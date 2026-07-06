@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize)]
 struct Entry {
     id: String,
     title: String,
@@ -118,9 +118,13 @@ impl Wiki {
     /// BFS to `depth` over neighbors_out+neighbors_in, then build a budgeted
     /// context pack: target first (full body), neighbors ordered ascending by
     /// pagerank (highest-centrality lands last — "lost in the middle").
-    /// `max_nodes` keeps the target plus the highest-centrality neighbors,
-    /// dropping the lowest-centrality ones first. `max_tokens` caps the total
-    /// token budget. Neighbors get summaries unless `full_neighbors` is set.
+    /// Both `max_nodes` and `max_tokens` keep the highest-centrality
+    /// neighbors that fit, dropping the lowest-centrality ones first:
+    /// selection always walks candidates in *descending* centrality order,
+    /// and only the final emission re-sorts the kept set back to ascending.
+    /// Neighbors get summaries unless `full_neighbors` is set. The target is
+    /// always included, even if its own token estimate alone exceeds
+    /// `max_tokens`.
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
@@ -142,22 +146,62 @@ impl Wiki {
             frontier = next;
         }
 
-        // Neighbors (excluding target) ascending by pagerank → best lands last.
-        let mut neighbor_ids: Vec<String> = seen.iter().filter(|n| *n != id).cloned().collect();
-        neighbor_ids.sort_by(|a, b| {
+        // Candidates (excluding target), descending by pagerank, so every
+        // budget below always considers the highest-centrality neighbor
+        // first.
+        let mut candidates: Vec<String> = seen.iter().filter(|n| *n != id).cloned().collect();
+        candidates.sort_by(|a, b| {
+            let pa = self.entries.get(a).map(|e| e.pagerank).unwrap_or(0.0);
+            let pb = self.entries.get(b).map(|e| e.pagerank).unwrap_or(0.0);
+            pb.total_cmp(&pa).then_with(|| a.cmp(b))
+        });
+
+        // Apply max_nodes: keep target + the highest-centrality neighbors
+        // (the head of the descending list); the lowest-centrality tail is
+        // dropped first.
+        if let Some(max) = budget.max_nodes {
+            let keep = max.saturating_sub(1);
+            candidates.truncate(keep);
+        }
+
+        // Apply max_tokens: walk the (still descending) candidates and keep
+        // whichever fit the running budget. A candidate that doesn't fit is
+        // skipped with `continue` (not `break`) so a smaller, lower-
+        // centrality neighbor further down the list can still use any
+        // leftover budget — at every step the highest-centrality neighbor
+        // that fits wins, so the kept set stays as high-centrality as the
+        // budget allows. The target is added unconditionally up front, even
+        // if its own token estimate alone already exceeds `max_tokens`.
+        let mut tokens_used = target.token_estimate;
+        let mut kept: Vec<String> = Vec::new();
+        for nid in candidates {
+            let e = match self.entries.get(&nid) {
+                Some(e) => e,
+                None => continue,
+            };
+            // Summary-mode cost is a flat approximation, not measured from
+            // the actual rendered summary line.
+            let cost = if budget.full_neighbors {
+                e.token_estimate
+            } else {
+                20
+            };
+            if let Some(maxt) = budget.max_tokens {
+                if tokens_used.saturating_add(cost) > maxt {
+                    continue;
+                }
+            }
+            tokens_used = tokens_used.saturating_add(cost);
+            kept.push(nid);
+        }
+
+        // Emit ascending by pagerank so the highest-centrality neighbor
+        // lands last ("lost in the middle" placement).
+        kept.sort_by(|a, b| {
             let pa = self.entries.get(a).map(|e| e.pagerank).unwrap_or(0.0);
             let pb = self.entries.get(b).map(|e| e.pagerank).unwrap_or(0.0);
             pa.total_cmp(&pb).then_with(|| a.cmp(b))
         });
-
-        // Apply max_nodes: keep target + the highest-centrality neighbors (tail of the sorted list).
-        if let Some(max) = budget.max_nodes {
-            let keep = max.saturating_sub(1);
-            if neighbor_ids.len() > keep {
-                let drop = neighbor_ids.len() - keep;
-                neighbor_ids.drain(0..drop); // drop lowest-centrality first
-            }
-        }
 
         // Build pack: target body first, then neighbor summaries (or full bodies).
         let mut text = String::new();
@@ -169,20 +213,13 @@ impl Wiki {
         );
         text.push_str("\n\n---\n\n");
 
-        let mut tokens_used = target.token_estimate;
-        for nid in &neighbor_ids {
+        for nid in &kept {
             let e = match self.entries.get(nid) {
                 Some(e) => e,
                 None => continue,
             };
-            if let Some(maxt) = budget.max_tokens {
-                if tokens_used + e.token_estimate > maxt {
-                    continue;
-                }
-            }
             if budget.full_neighbors {
                 text.push_str(&self.page(nid).unwrap_or_default());
-                tokens_used += e.token_estimate;
             } else {
                 text.push_str(&format!(
                     "## {} ({})\n{}\n\n",
@@ -190,7 +227,6 @@ impl Wiki {
                     nid,
                     e.summary.as_deref().unwrap_or("(no summary)")
                 ));
-                tokens_used += 20;
             }
             included.push(nid.clone());
         }
