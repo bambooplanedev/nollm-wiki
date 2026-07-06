@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod formats;
 pub mod graph;
 pub mod hash;
