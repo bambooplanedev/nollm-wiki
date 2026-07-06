@@ -114,6 +114,14 @@ fn compile_inner(
         }
     }
 
+    // 2b. Remap any id colliding with a reserved manifest base name (index,
+    // llms, agents, graph) so its page can never clobber — or on
+    // case-insensitive filesystems, be clobbered by — a manifest artifact.
+    // Runs after slug dedup so graph/render/manifest/lint all see the same,
+    // final ids. Processes the (already sorted) BTreeMap in key order so the
+    // remap is identical across runs/machines/thread counts.
+    let entities = remap_reserved_names(entities);
+
     // 3. Graph.
     let graph = graph::build_graph(&entities);
 
@@ -193,4 +201,118 @@ fn compile_inner(
         pages_total: entities.len(),
         lint,
     })
+}
+
+/// Base names (case-insensitive) reserved for manifest artifacts written
+/// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
+/// (with `--emit-json`) `graph.json`.
+const RESERVED_MANIFEST_NAMES: [&str; 4] = ["index", "llms", "agents", "graph"];
+
+fn is_reserved_manifest_name(id: &str) -> bool {
+    RESERVED_MANIFEST_NAMES.contains(&id.to_lowercase().as_str())
+}
+
+/// Rewrite any entity id that collides with a reserved manifest base name to
+/// a non-colliding id, deterministically. Ids that already exist and are not
+/// themselves reserved are treated as fixed and never displaced; a remapped
+/// id gets an `_page` suffix, then `_page_2`, `_page_3`, ... until it clears
+/// both the reserved set and every id already claimed (fixed or previously
+/// remapped). `entities` is a `BTreeMap`, so iteration is in sorted key
+/// order — the same input always produces the same remap, regardless of
+/// thread count or machine.
+fn remap_reserved_names(entities: BTreeMap<String, Entity>) -> BTreeMap<String, Entity> {
+    let mut used: BTreeSet<String> = entities
+        .keys()
+        .filter(|id| !is_reserved_manifest_name(id))
+        .cloned()
+        .collect();
+
+    let mut result: BTreeMap<String, Entity> = BTreeMap::new();
+    for (id, mut e) in entities {
+        if !is_reserved_manifest_name(&id) {
+            result.insert(id, e);
+            continue;
+        }
+
+        let mut candidate = format!("{id}_page");
+        let mut suffix = 2;
+        while is_reserved_manifest_name(&candidate) || used.contains(&candidate) {
+            candidate = format!("{id}_page_{suffix}");
+            suffix += 1;
+        }
+
+        eprintln!(
+            "warning: '{id}' collides with a reserved manifest name — writing page as '{candidate}.md'"
+        );
+
+        used.insert(candidate.clone());
+        e.id = candidate.clone();
+        result.insert(candidate, e);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::SourceKind;
+
+    fn ent(id: &str) -> Entity {
+        Entity {
+            id: id.into(),
+            name: id.into(),
+            aliases: vec![],
+            created: String::new(),
+            body: String::new(),
+            source_path: format!("{id}.txt"),
+            kind: SourceKind::Text,
+            content_hash: [0u8; 32],
+            summary: None,
+            symbols: vec![],
+            imports: vec![],
+        }
+    }
+
+    fn map(ids: &[&str]) -> BTreeMap<String, Entity> {
+        ids.iter().map(|id| (id.to_string(), ent(id))).collect()
+    }
+
+    #[test]
+    fn reserved_id_is_remapped_and_entity_id_field_matches_key() {
+        let out = remap_reserved_names(map(&["index", "alpha"]));
+        assert!(!out.contains_key("index"));
+        assert!(out.contains_key("index_page"));
+        assert_eq!(out["index_page"].id, "index_page");
+        assert!(out.contains_key("alpha"));
+    }
+
+    #[test]
+    fn all_reserved_names_are_remapped() {
+        let out = remap_reserved_names(map(&["index", "llms", "agents", "graph"]));
+        for reserved in ["index", "llms", "agents", "graph"] {
+            assert!(!out.contains_key(reserved));
+            assert!(out.contains_key(&format!("{reserved}_page")));
+        }
+    }
+
+    #[test]
+    fn remap_avoids_colliding_with_an_existing_fixed_id() {
+        // "index_page" is already taken by a real (non-reserved) entity, so
+        // "index" must skip straight past it to "index_page_2".
+        let out = remap_reserved_names(map(&["index", "index_page"]));
+        assert!(!out.contains_key("index"));
+        assert!(out.contains_key("index_page_2"));
+        assert_eq!(out["index_page_2"].id, "index_page_2");
+        // The pre-existing entity keeps its original id untouched.
+        assert_eq!(out["index_page"].id, "index_page");
+    }
+
+    #[test]
+    fn remap_is_deterministic_regardless_of_input_order() {
+        let a = remap_reserved_names(map(&["index", "agents", "alpha"]));
+        let b = remap_reserved_names(map(&["alpha", "agents", "index"]));
+        let ids_a: Vec<&String> = a.keys().collect();
+        let ids_b: Vec<&String> = b.keys().collect();
+        assert_eq!(ids_a, ids_b);
+    }
 }
