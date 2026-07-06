@@ -93,7 +93,7 @@ pub fn render_llms_txt(m: &Manifest) -> String {
 
     // Split by centrality: below-median pagerank goes under ## Optional.
     let mut ranks: Vec<f64> = m.entries.iter().map(|e| e.pagerank).collect();
-    ranks.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    ranks.sort_by(|a, b| a.total_cmp(b));
     let median = ranks.get(ranks.len() / 2).copied().unwrap_or(0.0);
 
     out.push_str("## Docs\n\n");
