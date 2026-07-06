@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod formats;
+pub mod generator;
 pub mod graph;
 pub mod hash;
 pub mod lint;
