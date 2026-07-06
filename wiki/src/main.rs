@@ -1,3 +1,3 @@
 fn main() {
-    println!("{}", wiki::hello());
+    println!("wiki compiler");
 }
