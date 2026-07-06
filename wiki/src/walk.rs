@@ -1,5 +1,4 @@
 use crate::model::normalize_path;
-use ignore::gitignore::Gitignore;
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 
@@ -10,26 +9,28 @@ pub struct SourceFile {
 }
 
 /// Walk `root` for files. When `respect_ignore` is true, `.gitignore`/`.ignore`
-/// and hidden-file rules apply (skips `target/`, `node_modules/`, `.git/`, etc.).
-/// Results are sorted by `rel_path` for determinism, and files are read as raw bytes.
+/// rules (including nested `.gitignore` files, global excludes, and
+/// `.git/info/exclude`), hidden-file rules, and directory-subtree pruning all
+/// apply — so `target/`, `node_modules/`, `.git/`, and any directory excluded
+/// by a matching rule are skipped entirely (their contents are never visited,
+/// not merely filtered file-by-file). `require_git(false)` ensures these
+/// rules are honored even when `root` is not inside an actual `.git`
+/// repository (e.g. a plain tempdir in tests). When `respect_ignore` is
+/// false, no filtering is applied and all files are returned, including
+/// hidden and normally-ignored ones.
+/// Results are sorted by `rel_path` for determinism, and files are read as
+/// raw bytes. Entries that error out (permission issues, broken symlinks,
+/// unreadable files) are skipped rather than aborting the walk.
 pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::io::Error> {
     let mut builder = WalkBuilder::new(root);
-    builder.hidden(false).standard_filters(false);
-
-    // Load .gitignore if respect_ignore is true
-    let gitignore = if respect_ignore {
-        let gitignore_path = root.join(".gitignore");
-        if gitignore_path.exists() {
-            match Gitignore::new(&gitignore_path) {
-                (gi, None) => Some(gi),
-                _ => None,
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    builder
+        .hidden(respect_ignore)
+        .git_ignore(respect_ignore)
+        .git_global(respect_ignore)
+        .git_exclude(respect_ignore)
+        .ignore(respect_ignore)
+        .parents(respect_ignore)
+        .require_git(false);
 
     let mut files = Vec::new();
     for result in builder.build() {
@@ -41,26 +42,11 @@ pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::i
             continue;
         }
         let abs_path = entry.path().to_path_buf();
-        let rel_path = normalize_path(root, &abs_path);
-
-        // Check .gitignore rules if respect_ignore is true
-        if respect_ignore {
-            if let Some(ref gi) = gitignore {
-                let match_result = gi.matched(&abs_path, false);
-                if match_result.is_ignore() {
-                    continue;
-                }
-            }
-            // Also skip hidden files when respect_ignore is true
-            if rel_path.split('/').any(|part| part.starts_with('.')) {
-                continue;
-            }
-        }
-
         let bytes = match std::fs::read(&abs_path) {
             Ok(b) => b,
             Err(_) => continue,
         };
+        let rel_path = normalize_path(root, &abs_path);
         files.push(SourceFile {
             abs_path,
             rel_path,
@@ -103,5 +89,30 @@ mod tests {
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
         let files = walk(root, false).unwrap();
         assert!(files.iter().any(|f| f.rel_path == "ignored.txt"));
+    }
+
+    #[test]
+    fn walk_prunes_whole_ignored_directory_subtrees() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join(".gitignore"), b"target/\n").unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        fs::write(root.join("target/debug/foo.o"), b"binary").unwrap();
+        fs::write(root.join("keep.txt"), b"keep").unwrap();
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
+
+        let files = walk(root, true).unwrap();
+        let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
+
+        assert!(rels.contains(&"keep.txt".to_string()));
+        assert!(
+            !rels.iter().any(|r| r.starts_with("target/")),
+            "target/ subtree should be pruned entirely, got: {rels:?}"
+        );
+        assert!(
+            !rels.iter().any(|r| r.starts_with(".git/")),
+            ".git/ should be excluded as a hidden directory, got: {rels:?}"
+        );
     }
 }
