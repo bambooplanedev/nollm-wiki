@@ -5,6 +5,7 @@ pub mod hash;
 pub mod lint;
 pub mod manifest;
 pub mod model;
+pub mod query;
 pub mod rewrite;
 pub mod walk;
 
