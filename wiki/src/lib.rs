@@ -9,6 +9,7 @@ pub mod model;
 pub mod query;
 pub mod rewrite;
 pub mod walk;
+pub mod watch;
 
 use crate::formats::Registry;
 use crate::model::{Entity, LintReport};

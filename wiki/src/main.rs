@@ -32,6 +32,8 @@ enum Command {
         no_ignore: bool,
         #[arg(long)]
         emit_json: bool,
+        #[arg(long)]
+        watch: bool,
     },
     Neighbors {
         id: String,
@@ -77,6 +79,7 @@ fn main() -> Result<()> {
             incremental,
             no_ignore,
             emit_json,
+            watch,
         } => {
             let opts = CompileOptions {
                 incremental,
@@ -85,18 +88,22 @@ fn main() -> Result<()> {
                 jobs: cli.jobs,
                 project: None,
             };
-            let r = compile(&input, &output, &opts).context("compile failed")?;
-            println!(
-                "Compiled {} pages ({} written) -> {}",
-                r.pages_total,
-                r.pages_written,
-                output.display()
-            );
-            println!(
-                "Lint: {} broken links, {} orphans",
-                r.lint.broken_links.len(),
-                r.lint.orphans.len()
-            );
+            if watch {
+                wiki::watch::watch(&input, &output, &opts).context("watch failed")?;
+            } else {
+                let r = compile(&input, &output, &opts).context("compile failed")?;
+                println!(
+                    "Compiled {} pages ({} written) -> {}",
+                    r.pages_total,
+                    r.pages_written,
+                    output.display()
+                );
+                println!(
+                    "Lint: {} broken links, {} orphans",
+                    r.lint.broken_links.len(),
+                    r.lint.orphans.len()
+                );
+            }
         }
         Command::Neighbors {
             id,
