@@ -85,7 +85,7 @@ pub fn generate_corpus(
         let slug = slugify(topic);
         let mut lines: Vec<String> = Vec::new();
 
-        if rng.next_u64() % 2 == 0 {
+        if rng.next_u64().is_multiple_of(2) {
             lines.push(format!("# {topic}"));
         } else {
             lines.push(topic.to_uppercase());

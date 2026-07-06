@@ -158,8 +158,8 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let mut symbols = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
-    while let Some(m) = matches.next() {
+    let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    for m in matches {
         let mut def_node: Option<Node> = None;
         let mut name_text: Option<&str> = None;
         for cap in m.captures {

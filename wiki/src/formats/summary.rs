@@ -8,7 +8,7 @@ pub fn summarize(
     if let Some(d) = non_empty(frontmatter_desc) {
         return Some(first_sentence(d));
     }
-    if let Some(d) = docstring.and_then(|d| first_real_sentence(d)) {
+    if let Some(d) = docstring.and_then(first_real_sentence) {
         return Some(d);
     }
     if let Some(s) = first_real_sentence(body) {

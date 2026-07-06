@@ -43,8 +43,10 @@ fn output_is_deterministic_across_jobs() {
     }
     let out1 = dir.path().join("o1");
     let out2 = dir.path().join("o2");
-    let mut o = CompileOptions::default();
-    o.jobs = Some(1);
+    let mut o = CompileOptions {
+        jobs: Some(1),
+        ..Default::default()
+    };
     compile(&input, &out1, &o).unwrap();
     o.jobs = Some(8);
     compile(&input, &out2, &o).unwrap();
