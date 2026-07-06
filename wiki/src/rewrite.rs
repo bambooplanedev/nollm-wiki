@@ -173,7 +173,9 @@ pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("md.tmp");
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
     {
         let f = std::fs::File::create(&tmp)?;
         let mut w = std::io::BufWriter::new(f);
