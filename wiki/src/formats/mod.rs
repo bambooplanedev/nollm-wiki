@@ -1,7 +1,9 @@
+pub mod code;
 pub mod markdown;
 pub mod summary;
 pub mod text;
 
+pub use code::CodeExtractor;
 pub use markdown::MarkdownExtractor;
 pub use summary::summarize;
 pub use text::TextExtractor;
@@ -45,7 +47,7 @@ impl Registry {
         let mut reg = Registry::new();
         reg.register(Arc::new(TextExtractor));
         reg.register(Arc::new(MarkdownExtractor));
-        // Task 7 adds CodeExtractor.
+        reg.register(Arc::new(CodeExtractor));
         // Feature seams (pdf/ocr/audio) register here under #[cfg(feature = ...)].
         reg
     }
