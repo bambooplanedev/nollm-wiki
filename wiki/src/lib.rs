@@ -209,9 +209,6 @@ fn compile_inner(
     })
 }
 
-/// Base names (case-insensitive) reserved for manifest artifacts written
-/// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
-/// (with `--emit-json`) `graph.json`.
 /// True if `path` lies within `dir`, compared on lexically-absolute components
 /// (`std::path::absolute` — no filesystem access, no symlink resolution). This
 /// is a predicate only: it never reaches output bytes, so it stays
@@ -224,6 +221,9 @@ pub(crate) fn is_under(path: &Path, dir: &Path) -> bool {
     }
 }
 
+/// Base names (case-insensitive) reserved for manifest artifacts written
+/// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
+/// (with `--emit-json`) `graph.json`.
 const RESERVED_MANIFEST_NAMES: [&str; 4] = ["index", "llms", "agents", "graph"];
 
 fn is_reserved_manifest_name(id: &str) -> bool {
