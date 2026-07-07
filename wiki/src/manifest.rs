@@ -68,7 +68,7 @@ pub fn build_manifest(
 }
 
 pub fn render_index_json(m: &Manifest) -> String {
-    serde_json::to_string_pretty(m).unwrap_or_else(|_| "{}".into())
+    serde_json::to_string_pretty(m).expect("manifest serialization is infallible")
 }
 
 pub fn render_index_md(m: &Manifest) -> String {
@@ -142,7 +142,7 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
         }
     }
     serde_json::to_string_pretty(&serde_json::json!({ "nodes": nodes, "edges": edges }))
-        .unwrap_or_else(|_| "{}".into())
+        .expect("graph JSON serialization is infallible")
 }
 
 #[cfg(test)]
