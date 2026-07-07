@@ -70,6 +70,20 @@ impl Wiki {
         std::fs::read_to_string(self.dir.join(format!("{id}.md"))).ok()
     }
 
+    /// The searchable *content* of a rendered page: the Body, Exports, and
+    /// Imports sections only. Excludes generated chrome (the banner, Metadata,
+    /// Related, Referenced By, Notes) so a query like "related" or "metadata"
+    /// does not false-positive on every page.
+    fn content_text(page: &str) -> String {
+        let sections = crate::rewrite::parse_sections(page);
+        ["Body", "Exports", "Imports"]
+            .iter()
+            .filter_map(|k| sections.get(*k))
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Case-insensitive search over name/alias/summary/body. Deterministic:
     /// field-weighted score with a pagerank tiebreak, sorted desc by score
     /// then asc by id, truncated to `limit`.
@@ -92,7 +106,7 @@ impl Wiki {
                 .unwrap_or(false);
             let body_hit = self
                 .page(&e.id)
-                .map(|p| p.to_lowercase().contains(&needle))
+                .map(|p| Self::content_text(&p).to_lowercase().contains(&needle))
                 .unwrap_or(false);
             if !(name_hit || alias_hit || summary_hit || body_hit) {
                 continue;

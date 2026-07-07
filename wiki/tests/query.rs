@@ -46,6 +46,26 @@ fn neighbors_pack_includes_target_first_and_respects_max_nodes() {
     assert!(pack.text.contains("# Alpha"));
 }
 
+#[test]
+fn search_ignores_generated_chrome() {
+    let dir = build();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+
+    // "metadata" appears only inside the generated "## Metadata" chrome of every
+    // page, never in a source body — it must not match after the fix.
+    let chrome = w.search("metadata", None, 10);
+    let ids: Vec<_> = chrome.iter().map(|h| h.id.clone()).collect();
+    assert!(chrome.is_empty(), "chrome word matched pages: {ids:?}");
+
+    // A genuine body word still matches (alpha's body: "Alpha mentions Beta and Gamma.").
+    let body = w.search("mentions", None, 10);
+    assert!(
+        body.iter().any(|h| h.id == "alpha"),
+        "body word should still match: {:?}",
+        body.iter().map(|h| &h.id).collect::<Vec<_>>()
+    );
+}
+
 /// Spec §8: budgets must degrade by dropping the LOWEST-centrality
 /// neighbors first, keeping the highest-centrality ones that fit.
 ///
