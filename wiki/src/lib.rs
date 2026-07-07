@@ -87,8 +87,14 @@ fn compile_inner(
     });
 
     // 1. Walk + parallel extract (ordered — collecting into a Vec preserves
-    // the sorted-by-rel_path order that `walk` produced).
-    let files = walk::walk(input, opts.respect_ignore)?;
+    // the sorted-by-rel_path order that `walk` produced). Files under
+    // `output` are excluded so a nested output dir never feeds its own
+    // generated pages back in as sources (which would also self-trigger a
+    // `--watch` recompile loop).
+    let files: Vec<_> = walk::walk(input, opts.respect_ignore)?
+        .into_iter()
+        .filter(|sf| !is_under(&sf.abs_path, output))
+        .collect();
     let registry = Registry::with_defaults();
     let extracted: Vec<Entity> = files
         .par_iter()
@@ -206,6 +212,18 @@ fn compile_inner(
 /// Base names (case-insensitive) reserved for manifest artifacts written
 /// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
 /// (with `--emit-json`) `graph.json`.
+/// True if `path` lies within `dir`, compared on lexically-absolute components
+/// (`std::path::absolute` — no filesystem access, no symlink resolution). This
+/// is a predicate only: it never reaches output bytes, so it stays
+/// deterministic across machines. Falls back to a raw component compare if
+/// absolute-normalization errors (degrade, never panic).
+pub(crate) fn is_under(path: &Path, dir: &Path) -> bool {
+    match (std::path::absolute(path), std::path::absolute(dir)) {
+        (Ok(p), Ok(d)) => p.starts_with(d),
+        _ => path.starts_with(dir),
+    }
+}
+
 const RESERVED_MANIFEST_NAMES: [&str; 4] = ["index", "llms", "agents", "graph"];
 
 fn is_reserved_manifest_name(id: &str) -> bool {
@@ -314,5 +332,23 @@ mod tests {
         let ids_a: Vec<&String> = a.keys().collect();
         let ids_b: Vec<&String> = b.keys().collect();
         assert_eq!(ids_a, ids_b);
+    }
+
+    #[test]
+    fn is_under_matches_nested_paths_only() {
+        use std::path::Path;
+        assert!(super::is_under(
+            Path::new("/proj/wiki/alpha.md"),
+            Path::new("/proj/wiki")
+        ));
+        assert!(!super::is_under(
+            Path::new("/proj/alpha.txt"),
+            Path::new("/proj/wiki")
+        ));
+        // Sibling prefix must not false-match (/proj/wiki vs /proj/wiki2).
+        assert!(!super::is_under(
+            Path::new("/proj/wiki2/a.md"),
+            Path::new("/proj/wiki")
+        ));
     }
 }

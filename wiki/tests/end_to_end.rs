@@ -107,3 +107,24 @@ fn source_slugging_to_reserved_manifest_name_is_remapped_not_clobbered() {
         .expect("manifest should list the remapped 'index_page' entity");
     assert_eq!(remapped_entry["page"], "index_page.md");
 }
+
+#[test]
+fn output_nested_under_input_does_not_ingest_generated_pages() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("proj");
+    let output = input.join("wiki"); // output nested INSIDE input
+    fs::create_dir_all(&input).unwrap();
+    write(&input, "alpha.txt", "# Alpha\n\nAlpha stands alone.\n");
+
+    // First compile: output dir does not exist yet, so only alpha.txt is seen.
+    let r1 = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(r1.pages_total, 1);
+
+    // Second compile: output/*.md now exist under input. They must NOT be
+    // ingested as source pages, or a watch loop would recompile forever.
+    let r2 = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        r2.pages_total, 1,
+        "generated pages under the output dir were ingested as sources"
+    );
+}
