@@ -186,6 +186,12 @@ impl Wiki {
         // that fits wins, so the kept set stays as high-centrality as the
         // budget allows. The target is added unconditionally up front, even
         // if its own token estimate alone already exceeds `max_tokens`.
+        // Guarantee: candidates are visited in descending centrality and kept
+        // if they fit the running budget, so the result is the highest-
+        // centrality set the greedy can admit — deliberately NOT a maximum-
+        // cardinality fill. A heavier high-centrality neighbor is preferred
+        // over several lighter lower-centrality ones. See the query test
+        // `full_neighbors_max_tokens_prefers_centrality_over_packing`.
         let mut tokens_used = target.token_estimate;
         let mut kept: Vec<String> = Vec::new();
         for nid in candidates {

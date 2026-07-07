@@ -144,3 +144,79 @@ fn neighbors_pack_max_tokens_keeps_highest_centrality_neighbor() {
         pack.included
     );
 }
+
+/// full_neighbors + max_tokens must keep the highest-centrality neighbor even
+/// when several lighter, lower-centrality neighbors would pack more nodes into
+/// the same budget. Fixture: hub -> big, sa, sb. `big` gets three extra
+/// incoming links (fillers) so its pagerank beats sa/sb, and a long body so
+/// its token cost exceeds sa+sb combined. Budget = hub + big exactly: the
+/// centrality-first greedy keeps {big}; a cardinality-maximizer would instead
+/// keep {sa, sb}. Token estimates are read from index.json so the assertion
+/// never depends on hand-counted characters.
+#[test]
+fn full_neighbors_max_tokens_prefers_centrality_over_packing() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("hub.txt"),
+        "# Hub\n\nHub mentions Big and Sa and Sb.\n",
+    )
+    .unwrap();
+    // Long body -> high token cost (> sa + sb combined).
+    fs::write(
+        input.join("big.txt"),
+        "# Big\n\nBig has a deliberately long body so that its token estimate \
+exceeds the two small neighbors combined, which is what forces the centrality \
+versus packing distinction this test pins down here today.\n",
+    )
+    .unwrap();
+    fs::write(input.join("sa.txt"), "# Sa\n\nSa is short.\n").unwrap();
+    fs::write(input.join("sb.txt"), "# Sb\n\nSb is short.\n").unwrap();
+    for n in ["one", "two", "three"] {
+        fs::write(
+            input.join(format!("filler_{n}.txt")),
+            format!("# Filler {n}\n\nFiller {n} talks about Big.\n"),
+        )
+        .unwrap();
+    }
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    let tok = |id: &str| -> usize {
+        index["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap_or_else(|| panic!("missing entry {id}"))["token_estimate"]
+            .as_u64()
+            .unwrap() as usize
+    };
+    let (hub_t, big_t, sa_t, sb_t) = (tok("hub"), tok("big"), tok("sa"), tok("sb"));
+    assert!(
+        sa_t + sb_t < big_t,
+        "fixture invalid: need sa({sa_t}) + sb({sb_t}) < big({big_t})"
+    );
+
+    let w = Wiki::load(&output).unwrap();
+    let budget = PackBudget {
+        max_tokens: Some(hub_t + big_t),
+        full_neighbors: true,
+        ..Default::default()
+    };
+    let pack = w.neighbors("hub", 1, &budget).unwrap();
+
+    assert!(
+        pack.included.contains(&"big".to_string()),
+        "highest-centrality neighbor dropped: {:?}",
+        pack.included
+    );
+    assert!(
+        !pack.included.contains(&"sa".to_string()) && !pack.included.contains(&"sb".to_string()),
+        "packing beat centrality — lighter low-centrality neighbors kept: {:?}",
+        pack.included
+    );
+}
