@@ -73,7 +73,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries; used by the CLI and as a library API. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring events under `output`. |
-| `src/main.rs` | CLI entry point (`clap`): `compile`, `generate`, `search`, `neighbors`, `lint`, `watch` subcommands. |
+| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `generate`. |
 
 ## Determinism rules
 
@@ -115,8 +115,8 @@ breaking any of them reintroduces nondeterminism.
 - **Float comparisons use `f64::total_cmp` with an id tie-break, never
   `partial_cmp`.** `partial_cmp` returns `None` for incomparable values and
   gives ties no defined order; `total_cmp` gives every `f64` a total order,
-  and the id tie-break (in `manifest.rs`/`query.rs` sort keys) means equal
-  scores still resolve to one fixed order instead of falling back to
+  and the id tie-break (in `query.rs` sort keys for search-hit ranking) means
+  equal scores still resolve to one fixed order instead of falling back to
   undefined behavior.
 - **The synthetic corpus generator uses a hand-rolled, explicitly-seeded
   SplitMix64 PRNG** (`generator::generate_corpus`), not `rand`'s
