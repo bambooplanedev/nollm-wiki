@@ -10,13 +10,16 @@ static SECTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^##\s+(.+)$"
 
 pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
     let mut sections = BTreeMap::new();
-    let marks: Vec<_> = SECTION.captures_iter(text).collect();
-    let ms: Vec<_> = SECTION.find_iter(text).collect();
-    for (i, cap) in marks.iter().enumerate() {
+    let caps: Vec<_> = SECTION.captures_iter(text).collect();
+    for (i, cap) in caps.iter().enumerate() {
+        let m = cap.get(0).expect("capture group 0 always present");
         let heading = cap[1].trim().to_string();
-        let start = ms[i].end();
-        let end = if i + 1 < ms.len() {
-            ms[i + 1].start()
+        let start = m.end();
+        let end = if i + 1 < caps.len() {
+            caps[i + 1]
+                .get(0)
+                .expect("capture group 0 always present")
+                .start()
         } else {
             text.len()
         };
