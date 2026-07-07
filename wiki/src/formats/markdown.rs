@@ -40,21 +40,27 @@ impl Extractor for MarkdownExtractor {
 }
 
 /// Returns (frontmatter lines, remaining body). Frontmatter is a leading block
-/// delimited by lines containing only `---`.
+/// delimited by lines containing only `---`. CRLF-safe: byte offsets come from
+/// `split_inclusive('\n')`, whose segments retain their `\r\n`, so the body
+/// slice lands on a true byte boundary for both `\n` and `\r\n` files.
 fn split_frontmatter(text: &str) -> (Vec<String>, &str) {
-    let mut lines = text.lines();
-    if lines.next().map(str::trim) != Some("---") {
+    let mut segments = text.split_inclusive('\n');
+    let first = match segments.next() {
+        Some(s) => s,
+        None => return (Vec::new(), text),
+    };
+    if first.trim() != "---" {
         return (Vec::new(), text);
     }
+    let mut consumed = first.len();
     let mut fm = Vec::new();
-    let mut consumed = text.find('\n').map(|i| i + 1).unwrap_or(text.len());
-    for line in text[consumed..].lines() {
-        consumed += line.len() + 1;
-        if line.trim() == "---" {
+    for seg in segments {
+        consumed += seg.len();
+        if seg.trim() == "---" {
             let rest = text.get(consumed..).unwrap_or("");
             return (fm, rest);
         }
-        fm.push(line.to_string());
+        fm.push(seg.trim_end_matches(['\n', '\r']).to_string());
     }
     (Vec::new(), text) // unterminated frontmatter → treat whole file as body
 }
@@ -121,5 +127,25 @@ mod tests {
     fn filename_fallback_when_no_title() {
         let e = MarkdownExtractor.extract("my_file.md", "just prose\n");
         assert_eq!(e.name, "My File");
+    }
+
+    #[test]
+    fn crlf_frontmatter_body_is_clean() {
+        // Same content as frontmatter_fields_parsed, but CRLF line endings.
+        let src = "---\r\ntitle: My Note\r\naliases: foo, bar\r\ncreated: 2026-02-02\r\n---\r\n\r\nBody line one.\r\nBody line two.\r\n";
+        let e = MarkdownExtractor.extract("n.md", src);
+        assert_eq!(e.name, "My Note");
+        assert_eq!(e.aliases, vec!["foo", "bar"]);
+        assert_eq!(e.created, "2026-02-02");
+        assert!(
+            e.body.starts_with("Body line one."),
+            "body should start at content, got: {:?}",
+            e.body
+        );
+        assert!(
+            !e.body.contains("---"),
+            "closing delimiter leaked into body: {:?}",
+            e.body
+        );
     }
 }
