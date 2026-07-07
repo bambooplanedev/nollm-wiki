@@ -31,6 +31,9 @@ pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::i
         .ignore(respect_ignore)
         .parents(respect_ignore)
         .require_git(false);
+    // Symlinks are intentionally NOT followed (follow_links defaults to false):
+    // following them risks cycles, escaping the input tree, and machine-
+    // dependent ordering — all of which would break output determinism.
 
     let mut files = Vec::new();
     for result in builder.build() {
@@ -38,7 +41,16 @@ pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::i
             Ok(e) => e,
             Err(_) => continue, // skip unreadable entries, never abort the walk
         };
-        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+        let is_file = match entry.file_type() {
+            Some(ft) => ft.is_file(),
+            // Type unknown from the walk's own stat: take a fresh stat rather
+            // than silently dropping a possibly-regular file. This does not
+            // change the deliberate no-follow policy for known symlinks.
+            None => std::fs::metadata(entry.path())
+                .map(|m| m.is_file())
+                .unwrap_or(false),
+        };
+        if !is_file {
             continue;
         }
         let abs_path = entry.path().to_path_buf();
@@ -113,6 +125,27 @@ mod tests {
         assert!(
             !rels.iter().any(|r| r.starts_with(".git/")),
             ".git/ should be excluded as a hidden directory, got: {rels:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_are_not_followed() {
+        use std::os::unix::fs::symlink;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("real.txt"), b"real").unwrap();
+        symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
+
+        let files = walk(root, true).unwrap();
+        let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
+        assert!(
+            rels.contains(&"real.txt".to_string()),
+            "real file missing: {rels:?}"
+        );
+        assert!(
+            !rels.contains(&"link.txt".to_string()),
+            "symlink was followed (determinism risk): {rels:?}"
         );
     }
 }
