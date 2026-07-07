@@ -107,3 +107,49 @@ fn source_slugging_to_reserved_manifest_name_is_remapped_not_clobbered() {
         .expect("manifest should list the remapped 'index_page' entity");
     assert_eq!(remapped_entry["page"], "index_page.md");
 }
+
+#[test]
+fn output_nested_under_input_does_not_ingest_generated_pages() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("proj");
+    let output = input.join("wiki"); // output nested INSIDE input
+    fs::create_dir_all(&input).unwrap();
+    write(&input, "alpha.txt", "# Alpha\n\nAlpha stands alone.\n");
+
+    // First compile: output dir does not exist yet, so only alpha.txt is seen.
+    let r1 = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(r1.pages_total, 1);
+
+    // Second compile: output/*.md now exist under input. They must NOT be
+    // ingested as source pages, or a watch loop would recompile forever.
+    let r2 = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(
+        r2.pages_total, 1,
+        "generated pages under the output dir were ingested as sources"
+    );
+}
+
+#[test]
+fn names_differing_only_by_case_collapse_to_one_page() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    // Two sources whose titles differ only by case both slugify to "widget".
+    write(&input, "a.md", "---\ntitle: Widget\n---\n\nFirst body.\n");
+    write(&input, "b.md", "---\ntitle: widget\n---\n\nSecond body.\n");
+
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+
+    // Deterministic dedup: exactly one entity, one page file, and it is the
+    // lowercase slug "widget".
+    assert_eq!(result.pages_total, 1, "case-only duplicate was not deduped");
+    assert!(output.join("widget.md").exists(), "expected widget.md");
+
+    // The kept page is the first by sorted rel_path (a.md -> "First body.").
+    let page = fs::read_to_string(output.join("widget.md")).unwrap();
+    assert!(
+        page.contains("First body."),
+        "expected the first-by-path source to win, got:\n{page}"
+    );
+}

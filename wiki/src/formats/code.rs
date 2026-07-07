@@ -44,7 +44,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (function_item (visibility_modifier) name: (identifier) @name) @def
                 (struct_item (visibility_modifier) name: (type_identifier) @name) @def
                 (enum_item (visibility_modifier) name: (type_identifier) @name) @def
-                (trait_item name: (type_identifier) @name) @def
+                (trait_item (visibility_modifier) name: (type_identifier) @name) @def
                 (use_declaration argument: (_) @import)
             "#,
             name_filter: keep_all,
@@ -341,6 +341,22 @@ mod tests {
         assert!(!e.symbols.iter().any(|s| s.contains("private_helper")));
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert_eq!(e.summary.as_deref(), Some("Module docs."));
+    }
+
+    #[test]
+    fn rust_trait_visibility_gated() {
+        let src = "pub trait Public {\n    fn m(&self);\n}\ntrait Private {\n    fn n(&self);\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "pub trait Public"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("Private")),
+            "private trait leaked as export: {:?}",
+            e.symbols
+        );
     }
 
     #[test]

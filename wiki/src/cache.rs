@@ -66,10 +66,9 @@ pub fn save(dir: &Path, cache: &Cache) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(
-        path,
-        serde_json::to_string_pretty(cache).unwrap_or_else(|_| "{}".into()),
-    )
+    let json = serde_json::to_string_pretty(cache)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, json)
 }
 
 #[cfg(test)]
