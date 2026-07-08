@@ -140,7 +140,7 @@ that the Markdown it emits is link-compatible with it.
 Page ids (and filenames) are slugs matching `[a-z0-9_]+`, derived from each
 source name by folding punctuation, whitespace, and non-ASCII characters
 down to `_`/ASCII in a single pass. Two names that differ only by
-punctuation or non-ASCII characters (e.g. "Naïve Bayes" vs "naive bayes")
+punctuation or whitespace (e.g. "Fetch (v2)" vs "Fetch v2", both → `fetch_v2`)
 can slugify to the same id; the compiler resolves this deterministically by
 keeping the entity with the lexicographically-first source path and
 skipping the rest, printing a warning for each skip. A name that is
