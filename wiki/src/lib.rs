@@ -138,6 +138,7 @@ fn compile_inner(
         cache::Cache::fresh()
     };
     std::fs::create_dir_all(output)?;
+    let prior_ids = cache::prior_page_ids(output);
 
     let rendered: Vec<(String, String, String)> = entities
         .par_iter()
@@ -180,6 +181,19 @@ fn compile_inner(
         cache::save(output, &cache)?;
     }
 
+    // Migration diagnostic: warn (never delete) about pages left by a previous
+    // id scheme. Runs after the incremental prune so it never warns about files
+    // that prune already removed.
+    let stale = stale_page_files(&prior_ids, &live, output);
+    if !stale.is_empty() {
+        eprintln!(
+            "warning: {} page(s) from a previous id scheme remain in {} and are no longer generated: {} — delete them or recompile into a clean directory",
+            stale.len(),
+            output.display(),
+            stale.join(", ")
+        );
+    }
+
     // 6. Manifest artifacts.
     let man = manifest::build_manifest(&project, &entities, &graph);
     rewrite::write_atomic(
@@ -207,6 +221,22 @@ fn compile_inner(
         pages_total: entities.len(),
         lint,
     })
+}
+
+/// Page files the compiler previously wrote (per the prior cache) that are no
+/// longer live and still exist on disk — orphaned by an id-scheme change.
+/// Returned sorted for a deterministic warning; never deleted here.
+fn stale_page_files(
+    prior: &BTreeSet<String>,
+    live: &BTreeSet<String>,
+    output: &Path,
+) -> Vec<String> {
+    prior
+        .iter()
+        .filter(|id| !live.contains(*id))
+        .filter(|id| output.join(format!("{id}.md")).exists())
+        .map(|id| format!("{id}.md"))
+        .collect()
 }
 
 /// True if `path` lies within `dir`, compared on lexically-absolute components
@@ -332,6 +362,26 @@ mod tests {
         let ids_a: Vec<&String> = a.keys().collect();
         let ids_b: Vec<&String> = b.keys().collect();
         assert_eq!(ids_a, ids_b);
+    }
+
+    #[test]
+    fn stale_page_files_lists_orphaned_on_disk_only() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path();
+        std::fs::write(out.join("old_slug.md"), "x").unwrap();
+        std::fs::write(out.join("kept.md"), "x").unwrap();
+        let prior: BTreeSet<String> = ["old_slug", "kept", "never_written"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let live: BTreeSet<String> = ["kept", "new_slug"].iter().map(|s| s.to_string()).collect();
+        // old_slug: prior, not live, on disk → listed.
+        // kept: live → excluded. never_written: not on disk → excluded.
+        assert_eq!(
+            super::stale_page_files(&prior, &live, out),
+            vec!["old_slug.md".to_string()]
+        );
     }
 
     #[test]

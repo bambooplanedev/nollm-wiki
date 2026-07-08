@@ -26,7 +26,7 @@ fn compiles_a_small_corpus_and_emits_artifacts() {
     assert!(output.join("llms.txt").exists());
     assert!(output.join("AGENTS.md").exists());
     let alpha = fs::read_to_string(output.join("alpha.md")).unwrap();
-    assert!(alpha.contains("[[Beta]]"));
+    assert!(alpha.contains("[[beta|Beta]]"));
 }
 
 #[test]

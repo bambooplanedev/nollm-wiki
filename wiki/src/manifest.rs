@@ -125,7 +125,7 @@ tree first — start here.\n\n\
 - All pages: `index.md` (human) / `index.json` (machine catalog: id, title, kind, summary, degree, neighbors).\n\
 - Machine map for tools: `llms.txt`.\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
-- Pages cross-link with `[[Name]]` wikilinks; each has Metadata / Related / Referenced By / Body sections.\n\
+- Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Referenced By / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
 }
@@ -201,5 +201,18 @@ mod tests {
     #[test]
     fn token_estimate_is_chars_over_four() {
         assert_eq!(token_estimate("abcdefgh"), 2);
+    }
+
+    #[test]
+    fn agents_md_documents_slug_piped_link_format() {
+        let md = render_agents_md("proj");
+        assert!(
+            md.contains("[[slug|Name]]"),
+            "AGENTS.md should describe the slug-piped link format: {md}"
+        );
+        assert!(
+            !md.contains("`[[Name]]`"),
+            "AGENTS.md still describes the old [[Name]] format: {md}"
+        );
     }
 }

@@ -67,11 +67,11 @@ $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --
 - source_hash: 66fce8283cb6b5e45c6a3ee6b6c3e34204c9ba9c562f4d3df2dfdd7a3dd33c79
 
 ## Related
-- [[Learning Rate Schedule]]
+- [[learning_rate_schedule|Learning Rate Schedule]]
 
 ## Referenced By
-- [[Layer Normalization]]
-- [[Learning Rate Schedule]]
+- [[layer_normalization|Layer Normalization]]
+- [[learning_rate_schedule|Learning Rate Schedule]]
 
 ## Body
 Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
@@ -114,6 +114,39 @@ positional_encoding.md
 tokenization.md
 transformer_block.md
 ```
+
+## Opening the wiki in Obsidian
+
+Per-page cross-links are Obsidian-flavored wikilinks with an explicit slug
+target: `[[slug|Display Name]]` (e.g. `[[gradient_descent|Gradient Descent]]`).
+Each `<slug>.md` file is a real page in the output directory, so the links
+resolve directly — no plugin or extra configuration needed.
+
+To browse a compiled wiki in Obsidian, open the **output directory itself**
+(e.g. `demo_wiki/`) as the vault root — not a parent directory that might
+also contain the raw input sources, since those can have basenames that
+collide with the generated pages. With the output directory as the vault
+root, the graph view and backlinks panel work immediately.
+
+The same `[[slug|Name]]` format is also **Quartz-compatible**: Quartz parses
+Obsidian-flavored wikilinks natively, so a compiled wiki's Markdown can be
+dropped into a Quartz `content/` directory and its links will resolve. This
+does *not* mean `wiki compile` produces a Quartz site — Quartz is a separate
+npm-based static site generator you set up yourself; `wiki` only guarantees
+that the Markdown it emits is link-compatible with it.
+
+### Slugs
+
+Page ids (and filenames) are slugs matching `[a-z0-9_]+`, derived from each
+source name by folding punctuation, whitespace, and non-ASCII characters
+down to `_`/ASCII in a single pass. Two names that differ only by
+punctuation or whitespace (e.g. "Fetch (v2)" vs "Fetch v2", both → `fetch_v2`)
+can slugify to the same id; the compiler resolves this deterministically by
+keeping the entity with the lexicographically-first source path and
+skipping the rest, printing a warning for each skip. A name that is
+**entirely** non-ASCII (no `[a-zA-Z0-9]` survives the fold) has no
+meaningful ASCII slug to derive, so it becomes an anonymous `page_<hash>`
+file instead — transliteration (e.g. Cyrillic → Latin) is not performed.
 
 ## CLI reference
 

@@ -1,3 +1,4 @@
+use crate::hash::{hash_str, to_hex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -78,8 +79,31 @@ impl LintReport {
     }
 }
 
+/// A filesystem/URL-clean id: lowercase, every run of non-`[a-z0-9]` collapsed
+/// to a single `_`, no leading/trailing `_`. A name that is entirely non-alnum
+/// falls back to a deterministic `page_<hash>` so it is never empty (and never
+/// silently dropped by slug dedup). Uses `char::to_ascii_lowercase` (ASCII-only,
+/// no Unicode case-expansion) and a single pass (no `String::replace` loop).
 pub fn slugify(name: &str) -> String {
-    name.trim().to_lowercase().replace([' ', '-'], "_")
+    let mut out = String::with_capacity(name.len());
+    let mut pending_sep = false;
+    for c in name.chars() {
+        let c = c.to_ascii_lowercase();
+        if c.is_ascii_alphanumeric() {
+            if pending_sep && !out.is_empty() {
+                out.push('_');
+            }
+            out.push(c);
+            pending_sep = false;
+        } else {
+            pending_sep = true; // a run of non-alnum → at most one '_', added lazily
+        }
+    }
+    if out.is_empty() {
+        format!("page_{}", &to_hex(&hash_str(name))[..16])
+    } else {
+        out
+    }
 }
 
 /// Repo-relative, forward-slash-normalized path string. Falls back to the raw
@@ -102,6 +126,34 @@ mod tests {
         assert_eq!(slugify("Gradient Descent"), "gradient_descent");
         assert_eq!(slugify("Top-K Sampling"), "top_k_sampling");
         assert_eq!(slugify("KV Cache"), "kv_cache");
+    }
+
+    #[test]
+    fn slugify_folds_punctuation_and_unicode() {
+        assert_eq!(
+            slugify("AI News RSS Aggregator → Telegram"),
+            "ai_news_rss_aggregator_telegram"
+        );
+        assert_eq!(slugify("a  --  b"), "a_b");
+        assert_eq!(slugify("  →Foo→  "), "foo");
+        assert_eq!(slugify("Rate: 5&6"), "rate_5_6");
+        assert_eq!(slugify("café"), "caf");
+        // A `|` in a title MUST fold away — the id is both the `<id>.md`
+        // filename and the `[[id|display]]` link target, and a pipe in either
+        // would break Task 1's split-on-`|` resolution (Task 1 review finding).
+        assert_eq!(slugify("Chapter 1 | Overview"), "chapter_1_overview");
+        // 'İ' (U+0130) is non-ASCII; ASCII-only lowercasing leaves it, then it
+        // folds to a single leading separator that is suppressed.
+        assert_eq!(slugify("İstanbul"), "stanbul");
+    }
+
+    #[test]
+    fn slugify_all_non_alnum_falls_back_to_hash() {
+        let s = slugify("→→→");
+        assert!(s.starts_with("page_"), "got {s}");
+        assert_eq!(s.len(), "page_".len() + 16);
+        assert_eq!(s, slugify("→→→")); // deterministic
+        assert_ne!(slugify("→→→"), slugify("★★★")); // distinct names → distinct slugs
     }
 
     #[test]

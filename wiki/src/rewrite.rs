@@ -57,8 +57,19 @@ pub fn read_preserved_notes(path: &Path) -> String {
     }
 }
 
+/// Replace `|` in a display name so it cannot break the `[[target|display]]`
+/// split. (`]]`/newlines in a name are pre-existing pathological cases, unchanged.)
+fn sanitize_display(name: &str) -> String {
+    name.replace('|', "/")
+}
+
+/// A wikilink whose target is the entity's slug (its `<id>.md` filename) and
+/// whose display text is the entity name — resolves in Obsidian/Quartz and in
+/// our own lint. Example: `[[test_main|Test Main]]`.
 fn link_name(id: &str, entities: &BTreeMap<String, Entity>) -> Option<String> {
-    entities.get(id).map(|e| format!("[[{}]]", e.name))
+    entities
+        .get(id)
+        .map(|e| format!("[[{}|{}]]", e.id, sanitize_display(&e.name)))
 }
 
 pub fn render_page(
@@ -241,9 +252,15 @@ mod tests {
         let g = build_graph(&ents);
         let a = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
         let b = render_page(&ents["beta"], &g.edges["beta"], &ents, "");
-        assert!(a.contains("## Related") && a.contains("[[Beta]]"));
-        assert!(b.contains("## Referenced By") && b.contains("[[Alpha]]"));
+        assert!(a.contains("## Related") && a.contains("[[beta|Beta]]"));
+        assert!(b.contains("## Referenced By") && b.contains("[[alpha|Alpha]]"));
         assert!(a.contains("generated"));
+    }
+
+    #[test]
+    fn sanitize_display_replaces_pipe() {
+        assert_eq!(sanitize_display("A|B"), "A/B");
+        assert_eq!(sanitize_display("Normal Name"), "Normal Name");
     }
 
     #[test]
