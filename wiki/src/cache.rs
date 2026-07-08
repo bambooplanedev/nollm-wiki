@@ -61,6 +61,17 @@ pub fn load(dir: &Path) -> Cache {
     cache
 }
 
+/// The page ids recorded in `dir`'s cache, IGNORING the version guard — for
+/// migration diagnostics (files the compiler previously wrote). Empty if the
+/// cache is absent or unparseable.
+pub fn prior_page_ids(dir: &Path) -> BTreeSet<String> {
+    std::fs::read_to_string(cache_path(dir))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Cache>(&t).ok())
+        .map(|c| c.pages.into_keys().collect())
+        .unwrap_or_default()
+}
+
 pub fn save(dir: &Path, cache: &Cache) -> std::io::Result<()> {
     let path = cache_path(dir);
     if let Some(parent) = path.parent() {
@@ -111,5 +122,19 @@ mod tests {
         let live: BTreeSet<String> = ["a".to_string()].into_iter().collect();
         c.retain_ids(&live);
         assert!(!c.pages.contains_key("b"));
+    }
+
+    #[test]
+    fn prior_page_ids_reads_ignoring_version() {
+        let dir = tempdir().unwrap();
+        let mut c = Cache::fresh();
+        c.version = 999; // a version `load` would reject
+        c.set("a", "1");
+        c.set("b", "2");
+        save(dir.path(), &c).unwrap();
+        let ids = prior_page_ids(dir.path());
+        assert!(ids.contains("a") && ids.contains("b"));
+        // Sanity: `load` would have reset to empty for this bad version.
+        assert!(load(dir.path()).pages.is_empty());
     }
 }
