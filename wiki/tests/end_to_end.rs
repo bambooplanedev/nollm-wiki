@@ -153,3 +153,33 @@ fn names_differing_only_by_case_collapse_to_one_page() {
         "expected the first-by-path source to win, got:\n{page}"
     );
 }
+
+#[test]
+fn incremental_recompile_with_no_changes_writes_nothing() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    write(&input, "alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n");
+    write(&input, "beta.txt", "# Beta\n\nBeta stands alone.\n");
+
+    let opts = CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    // Fresh build writes every page.
+    let first = compile(&input, &output, &opts).unwrap();
+    assert_eq!(first.pages_written, first.pages_total);
+
+    // A recompile with no source changes must write nothing. The render
+    // fingerprint includes the preserved Notes section; the fresh build emits
+    // a Notes placeholder, so the fingerprint must treat that placeholder as
+    // "no notes" — otherwise the first recompile re-reads the placeholder,
+    // computes a different fingerprint, and rewrites every page.
+    let second = compile(&input, &output, &opts).unwrap();
+    assert_eq!(
+        second.pages_written, 0,
+        "no-change recompile rewrote {} pages",
+        second.pages_written
+    );
+}
