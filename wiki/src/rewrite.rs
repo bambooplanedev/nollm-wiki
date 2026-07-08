@@ -8,6 +8,14 @@ use std::sync::LazyLock;
 
 static SECTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^##\s+(.+)$").unwrap());
 
+/// Placeholder written into the `## Notes` section when an entity has no
+/// hand-authored notes. `read_preserved_notes` treats it as "no notes" so a
+/// fresh build and its recompiles fingerprint identically (see
+/// `render_fingerprint`); without this, the first recompile after a fresh
+/// build re-reads the placeholder, computes a different fingerprint, and
+/// needlessly rewrites every page.
+const NOTES_PLACEHOLDER: &str = "_(add your own notes here — preserved on recompile)_";
+
 pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
     let mut sections = BTreeMap::new();
     let caps: Vec<_> = SECTION.captures_iter(text).collect();
@@ -30,12 +38,21 @@ pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
 
 pub fn read_preserved_notes(path: &Path) -> String {
     match std::fs::read_to_string(path) {
-        Ok(text) => parse_sections(&text)
-            .get("Notes")
-            .cloned()
-            .unwrap_or_default()
-            .trim()
-            .to_string(),
+        Ok(text) => {
+            let notes = parse_sections(&text)
+                .get("Notes")
+                .cloned()
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            // The unedited placeholder is not real notes — treat it as empty so
+            // the render fingerprint is stable across recompiles.
+            if notes == NOTES_PLACEHOLDER {
+                String::new()
+            } else {
+                notes
+            }
+        }
         Err(_) => String::new(),
     }
 }
@@ -130,7 +147,8 @@ pub fn render_page(
     // Notes (human-owned, always present so there is a home for hand edits)
     out.push_str("## Notes\n");
     if preserved_notes.trim().is_empty() {
-        out.push_str("_(add your own notes here — preserved on recompile)_\n");
+        out.push_str(NOTES_PLACEHOLDER);
+        out.push('\n');
     } else {
         out.push_str(preserved_notes.trim());
         out.push('\n');
