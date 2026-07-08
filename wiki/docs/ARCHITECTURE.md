@@ -44,8 +44,12 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the
-   page body. Writes only land on disk if not in incremental mode, or if the
-   fingerprint changed (see [Incremental build](#incremental-build)).
+   page body. Cross-links are emitted as slug-target, Obsidian-flavored
+   wikilinks — `[[slug|Name]]` (e.g. `[[gradient_descent|Gradient
+   Descent]]`) — so each link target is a real `<slug>.md` file rather than
+   a display name that has to be re-slugified to resolve. Writes only land
+   on disk if not in incremental mode, or if the fingerprint changed (see
+   [Incremental build](#incremental-build)).
 6. **Manifest** (`manifest::build_manifest`) — builds `index.json`,
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
    `graph.json` from the final entity map and graph.
@@ -63,7 +67,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
 | `src/formats/code.rs` | `CodeExtractor` — tree-sitter-based extraction for Rust/Python/JS/TS/Go; captures only exported/public symbols. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
-| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()`, `normalize_path()`. |
+| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention-based edge detection and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`). |
