@@ -6,6 +6,18 @@ use std::sync::LazyLock;
 
 static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[(.+?)\]\]").unwrap());
 
+/// The slug side of a wikilink capture: everything before the first `|`
+/// (`[[target|display]]`). A bare `[[x]]` returns `x`.
+fn link_target(inner: &str) -> &str {
+    inner.split('|').next().unwrap_or(inner)
+}
+
+/// The human-readable side of a wikilink capture: everything after the last `|`
+/// (or the whole capture if there is no `|`). Used for broken-link reports.
+fn link_display(inner: &str) -> &str {
+    inner.rsplit('|').next().unwrap_or(inner)
+}
+
 /// `pages`: page id -> rendered markdown. Purely in-memory (no disk re-read).
 pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
     let known: std::collections::BTreeSet<&String> = pages.keys().collect();
@@ -14,15 +26,15 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
 
     for (id, text) in pages {
         for cap in LINK.captures_iter(text) {
-            let target = cap[1].to_string();
-            if !known.contains(&slugify(&target)) {
-                broken_links.push((id.clone(), target));
+            let inner = &cap[1];
+            if !known.contains(&slugify(link_target(inner))) {
+                broken_links.push((id.clone(), link_display(inner).to_string()));
             }
         }
         // Orphan counting uses ONLY the Related section (true outgoing edges).
         if let Some(related) = parse_sections(text).get("Related") {
             for cap in LINK.captures_iter(related) {
-                let slug = slugify(&cap[1]);
+                let slug = slugify(link_target(&cap[1]));
                 if let Some(c) = incoming.get_mut(&slug) {
                     *c += 1;
                 }
@@ -107,5 +119,27 @@ mod tests {
             ent("beta", "Beta", "nothing"),
         ]);
         assert!(lint(&pages).broken_links.is_empty());
+    }
+
+    #[test]
+    fn resolves_slug_piped_links_and_reports_readable_broken() {
+        let mut pages = render_all(vec![
+            ent("alpha", "Alpha", "mentions Beta"),
+            ent("beta", "Beta", "nothing"),
+        ]);
+        // A broken slug-piped link: target `ghost_page` has no page.
+        pages
+            .get_mut("alpha")
+            .unwrap()
+            .push_str("\nSee [[ghost_page|Ghost Page]].\n");
+        let r = lint(&pages);
+        // The real Related link `[[beta|Beta]]` resolves (not reported); only the
+        // ghost is broken, and it is reported with its READABLE display name.
+        assert_eq!(
+            r.broken_links,
+            vec![("alpha".to_string(), "Ghost Page".to_string())]
+        );
+        // beta is referenced by alpha's Related section → not an orphan.
+        assert!(!r.orphans.contains(&"beta".to_string()));
     }
 }

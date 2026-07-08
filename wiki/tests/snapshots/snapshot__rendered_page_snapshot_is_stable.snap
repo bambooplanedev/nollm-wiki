@@ -14,11 +14,11 @@ expression: redacted
 - source_hash: <redacted>
 
 ## Related
-- [[Learning Rate Schedule]]
+- [[learning_rate_schedule|Learning Rate Schedule]]
 
 ## Referenced By
-- [[Layer Normalization]]
-- [[Learning Rate Schedule]]
+- [[layer_normalization|Layer Normalization]]
+- [[learning_rate_schedule|Learning Rate Schedule]]
 
 ## Body
 Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
