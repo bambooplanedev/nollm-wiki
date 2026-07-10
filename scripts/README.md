@@ -4,7 +4,7 @@ This directory contains the tooling to turn a compiled wiki directory into a loc
 
 ## What It Does
 
-`quartz-publish.sh` takes a compiled wiki directory (from the wiki-compiler) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
+`quartz-publish.sh` takes a compiled wiki directory (from the `wiki` compiler) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
 1. Clones Quartz (pinned to `v4.5.2`) into `.quartz-build/` (reused across runs)
 2. Runs `npm install` once (then cached)
 3. Copies wiki pages through `strip-chrome.awk` to remove compiler-owned metadata sections
@@ -64,6 +64,16 @@ The `strip-chrome.awk` script removes compiler-owned metadata sections before pu
 ### Known Limitation
 
 An orphan page (with no incoming links) whose markdown body contains a literal `## Referenced By` heading as actual content would have that body heading stripped. This is rare and cosmetic — the orphan page's content would still be readable, but the heading would be missing.
+
+### Testing
+
+`strip-chrome.awk` has a self-contained, network-free unit test:
+
+```bash
+scripts/test-strip-chrome.sh
+```
+
+It runs the awk filter over fixture pages and asserts that compiler-owned sections are removed while body content is preserved.
 
 ## Quartz Version
 
