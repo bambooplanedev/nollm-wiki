@@ -28,6 +28,9 @@ pub struct Hit {
     pub title: String,
     pub summary: Option<String>,
     pub score: f64,
+    /// Deterministic excerpt around the earliest body match (`None` for
+    /// title/alias/summary-only hits — the summary explains those).
+    pub snippet: Option<String>,
 }
 
 #[derive(Default)]
@@ -135,6 +138,66 @@ impl Wiki {
         tokens
     }
 
+    const SNIPPET_CONTEXT_CHARS: usize = 60;
+
+    /// Excerpt around the earliest occurrence of any query token in the
+    /// content: 60 chars of context each side, whitespace runs collapsed,
+    /// `…` on truncated edges. Match offsets come from the lowercased text;
+    /// on the rare non-ASCII page where lowercasing changes byte lengths the
+    /// window may sit slightly off, but boundary snapping guarantees it
+    /// never panics and stays deterministic.
+    fn snippet(content: &str, content_lower: &str, tokens: &[String]) -> Option<String> {
+        // Earliest occurrence of any token; ties at the same index go to the
+        // longer token.
+        let mut best: Option<(usize, usize)> = None;
+        for t in tokens {
+            if let Some(i) = content_lower.find(t.as_str()) {
+                best = match best {
+                    Some((bi, bl)) if bi < i || (bi == i && bl >= t.len()) => Some((bi, bl)),
+                    _ => Some((i, t.len())),
+                };
+            }
+        }
+        let (m_start, m_len) = best?;
+
+        // Clamp into the original string, then snap inward to char
+        // boundaries (lowercasing can shift byte offsets on non-ASCII).
+        let mut start = m_start.min(content.len());
+        while !content.is_char_boundary(start) {
+            start -= 1;
+        }
+        let mut end = (m_start + m_len).min(content.len());
+        while !content.is_char_boundary(end) {
+            end += 1;
+        }
+
+        // Widen by up to SNIPPET_CONTEXT_CHARS chars on each side.
+        let before: usize = content[..start]
+            .chars()
+            .rev()
+            .take(Self::SNIPPET_CONTEXT_CHARS)
+            .map(char::len_utf8)
+            .sum();
+        let after: usize = content[end..]
+            .chars()
+            .take(Self::SNIPPET_CONTEXT_CHARS)
+            .map(char::len_utf8)
+            .sum();
+        let (w_start, w_end) = (start - before, end + after);
+
+        let mut s = content[w_start..w_end]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if w_start > 0 {
+            s.insert(0, '…');
+        }
+        if w_end < content.len() {
+            s.push('…');
+        }
+        Some(s)
+    }
+
     /// Case-insensitive tokenized search over name/alias/summary/body.
     /// AND semantics: every query token must match at least one field.
     /// Deterministic: per-token field weights + a capped occurrence bonus
@@ -165,6 +228,7 @@ impl Wiki {
             let mut score = 0.0;
             let mut occurrences = 0usize;
             let mut all_match = true;
+            let mut any_body = false;
             for t in &tokens {
                 let name_hit = title.contains(t.as_str());
                 let alias_hit = aliases.iter().any(|a| a.contains(t.as_str()));
@@ -173,6 +237,7 @@ impl Wiki {
                     .map(|s| s.contains(t.as_str()))
                     .unwrap_or(false);
                 let body_hit = content_lower.contains(t.as_str());
+                any_body |= body_hit;
                 if !(name_hit || alias_hit || summary_hit || body_hit) {
                     all_match = false;
                     break;
@@ -189,11 +254,17 @@ impl Wiki {
             }
             score += Self::W_OCCURRENCE * occurrences.min(Self::OCCURRENCE_CAP) as f64;
             score += e.pagerank;
+            let snippet = if any_body {
+                Self::snippet(&content, &content_lower, &tokens)
+            } else {
+                None
+            };
             hits.push(Hit {
                 id: e.id.clone(),
                 title: e.title.clone(),
                 summary: e.summary.clone(),
                 score,
+                snippet,
             });
         }
         hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));

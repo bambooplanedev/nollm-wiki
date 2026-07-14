@@ -132,3 +132,64 @@ fn empty_and_punctuation_queries_return_nothing() {
     assert!(w.search("", None, 10).is_empty());
     assert!(w.search("  ,,  ", None, 10).is_empty());
 }
+
+#[test]
+fn body_hits_carry_a_snippet_with_context() {
+    let (_dir, out) = build_corpus();
+    let w = Wiki::load(&out).unwrap();
+    let hits = w.search("determinism", None, 10);
+    let hit = hits.iter().find(|h| h.id == "architecture").expect("hit");
+    let s = hit.snippet.as_deref().expect("body hit must carry a snippet");
+    assert!(s.to_lowercase().contains("determinism"), "snippet shows the match: {s:?}");
+    // Earliest-occurrence selection: the first "determinism" in the content
+    // is "Determinism is enforced by sorted walks", so its context must
+    // appear in the window.
+    assert!(s.contains("enforced"), "snippet centers the earliest match: {s:?}");
+    assert!(!s.contains('\n'), "whitespace collapsed to single spaces: {s:?}");
+    assert!(s.len() <= 200, "snippet stays compact: {} chars", s.len());
+}
+
+#[test]
+fn title_only_hits_have_no_snippet() {
+    // Needs a page whose title matches but whose *content* does not. A
+    // markdown page can't provide that — its own `# H1` line lands inside
+    // the rendered `## Body` section — so use a code file: the title comes
+    // from the basename, which appears nowhere in the extracted content.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("zephyr.rs"), "pub fn blow() {}\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("zephyr", None, 10);
+    let hit = hits.iter().find(|h| h.id == "zephyr").expect("hit");
+    assert!(
+        hit.snippet.is_none(),
+        "title-only hit must have snippet None: {:?}",
+        hit.snippet
+    );
+}
+
+#[test]
+fn snippet_never_splits_multibyte_chars() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    // Multibyte chars (— and é) crowd both sides of the match word so the
+    // 60-char window edges land amid non-ASCII. Must not panic.
+    let padding = "café — déjà-vu ".repeat(20);
+    fs::write(
+        input.join("unicode.md"),
+        format!("# Unicode\n\n{padding}xylophone{padding}\n"),
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("xylophone", None, 10);
+    let hit = hits.iter().find(|h| h.id == "unicode").expect("hit");
+    let s = hit.snippet.as_deref().expect("snippet");
+    assert!(s.contains("xylophone"));
+    assert!(s.starts_with('…') && s.ends_with('…'), "both edges truncated: {s:?}");
+}

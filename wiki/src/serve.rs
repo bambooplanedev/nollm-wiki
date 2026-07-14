@@ -132,7 +132,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score}]. Use `neighbors` afterwards to pull a page's full context."
+        description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score, snippet}]. Use `neighbors` afterwards to pull a page's full context."
     )]
     fn search(&self, Parameters(p): Parameters<SearchParams>) -> Result<CallToolResult, McpError> {
         let kind = match p.kind.as_deref() {
@@ -153,6 +153,7 @@ impl WikiServer {
                         "title": h.title,
                         "summary": h.summary,
                         "score": h.score,
+                        "snippet": h.snippet,
                     })
                 })
                 .collect::<Vec<_>>()

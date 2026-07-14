@@ -250,3 +250,24 @@ fn serve_refuses_non_wiki_dir() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("compile"), "stderr: {stderr}");
 }
+
+#[test]
+fn search_hits_include_snippet_field() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
+    initialize(&mut stdin, &mut stdout);
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+            "name": "search", "arguments": {"query": "gradient"}}}),
+    );
+    let resp = read_response(&mut stdout, 7);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let hits: Value = serde_json::from_str(text).unwrap();
+    let arr = hits.as_array().expect("hits array");
+    assert!(!arr.is_empty());
+    for h in arr {
+        assert!(h.get("snippet").is_some(), "hit missing snippet key: {h}");
+    }
+    child.kill().ok();
+}

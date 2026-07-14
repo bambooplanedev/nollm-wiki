@@ -141,6 +141,9 @@ fn main() -> Result<()> {
                     hit.title,
                     hit.summary.unwrap_or_default()
                 );
+                if let Some(s) = &hit.snippet {
+                    println!("    {s}");
+                }
             }
         }
         Command::Lint { dir } => {
