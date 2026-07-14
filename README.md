@@ -10,4 +10,3 @@ optionally publish it as a browsable static site with `scripts/`.
 - **`wiki/`** — the Rust compiler. Start with [`wiki/README.md`](wiki/README.md).
 - **`wiki/docs/ARCHITECTURE.md`** — pipeline internals, module map, and determinism rules.
 - **`scripts/`** — publish a compiled wiki as a [Quartz](https://quartz.jzhao.xyz/) static site. See [`scripts/README.md`](scripts/README.md).
-- **`docs/superpowers/`** — design specs and implementation plans.

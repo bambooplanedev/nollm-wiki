@@ -303,5 +303,3 @@ make this guarantee hold.
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — pipeline internals,
   module map, determinism rules, and how to extend the compiler.
-- [`../docs/superpowers/`](../docs/superpowers/) — design specs and
-  implementation plan history.
