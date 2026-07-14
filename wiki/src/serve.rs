@@ -71,6 +71,170 @@ impl WikiState {
     }
 }
 
+use crate::lint::{lint, load_compiled_pages};
+use crate::model::SourceKind;
+use crate::query::PackBudget;
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::transport::stdio;
+use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler, ServiceExt};
+use serde::Deserialize;
+use std::sync::Arc;
+
+#[derive(Deserialize, rmcp::schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct SearchParams {
+    /// Search query, matched case-insensitively against title, aliases,
+    /// summary, and body.
+    pub query: String,
+    /// Filter by source kind: text, markdown, pdf, image, audio, or
+    /// code:<lang> (e.g. code:rust).
+    pub kind: Option<String>,
+    /// Maximum number of hits (default 10).
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize, rmcp::schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub struct NeighborsParams {
+    /// Page id (slug) to build the context pack around.
+    pub id: String,
+    /// BFS hop count from the target page (default 1).
+    pub depth: Option<usize>,
+    /// Token budget for the returned pack (default unbounded).
+    pub max_tokens: Option<usize>,
+    /// Node-count budget for the returned pack (default unbounded).
+    pub max_nodes: Option<usize>,
+    /// Include full neighbor bodies instead of one-line summaries.
+    pub full: Option<bool>,
+}
+
+#[derive(Clone)]
+pub struct WikiServer {
+    state: Arc<WikiState>,
+    tool_router: ToolRouter<Self>,
+}
+
+#[tool_router]
+impl WikiServer {
+    pub fn new(state: Arc<WikiState>) -> Self {
+        Self {
+            state,
+            tool_router: Self::tool_router(),
+        }
+    }
+
+    #[tool(
+        description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score}]. Use `neighbors` afterwards to pull a page's full context."
+    )]
+    fn search(&self, Parameters(p): Parameters<SearchParams>) -> Result<CallToolResult, McpError> {
+        let kind = match p.kind.as_deref() {
+            None => None,
+            Some(s) => Some(SourceKind::parse(s).ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("unknown kind {s:?}; expected text, markdown, pdf, image, audio, or code:<lang>"),
+                    None,
+                )
+            })?),
+        };
+        let hits = self.state.with_wiki(|w| {
+            w.search(&p.query, kind, p.limit.unwrap_or(10))
+                .into_iter()
+                .map(|h| {
+                    serde_json::json!({
+                        "id": h.id,
+                        "title": h.title,
+                        "summary": h.summary,
+                        "score": h.score,
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            serde_json::Value::Array(hits).to_string(),
+        )]))
+    }
+
+    #[tool(
+        description = "Build a budgeted context pack around a page: the page in full, then its graph neighbors ordered by centrality (most important last). Prefer this over reading pages one by one."
+    )]
+    fn neighbors(
+        &self,
+        Parameters(p): Parameters<NeighborsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let budget = PackBudget {
+            max_tokens: p.max_tokens,
+            max_nodes: p.max_nodes,
+            full_neighbors: p.full.unwrap_or(false),
+        };
+        let pack = self
+            .state
+            .with_wiki(|w| w.neighbors(&p.id, p.depth.unwrap_or(1), &budget));
+        match pack {
+            Some(pack) => Ok(CallToolResult::success(vec![ContentBlock::text(pack.text)])),
+            None => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+                "unknown page id {:?} — use the search tool to find valid ids",
+                p.id
+            ))])),
+        }
+    }
+
+    #[tool(
+        description = "Check wiki health: broken wikilinks and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
+    )]
+    fn lint(&self) -> Result<CallToolResult, McpError> {
+        let pages = load_compiled_pages(self.state.dir())
+            .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
+        let r = lint(&pages);
+        let report = serde_json::json!({
+            "total_pages": r.total_pages,
+            "broken_links": r.broken_links,
+            "orphans": r.orphans,
+        });
+        Ok(CallToolResult::success(vec![ContentBlock::text(
+            report.to_string(),
+        )]))
+    }
+}
+
+#[tool_handler(router = self.tool_router.clone())]
+impl ServerHandler for WikiServer {
+    fn get_info(&self) -> ServerInfo {
+        let capabilities = ServerCapabilities::builder()
+            .enable_tools()
+            .enable_resources()
+            .build();
+        ServerInfo::new(capabilities)
+            .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
+            .with_instructions(
+                "Query interface to a compiled wiki. Start with `search` to find \
+                 page ids, then `neighbors` to pull a budgeted context pack around \
+                 a page. Pages are also exposed as resources under wiki://page/<id>.",
+            )
+    }
+}
+
+/// Start the MCP server over stdio and block until the client disconnects.
+pub fn run(dir: &Path) -> anyhow::Result<()> {
+    let state = WikiState::load(dir).map_err(|e| {
+        anyhow::anyhow!(
+            "{} is not a compiled wiki ({e}) — run `wiki compile <input> {}` first",
+            dir.display(),
+            dir.display()
+        )
+    })?;
+    let server = WikiServer::new(Arc::new(state));
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async move {
+            let service = server.serve(stdio()).await?;
+            service.waiting().await?;
+            Ok(())
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

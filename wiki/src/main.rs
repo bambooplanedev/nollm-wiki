@@ -61,6 +61,10 @@ enum Command {
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
+    Serve {
+        #[arg(long, default_value = "out")]
+        dir: PathBuf,
+    },
     Generate {
         dir: PathBuf,
         #[arg(long, default_value_t = 20)]
@@ -148,6 +152,9 @@ fn main() -> Result<()> {
                 r.broken_links.len(),
                 r.orphans.len()
             );
+        }
+        Command::Serve { dir } => {
+            wiki::serve::run(&dir)?;
         }
         Command::Generate { dir, files, seed } => {
             let paths = generate_corpus(&dir, files, seed).context("generate corpus")?;
