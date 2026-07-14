@@ -193,6 +193,17 @@ wiki lint [OPTIONS]
 
 - `--dir <out>` (`out`) — the compiled wiki directory to check for broken links and orphan pages.
 
+### `serve`
+
+```
+wiki serve [OPTIONS]
+```
+
+- `--dir <out>` (`out`) — the compiled wiki directory to serve.
+
+Runs an MCP (Model Context Protocol) server over stdio for the compiled
+wiki. See [MCP server](#mcp-server).
+
 ### `generate`
 
 ```
@@ -264,6 +275,39 @@ Layer Normalization builds directly on the ideas behind Gradient Descent.
 Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ```
 
+## MCP server
+
+`wiki serve` exposes a compiled wiki to MCP clients (Claude Code, Claude
+Desktop, and other agents) over stdio — the native alternative to shelling
+out to the CLI. Client configuration:
+
+```json
+{
+  "mcpServers": {
+    "wiki": { "command": "wiki", "args": ["serve", "--dir", "demo_wiki"] }
+  }
+}
+```
+
+**Tools** (mirroring the CLI subcommands 1:1):
+
+| Tool | Parameters | Returns |
+|---|---|---|
+| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score}]` |
+| `neighbors` | `id`, `depth?` (1), `max_tokens?`, `max_nodes?`, `full?` | The context-pack text |
+| `lint` | — | JSON `{total_pages, broken_links, orphans}` |
+
+**Resources:** every page is `wiki://page/<id>` (markdown), plus
+`wiki://index` (`index.json`) and `wiki://llms.txt`.
+
+**Freshness:** the server checks `index.json`'s fingerprint before each
+request and reloads if the wiki was recompiled — no restart needed. If a
+reload fails (e.g. mid-compile), the previous snapshot keeps serving and
+the reload is retried on the next request.
+
+The server is read-only: compiling stays a CLI concern (`wiki compile`,
+optionally with `--watch`).
+
 ## Library usage (Rust)
 
 `wiki` is also usable as a library — the CLI is a thin wrapper over the same
@@ -313,9 +357,9 @@ oversights:
 - **PDF/OCR/audio extractors are seams, not backends.** `--features
   full` compiles the registry hooks for them, but no extractor is
   implemented (see [Install & build](#install--build)).
-- **No MCP server yet.** The query API (`Wiki::load`, `search`,
-  `neighbors`) is designed to map 1:1 onto MCP resources/tools, but the
-  server itself is a later addition.
+- **MCP server is query-only.** `wiki serve` exposes search/neighbors/lint
+  and page resources over stdio (see [MCP server](#mcp-server)); there is
+  deliberately no compile-over-MCP tool and no HTTP transport.
 - **Graph export is JSON only.** `--emit-json` writes the node-link
   `graph.json`; there is no DOT/GraphML export.
 - **`--watch` covers `compile` only.** The query subcommands (`search`,
