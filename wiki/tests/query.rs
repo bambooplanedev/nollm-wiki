@@ -220,3 +220,26 @@ versus packing distinction this test pins down here today.\n",
         pack.included
     );
 }
+
+#[test]
+fn search_finds_text_under_embedded_subheadings() {
+    // A markdown doc whose body has its own `## ` subheading: parse_sections
+    // splits there, and pre-fix the text below it is invisible to search.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("doc.md"),
+        "# Doc\n\nIntro paragraph.\n\n## Deep Section\n\nThe zanzibar rule lives here.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+
+    let hits = w.search("zanzibar", None, 10);
+    assert!(
+        hits.iter().any(|h| h.id == "doc"),
+        "text under an embedded subheading must be searchable"
+    );
+}

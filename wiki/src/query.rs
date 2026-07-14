@@ -85,16 +85,28 @@ impl Wiki {
             .collect()
     }
 
-    /// The searchable *content* of a rendered page: the Body, Exports, and
-    /// Imports sections only. Excludes generated chrome (the banner, Metadata,
-    /// Related, Referenced By, Notes) so a query like "related" or "metadata"
-    /// does not false-positive on every page.
+    /// Sections excluded from search: generated chrome, so a query like
+    /// "related" or "metadata" does not false-positive on every page.
+    const CHROME_SECTIONS: [&'static str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
+
+    /// The searchable *content* of a rendered page: every parsed section
+    /// except the generated chrome (`CHROME_SECTIONS`). Subtractive on
+    /// purpose — a doc body's own `## ` subheadings become sections of their
+    /// own in `parse_sections`, and their text must stay searchable.
+    ///
+    /// Known residual limits (accepted by the 2026-07-14 search-quality
+    /// design): content under an embedded heading named exactly like a
+    /// chrome section stays unsearchable; duplicate heading names overwrite
+    /// each other in the map; `parse_sections` also matches `## ` inside
+    /// fenced code blocks (the text is still kept, under the example
+    /// heading's name). Section order is BTreeMap (alphabetical), not
+    /// document, order.
     fn content_text(page: &str) -> String {
         let sections = crate::rewrite::parse_sections(page);
-        ["Body", "Exports", "Imports"]
+        sections
             .iter()
-            .filter_map(|k| sections.get(*k))
-            .cloned()
+            .filter(|(k, _)| !Self::CHROME_SECTIONS.contains(&k.as_str()))
+            .map(|(_, v)| v.clone())
             .collect::<Vec<_>>()
             .join("\n")
     }
