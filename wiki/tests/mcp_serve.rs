@@ -151,9 +151,8 @@ fn serve_lists_and_reads_resources() {
         json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
     );
     let resp = read_response(&mut stdout, 2);
-    let uris: Vec<&str> = resp["result"]["resources"]
-        .as_array()
-        .unwrap()
+    let resources = resp["result"]["resources"].as_array().unwrap();
+    let uris: Vec<&str> = resources
         .iter()
         .map(|r| r["uri"].as_str().unwrap())
         .collect();
@@ -161,6 +160,18 @@ fn serve_lists_and_reads_resources() {
     assert!(uris.contains(&"wiki://index"));
     assert!(uris.contains(&"wiki://llms.txt"));
     assert!(uris.contains(&"wiki://page/gradient_descent"));
+
+    // resources/list: MIME types are set per the spec.
+    let index_entry = resources
+        .iter()
+        .find(|r| r["uri"] == json!("wiki://index"))
+        .unwrap();
+    assert_eq!(index_entry["mimeType"], json!("application/json"));
+    let page_entry = resources
+        .iter()
+        .find(|r| r["uri"] == json!("wiki://page/gradient_descent"))
+        .unwrap();
+    assert_eq!(page_entry["mimeType"], json!("text/markdown"));
 
     // resources/read a page
     send(
@@ -172,6 +183,10 @@ fn serve_lists_and_reads_resources() {
     let resp = read_response(&mut stdout, 3);
     let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("# Gradient Descent"));
+    assert_eq!(
+        resp["result"]["contents"][0]["mimeType"],
+        json!("text/markdown")
+    );
 
     // resources/read the index
     send(
@@ -195,6 +210,28 @@ fn serve_lists_and_reads_resources() {
         }}),
     );
     let resp = read_response(&mut stdout, 5);
+    assert!(resp["error"].is_object(), "expected error, got: {resp}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_refuses_path_traversal_outside_index() {
+    let (_tmp, out) = compile_fixture();
+    // Plant a decoy file outside the served directory.
+    std::fs::write(out.parent().unwrap().join("secret.md"), "# Secret").unwrap();
+
+    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
+    initialize(&mut stdin, &mut stdout);
+
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {
+            "uri": "wiki://page/../secret"
+        }}),
+    );
+    let resp = read_response(&mut stdout, 2);
     assert!(resp["error"].is_object(), "expected error, got: {resp}");
 
     drop(stdin);

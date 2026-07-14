@@ -1,8 +1,25 @@
 //! MCP server for a compiled wiki (`wiki serve`): exposes search/neighbors/
 //! lint as tools and pages as resources over stdio.
 
+use crate::lint::{lint, load_compiled_pages};
+use crate::model::SourceKind;
+use crate::query::PackBudget;
 use crate::query::Wiki;
+use rmcp::handler::server::router::tool::ToolRouter;
+use rmcp::handler::server::wrapper::Parameters;
+use rmcp::model::{
+    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
+    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
+    ServerInfo,
+};
+use rmcp::service::RequestContext;
+use rmcp::transport::stdio;
+use rmcp::{
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
+};
+use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
@@ -70,24 +87,6 @@ impl WikiState {
         f(&guard.wiki)
     }
 }
-
-use crate::lint::{lint, load_compiled_pages};
-use crate::model::SourceKind;
-use crate::query::PackBudget;
-use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-    ServerInfo,
-};
-use rmcp::service::RequestContext;
-use rmcp::transport::stdio;
-use rmcp::{
-    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
-};
-use serde::Deserialize;
-use std::sync::Arc;
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
@@ -227,12 +226,17 @@ impl ServerHandler for WikiServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
         let mut resources = vec![
-            Resource::new("wiki://index", "index.json (machine catalog)"),
-            Resource::new("wiki://llms.txt", "llms.txt (compact LLM index)"),
+            Resource::new("wiki://index", "index.json (machine catalog)")
+                .with_mime_type("application/json"),
+            Resource::new("wiki://llms.txt", "llms.txt (compact LLM index)")
+                .with_mime_type("text/plain"),
         ];
         self.state.with_wiki(|w| {
             for (id, title) in w.list_pages() {
-                resources.push(Resource::new(format!("wiki://page/{id}"), title));
+                resources.push(
+                    Resource::new(format!("wiki://page/{id}"), title)
+                        .with_mime_type("text/markdown"),
+                );
             }
         });
         Ok(ListResourcesResult::with_all_items(resources))
@@ -245,19 +249,36 @@ impl ServerHandler for WikiServer {
     ) -> Result<ReadResourceResult, McpError> {
         let uri = request.uri.as_str();
         let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
-        let text = match uri {
-            "wiki://index" => std::fs::read_to_string(self.state.dir().join("index.json"))
-                .map_err(|_| not_found())?,
-            "wiki://llms.txt" => std::fs::read_to_string(self.state.dir().join("llms.txt"))
-                .map_err(|_| not_found())?,
+        let (text, mime_type) = match uri {
+            "wiki://index" => (
+                std::fs::read_to_string(self.state.dir().join("index.json"))
+                    .map_err(|_| not_found())?,
+                "application/json",
+            ),
+            "wiki://llms.txt" => (
+                std::fs::read_to_string(self.state.dir().join("llms.txt"))
+                    .map_err(|_| not_found())?,
+                "text/plain",
+            ),
             _ => {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
-                self.state.with_wiki(|w| w.page(id)).ok_or_else(not_found)?
+                let page = self.state.with_wiki(|w| {
+                    // Only touch the filesystem for ids the loaded index knows
+                    // about — page ids are slugs `[a-z0-9_]+`, so index
+                    // membership rejects any traversal sequence outright.
+                    if w.has_page(id) {
+                        w.page(id)
+                    } else {
+                        None
+                    }
+                });
+                (page.ok_or_else(not_found)?, "text/markdown")
             }
         };
         Ok(ReadResourceResult::new(vec![ResourceContents::text(
             text, uri,
-        )]))
+        )
+        .with_mime_type(mime_type)]))
     }
 }
 

@@ -70,6 +70,12 @@ impl Wiki {
         std::fs::read_to_string(self.dir.join(format!("{id}.md"))).ok()
     }
 
+    /// Whether `id` is a page in the loaded index. Used by the MCP server to
+    /// validate resource ids before touching the filesystem.
+    pub fn has_page(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
+
     /// All pages as `(id, title)` pairs, ascending by id (BTreeMap order).
     /// Used by the MCP server's `resources/list`.
     pub fn list_pages(&self) -> Vec<(String, String)> {
