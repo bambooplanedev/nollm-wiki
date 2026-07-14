@@ -51,8 +51,11 @@ Lint: 0 broken links, 1 orphans
 
 $ ./target/release/wiki search gradient --dir demo_wiki
 gradient_descent	Gradient Descent	Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
+    Gradient Descent is often paired with Learning Rate Schedule in prod…
 layer_normalization	Layer Normalization	Layer Normalization builds directly on the ideas behind Gradient Descent.
+    Layer Normalization builds directly on the ideas behind Gradient Descent. When debugging Layer Normalization, engineers trac…
 learning_rate_schedule	Learning Rate Schedule	Learning Rate Schedule builds directly on the ideas behind Backpropagation.
+    …tion Mechanism. Learning Rate Schedule is often paired with Gradient Descent in production pipelines. Numbers here are approxim…
 
 $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --dir demo_wiki
 # Gradient Descent
@@ -293,7 +296,7 @@ out to the CLI. Client configuration:
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score}]` |
+| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score, snippet}]` (`snippet` is `null` for title/alias/summary-only hits) |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?`, `max_nodes?`, `full?` | The context-pack text |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |
 

@@ -202,7 +202,7 @@ impl Wiki {
     /// AND semantics: every query token must match at least one field.
     /// Deterministic: per-token field weights + a capped occurrence bonus
     /// + pagerank tiebreak, sorted desc by score then asc by id, truncated
-    /// to `limit`. Empty/punctuation-only queries return no hits.
+    ///   to `limit`. Empty/punctuation-only queries return no hits.
     pub fn search(&self, q: &str, kind: Option<SourceKind>, limit: usize) -> Vec<Hit> {
         let tokens = Self::tokenize(q);
         if tokens.is_empty() {

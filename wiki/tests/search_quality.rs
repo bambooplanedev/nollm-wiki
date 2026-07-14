@@ -93,8 +93,11 @@ fn and_semantics_require_every_token() {
     // "incremental" appears only in cache.md; "orphans" only in lint.md —
     // no page contains both, so the AND query returns nothing.
     let hits = w.search("incremental orphans", None, 10);
-    assert!(hits.is_empty(), "AND across tokens must yield no hit: {:?}",
-        hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>());
+    assert!(
+        hits.is_empty(),
+        "AND across tokens must yield no hit: {:?}",
+        hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -105,7 +108,10 @@ fn occurrence_count_grades_ranking() {
     let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
     let hub = ids.iter().position(|i| *i == "hub").expect("hub found");
     let aside = ids.iter().position(|i| *i == "aside").expect("aside found");
-    assert!(hub < aside, "many-mentions page must outrank one-mention page: {ids:?}");
+    assert!(
+        hub < aside,
+        "many-mentions page must outrank one-mention page: {ids:?}"
+    );
 }
 
 #[test]
@@ -139,13 +145,25 @@ fn body_hits_carry_a_snippet_with_context() {
     let w = Wiki::load(&out).unwrap();
     let hits = w.search("determinism", None, 10);
     let hit = hits.iter().find(|h| h.id == "architecture").expect("hit");
-    let s = hit.snippet.as_deref().expect("body hit must carry a snippet");
-    assert!(s.to_lowercase().contains("determinism"), "snippet shows the match: {s:?}");
+    let s = hit
+        .snippet
+        .as_deref()
+        .expect("body hit must carry a snippet");
+    assert!(
+        s.to_lowercase().contains("determinism"),
+        "snippet shows the match: {s:?}"
+    );
     // Earliest-occurrence selection: the first "determinism" in the content
     // is "Determinism is enforced by sorted walks", so its context must
     // appear in the window.
-    assert!(s.contains("enforced"), "snippet centers the earliest match: {s:?}");
-    assert!(!s.contains('\n'), "whitespace collapsed to single spaces: {s:?}");
+    assert!(
+        s.contains("enforced"),
+        "snippet centers the earliest match: {s:?}"
+    );
+    assert!(
+        !s.contains('\n'),
+        "whitespace collapsed to single spaces: {s:?}"
+    );
     assert!(s.len() <= 200, "snippet stays compact: {} chars", s.len());
 }
 
@@ -191,5 +209,8 @@ fn snippet_never_splits_multibyte_chars() {
     let hit = hits.iter().find(|h| h.id == "unicode").expect("hit");
     let s = hit.snippet.as_deref().expect("snippet");
     assert!(s.contains("xylophone"));
-    assert!(s.starts_with('…') && s.ends_with('…'), "both edges truncated: {s:?}");
+    assert!(
+        s.starts_with('…') && s.ends_with('…'),
+        "both edges truncated: {s:?}"
+    );
 }
