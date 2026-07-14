@@ -70,6 +70,15 @@ impl Wiki {
         std::fs::read_to_string(self.dir.join(format!("{id}.md"))).ok()
     }
 
+    /// All pages as `(id, title)` pairs, ascending by id (BTreeMap order).
+    /// Used by the MCP server's `resources/list`.
+    pub fn list_pages(&self) -> Vec<(String, String)> {
+        self.entries
+            .values()
+            .map(|e| (e.id.clone(), e.title.clone()))
+            .collect()
+    }
+
     /// The searchable *content* of a rendered page: the Body, Exports, and
     /// Imports sections only. Excludes generated chrome (the banner, Metadata,
     /// Related, Referenced By, Notes) so a query like "related" or "metadata"

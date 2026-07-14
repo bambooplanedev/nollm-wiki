@@ -6,6 +6,25 @@ use std::sync::LazyLock;
 
 static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[(.+?)\]\]").unwrap());
 
+/// Read all rendered pages (`<id>.md`) from a compiled output directory,
+/// skipping the non-page files `index.md` and `AGENTS.md`. Used by the
+/// `lint` CLI subcommand and the MCP server's `lint` tool.
+pub fn load_compiled_pages(dir: &std::path::Path) -> std::io::Result<BTreeMap<String, String>> {
+    let mut pages = BTreeMap::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                if stem == "index" || stem == "AGENTS" {
+                    continue;
+                }
+                pages.insert(stem.to_string(), std::fs::read_to_string(&path)?);
+            }
+        }
+    }
+    Ok(pages)
+}
+
 /// The slug side of a wikilink capture: everything before the first `|`
 /// (`[[target|display]]`). A bare `[[x]]` returns `x`.
 fn link_target(inner: &str) -> &str {
@@ -141,5 +160,18 @@ mod tests {
         );
         // beta is referenced by alpha's Related section → not an orphan.
         assert!(!r.orphans.contains(&"beta".to_string()));
+    }
+
+    #[test]
+    fn load_compiled_pages_skips_index_and_agents() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("alpha.md"), "# Alpha").unwrap();
+        std::fs::write(tmp.path().join("index.md"), "# Index").unwrap();
+        std::fs::write(tmp.path().join("AGENTS.md"), "# Agents").unwrap();
+        std::fs::write(tmp.path().join("notes.txt"), "not markdown").unwrap();
+
+        let pages = load_compiled_pages(tmp.path()).unwrap();
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages["alpha"], "# Alpha");
     }
 }

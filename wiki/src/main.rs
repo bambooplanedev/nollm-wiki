@@ -140,19 +140,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Lint { dir } => {
-            // Re-read compiled pages and lint in-memory.
-            let mut pages = std::collections::BTreeMap::new();
-            for entry in std::fs::read_dir(&dir).context("read output dir")? {
-                let path = entry?.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("md") {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        if stem == "index" || stem == "AGENTS" {
-                            continue;
-                        }
-                        pages.insert(stem.to_string(), std::fs::read_to_string(&path)?);
-                    }
-                }
-            }
+            let pages = wiki::lint::load_compiled_pages(&dir).context("read output dir")?;
             let r = wiki::lint::lint(&pages);
             println!(
                 "Linted {} pages: {} broken links, {} orphans",
