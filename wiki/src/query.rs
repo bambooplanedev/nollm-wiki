@@ -89,6 +89,16 @@ impl Wiki {
     /// "related" or "metadata" does not false-positive on every page.
     const CHROME_SECTIONS: [&'static str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
 
+    // Field weights and the graded-occurrence bonus for search scoring.
+    // Values from the 2026-07-14 search-quality design; tuning is a
+    // constants-only change.
+    const W_NAME: f64 = 3.0;
+    const W_ALIAS: f64 = 2.0;
+    const W_SUMMARY: f64 = 1.5;
+    const W_BODY: f64 = 1.0;
+    const W_OCCURRENCE: f64 = 0.1;
+    const OCCURRENCE_CAP: usize = 20;
+
     /// The searchable *content* of a rendered page: every parsed section
     /// except the generated chrome (`CHROME_SECTIONS`). Subtractive on
     /// purpose — a doc body's own `## ` subheadings become sections of their
@@ -111,11 +121,30 @@ impl Wiki {
             .join("\n")
     }
 
-    /// Case-insensitive search over name/alias/summary/body. Deterministic:
-    /// field-weighted score with a pagerank tiebreak, sorted desc by score
-    /// then asc by id, truncated to `limit`.
+    /// Query tokenization for search: lowercase, split on whitespace, trim
+    /// each piece's leading/trailing non-alphanumeric chars (interior chars
+    /// like `_` and `:` survive), drop empties, dedupe keeping first order.
+    fn tokenize(query: &str) -> Vec<String> {
+        let mut tokens: Vec<String> = Vec::new();
+        for raw in query.to_lowercase().split_whitespace() {
+            let t = raw.trim_matches(|c: char| !c.is_alphanumeric());
+            if !t.is_empty() && !tokens.iter().any(|x| x == t) {
+                tokens.push(t.to_string());
+            }
+        }
+        tokens
+    }
+
+    /// Case-insensitive tokenized search over name/alias/summary/body.
+    /// AND semantics: every query token must match at least one field.
+    /// Deterministic: per-token field weights + a capped occurrence bonus
+    /// + pagerank tiebreak, sorted desc by score then asc by id, truncated
+    /// to `limit`. Empty/punctuation-only queries return no hits.
     pub fn search(&self, q: &str, kind: Option<SourceKind>, limit: usize) -> Vec<Hit> {
-        let needle = q.to_lowercase();
+        let tokens = Self::tokenize(q);
+        if tokens.is_empty() {
+            return Vec::new();
+        }
         let kind_label = kind.map(|k| k.label());
         let mut hits: Vec<Hit> = Vec::new();
         for e in self.entries.values() {
@@ -124,26 +153,42 @@ impl Wiki {
                     continue;
                 }
             }
-            let name_hit = e.title.to_lowercase().contains(&needle);
-            let alias_hit = e.aliases.iter().any(|a| a.to_lowercase().contains(&needle));
-            let summary_hit = e
-                .summary
-                .as_deref()
-                .map(|s| s.to_lowercase().contains(&needle))
-                .unwrap_or(false);
-            let body_hit = self
+            let title = e.title.to_lowercase();
+            let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
+            let summary = e.summary.as_deref().map(str::to_lowercase);
+            let content = self
                 .page(&e.id)
-                .map(|p| Self::content_text(&p).to_lowercase().contains(&needle))
-                .unwrap_or(false);
-            if !(name_hit || alias_hit || summary_hit || body_hit) {
+                .map(|p| Self::content_text(&p))
+                .unwrap_or_default();
+            let content_lower = content.to_lowercase();
+
+            let mut score = 0.0;
+            let mut occurrences = 0usize;
+            let mut all_match = true;
+            for t in &tokens {
+                let name_hit = title.contains(t.as_str());
+                let alias_hit = aliases.iter().any(|a| a.contains(t.as_str()));
+                let summary_hit = summary
+                    .as_deref()
+                    .map(|s| s.contains(t.as_str()))
+                    .unwrap_or(false);
+                let body_hit = content_lower.contains(t.as_str());
+                if !(name_hit || alias_hit || summary_hit || body_hit) {
+                    all_match = false;
+                    break;
+                }
+                score += (name_hit as u8 as f64) * Self::W_NAME
+                    + (alias_hit as u8 as f64) * Self::W_ALIAS
+                    + (summary_hit as u8 as f64) * Self::W_SUMMARY
+                    + (body_hit as u8 as f64) * Self::W_BODY;
+                // match_indices is non-overlapping — the spec'd counting rule.
+                occurrences += content_lower.match_indices(t.as_str()).count();
+            }
+            if !all_match {
                 continue;
             }
-            // Deterministic score: field weight + pagerank tiebreak.
-            let score = (name_hit as u8 as f64) * 3.0
-                + (alias_hit as u8 as f64) * 2.0
-                + (summary_hit as u8 as f64) * 1.5
-                + (body_hit as u8 as f64)
-                + e.pagerank;
+            score += Self::W_OCCURRENCE * occurrences.min(Self::OCCURRENCE_CAP) as f64;
+            score += e.pagerank;
             hits.push(Hit {
                 id: e.id.clone(),
                 title: e.title.clone(),
@@ -279,5 +324,26 @@ impl Wiki {
         }
 
         Some(ContextPack { text, included })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Wiki;
+
+    #[test]
+    fn tokenize_lowercases_splits_and_trims_punctuation_edges() {
+        assert_eq!(Wiki::tokenize("MCP resources"), vec!["mcp", "resources"]);
+        assert_eq!(Wiki::tokenize("Serve,"), vec!["serve"]);
+        // Interior non-alphanumerics survive.
+        assert_eq!(Wiki::tokenize("source_hash"), vec!["source_hash"]);
+        assert_eq!(Wiki::tokenize("code:rust"), vec!["code:rust"]);
+    }
+
+    #[test]
+    fn tokenize_dedupes_and_drops_empty() {
+        assert_eq!(Wiki::tokenize("beta BETA beta"), vec!["beta"]);
+        assert!(Wiki::tokenize("").is_empty());
+        assert!(Wiki::tokenize("  ,, !! ").is_empty());
     }
 }
