@@ -76,9 +76,16 @@ use crate::model::SourceKind;
 use crate::query::PackBudget;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
+    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
+    ServerInfo,
+};
+use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
-use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler, ServiceExt};
+use rmcp::{
+    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
+};
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -212,6 +219,45 @@ impl ServerHandler for WikiServer {
                  page ids, then `neighbors` to pull a budgeted context pack around \
                  a page. Pages are also exposed as resources under wiki://page/<id>.",
             )
+    }
+
+    async fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListResourcesResult, McpError> {
+        let mut resources = vec![
+            Resource::new("wiki://index", "index.json (machine catalog)"),
+            Resource::new("wiki://llms.txt", "llms.txt (compact LLM index)"),
+        ];
+        self.state.with_wiki(|w| {
+            for (id, title) in w.list_pages() {
+                resources.push(Resource::new(format!("wiki://page/{id}"), title));
+            }
+        });
+        Ok(ListResourcesResult::with_all_items(resources))
+    }
+
+    async fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ReadResourceResult, McpError> {
+        let uri = request.uri.as_str();
+        let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
+        let text = match uri {
+            "wiki://index" => std::fs::read_to_string(self.state.dir().join("index.json"))
+                .map_err(|_| not_found())?,
+            "wiki://llms.txt" => std::fs::read_to_string(self.state.dir().join("llms.txt"))
+                .map_err(|_| not_found())?,
+            _ => {
+                let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
+                self.state.with_wiki(|w| w.page(id)).ok_or_else(not_found)?
+            }
+        };
+        Ok(ReadResourceResult::new(vec![ResourceContents::text(
+            text, uri,
+        )]))
     }
 }
 

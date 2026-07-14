@@ -140,6 +140,68 @@ fn serve_lists_and_calls_tools() {
 }
 
 #[test]
+fn serve_lists_and_reads_resources() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
+    initialize(&mut stdin, &mut stdout);
+
+    // resources/list: 12 pages + index + llms.txt
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
+    );
+    let resp = read_response(&mut stdout, 2);
+    let uris: Vec<&str> = resp["result"]["resources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["uri"].as_str().unwrap())
+        .collect();
+    assert_eq!(uris.len(), 14, "uris: {uris:?}");
+    assert!(uris.contains(&"wiki://index"));
+    assert!(uris.contains(&"wiki://llms.txt"));
+    assert!(uris.contains(&"wiki://page/gradient_descent"));
+
+    // resources/read a page
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {
+            "uri": "wiki://page/gradient_descent"
+        }}),
+    );
+    let resp = read_response(&mut stdout, 3);
+    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("# Gradient Descent"));
+
+    // resources/read the index
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {
+            "uri": "wiki://index"
+        }}),
+    );
+    let resp = read_response(&mut stdout, 4);
+    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(
+        serde_json::from_str::<Value>(text).is_ok(),
+        "index.json should be valid JSON"
+    );
+
+    // unknown resource -> JSON-RPC error
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {
+            "uri": "wiki://page/no_such_page"
+        }}),
+    );
+    let resp = read_response(&mut stdout, 5);
+    assert!(resp["error"].is_object(), "expected error, got: {resp}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn serve_refuses_non_wiki_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
