@@ -8,6 +8,7 @@ pub mod manifest;
 pub mod model;
 pub mod query;
 pub mod rewrite;
+pub mod serve;
 pub mod walk;
 pub mod watch;
 
