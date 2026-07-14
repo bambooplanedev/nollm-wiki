@@ -1,6 +1,7 @@
-//! Render-fingerprint cache backing incremental compilation (`wiki compile
-//! --incremental`): pages whose fingerprints match the previous run are
-//! skipped instead of re-rendered.
+//! Render-fingerprint cache backing incremental compilation.
+//!
+//! Pages whose fingerprints match the previous run are skipped instead of
+//! re-rendered via `--incremental`.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

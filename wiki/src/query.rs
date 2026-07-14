@@ -236,7 +236,8 @@ impl Wiki {
                     .as_deref()
                     .map(|s| s.contains(t.as_str()))
                     .unwrap_or(false);
-                let body_hit = content_lower.contains(t.as_str());
+                let token_occurrences = content_lower.match_indices(t.as_str()).count();
+                let body_hit = token_occurrences > 0;
                 any_body |= body_hit;
                 if !(name_hit || alias_hit || summary_hit || body_hit) {
                     all_match = false;
@@ -247,7 +248,7 @@ impl Wiki {
                     + (summary_hit as u8 as f64) * Self::W_SUMMARY
                     + (body_hit as u8 as f64) * Self::W_BODY;
                 // match_indices is non-overlapping — the spec'd counting rule.
-                occurrences += content_lower.match_indices(t.as_str()).count();
+                occurrences += token_occurrences;
             }
             if !all_match {
                 continue;

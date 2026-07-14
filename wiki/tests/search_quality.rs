@@ -1,7 +1,8 @@
-//! Regression tests for the 2026-07-14 search-quality cycle: the four
-//! dogfood checklist queries that failed pre-fix, plus AND semantics and
-//! occurrence-graded ranking. Fixtures are authored in-test (modeled on the
-//! self-hosted corpus), not a checkout of this repo.
+//! Regression tests for the 2026-07-14 search-quality cycle.
+//!
+//! Coverage: the four dogfood checklist queries that failed pre-fix, plus AND
+//! semantics and occurrence-graded ranking. Fixtures are authored in-test
+//! (modeled on the self-hosted corpus), not a checkout of this repo.
 
 use std::fs;
 use tempfile::tempdir;
