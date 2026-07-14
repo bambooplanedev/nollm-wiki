@@ -299,6 +299,28 @@ work, hashing, float comparisons, and path handling. See
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the specific rules that
 make this guarantee hold.
 
+## Limitations & roadmap
+
+Deliberate scope cuts, recorded so they read as decisions rather than
+oversights:
+
+- **Linking is lexical.** No LLM, embeddings, or semantic matching at
+  generation time — two pages link only when a name or alias of one
+  appears in the other. This is the core design trade-off, not a bug.
+- **No call graph.** `find_definition` / `callers`-style queries need
+  cross-file name resolution, which is not built. Code extraction is
+  imports + exported signatures only.
+- **PDF/OCR/audio extractors are seams, not backends.** `--features
+  full` compiles the registry hooks for them, but no extractor is
+  implemented (see [Install & build](#install--build)).
+- **No MCP server yet.** The query API (`Wiki::load`, `search`,
+  `neighbors`) is designed to map 1:1 onto MCP resources/tools, but the
+  server itself is a later addition.
+- **Graph export is JSON only.** `--emit-json` writes the node-link
+  `graph.json`; there is no DOT/GraphML export.
+- **`--watch` covers `compile` only.** The query subcommands (`search`,
+  `neighbors`, `lint`) have no watch mode.
+
 ## Links
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — pipeline internals,

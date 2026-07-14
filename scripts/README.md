@@ -65,6 +65,18 @@ The `strip-chrome.awk` script removes compiler-owned metadata sections before pu
 
 An orphan page (with no incoming links) whose markdown body contains a literal `## Referenced By` heading as actual content would have that body heading stripped. This is rare and cosmetic — the orphan page's content would still be readable, but the heading would be missing.
 
+### Known Issues
+
+Two argument-parsing edges in `quartz-publish.sh`, found in review and
+left as documented follow-ups. Both fail loud (a build error or a
+visibly wrong mode), never silent corruption:
+
+- A `--title` value ending in a backslash can break the generated
+  string in `quartz.config.ts` — the title sanitizer strips `"` but
+  not `\`.
+- `--title --serve` consumes `--serve` as the title value; there is no
+  guard against flag-shaped values following `--title`.
+
 ### Testing
 
 `strip-chrome.awk` has a self-contained, network-free unit test:
