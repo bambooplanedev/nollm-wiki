@@ -23,5 +23,5 @@ scripts/selfhost.sh
 
 The checked-in `.mcp.json` registers `wiki serve --dir .wiki` as a
 project-scoped MCP server named `nollm-wiki`, so agent sessions started in
-this directory can search, expand, and lint the self-hosted wiki. Re-run
+this directory can search, expand, and lint the self-hosted wiki. In a fresh clone, `scripts/selfhost.sh` must be run once before starting an agent session, as the binary and compiled wiki directory won't exist yet. Re-run
 `scripts/selfhost.sh` after changes to refresh the pages.
