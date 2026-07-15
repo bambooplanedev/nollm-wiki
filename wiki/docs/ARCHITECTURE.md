@@ -17,16 +17,17 @@ src/walk.rs           src/formats/            src/lib.rs             src/graph.r
                        (Registry)
 
 SourceFile     →      Entity        →         BTreeMap<id,        →  Graph             →  pages (String)     →   Manifest            →  LintReport
-(sorted by                                     Entity>                (edges + rank)       + .wiki/cache.json      + index.json/.md,
+(sorted by                                     Entity>                (edges + pagerank)   + .wiki/cache.json      + index.json/.md,
  rel_path)                                                                                  fingerprints            llms.txt, AGENTS.md,
                                                                                                                      graph.json (--emit-json)
 ```
 
 1. **Walk** (`walk::walk`) — recursively lists `input`, respecting
-   `.gitignore`/`.ignore`/hidden-file rules when `respect_ignore` is set,
-   skips anything under `output` (so a nested output dir can't feed its own
-   generated pages back in as sources), and sorts the result by `rel_path`.
-   Produces `Vec<SourceFile>`.
+   `.gitignore`/`.ignore`/hidden-file rules when `respect_ignore` is set, and
+   sorts the result by `rel_path`. `compile_inner` then filters out anything
+   under `output` (`is_under`, so a nested output dir can't feed its own
+   generated pages back in as sources) before extraction runs. Produces
+   `Vec<SourceFile>`.
 2. **Extract** (`formats::Registry`, in parallel via `rayon`) — dispatches
    each file to the `Extractor` registered for its extension and produces an
    `Entity`. Because the input `Vec` was already sorted, `.collect()`ing the
@@ -39,8 +40,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links by scanning entity bodies for mentions of other entity names (and
-   aliases), then runs a fixed-iteration PageRank over the link graph.
-   Produces a `Graph { edges, rank }`.
+   aliases) and by resolving each entity's `imports` to a target id, then
+   runs a fixed-iteration PageRank over the link graph. Produces a
+   `Graph { edges, pagerank }`.
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the
@@ -68,16 +70,17 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/code.rs` | `CodeExtractor` — tree-sitter-based extraction for Rust/Python/JS/TS/Go; captures only exported/public symbols. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
-| `src/graph.rs` | `build_graph()` — mention-based edge detection and PageRank; `orphan_ids()`. |
+| `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`). |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `index.md`, `llms.txt`, `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
-| `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries; used by the CLI and as a library API. |
+| `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
+| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search`/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources; `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes, keeping the last good snapshot if a reload fails. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring events under `output`. |
-| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `generate`. |
+| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `serve`, `generate`. |
 
 ## Determinism rules
 
@@ -168,6 +171,56 @@ so hand-written notes under a page's `## Notes` heading survive
 regeneration, incremental or not, as long as the heading itself isn't
 renamed.
 
+## Query internals
+
+`Wiki::load` (`src/query.rs`) reads only `index.json` — metadata plus
+adjacency; page bodies are read on demand from `<id>.md`.
+
+**Search** (`Wiki::search`) is case-insensitive, tokenized, with AND
+semantics:
+
+- The query is lowercased, split on whitespace, each piece's edge
+  punctuation trimmed (interior characters like `_` and `:` survive),
+  empties dropped, duplicates removed. Empty or punctuation-only queries
+  return no hits.
+- Every token must match at least one field — name, alias, summary, or
+  body; a page missing any token is excluded entirely.
+- Score = per-token field weights (name 3.0, alias 2.0, summary 1.5,
+  body 1.0) + a graded occurrence bonus (0.1 per body occurrence across
+  all tokens, capped at 20 occurrences) + the page's PageRank as a
+  tiebreak. Hits sort descending by score (`total_cmp`), then ascending
+  by id.
+- The searched body text is the rendered page's parsed sections minus
+  generated chrome (`Metadata`, `Related`, `Referenced By`, `Notes`) —
+  subtractive on purpose, so text under a doc's own embedded `## `
+  subheadings stays searchable. Occurrence counting and snippet
+  extraction share one lowercased scan of that content.
+- Hits whose body matched carry a `snippet`: a deterministic excerpt
+  around the earliest token occurrence (60 chars of context per side,
+  whitespace runs collapsed, `…` on truncated edges). Title/alias/
+  summary-only hits have `snippet: None` — the summary explains those.
+
+**Neighbors** (`Wiki::neighbors`) BFS-collects ids to `depth` hops over
+both edge directions, then builds a budgeted context pack:
+
+- `--max-tokens` is a hard ceiling on the pack's estimated size, using
+  the same chars/4 rule as `manifest::token_estimate`; every block is
+  charged at the size of the text actually emitted, so the concatenated
+  pack can't overshoot the ceiling.
+- The target page comes first — in full when it fits, otherwise degraded
+  to a title + summary block pointing at `wiki://page/<id>`. The degraded
+  block is the one floor exception: it is always emitted, even when a
+  pathologically small budget cannot contain it.
+- Neighbor admission walks candidates in descending centrality
+  (skip-not-break): a neighbor that doesn't fit the remaining budget is
+  skipped and the walk continues, so the kept set favors high-centrality
+  neighbors over maximum cardinality. `--max-nodes` truncates the
+  candidate list before admission.
+- Emission order is ascending PageRank — the highest-centrality neighbor
+  lands last, closest to the end of the pack ("lost in the middle"
+  placement). `--full` swaps neighbor summary blocks for full page
+  bodies.
+
 ## Extending: add a format extractor
 
 1. Implement the `Extractor` trait (`src/formats/mod.rs`) in a new
@@ -216,6 +269,14 @@ deliberately excluded from `Entity::symbols`; a new language extractor
 should preserve this contract rather than dumping every definition in a
 file.
 
+**Rust test-module stripping:** before body assembly,
+`strip_rust_test_modules` (`src/formats/code.rs`) removes each
+`#[cfg(test)]`-annotated `mod` item — including the contiguous attribute
+run above it — from the Rust source shown in `## Body`, replacing it with
+a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. The strip
+applies to the body text only; `symbols` and `imports` are still captured
+from the raw source (a known limitation, tracked as dogfood finding 13).
+
 ## Testing
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
@@ -232,6 +293,15 @@ file.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
   - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
+  - `tests/search_quality.rs` — regression tests for the 2026-07-14
+    search-quality cycle: the dogfood checklist queries that failed
+    pre-fix, AND semantics, and occurrence-graded ranking, over in-test
+    fixtures.
+  - `tests/query_list_pages.rs` — `Wiki::list_pages` id/title ordering
+    (backs the MCP server's `resources/list`).
+  - `tests/mcp_serve.rs` — end-to-end MCP: spawns `wiki serve` and speaks
+    raw newline-delimited JSON-RPC over stdio, covering tools and
+    resources.
 - **Snapshot test:** `tests/snapshot.rs` uses `insta` to pin the exact
   rendered Markdown of one page from a seeded generated corpus
   (`generate_corpus(&input, 12, 42)`), with `source_hash` lines redacted so
