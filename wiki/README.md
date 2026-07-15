@@ -183,7 +183,7 @@ wiki neighbors [OPTIONS] <ID>
 ```
 
 - `--depth <N>` (`1`) — BFS hop count from `<ID>`.
-- `--max-tokens <N>` (none — unbounded) — token budget for the returned context pack.
+- `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). If the target page alone exceeds it, the target degrades to a title + summary block pointing at the full page.
 - `--max-nodes <N>` (none — unbounded) — node-count budget for the returned context pack.
 - `--full` (off) — include full neighbor page bodies instead of one-line summaries.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
@@ -257,11 +257,14 @@ source tree. Three artifacts drive that:
 `wiki neighbors <id>` builds a budgeted context pack for an agent:
 
 1. BFS outward from `<id>` up to `--depth` hops.
-2. The walk is budgeted by `--max-tokens` and/or `--max-nodes` — whichever
-   limit is hit first stops inclusion of further neighbors.
+2. `--max-tokens` is a hard ceiling on the pack's estimated size; `--max-nodes`
+   caps the node count. Neighbors that don't fit are dropped lowest-centrality
+   first.
 3. Neighbors are ordered by centrality (PageRank), **highest last**, so the
    most important context sits closest to the end of the pack.
-4. The target page (`<id>`) always comes first, in full.
+4. The target page (`<id>`) comes first — in full when it fits the budget,
+   otherwise as a title + summary block with a pointer to `wiki://page/<id>`,
+   so the neighborhood still fits.
 5. `--full` includes full neighbor page bodies instead of one-line summaries
    (larger pack, more token cost).
 
@@ -356,7 +359,8 @@ oversights:
   appears in the other. This is the core design trade-off, not a bug.
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
-  imports + exported signatures only.
+  imports + exported signatures only. `#[cfg(test)]` modules are omitted
+  from `## Body` and replaced with a `// [tests omitted: …]` marker.
 - **PDF/OCR/audio extractors are seams, not backends.** `--features
   full` compiles the registry hooks for them, but no extractor is
   implemented (see [Install & build](#install--build)).
