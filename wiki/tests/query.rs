@@ -24,6 +24,45 @@ fn build() -> tempfile::TempDir {
     dir
 }
 
+/// Mirror of the compiler's estimate (`manifest::token_estimate`): chars/4.
+/// If this drifts from manifest.rs the ceiling tests below will catch it.
+fn tok(s: &str) -> usize {
+    s.chars().count() / 4
+}
+
+/// hub -> popular, rare; three fillers point at popular so its pagerank
+/// beats rare's. Returns the tempdir; the compiled wiki is in `<dir>/out`.
+fn build_hub_corpus() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("hub.txt"),
+        "# Hub\n\nHub mentions Popular and Rare.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("popular.txt"),
+        "# Popular\n\nPopular is a popular topic.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("rare.txt"),
+        "# Rare\n\nRare stands alone here.\n",
+    )
+    .unwrap();
+    for n in ["one", "two", "three"] {
+        fs::write(
+            input.join(format!("filler_{n}.txt")),
+            format!("# Filler {n}\n\nFiller {n} talks about Popular.\n"),
+        )
+        .unwrap();
+    }
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    dir
+}
+
 #[test]
 fn search_finds_by_name_and_body() {
     let dir = build();
@@ -66,81 +105,56 @@ fn search_ignores_generated_chrome() {
     );
 }
 
-/// Spec §8: budgets must degrade by dropping the LOWEST-centrality
+/// Spec §2: budgets must degrade by dropping the LOWEST-centrality
 /// neighbors first, keeping the highest-centrality ones that fit.
 ///
-/// Fixture: "hub" links to two direct neighbors, "popular" and "rare".
-/// "popular" additionally has three filler entities pointing at it, so its
-/// pagerank is unambiguously higher than "rare"'s (4 incoming links vs 1) —
-/// none of the fillers link to "hub" itself, so they never enter the
-/// depth-1 neighbor set.
-///
-/// hub's body ("Hub mentions Popular and Rare.") is 30 chars ->
-/// token_estimate 7 (chars/4). Neighbor summaries cost a flat 20 tokens
-/// each. A `max_tokens` of 27 admits the target plus exactly one neighbor
-/// (7 + 20 = 27) but never two (7 + 40 = 47 > 27), so this asserts the
-/// *single* neighbor kept is the highest-centrality one ("popular"), not
-/// the lowest-centrality one ("rare").
+/// Self-probing budget: a `max_nodes: 2` pack (no token budget) is exactly
+/// target + the highest-centrality neighbor; its measured size is then the
+/// token budget that must reproduce the same selection via `max_tokens`
+/// alone. Adding rare's block would push past that budget, so only
+/// popular survives — regardless of how block costs are computed.
 #[test]
 fn neighbors_pack_max_tokens_keeps_highest_centrality_neighbor() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("hub.txt"),
-        "# Hub\n\nHub mentions Popular and Rare.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("popular.txt"),
-        "# Popular\n\nPopular is a popular topic.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("rare.txt"),
-        "# Rare\n\nRare stands alone here.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("filler_one.txt"),
-        "# Filler One\n\nFiller One talks about Popular.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("filler_two.txt"),
-        "# Filler Two\n\nFiller Two talks about Popular.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("filler_three.txt"),
-        "# Filler Three\n\nFiller Three talks about Popular.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
+    let dir = build_hub_corpus();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
 
-    let budget = PackBudget {
-        max_tokens: Some(27),
-        ..Default::default()
-    };
-    let pack = w.neighbors("hub", 1, &budget).unwrap();
+    let probe = w
+        .neighbors(
+            "hub",
+            1,
+            &PackBudget {
+                max_nodes: Some(2),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        probe.included.contains(&"popular".to_string()),
+        "probe must keep the highest-centrality neighbor: {:?}",
+        probe.included
+    );
+    let b = tok(&probe.text);
 
+    let pack = w
+        .neighbors(
+            "hub",
+            1,
+            &PackBudget {
+                max_tokens: Some(b),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     assert_eq!(pack.included.first().map(String::as_str), Some("hub"));
     assert_eq!(
         pack.included.len(),
         2,
-        "expected target + exactly one neighbor, got {:?}",
+        "expected target + exactly one neighbor at budget {b}, got {:?}",
         pack.included
     );
     assert!(
         pack.included.contains(&"popular".to_string()),
-        "expected the highest-centrality neighbor (popular) to be kept, got {:?}",
-        pack.included
-    );
-    assert!(
-        !pack.included.contains(&"rare".to_string()),
-        "expected the lowest-centrality neighbor (rare) to be dropped, got {:?}",
+        "expected the highest-centrality neighbor (popular), got {:?}",
         pack.included
     );
 }
@@ -149,10 +163,11 @@ fn neighbors_pack_max_tokens_keeps_highest_centrality_neighbor() {
 /// when several lighter, lower-centrality neighbors would pack more nodes into
 /// the same budget. Fixture: hub -> big, sa, sb. `big` gets three extra
 /// incoming links (fillers) so its pagerank beats sa/sb, and a long body so
-/// its token cost exceeds sa+sb combined. Budget = hub + big exactly: the
-/// centrality-first greedy keeps {big}; a cardinality-maximizer would instead
-/// keep {sa, sb}. Token estimates are read from index.json so the assertion
-/// never depends on hand-counted characters.
+/// its rendered page outweighs sa's + sb's pages combined. Budget is derived
+/// from a `max_nodes: 2` probe pack: the centrality-first greedy keeps
+/// {big}; a cardinality-maximizer would instead keep {sa, sb}. Token
+/// estimates are read from the rendered pages, not `index.json`, since page
+/// size (the new cost basis) is what the budget accounting measures.
 #[test]
 fn full_neighbors_max_tokens_prefers_centrality_over_packing() {
     let dir = tempdir().unwrap();
@@ -164,14 +179,11 @@ fn full_neighbors_max_tokens_prefers_centrality_over_packing() {
         "# Hub\n\nHub mentions Big and Sa and Sb.\n",
     )
     .unwrap();
-    // Long body -> high token cost (> sa + sb combined).
-    fs::write(
-        input.join("big.txt"),
-        "# Big\n\nBig has a deliberately long body so that its token estimate \
-exceeds the two small neighbors combined, which is what forces the centrality \
-versus packing distinction this test pins down here today.\n",
-    )
-    .unwrap();
+    let long = "Big has a deliberately long body so that its rendered page \
+outweighs the two small neighbor pages combined, which is what forces the \
+centrality versus packing distinction this test pins down. "
+        .repeat(4);
+    fs::write(input.join("big.txt"), format!("# Big\n\n{long}\n")).unwrap();
     fs::write(input.join("sa.txt"), "# Sa\n\nSa is short.\n").unwrap();
     fs::write(input.join("sb.txt"), "# Sb\n\nSb is short.\n").unwrap();
     for n in ["one", "two", "three"] {
@@ -183,32 +195,37 @@ versus packing distinction this test pins down here today.\n",
     }
     compile(&input, &output, &CompileOptions::default()).unwrap();
 
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
-    let tok = |id: &str| -> usize {
-        index["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap_or_else(|| panic!("missing entry {id}"))["token_estimate"]
-            .as_u64()
-            .unwrap() as usize
-    };
-    let (hub_t, big_t, sa_t, sb_t) = (tok("hub"), tok("big"), tok("sa"), tok("sb"));
+    let page = |id: &str| fs::read_to_string(output.join(format!("{id}.md"))).unwrap();
+    let (big_p, sa_p, sb_p) = (tok(&page("big")), tok(&page("sa")), tok(&page("sb")));
     assert!(
-        sa_t + sb_t < big_t,
-        "fixture invalid: need sa({sa_t}) + sb({sb_t}) < big({big_t})"
+        sa_p + sb_p < big_p,
+        "fixture invalid: need sa({sa_p}) + sb({sb_p}) < big({big_p}) in page tokens"
     );
 
     let w = Wiki::load(&output).unwrap();
+    let probe = w
+        .neighbors(
+            "hub",
+            1,
+            &PackBudget {
+                max_nodes: Some(2),
+                full_neighbors: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        probe.included.contains(&"big".to_string()),
+        "probe must keep the highest-centrality neighbor: {:?}",
+        probe.included
+    );
+
     let budget = PackBudget {
-        max_tokens: Some(hub_t + big_t),
+        max_tokens: Some(tok(&probe.text)),
         full_neighbors: true,
         ..Default::default()
     };
     let pack = w.neighbors("hub", 1, &budget).unwrap();
-
     assert!(
         pack.included.contains(&"big".to_string()),
         "highest-centrality neighbor dropped: {:?}",
@@ -242,4 +259,141 @@ fn search_finds_text_under_embedded_subheadings() {
         hits.iter().any(|h| h.id == "doc"),
         "text under an embedded subheading must be searchable"
     );
+}
+
+/// Fixture for the degrade tests: hub's body is long enough that its
+/// rendered page alone exceeds a 100-token budget, and hub links to two
+/// small neighbors.
+fn build_oversized_hub_corpus() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    let padding = "Padding sentence for sheer bulk in the body. ".repeat(40);
+    fs::write(
+        input.join("hub.txt"),
+        format!("# Hub\n\nHub mentions Popular and Rare.\n\n{padding}\n"),
+    )
+    .unwrap();
+    fs::write(
+        input.join("popular.txt"),
+        "# Popular\n\nPopular is a popular topic.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("rare.txt"),
+        "# Rare\n\nRare stands alone here.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    dir
+}
+
+/// Spec §2: max_tokens is a hard ceiling on token_estimate(pack.text) —
+/// at every budget, with the single documented floor exception (a target-
+/// only pack whose degraded block is itself over budget).
+#[test]
+fn max_tokens_is_a_hard_ceiling_on_pack_size() {
+    let dir = build_oversized_hub_corpus();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    for b in [5usize, 10, 25, 50, 100, 200, 500, 2000] {
+        let budget = PackBudget {
+            max_tokens: Some(b),
+            ..Default::default()
+        };
+        let pack = w.neighbors("hub", 1, &budget).unwrap();
+        let is_floor =
+            pack.included.len() == 1 && pack.text.contains("exceeds the budget");
+        assert!(
+            tok(&pack.text) <= b || is_floor,
+            "budget {b}: pack is {} tokens, included {:?}",
+            tok(&pack.text),
+            pack.included
+        );
+    }
+}
+
+/// Spec §3: a target too big for the budget degrades to title + summary +
+/// pointer — and the neighborhood still fits.
+#[test]
+fn oversized_target_degrades_to_summary_and_keeps_neighborhood() {
+    let dir = build_oversized_hub_corpus();
+    let output = dir.path().join("out");
+    let w = Wiki::load(&output).unwrap();
+
+    let full_page = fs::read_to_string(output.join("hub.md")).unwrap();
+    let b = 100usize;
+    assert!(
+        tok(&full_page) > b,
+        "fixture invalid: hub page is only {} tokens",
+        tok(&full_page)
+    );
+
+    let pack = w
+        .neighbors(
+            "hub",
+            1,
+            &PackBudget {
+                max_tokens: Some(b),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        pack.text.contains("exceeds the budget"),
+        "pack: {}",
+        pack.text
+    );
+    assert!(
+        pack.text.contains("wiki://page/hub"),
+        "pack must point at the full page: {}",
+        pack.text
+    );
+    assert!(
+        !pack.text.contains("Padding sentence"),
+        "full body must not be emitted on degrade"
+    );
+    assert!(
+        pack.included.len() >= 2,
+        "neighborhood must survive the degrade: {:?}",
+        pack.included
+    );
+    assert!(tok(&pack.text) <= b, "pack is {} tokens", tok(&pack.text));
+}
+
+/// Spec §3 floor: even a budget the degraded block itself cannot fit
+/// still returns the degraded block — never an empty pack.
+#[test]
+fn tiny_budget_still_returns_the_degraded_target_block() {
+    let dir = build_oversized_hub_corpus();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    let pack = w
+        .neighbors(
+            "hub",
+            1,
+            &PackBudget {
+                max_tokens: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(pack.included, vec!["hub".to_string()]);
+    assert!(pack.text.contains("exceeds the budget"));
+    assert!(pack.text.contains("# Hub"));
+}
+
+/// Spec §2: no max_tokens → unbudgeted behavior, full target, all
+/// neighbors admitted.
+#[test]
+fn no_max_tokens_keeps_full_target_and_all_neighbors() {
+    let dir = build_hub_corpus();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    let pack = w.neighbors("hub", 1, &PackBudget::default()).unwrap();
+    assert!(
+        !pack.text.contains("exceeds the budget"),
+        "must not degrade without a budget"
+    );
+    assert!(pack.text.contains("## Body"), "full rendered target expected");
+    assert!(pack.included.contains(&"popular".to_string()));
+    assert!(pack.included.contains(&"rare".to_string()));
 }

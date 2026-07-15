@@ -274,15 +274,25 @@ impl Wiki {
     }
 
     /// BFS to `depth` over neighbors_out+neighbors_in, then build a budgeted
-    /// context pack: target first (full body), neighbors ordered ascending by
-    /// pagerank (highest-centrality lands last — "lost in the middle").
-    /// Both `max_nodes` and `max_tokens` keep the highest-centrality
-    /// neighbors that fit, dropping the lowest-centrality ones first:
-    /// selection always walks candidates in *descending* centrality order,
-    /// and only the final emission re-sorts the kept set back to ascending.
-    /// Neighbors get summaries unless `full_neighbors` is set. The target is
-    /// always included, even if its own token estimate alone exceeds
-    /// `max_tokens`.
+    /// context pack: target first, neighbors ordered ascending by pagerank
+    /// (highest-centrality lands last — "lost in the middle").
+    ///
+    /// `max_tokens` is a hard ceiling on the estimated size of the returned
+    /// pack text (`manifest::token_estimate`, chars/4): every block is
+    /// charged at the size of the text actually emitted. When the target's
+    /// full page alone would blow the ceiling, it degrades to a summary
+    /// block (title + summary + a pointer at `wiki://page/<id>`) so the
+    /// neighborhood still fits. The one floor exception: the degraded block
+    /// is always emitted, even when a pathologically small budget cannot
+    /// contain it — a neighbors call always says something about the target.
+    ///
+    /// Neighbor selection walks candidates in descending centrality and
+    /// keeps whichever fit the remaining budget (skip, not break), so the
+    /// kept set is the highest-centrality set the greedy can admit —
+    /// deliberately NOT a maximum-cardinality fill. A heavier high-
+    /// centrality neighbor beats several lighter lower-centrality ones; see
+    /// `full_neighbors_max_tokens_prefers_centrality_over_packing`.
+    /// Neighbors get summary blocks unless `full_neighbors` is set.
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
@@ -322,77 +332,78 @@ impl Wiki {
             candidates.truncate(keep);
         }
 
-        // Apply max_tokens: walk the (still descending) candidates and keep
-        // whichever fit the running budget. A candidate that doesn't fit is
-        // skipped with `continue` (not `break`) so a smaller, lower-
-        // centrality neighbor further down the list can still use any
-        // leftover budget — at every step the highest-centrality neighbor
-        // that fits wins, so the kept set stays as high-centrality as the
-        // budget allows. The target is added unconditionally up front, even
-        // if its own token estimate alone already exceeds `max_tokens`.
-        // Guarantee: candidates are visited in descending centrality and kept
-        // if they fit the running budget, so the result is the highest-
-        // centrality set the greedy can admit — deliberately NOT a maximum-
-        // cardinality fill. A heavier high-centrality neighbor is preferred
-        // over several lighter lower-centrality ones. See the query test
-        // `full_neighbors_max_tokens_prefers_centrality_over_packing`.
-        let mut tokens_used = target.token_estimate;
-        let mut kept: Vec<String> = Vec::new();
+        const SEPARATOR: &str = "\n\n---\n\n";
+        // Budget math tracks emitted *chars* and converts with the same
+        // chars/4 rule as `manifest::token_estimate` — summing per-block
+        // token estimates would under-count the concatenation by up to one
+        // token per block (floor division) and break the ceiling. The
+        // integration test `max_tokens_is_a_hard_ceiling_on_pack_size`
+        // pins the two implementations together.
+        let fits = |chars: usize| match budget.max_tokens {
+            Some(b) => chars / 4 <= b,
+            None => true,
+        };
+
+        // Target block: the full page, degraded to a summary block when
+        // the full page (plus separator) alone would blow the ceiling.
+        let full_target = self
+            .page(id)
+            .unwrap_or_else(|| format!("# {}\n", target.title));
+        let sep_chars = SEPARATOR.chars().count();
+        let target_block = if fits(full_target.chars().count() + sep_chars) {
+            full_target
+        } else {
+            format!(
+                "# {} ({id})\n\n{}\n\n_body (~{} tokens) exceeds the budget; read wiki://page/{id} for the full page_\n",
+                target.title,
+                target.summary.as_deref().unwrap_or("(no summary)"),
+                target.token_estimate,
+            )
+        };
+        // Floor: the target block is charged but never dropped.
+        let mut chars_used = target_block.chars().count() + sep_chars;
+
+        // Admit neighbors in descending centrality, each charged at the
+        // size of the block actually emitted (summary line or full page).
+        let mut kept: Vec<(String, String)> = Vec::new();
         for nid in candidates {
             let e = match self.entries.get(&nid) {
                 Some(e) => e,
                 None => continue,
             };
-            // Summary-mode cost is a flat approximation, not measured from
-            // the actual rendered summary line.
-            let cost = if budget.full_neighbors {
-                e.token_estimate
+            let block = if budget.full_neighbors {
+                self.page(&nid).unwrap_or_default()
             } else {
-                20
+                format!(
+                    "## {} ({})\n{}\n\n",
+                    e.title,
+                    nid,
+                    e.summary.as_deref().unwrap_or("(no summary)")
+                )
             };
-            if let Some(maxt) = budget.max_tokens {
-                if tokens_used.saturating_add(cost) > maxt {
-                    continue;
-                }
+            let cost = block.chars().count();
+            if !fits(chars_used + cost) {
+                continue;
             }
-            tokens_used = tokens_used.saturating_add(cost);
-            kept.push(nid);
+            chars_used += cost;
+            kept.push((nid, block));
         }
 
         // Emit ascending by pagerank so the highest-centrality neighbor
         // lands last ("lost in the middle" placement).
-        kept.sort_by(|a, b| {
+        kept.sort_by(|(a, _), (b, _)| {
             let pa = self.entries.get(a).map(|e| e.pagerank).unwrap_or(0.0);
             let pb = self.entries.get(b).map(|e| e.pagerank).unwrap_or(0.0);
             pa.total_cmp(&pb).then_with(|| a.cmp(b))
         });
 
-        // Build pack: target body first, then neighbor summaries (or full bodies).
         let mut text = String::new();
         let mut included = vec![id.to_string()];
-        text.push_str(
-            &self
-                .page(id)
-                .unwrap_or_else(|| format!("# {}\n", target.title)),
-        );
-        text.push_str("\n\n---\n\n");
-
-        for nid in &kept {
-            let e = match self.entries.get(nid) {
-                Some(e) => e,
-                None => continue,
-            };
-            if budget.full_neighbors {
-                text.push_str(&self.page(nid).unwrap_or_default());
-            } else {
-                text.push_str(&format!(
-                    "## {} ({})\n{}\n\n",
-                    e.title,
-                    nid,
-                    e.summary.as_deref().unwrap_or("(no summary)")
-                ));
-            }
-            included.push(nid.clone());
+        text.push_str(&target_block);
+        text.push_str(SEPARATOR);
+        for (nid, block) in kept {
+            text.push_str(&block);
+            included.push(nid);
         }
 
         Some(ContextPack { text, included })
