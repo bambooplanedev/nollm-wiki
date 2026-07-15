@@ -52,7 +52,7 @@ Press Ctrl-C to stop the server.
 
 **Excluded:**
 - `AGENTS.md` — agent definitions are not published
-- Non-markdown files: `index.json`, `graph.json`, `llms.txt`, `graph.html`, `.wiki/`
+- Non-markdown files: `index.json`, `graph.json`, `llms.txt`, `.wiki/`
 
 ## Content Transformation
 
@@ -105,3 +105,9 @@ The built site is in `.quartz-build/public/`. To deploy:
    - Any other static file hosting
 
 For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosting).
+
+## Also in this directory
+
+`selfhost.sh` — compiles this repository into its own wiki at `.wiki/`
+(always rebuilds the release binary first). See the repo root
+[`README.md`](../README.md#self-hosting).
