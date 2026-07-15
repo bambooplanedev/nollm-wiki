@@ -8,14 +8,15 @@ Compile a source tree into a cross-linked Markdown wiki with `wiki/`, then
 optionally publish it as a browsable static site with `scripts/`.
 
 - **`wiki/`** — the Rust compiler. Start with [`wiki/README.md`](wiki/README.md).
-- **`wiki/docs/ARCHITECTURE.md`** — pipeline internals, module map, and determinism rules.
+- **`wiki/docs/ARCHITECTURE.md`** — pipeline internals, module map, determinism rules, and query internals (search/neighbors).
 - **`scripts/`** — publish a compiled wiki as a [Quartz](https://quartz.jzhao.xyz/) static site. See [`scripts/README.md`](scripts/README.md).
 
 ## Self-hosting
 
-This repo compiles itself. `scripts/selfhost.sh` builds the release binary if
-needed and compiles the repository into `.wiki/` (gitignored; incremental on
-re-runs):
+This repo compiles itself. `scripts/selfhost.sh` always runs
+`cargo build --release` (a no-op when sources are unchanged, so the binary
+can never go stale) and compiles the repository into `.wiki/` (gitignored;
+incremental on re-runs):
 
 ```bash
 scripts/selfhost.sh
