@@ -84,6 +84,7 @@ Revisit this after the next benchmark run.
 ## Notes
 _(add your own notes here — preserved on recompile)_
 
+
 ---
 
 ## Layer Normalization (layer_normalization)
@@ -91,6 +92,7 @@ Layer Normalization builds directly on the ideas behind Gradient Descent.
 
 ## Learning Rate Schedule (learning_rate_schedule)
 Learning Rate Schedule builds directly on the ideas behind Backpropagation.
+
 
 $ ./target/release/wiki lint --dir demo_wiki
 Linted 12 pages: 0 broken links, 1 orphans
