@@ -127,12 +127,21 @@ impl Extractor for CodeExtractor {
         let summary = summarize(None, docstring.as_deref(), "", first_sig);
         let name = derive_name_from_path(rel_path);
 
+        // Test modules are orientation noise that inflate the page body,
+        // its token_estimate, and the neighbors budget (dogfood finding
+        // #12) — splice them out, leaving an honest omission marker.
+        let body = if ext == "rs" {
+            strip_rust_test_modules(text).unwrap_or_else(|| text.to_string())
+        } else {
+            text.to_string()
+        };
+
         Entity {
             id: slugify(&name),
             name,
             aliases: Vec::new(),
             created: String::new(),
-            body: text.to_string(),
+            body,
             source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },
             content_hash: [0u8; 32],
@@ -319,6 +328,79 @@ fn derive_name_from_path(rel_path: &str) -> String {
         .join(" ")
 }
 
+/// Remove `#[cfg(test)]`-annotated `mod` items from Rust source, replacing
+/// each with a one-line omission marker (`// [tests omitted: mod <name>,
+/// <N> lines]`). The spliced span starts at the first attribute in the
+/// contiguous run of attributes directly above the `mod` (so `#[cfg(test)]`
+/// itself is removed) and ends at the module's closing brace; `<N>` is that
+/// span's line count. Returns `None` when there is nothing to strip or the
+/// source fails to parse — the caller keeps the raw text.
+fn strip_rust_test_modules(text: &str) -> Option<String> {
+    let language: Language = tree_sitter_rust::LANGUAGE.into();
+    let mut parser = Parser::new();
+    parser.set_language(&language).ok()?;
+    let tree = parser.parse(text, None)?;
+    let query = Query::new(&language, "(mod_item) @m").ok()?;
+    let mut cursor = QueryCursor::new();
+
+    // (start, end, mod name) per cfg(test) module, at any nesting depth.
+    let mut spans: Vec<(usize, usize, String)> = Vec::new();
+    let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    for m in matches {
+        for cap in m.captures {
+            let node = cap.node;
+            // Walk the contiguous run of attribute_items directly above the
+            // mod; the whole run is spliced when any of them is cfg(test).
+            let mut start = node.start_byte();
+            let mut is_test_mod = false;
+            let mut prev = node.prev_named_sibling();
+            while let Some(p) = prev {
+                if p.kind() != "attribute_item" {
+                    break;
+                }
+                let attr: String = text
+                    .get(p.byte_range())
+                    .unwrap_or("")
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                if attr == "#[cfg(test)]" {
+                    is_test_mod = true;
+                }
+                start = p.start_byte();
+                prev = p.prev_named_sibling();
+            }
+            if !is_test_mod {
+                continue;
+            }
+            let name = node
+                .child_by_field_name("name")
+                .and_then(|n| text.get(n.byte_range()))
+                .unwrap_or("?")
+                .to_string();
+            spans.push((start, node.end_byte(), name));
+        }
+    }
+    if spans.is_empty() {
+        return None;
+    }
+    spans.sort_by_key(|s| s.0);
+
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0;
+    for (start, end, name) in spans {
+        if start < pos {
+            continue; // nested inside a module already removed
+        }
+        let lines = text[start..end].lines().count();
+        out.push_str(&text[pos..start]);
+        out.push_str(&format!("// [tests omitted: mod {name}, {lines} lines]"));
+        pos = end;
+    }
+    out.push_str(&text[pos..]);
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,5 +509,73 @@ mod tests {
         );
         assert!(!e.symbols.iter().any(|s| s.contains("bar")));
         assert!(e.imports.iter().any(|i| i.contains("fmt")));
+    }
+
+    #[test]
+    fn rust_test_module_stripped_with_marker() {
+        let src = "//! Docs.\npub fn real() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn checks_real() {\n        real();\n    }\n}\n";
+        let e = CodeExtractor.extract("src/thing.rs", src);
+        assert!(
+            !e.body.contains("checks_real"),
+            "test fn text must be gone: {}",
+            e.body
+        );
+        assert!(!e.body.contains("#[cfg(test)]"), "body: {}", e.body);
+        // Removed span = the attribute line through the closing brace: 9 lines.
+        assert!(
+            e.body.contains("// [tests omitted: mod tests, 9 lines]"),
+            "body: {}",
+            e.body
+        );
+        assert!(e.body.contains("pub fn real()"), "body: {}", e.body);
+    }
+
+    #[test]
+    fn rust_without_test_module_round_trips_byte_identical() {
+        let src = "//! Docs.\nuse std::fmt;\npub fn only() {}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.body, src);
+    }
+
+    #[test]
+    fn rust_two_test_modules_get_two_markers_in_source_order() {
+        let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[test]\n    fn t1() {}\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t2() {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        let early = e.body.find("// [tests omitted: mod early_tests, 5 lines]");
+        let late = e.body.find("// [tests omitted: mod late_tests, 5 lines]");
+        assert!(early.is_some() && late.is_some(), "body: {}", e.body);
+        assert!(early.unwrap() < late.unwrap(), "markers out of order: {}", e.body);
+        assert!(!e.body.contains("fn t1") && !e.body.contains("fn t2"));
+    }
+
+    #[test]
+    fn rust_entirely_test_module_body_is_just_the_marker() {
+        let src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.body.trim(), "// [tests omitted: mod tests, 5 lines]");
+    }
+
+    #[test]
+    fn cfg_test_matches_modulo_whitespace_but_other_cfgs_do_not() {
+        // Interior whitespace in the attribute still counts as cfg(test).
+        let ws = "#[cfg( test )]\nmod tests {}\npub fn x() {}\n";
+        let e = CodeExtractor.extract("a.rs", ws);
+        assert!(
+            e.body.contains("// [tests omitted: mod tests, 2 lines]"),
+            "body: {}",
+            e.body
+        );
+
+        // A different cfg is NOT a test module.
+        let feature = "#[cfg(feature = \"extra\")]\nmod extra {}\npub fn x() {}\n";
+        let e2 = CodeExtractor.extract("b.rs", feature);
+        assert_eq!(e2.body, feature);
+    }
+
+    #[test]
+    fn non_rust_bodies_are_untouched() {
+        let src = "def test_visible():\n    pass\n";
+        let e = CodeExtractor.extract("t.py", src);
+        assert_eq!(e.body, src);
     }
 }
