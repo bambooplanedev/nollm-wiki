@@ -544,7 +544,11 @@ mod tests {
         let early = e.body.find("// [tests omitted: mod early_tests, 5 lines]");
         let late = e.body.find("// [tests omitted: mod late_tests, 5 lines]");
         assert!(early.is_some() && late.is_some(), "body: {}", e.body);
-        assert!(early.unwrap() < late.unwrap(), "markers out of order: {}", e.body);
+        assert!(
+            early.unwrap() < late.unwrap(),
+            "markers out of order: {}",
+            e.body
+        );
         assert!(!e.body.contains("fn t1") && !e.body.contains("fn t2"));
     }
 

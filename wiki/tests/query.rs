@@ -302,8 +302,7 @@ fn max_tokens_is_a_hard_ceiling_on_pack_size() {
             ..Default::default()
         };
         let pack = w.neighbors("hub", 1, &budget).unwrap();
-        let is_floor =
-            pack.included.len() == 1 && pack.text.contains("exceeds the budget");
+        let is_floor = pack.included.len() == 1 && pack.text.contains("exceeds the budget");
         assert!(
             tok(&pack.text) <= b || is_floor,
             "budget {b}: pack is {} tokens, included {:?}",
@@ -393,7 +392,10 @@ fn no_max_tokens_keeps_full_target_and_all_neighbors() {
         !pack.text.contains("exceeds the budget"),
         "must not degrade without a budget"
     );
-    assert!(pack.text.contains("## Body"), "full rendered target expected");
+    assert!(
+        pack.text.contains("## Body"),
+        "full rendered target expected"
+    );
     assert!(pack.included.contains(&"popular".to_string()));
     assert!(pack.included.contains(&"rare".to_string()));
 }
