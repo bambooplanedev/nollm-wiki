@@ -395,6 +395,14 @@ fn strip_rust_test_modules(text: &str) -> Option<String> {
         let lines = text[start..end].lines().count();
         out.push_str(&text[pos..start]);
         out.push_str(&format!("// [tests omitted: mod {name}, {lines} lines]"));
+        // The marker is a line comment. Anything that followed the module's
+        // closing brace on the same line would otherwise be commented out —
+        // cosmetic in `## Body`, but a silent loss of exports once symbols
+        // are extracted from this text.
+        let rest = &text[end..];
+        if !rest.is_empty() && !rest.starts_with('\n') {
+            out.push('\n');
+        }
         pos = end;
     }
     out.push_str(&text[pos..]);
@@ -557,6 +565,21 @@ mod tests {
         let src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_eq!(e.body.trim(), "// [tests omitted: mod tests, 5 lines]");
+    }
+
+    #[test]
+    fn code_after_a_test_module_on_the_same_line_is_not_commented_out() {
+        let src = "pub fn before() {}\n#[cfg(test)]\nmod tests { #[test] fn t() {} } pub fn after() -> u8 { 1 }\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        let marker_line = e
+            .body
+            .lines()
+            .find(|l| l.contains("[tests omitted"))
+            .unwrap_or_else(|| panic!("no marker in body: {}", e.body));
+        assert!(
+            !marker_line.contains("pub fn after"),
+            "code following the module was swallowed by the marker comment: {marker_line}"
+        );
     }
 
     #[test]
