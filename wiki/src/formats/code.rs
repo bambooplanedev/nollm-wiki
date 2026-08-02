@@ -113,35 +113,38 @@ impl Extractor for CodeExtractor {
 
     fn extract(&self, rel_path: &str, text: &str) -> Entity {
         let ext = rel_path.rsplit('.').next().unwrap_or("");
-        let (lang_name, symbols, imports, docstring) = match extract_code(ext, text) {
-            Some(v) => v,
-            None => (ext.to_string(), Vec::new(), Vec::new(), None),
-        };
 
-        let docstring = docstring.or_else(|| leading_doc(text, ext));
-        let first_sig = symbols.first().map(String::as_str);
-        // `body` is deliberately NOT the raw source text here: source code is
-        // not prose, so letting summarize() scan it line-by-line for a "real
-        // sentence" produces garbage. Only a real docstring, or (failing
-        // that) the first exported signature, is an acceptable summary.
-        let summary = summarize(None, docstring.as_deref(), "", first_sig);
-        let name = derive_name_from_path(rel_path);
-
-        // Test modules are orientation noise that inflate the page body,
-        // its token_estimate, and the neighbors budget (dogfood finding
-        // #12) — splice them out, leaving an honest omission marker.
-        let body = if ext == "rs" {
+        // Test modules are orientation noise that inflate the page body, its
+        // token_estimate, and the neighbors budget (dogfood finding #12) —
+        // splice them out, leaving an honest omission marker. Stripping runs
+        // BEFORE extraction (finding #13) so the body, the symbols, the
+        // imports, and the doc comment all describe the same source.
+        let source = if ext == "rs" {
             strip_rust_test_modules(text).unwrap_or_else(|| text.to_string())
         } else {
             text.to_string()
         };
+
+        let (lang_name, symbols, imports, docstring) = match extract_code(ext, &source) {
+            Some(v) => v,
+            None => (ext.to_string(), Vec::new(), Vec::new(), None),
+        };
+
+        let docstring = docstring.or_else(|| leading_doc(&source, ext));
+        let first_sig = symbols.first().map(String::as_str);
+        // `body` is deliberately NOT scanned for a summary: source code is not
+        // prose, so letting summarize() hunt line-by-line for a "real
+        // sentence" produces garbage. Only a real docstring, or (failing
+        // that) an exported signature, is an acceptable summary.
+        let summary = summarize(None, docstring.as_deref(), "", first_sig);
+        let name = derive_name_from_path(rel_path);
 
         Entity {
             id: slugify(&name),
             name,
             aliases: Vec::new(),
             created: String::new(),
-            body,
+            body: source,
             source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },
             content_hash: [0u8; 32],
@@ -604,5 +607,26 @@ mod tests {
         let src = "def test_visible():\n    pass\n";
         let e = CodeExtractor.extract("t.py", src);
         assert_eq!(e.body, src);
+    }
+
+    #[test]
+    fn symbols_and_imports_come_from_the_test_stripped_source() {
+        let src = "pub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            !e.imports.iter().any(|i| i == "super::*"),
+            "test-only import leaked: {:?}",
+            e.imports
+        );
+        assert!(
+            !e.imports.iter().any(|i| i.contains("tempfile")),
+            "test-only import leaked: {:?}",
+            e.imports
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "pub struct Fixture"),
+            "real export lost: {:?}",
+            e.symbols
+        );
     }
 }
