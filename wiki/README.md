@@ -361,8 +361,10 @@ oversights:
   appears in the other. This is the core design trade-off, not a bug.
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
-  imports + exported signatures only. `#[cfg(test)]` modules are omitted
-  from `## Body` and replaced with a `// [tests omitted: …]` marker.
+  imports + exported signatures only, with Rust signatures owner-qualified
+  (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`). `#[cfg(test)]`
+  modules are omitted from `## Body` and replaced with a
+  `// [tests omitted: …]` marker.
 - **PDF/OCR/audio extractors are seams, not backends.** `--features
   full` compiles the registry hooks for them, but no extractor is
   implemented (see [Install & build](#install--build)).

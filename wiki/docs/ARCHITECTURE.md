@@ -67,7 +67,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
-| `src/formats/code.rs` | `CodeExtractor` — tree-sitter-based extraction for Rust/Python/JS/TS/Go; captures only exported/public symbols. |
+| `src/formats/code.rs` | `CodeExtractor` — tree-sitter-based extraction for Rust/Python/JS/TS/Go; captures only exported/public symbols, owner-qualified in Rust. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
@@ -135,6 +135,13 @@ breaking any of them reintroduces nondeterminism.
   resolution) rather than canonicalizing — canonicalization depends on the
   filesystem's current state (symlinks, mounts), which varies by machine;
   the lexical form doesn't.
+- **Grammar shape is part of the output contract.** Extraction depends on
+  tree-sitter field names (`trait:`, `type:`, `value:`, `body:`) and node kinds
+  (`declaration_list`, `const_item`, `static_item`, `type_item`,
+  `function_signature_item`). `Cargo.toml` carets
+  `tree-sitter-rust = "0.23"`, so `Cargo.lock` is what guarantees byte-identical
+  output across machines; a grammar bump is an output-affecting change and must
+  be reviewed as one.
 
 ## Incremental build
 
@@ -263,19 +270,33 @@ both edge directions, then builds a budgeted context pack:
 
 **Export-only contract for code extraction:** `CodeExtractor`
 (`src/formats/code.rs`) only captures symbols that are part of a language's
-public/exported surface — `pub` items in Rust/Go, symbols wrapped in an
-`export_statement` in JS/TS. Private helpers and unexported items are
-deliberately excluded from `Entity::symbols`; a new language extractor
-should preserve this contract rather than dumping every definition in a
-file.
+public/exported surface — bare `pub` items in Rust (`pub(crate)`,
+`pub(super)`, and `pub(in path)` are excluded), exported identifiers in Go,
+symbols wrapped in an `export_statement` in JS/TS. Private helpers and
+unexported items are deliberately excluded from `Entity::symbols`; a new
+language extractor should preserve this contract rather than dumping every
+definition in a file.
+
+Rust signatures are **owner-qualified**: a method in an inherent `impl` renders
+as `pub fn Wiki::search(…)`, and one in a trait impl as
+`fn <TextExtractor as Extractor>::extract(…)` — Rust's own disambiguation
+syntax, required because `Display::fmt` and `Debug::fmt` on one type are
+otherwise identical strings that `dedup` would merge. Trait impls also emit an
+`impl Trait for Type` header, and a `pub` trait declaration emits its required
+and default methods. Because tree-sitter queries match at any depth, only
+items reachable from the file root through module and type scopes are
+captured; an `impl` written inside a function body is not module surface.
 
 **Rust test-module stripping:** before body assembly,
 `strip_rust_test_modules` (`src/formats/code.rs`) removes each
 `#[cfg(test)]`-annotated `mod` item — including the contiguous attribute
 run above it — from the Rust source shown in `## Body`, replacing it with
-a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. The strip
-applies to the body text only; `symbols` and `imports` are still captured
-from the raw source (a known limitation, tracked as dogfood finding 13).
+a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. Stripping runs
+*before* extraction, so `body`, `symbols`, and `imports` all describe the same
+source (dogfood finding 13). The marker is terminated at a line boundary: it
+is a line comment, so code following the module's closing brace on the same
+line would otherwise be commented out. `#[cfg(test)]` on a non-`mod` item is
+still not stripped.
 
 ## Testing
 
