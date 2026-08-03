@@ -362,7 +362,10 @@ oversights:
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
   imports + exported signatures only, with Rust signatures owner-qualified
-  (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`). `#[cfg(test)]`
+  (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`) and Python
+  signatures owner-qualified through the full class chain and carrying
+  their decorators (`def Article.Inner.deep(self) -> None`,
+  `@dataclass(frozen=True) class Article`). `#[cfg(test)]`
   modules are omitted from `## Body` and replaced with a
   `// [tests omitted: …]` marker.
 - **PDF/OCR/audio extractors are seams, not backends.** `--features

@@ -67,7 +67,10 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
-| `src/formats/code.rs` | `CodeExtractor` — tree-sitter-based extraction for Rust/Python/JS/TS/Go; captures only exported/public symbols, owner-qualified in Rust. |
+| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `extract_code`, `build_signature`, `signature_cut`, `tidy_punctuation`, `collapse_whitespace`, `Placement`, `ItemKind`. |
+| `src/formats/extract_rust.rs` | The Rust `LangSpec`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes, `#[cfg(test)]` module stripping. |
+| `src/formats/extract_python.rs` | The Python `LangSpec`: class-chain owner qualification, `__all__` handling, module docstring extraction. |
+| `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
@@ -81,6 +84,18 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring events under `output`. |
 | `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `serve`, `generate`. |
+
+**The `extract_*.rs` names are two words on purpose, not tidiness.** Page
+titles are derived from file stems and are themselves graph inputs: a page
+titled `Rust` (from a hypothetical `rust.rs`) would attract an edge from
+every prose mention of "rust" — measured at 9 files for `Rust`, 2 for
+`Python`, 1 for `Simple`, on this repo alone. A two-word title needs an
+adjacent token pair in the phrase index, which a bare prose mention doesn't
+produce. `code_rust.rs` was tried next and also failed: `code:rust` is the
+compiler's own `SourceKind` string, and it tokenizes to the adjacent words
+`code` and `rust`, which still matched a page titled `Code Rust` (see
+dogfood finding: generic titles match prose through punctuation).
+`extract_rust.rs`/`extract_python.rs`/`extract_simple.rs` avoid both traps.
 
 ## Determinism rules
 
@@ -142,6 +157,31 @@ breaking any of them reintroduces nondeterminism.
   `tree-sitter-rust = "0.23"`, so `Cargo.lock` is what guarantees byte-identical
   output across machines; a grammar bump is an output-affecting change and must
   be reviewed as one.
+- **Rust and Python guard module level with opposite conventions, on
+  purpose.** `rust_placement` (`extract_rust.rs`) is an allow-list of item
+  containers (`source_file`, `mod_item`, `declaration_list`, `impl_item`,
+  `trait_item`); `python_placement` (`extract_python.rs`) is a deny-list of
+  one node kind (`function_definition`/`lambda`). The grammars are mirror
+  images — Rust has many kinds of item container, Python's module level has
+  exactly one excluder — so the two rules fail in opposite directions: a new
+  tree-sitter node kind that can host a definition is silently *admitted* by
+  Python's rule and silently *rejected* by Rust's. A `tree-sitter-rust` or
+  `tree-sitter-python` grammar bump must be reviewed under both conventions,
+  not just re-checked against the existing test fixtures.
+- **`## Exports` is ordered by a grouping key, `(group, kind, name)`, not by
+  plain lexicographic sort of the rendered signature — for every language.**
+  `group` is the owner for a member and the item's own name otherwise, so
+  `class Article` and `Article.title: str` share the group `Article` instead
+  of scattering under `@` < `A` < `d`. `kind` ranks `FreeDef`/`FreeValue`/
+  `Header` ahead of `Member`, so a class or an `impl` header leads its own
+  members. Only the *order* changes: `Entity::symbols` stays a plain sorted
+  `Vec<String>`, and `dedup_by` (keyed on the signature alone) still merges
+  equal signatures, since equal signatures have equal group/kind/name too.
+  The summary fallback deliberately does **not** read this order — it picks
+  the smallest signature within each `ItemKind`, independent of how
+  `## Exports` displays — because grouping sorts on the bare name, and an
+  uppercase type name outranks a lowercase function name there even when the
+  function is what the module is about.
 
 ## Incremental build
 
@@ -291,6 +331,35 @@ there) nor its target type's, so an `impl Trait for PrivateType` does reach
 `## Exports` — resolving that needs name resolution across files (dogfood
 finding 16).
 
+**Python signatures are owner-qualified through the full class chain**
+(`extract_python.rs`): a nested method renders as `def Article.Inner.deep(self)
+-> None`, joined with `.` rather than Rust's `::`. `python_placement` walks
+upward from a captured definition and rejects it outright the moment it finds
+an enclosing `function_definition` or `lambda` — a **deny-list** of one
+excluded node kind, where Rust's `rust_placement` is an **allow-list** of
+permitted containers; both walks otherwise keep definitions nested under
+`if`/`try`/`with`/`match`/`while`/`for`, since those are genuine module-level
+surface (`if TYPE_CHECKING: def …` and `try: def … except ImportError:` are
+both kept). Visibility is two gates applied in order: **`__all__`, when the
+module declares one authoritatively** — a module-level `__all__` assigned a
+literal list/tuple of plain string literals (`python_all`) replaces the
+underscore convention for the module-level name (the item's own name when
+free, the outermost enclosing class when a member); anything else (a computed
+expression, a comprehension, an f-string element) falls back to the
+convention, and a later reassignment of `__all__` wins over an earlier one —
+and **the underscore convention, always applied inside a class**, since
+`__all__` says nothing about what is public *within* a class it lists — even
+one it lists by name, a private member stays private. Module
+constants and class fields share one query pattern
+(`assignment left: (identifier)`), with value handling that depends on
+whether a type annotation is present: an annotated assignment
+(`SUMMARY_LIMIT: int = 300`) is cut at its value, since the annotation is the
+contract; an unannotated one (`MAX_IDS = 2000`) keeps its whole value,
+truncated to 48 `chars()` (never bytes, to avoid splitting a multi-byte
+character) plus `…` when longer. Decorators are kept **with their
+arguments** — `@dataclass(frozen=True) class Article` — because a field is
+only interpretable through the decorator that governs it.
+
 **Signature normalization is language-agnostic**, unlike the visibility and
 owner machinery above: `build_signature` collapses whitespace and tidies the
 punctuation a wrapped parameter list leaves behind, for all five languages.
@@ -299,7 +368,7 @@ cleaned up. This is deliberate; the pass and its limits are documented on
 `tidy_punctuation`.
 
 **Rust test-module stripping:** before body assembly,
-`strip_rust_test_modules` (`src/formats/code.rs`) removes each
+`strip_rust_test_modules` (`src/formats/extract_rust.rs`) removes each
 `#[cfg(test)]`-annotated `mod` item — including the contiguous attribute
 run above it — from the Rust source shown in `## Body`, replacing it with
 a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. Stripping runs
@@ -313,8 +382,10 @@ still not stripped.
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
   the source file they test (e.g. `src/cache.rs`, `src/hash.rs`,
-  `src/lib.rs`, `src/formats/code.rs`) — colocated with the code, not in a
-  separate tree.
+  `src/lib.rs`, `src/formats/code.rs`, `src/formats/extract_rust.rs`,
+  `src/formats/extract_python.rs`) — colocated with the code, not in a
+  separate tree. Language-specific extraction tests moved with their
+  language when `code.rs` was split (§ Module map).
 - **Integration tests** live in `tests/`:
   - `tests/end_to_end.rs` — full `compile()` runs against small in-memory
     corpora: artifact presence, cross-linking, reserved-name remapping,
