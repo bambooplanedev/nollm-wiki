@@ -58,6 +58,7 @@ pub(crate) fn python_spec() -> LangSpec {
         placement: python_placement,
         owner_sep: ".",
         export_set: python_all,
+        join_continuations: true,
     }
 }
 

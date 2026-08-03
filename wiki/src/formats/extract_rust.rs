@@ -107,6 +107,7 @@ pub(crate) fn rust_spec() -> LangSpec {
         placement: rust_placement,
         owner_sep: "::",
         export_set: no_export_set,
+        join_continuations: false,
     }
 }
 

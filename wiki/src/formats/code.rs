@@ -36,6 +36,12 @@ pub(crate) struct LangSpec {
     /// has one and the module states it literally. `None` means fall back to
     /// `name_filter`.
     pub(crate) export_set: fn(&Tree, &str) -> Option<BTreeSet<String>>,
+    /// Join Python's explicit `\`-newline line continuations before
+    /// collapsing. Not shared: JS and TS allow the same sequence inside a
+    /// string literal, and a default-parameter value is part of the retained
+    /// signature span, so stripping it there would silently rewrite their
+    /// signatures.
+    pub(crate) join_continuations: bool,
 }
 
 pub(crate) fn keep_all(_name: &str) -> bool {
@@ -241,9 +247,8 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                     def,
                     name_node,
                     owner.as_deref(),
-                    spec.owner_sep,
+                    &spec,
                     signature_cut(def),
-                    spec.strip_trailing,
                 );
                 if !sig.is_empty() {
                     let kind = if name_node.is_none() {
@@ -346,9 +351,8 @@ fn build_signature(
     def: Node,
     name: Option<Node>,
     owner: Option<&str>,
-    owner_sep: &str,
+    spec: &LangSpec,
     cut: Option<Node>,
-    strip_trailing: &[char],
 ) -> String {
     let start = def.start_byte();
     let end = cut
@@ -362,16 +366,28 @@ fn build_signature(
                 "{}{}{}{}",
                 text.get(start..name.start_byte()).unwrap_or(""),
                 owner,
-                owner_sep,
+                spec.owner_sep,
                 text.get(name.start_byte()..end).unwrap_or("")
             )
         }
         _ => text.get(start..end).unwrap_or("").to_string(),
     };
+    // A backslash immediately followed by a newline is Python's explicit line
+    // continuation: it is not whitespace, so it survives collapsing and
+    // strands the trailing-strip loop one character short of the `=` it must
+    // remove (`Z: int = \` never reduces to `Z: int`). Gated per-language:
+    // JS and TS allow the identical sequence inside a string literal, and a
+    // default-parameter value sits inside the retained signature span, so
+    // joining it there would silently rewrite `"x\<newline>y"` to `"x y"`.
+    let raw = if spec.join_continuations {
+        raw.replace("\\\n", " ")
+    } else {
+        raw
+    };
     let mut sig = tidy_punctuation(collapse_whitespace(&raw));
     loop {
         match sig.chars().last() {
-            Some(c) if strip_trailing.contains(&c) => {
+            Some(c) if spec.strip_trailing.contains(&c) => {
                 sig.pop();
                 sig = sig.trim_end().to_string();
             }
@@ -439,12 +455,6 @@ fn tidy_punctuation(mut sig: String) -> String {
 }
 
 fn collapse_whitespace(s: &str) -> String {
-    // A backslash immediately followed by a newline is Python's explicit line
-    // continuation. It is not whitespace, so it survives collapsing and
-    // strands the strip loop one character short of the `=` it must remove:
-    // `Z: int = \` never reaches `Z: int`. Residual risk: a literal backslash
-    // ending a line inside a retained string.
-    let s = s.replace("\\\n", " ");
     let mut out = String::with_capacity(s.len());
     let mut prev_ws = false;
     for ch in s.trim().chars() {
@@ -602,6 +612,27 @@ mod tests {
                 .iter()
                 .any(|s| s == "func Wrapped(a int, b int) string"),
             "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn javascript_string_literal_line_continuations_survive_collapsing() {
+        // Python's `\`-newline join (added so `Z: int = \` reduces to
+        // `Z: int`) must NOT be applied to JS/TS: the identical sequence is a
+        // legal string-literal continuation there, and a default-parameter
+        // value sits inside the retained signature span (the cut stops at
+        // `body`, after the parameter list). Joining it would silently turn
+        // `"x\<newline>y"` into `"x y"`. `join_continuations` gates this
+        // per-language; only the whitespace-collapse (newline -> space) that
+        // every language already gets should touch this text.
+        let js = "export function foo(a = \"x\\\ny\") {\n  return a;\n}\n";
+        let e = CodeExtractor.extract("t.js", js);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "export function foo(a = \"x\\ y\")"),
+            "the backslash must survive: {:?}",
             e.symbols
         );
     }

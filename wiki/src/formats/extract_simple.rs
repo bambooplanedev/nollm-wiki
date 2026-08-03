@@ -24,6 +24,7 @@ pub(crate) fn js_spec() -> LangSpec {
         placement: always_free,
         owner_sep: "",
         export_set: no_export_set,
+        join_continuations: false,
     }
 }
 
@@ -42,6 +43,7 @@ pub(crate) fn ts_spec() -> LangSpec {
         placement: always_free,
         owner_sep: "",
         export_set: no_export_set,
+        join_continuations: false,
     }
 }
 
@@ -63,6 +65,7 @@ pub(crate) fn go_spec() -> LangSpec {
         placement: always_free,
         owner_sep: "",
         export_set: no_export_set,
+        join_continuations: false,
     }
 }
 
