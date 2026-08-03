@@ -2,7 +2,8 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    always_free, keep_all, keep_any_vis, no_export_set, sig_start_identity, LangSpec,
+    always_free, keep_all, keep_any_vis, no_export_set, no_header_group, sig_start_identity,
+    LangSpec,
 };
 
 fn keep_go_exported(name: &str) -> bool {
@@ -28,6 +29,7 @@ pub(crate) fn js_spec() -> LangSpec {
         export_set: no_export_set,
         join_continuations: false,
         sig_start: sig_start_identity,
+        header_group: no_header_group,
     }
 }
 
@@ -48,6 +50,7 @@ pub(crate) fn ts_spec() -> LangSpec {
         export_set: no_export_set,
         join_continuations: false,
         sig_start: sig_start_identity,
+        header_group: no_header_group,
     }
 }
 
@@ -71,6 +74,7 @@ pub(crate) fn go_spec() -> LangSpec {
         export_set: no_export_set,
         join_continuations: false,
         sig_start: sig_start_identity,
+        header_group: no_header_group,
     }
 }
 

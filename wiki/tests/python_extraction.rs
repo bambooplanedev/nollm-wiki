@@ -40,17 +40,17 @@ fn python_exports_and_imports_match_the_audited_shapes() {
     compile(&input, &out, &CompileOptions::default()).unwrap();
 
     let shapes = fs::read_to_string(out.join("shapes.md")).unwrap();
-    // `## Exports` is still sorted plain-lexicographically at this commit;
-    // the grouping-by-owner key lands in a later task, which will update
-    // this vector's order.
+    // `## Exports` is sorted on a grouping key, not the rendered signature:
+    // a class leads its own members instead of scattering across the
+    // section, so `Article` and its fields come before `FeedSource`.
     assert_eq!(
         exports(&shapes),
         vec![
             "@dataclass(frozen=True) class Article",
-            "@dataclass(frozen=True) class FeedSource",
             "Article.id: str",
             "Article.title: str",
             "Article.url: str",
+            "@dataclass(frozen=True) class FeedSource",
             "FeedSource.name: str",
             "FeedSource.tier: int",
         ],

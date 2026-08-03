@@ -74,6 +74,18 @@ pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
     }
 }
 
+/// The group a trait-impl header shares with its own methods. `rust_owner`
+/// resolves the owner of a node *inside* a `declaration_list`; a header is the
+/// `impl_item`, so the same rendering is reproduced here from its own fields.
+pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
+    if def.kind() != "impl_item" {
+        return None;
+    }
+    let ty = text.get(def.child_by_field_name("type")?.byte_range())?;
+    let tr = def.child_by_field_name("trait")?;
+    Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?))
+}
+
 pub(crate) fn rust_spec() -> LangSpec {
     LangSpec {
         lang_name: "rust",
@@ -109,6 +121,7 @@ pub(crate) fn rust_spec() -> LangSpec {
         export_set: no_export_set,
         join_continuations: false,
         sig_start: sig_start_identity,
+        header_group: rust_header_group,
     }
 }
 
@@ -546,6 +559,23 @@ mod tests {
     }
 
     #[test]
+    fn a_trait_impl_header_leads_its_own_methods() {
+        let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self) -> u8 { 0 }\n}\n";
+        let e = CodeExtractor.extract("text.rs", src);
+        assert_eq!(
+            e.symbols,
+            vec![
+                "impl Extractor for TextExtractor".to_string(),
+                "fn <TextExtractor as Extractor>::extensions(&self) -> &[&str]".to_string(),
+                "fn <TextExtractor as Extractor>::extract(&self) -> u8".to_string(),
+                "pub struct TextExtractor".to_string(),
+            ],
+            "the header must lead its methods: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
     fn two_traits_with_the_same_method_name_stay_distinct() {
         let src = "pub struct Foo;\nimpl Display for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\nimpl Debug for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
@@ -664,11 +694,11 @@ mod tests {
         assert_eq!(
             e.symbols,
             vec![
-                "fn <Wiki as Display>::fmt(&self)".to_string(),
                 "impl Display for Wiki".to_string(),
+                "fn <Wiki as Display>::fmt(&self)".to_string(),
+                "pub struct Wiki".to_string(),
                 "pub fn Wiki::go(&self)".to_string(),
                 "pub fn go()".to_string(),
-                "pub struct Wiki".to_string(),
             ]
         );
     }

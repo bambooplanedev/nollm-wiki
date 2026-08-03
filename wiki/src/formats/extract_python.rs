@@ -1,7 +1,7 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention,
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
-use super::code::{keep_any_vis, LangSpec, Placement};
+use super::code::{keep_any_vis, no_header_group, LangSpec, Placement};
 use std::collections::BTreeSet;
 use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
 
@@ -79,6 +79,7 @@ pub(crate) fn python_spec() -> LangSpec {
         export_set: python_all,
         join_continuations: true,
         sig_start: python_sig_start,
+        header_group: no_header_group,
     }
 }
 
@@ -367,6 +368,24 @@ mod tests {
         assert!(
             e.symbols.iter().any(|s| s == "def B2.run(self) -> None"),
             "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn exports_group_a_class_with_its_own_members() {
+        let src =
+            "@dataclass\nclass Article:\n    title: str\n\nclass Verdict:\n    decision: str\n";
+        let e = CodeExtractor.extract("models.py", src);
+        assert_eq!(
+            e.symbols,
+            vec![
+                "@dataclass class Article".to_string(),
+                "Article.title: str".to_string(),
+                "class Verdict".to_string(),
+                "Verdict.decision: str".to_string(),
+            ],
+            "symbols: {:?}",
             e.symbols
         );
     }

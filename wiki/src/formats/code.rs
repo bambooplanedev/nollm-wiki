@@ -46,6 +46,10 @@ pub(crate) struct LangSpec {
     /// enclosing `decorated_definition`; every other language returns the
     /// definition itself.
     pub(crate) sig_start: fn(Node) -> Node,
+    /// The group a `@def` with no `@name` shares with its own members — only
+    /// Rust's trait-impl header pattern needs this; every other language
+    /// resolves a group from `owner` or `@name` and never reaches it.
+    pub(crate) header_group: fn(Node, &str) -> Option<String>,
 }
 
 pub(crate) fn sig_start_identity(def: Node) -> Node {
@@ -61,6 +65,12 @@ pub(crate) fn keep_any_vis(_vis: &str) -> bool {
 }
 
 pub(crate) fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
+    None
+}
+
+/// Only Rust emits a `@def` without a `@name` (the trait-impl header pattern),
+/// so every other language never reaches this.
+pub(crate) fn no_header_group(_def: Node, _text: &str) -> Option<String> {
     None
 }
 
@@ -216,9 +226,12 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let imp_idx = query.capture_index_for_name("import");
     let exports = (spec.export_set)(&tree, text);
 
-    // (signature, kind). See `ItemKind` for why the kind is recorded here
-    // rather than recovered from the signature string later.
-    let mut collected: Vec<(String, ItemKind)> = Vec::new();
+    // (group, kind, name, signature). The sort key groups a definition with
+    // its own members: `class Article` and `Article.title: str` share the
+    // group `Article`, so a class no longer scatters across the section
+    // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
+    // stays a plain `Vec<String>`.
+    let mut collected: Vec<(String, ItemKind, String, String)> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
@@ -283,21 +296,26 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                     } else {
                         ItemKind::FreeDef
                     };
-                    collected.push((sig, kind));
+                    let group = match (&owner, name_text) {
+                        (Some(o), _) => o.clone(),
+                        (None, Some(n)) => n.to_string(),
+                        (None, None) => (spec.header_group)(def, text).unwrap_or_default(),
+                    };
+                    collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
         }
     }
-    // Sorting a `(String, ItemKind)` tuple ties on `ItemKind`'s derived order
-    // only when two entries share a signature. Deduplication below is keyed
-    // on the signature alone, so which kind wins such a tie is irrelevant:
-    // the surviving text is identical either way, and `symbols` (built from
-    // the signature only, after dedup) cannot observe the difference.
+    // Sort by (group, kind, name, signature): a definition's group places it
+    // next to its own members instead of scattering across the section under
+    // plain lexicographic order on the rendered signature, and within a group
+    // `ItemKind`'s derived `Ord` (FreeDef, Header < FreeValue, Member) puts a
+    // class or an impl header ahead of its own members.
     collected.sort();
-    // Deduplicate on the signature alone: comparing the full tuple would let
-    // a future divergence between a signature and its recorded kind smuggle
-    // a duplicate through instead of surfacing the mismatch.
-    collected.dedup_by(|a, b| a.0 == b.0);
+    // Still keyed on the signature alone. The sort key is a function of the
+    // same captures that build the signature — equal signatures have equal
+    // group, kind, and name — so equal signatures remain adjacent.
+    collected.dedup_by(|a, b| a.3 == b.3);
     imports.sort();
     imports.dedup();
 
@@ -311,17 +329,21 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     // lexicographic order), then whatever sorts first.
     let summary_fallback = collected
         .iter()
-        .find(|(_, kind)| *kind == ItemKind::FreeDef)
-        .or_else(|| collected.iter().find(|(_, kind)| *kind == ItemKind::Header))
+        .find(|(_, kind, ..)| *kind == ItemKind::FreeDef)
         .or_else(|| {
             collected
                 .iter()
-                .find(|(_, kind)| *kind == ItemKind::FreeValue)
+                .find(|(_, kind, ..)| *kind == ItemKind::Header)
+        })
+        .or_else(|| {
+            collected
+                .iter()
+                .find(|(_, kind, ..)| *kind == ItemKind::FreeValue)
         })
         .or_else(|| collected.first())
-        .map(|(sig, _)| sig.clone());
+        .map(|(_, _, _, sig)| sig.clone());
 
-    let symbols: Vec<String> = collected.into_iter().map(|(sig, _)| sig).collect();
+    let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
     let docstring = if ext == "py" {
         super::extract_python::python_docstring(&tree, text)
