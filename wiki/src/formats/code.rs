@@ -56,11 +56,11 @@ pub(crate) fn any_def(_def: Node) -> bool {
 
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
-        "rs" => super::code_rust::rust_spec(),
-        "py" => super::code_python::python_spec(),
-        "js" => super::code_simple::js_spec(),
-        "ts" => super::code_simple::ts_spec(),
-        "go" => super::code_simple::go_spec(),
+        "rs" => super::extract_rust::rust_spec(),
+        "py" => super::extract_python::python_spec(),
+        "js" => super::extract_simple::js_spec(),
+        "ts" => super::extract_simple::ts_spec(),
+        "go" => super::extract_simple::go_spec(),
         _ => return None,
     })
 }
@@ -79,7 +79,7 @@ impl Extractor for CodeExtractor {
         // BEFORE extraction (finding #13) so the body, the symbols, the
         // imports, and the doc comment all describe the same source.
         let source = if ext == "rs" {
-            super::code_rust::strip_rust_test_modules(text).unwrap_or_else(|| text.to_string())
+            super::extract_rust::strip_rust_test_modules(text).unwrap_or_else(|| text.to_string())
         } else {
             text.to_string()
         };
@@ -241,7 +241,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let symbols: Vec<String> = collected.into_iter().map(|(sig, _)| sig).collect();
 
     let docstring = if ext == "py" {
-        super::code_python::python_docstring(&tree, text)
+        super::extract_python::python_docstring(&tree, text)
     } else {
         None
     };
