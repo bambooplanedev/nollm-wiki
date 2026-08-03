@@ -1,3 +1,6 @@
+//! Query surface over a compiled wiki: full-text search, page lookup, and
+//! budgeted neighbor context packs.
+
 use crate::model::SourceKind;
 use serde::Deserialize;
 use std::collections::BTreeMap;
