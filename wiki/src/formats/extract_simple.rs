@@ -1,7 +1,9 @@
 //! JS, TS, and Go: languages whose export surface is expressed by the grammar
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
-use super::code::{always_free, keep_all, keep_any_vis, no_export_set, LangSpec};
+use super::code::{
+    always_free, keep_all, keep_any_vis, no_export_set, sig_start_identity, LangSpec,
+};
 
 fn keep_go_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_uppercase())
@@ -25,6 +27,7 @@ pub(crate) fn js_spec() -> LangSpec {
         owner_sep: "",
         export_set: no_export_set,
         join_continuations: false,
+        sig_start: sig_start_identity,
     }
 }
 
@@ -44,6 +47,7 @@ pub(crate) fn ts_spec() -> LangSpec {
         owner_sep: "",
         export_set: no_export_set,
         join_continuations: false,
+        sig_start: sig_start_identity,
     }
 }
 
@@ -66,6 +70,7 @@ pub(crate) fn go_spec() -> LangSpec {
         owner_sep: "",
         export_set: no_export_set,
         join_continuations: false,
+        sig_start: sig_start_identity,
     }
 }
 

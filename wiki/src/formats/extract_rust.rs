@@ -1,6 +1,6 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
-use super::code::{keep_all, no_export_set, LangSpec, Placement};
+use super::code::{keep_all, no_export_set, sig_start_identity, LangSpec, Placement};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
 /// Rust only. `(visibility_modifier)` also covers `pub(crate)`, `pub(super)`,
@@ -108,6 +108,7 @@ pub(crate) fn rust_spec() -> LangSpec {
         owner_sep: "::",
         export_set: no_export_set,
         join_continuations: false,
+        sig_start: sig_start_identity,
     }
 }
 

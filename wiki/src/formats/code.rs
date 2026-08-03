@@ -42,6 +42,14 @@ pub(crate) struct LangSpec {
     /// signature span, so stripping it there would silently rewrite their
     /// signatures.
     pub(crate) join_continuations: bool,
+    /// The node whose start byte opens the signature. Python returns the
+    /// enclosing `decorated_definition`; every other language returns the
+    /// definition itself.
+    pub(crate) sig_start: fn(Node) -> Node,
+}
+
+pub(crate) fn sig_start_identity(def: Node) -> Node {
+    def
 }
 
 pub(crate) fn keep_all(_name: &str) -> bool {
@@ -354,7 +362,7 @@ fn build_signature(
     spec: &LangSpec,
     cut: Option<Node>,
 ) -> String {
-    let start = def.start_byte();
+    let start = (spec.sig_start)(def).start_byte();
     let end = cut
         .map(|b| b.start_byte())
         .unwrap_or_else(|| def.end_byte())

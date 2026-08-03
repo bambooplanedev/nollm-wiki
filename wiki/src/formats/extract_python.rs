@@ -5,6 +5,25 @@ use super::code::{keep_any_vis, LangSpec, Placement};
 use std::collections::BTreeSet;
 use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
 
+/// A decorated definition parses as
+/// `(decorated_definition (decorator)+ (function_definition|class_definition))`
+/// and the `@def` capture lands on the inner node, so the decorator is
+/// invisible without this. Decorators are kept **with their arguments**:
+/// `@dataclass` makes a field a constructor parameter and `frozen=True` makes
+/// it immutable, so cutting the arguments would hide the very semantics that
+/// make the extracted fields interpretable.
+///
+/// Two accepted risks, both absent from the audit corpora: an unbounded
+/// argument list (`@pytest.mark.parametrize("a,b", [(1, 2), …])`) is spliced in
+/// full, and a comment between decorator and definition
+/// (`@dataclass  # noqa`) is spliced in with it.
+pub(crate) fn python_sig_start(def: Node) -> Node {
+    match def.parent() {
+        Some(p) if p.kind() == "decorated_definition" => p,
+        _ => def,
+    }
+}
+
 fn keep_python_public(name: &str) -> bool {
     !name.starts_with('_')
 }
@@ -59,6 +78,7 @@ pub(crate) fn python_spec() -> LangSpec {
         owner_sep: ".",
         export_set: python_all,
         join_continuations: true,
+        sig_start: python_sig_start,
     }
 }
 
@@ -527,6 +547,51 @@ mod tests {
         let src = "A = B = 2\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_eq!(e.symbols, vec!["A = B = 2".to_string()], "{:?}", e.symbols);
+    }
+
+    #[test]
+    fn python_decorators_are_kept_with_their_arguments() {
+        let src = "@dataclass(frozen=True)\nclass Article:\n    title: str\n";
+        let e = CodeExtractor.extract("models.py", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "@dataclass(frozen=True) class Article"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "Article.title: str"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_method_decorators_render_before_the_qualified_name() {
+        let src =
+            "class Article:\n    @property\n    def slug(self) -> str:\n        return \"\"\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "@property def Article.slug(self) -> str"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_stacked_decorators_all_survive() {
+        let src = "@a\n@b(1)\n@c.d.e\ndef stacked() -> int:\n    return 0\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "@a @b(1) @c.d.e def stacked() -> int"),
+            "{:?}",
+            e.symbols
+        );
     }
 
     #[test]
