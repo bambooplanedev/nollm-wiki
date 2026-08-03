@@ -246,18 +246,18 @@ impl Extractor for CodeExtractor {
             text.to_string()
         };
 
-        let (lang_name, symbols, imports, docstring) = match extract_code(ext, &source) {
-            Some(v) => v,
-            None => (ext.to_string(), Vec::new(), Vec::new(), None),
-        };
+        let (lang_name, symbols, imports, docstring, summary_fallback) =
+            match extract_code(ext, &source) {
+                Some(v) => v,
+                None => (ext.to_string(), Vec::new(), Vec::new(), None, None),
+            };
 
         let docstring = docstring.or_else(|| leading_doc(&source, ext));
-        let first_sig = symbols.first().map(String::as_str);
         // `body` is deliberately NOT scanned for a summary: source code is not
         // prose, so letting summarize() hunt line-by-line for a "real
         // sentence" produces garbage. Only a real docstring, or (failing
         // that) an exported signature, is an acceptable summary.
-        let summary = summarize(None, docstring.as_deref(), "", first_sig);
+        let summary = summarize(None, docstring.as_deref(), "", summary_fallback.as_deref());
         let name = derive_name_from_path(rel_path);
 
         Entity {
@@ -276,7 +276,17 @@ impl Extractor for CodeExtractor {
     }
 }
 
-type CodeInfo = (String, Vec<String>, Vec<String>, Option<String>);
+/// `(language, symbols, imports, docstring, summary_fallback)`. The fallback
+/// is chosen here rather than by the caller: freeness is known only while the
+/// captures are in hand, and `symbols` alone cannot be reinterpreted after
+/// sorting.
+type CodeInfo = (
+    String,
+    Vec<String>,
+    Vec<String>,
+    Option<String>,
+    Option<String>,
+);
 
 fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
@@ -289,7 +299,9 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let vis_idx = query.capture_index_for_name("vis");
     let imp_idx = query.capture_index_for_name("import");
 
-    let mut symbols = Vec::new();
+    // (signature, is_free_item). A free item has a name and no owner: it is a
+    // top-level declaration rather than a method or an `impl` header.
+    let mut collected: Vec<(String, bool)> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
@@ -327,15 +339,31 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                     spec.strip_trailing,
                 );
                 if !sig.is_empty() {
-                    symbols.push(sig);
+                    let is_free = owner.is_none() && name_node.is_some();
+                    collected.push((sig, is_free));
                 }
             }
         }
     }
-    symbols.sort();
-    symbols.dedup();
+    collected.sort();
+    // Deduplicate on the signature alone: the flag is derived from the
+    // signature's own shape, so equal strings always agree, but comparing
+    // tuples would let a future divergence smuggle a duplicate through.
+    collected.dedup_by(|a, b| a.0 == b.0);
     imports.sort();
     imports.dedup();
+
+    // The summary fallback must not be a qualified method. `symbols` is
+    // sorted, so on every extractor module `fn <X as Extractor>::extensions`
+    // would outrank `pub struct X` and become the page's one-line summary.
+    let summary_fallback = collected
+        .iter()
+        .find(|(_, is_free)| *is_free)
+        .or_else(|| collected.iter().find(|(sig, _)| sig.starts_with("impl ")))
+        .or_else(|| collected.first())
+        .map(|(sig, _)| sig.clone());
+
+    let symbols: Vec<String> = collected.into_iter().map(|(sig, _)| sig).collect();
 
     let docstring = if ext == "py" {
         python_docstring(&tree, text)
@@ -343,7 +371,13 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
         None
     };
 
-    Some((spec.lang_name.to_string(), symbols, imports, docstring))
+    Some((
+        spec.lang_name.to_string(),
+        symbols,
+        imports,
+        docstring,
+        summary_fallback,
+    ))
 }
 
 /// Locate the node at which a definition's signature stops, so the rest of its
@@ -1110,5 +1144,19 @@ mod tests {
                 "pub struct Wiki".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn summary_fallback_prefers_a_free_item_over_a_qualified_method() {
+        let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
+        let e = CodeExtractor.extract("text.rs", src);
+        assert_eq!(e.summary.as_deref(), Some("pub struct TextExtractor"));
+    }
+
+    #[test]
+    fn summary_fallback_uses_the_impl_header_when_no_free_item_exists() {
+        let src = "impl Extractor for Foo {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.summary.as_deref(), Some("impl Extractor for Foo"));
     }
 }
