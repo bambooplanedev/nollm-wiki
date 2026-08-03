@@ -1,4 +1,7 @@
 pub mod code;
+pub mod code_python;
+pub mod code_rust;
+pub mod code_simple;
 pub mod markdown;
 pub mod summary;
 pub mod text;
