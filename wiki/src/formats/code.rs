@@ -499,6 +499,15 @@ fn build_signature(
 /// so no rule over the collapsed string can tell them apart — separating them
 /// would take the parse tree. Signatures are documentation, not compiled code,
 /// and the shape is rare enough to accept.
+///
+/// Unlike `owner_of`, `vis_filter`, `owner_sep` and `def_filter`, this pass is
+/// not a `LangSpec` field: it runs inside `build_signature` for all five
+/// languages, not just Rust. It is a plain substring substitution over the
+/// collapsed text, so it also rewrites punctuation sitting inside a string
+/// literal that survives into a signature — a measured example is a Python
+/// default argument `gamma=" )"`, which renders as `gamma=")"`. Rust is immune
+/// because `signature_cut` stops a `const`/`static` signature at `value:`, but
+/// Python and JS/TS default arguments sit inside the retained span.
 fn tidy_punctuation(mut sig: String) -> String {
     for (from, to) in [("( ", "("), (", )", ")"), (" )", ")"), (" ,", ",")] {
         while sig.contains(from) {
@@ -1013,6 +1022,14 @@ mod tests {
             !marker_line.contains("pub fn after"),
             "code following the module was swallowed by the marker comment: {marker_line}"
         );
+        // The body assertion above only catches the symptom; the stake is
+        // that a same-line export doesn't silently vanish from the page's
+        // exports once the newline separates it from the marker comment.
+        assert!(
+            e.symbols.iter().any(|s| s == "pub fn after() -> u8"),
+            "export following the test module on the same line was lost: {:?}",
+            e.symbols
+        );
     }
 
     #[test]
@@ -1056,6 +1073,14 @@ mod tests {
         assert!(
             e.symbols.iter().any(|s| s == "pub struct Fixture"),
             "real export lost: {:?}",
+            e.symbols
+        );
+        // The fixture also plants an `impl Default for Fixture` inside the
+        // `#[cfg(test)]` module — exactly the widening the module-level
+        // guard exists to prevent. It must not survive stripping.
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("Default")),
+            "impl inside the stripped test module leaked as an export: {:?}",
             e.symbols
         );
     }
@@ -1256,7 +1281,7 @@ mod tests {
     }
 
     #[test]
-    fn non_rust_languages_are_unaffected_by_rust_qualification() {
+    fn rust_qualification_does_not_leak_into_other_languages() {
         // Python nested defs and class methods are captured today and must
         // stay captured, unqualified: the module-level guard and the owner
         // walk are Rust-only.
@@ -1279,6 +1304,37 @@ mod tests {
         let e = CodeExtractor.extract("m.go", go);
         assert!(
             e.symbols.iter().any(|s| s == "func Foo(a int) string"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn wrapped_parameter_lists_are_tidied_in_every_language() {
+        // `tidy_punctuation` is not gated by `LangSpec` the way owner/vis
+        // machinery is — it runs inside `build_signature` for all five
+        // languages. Pin that as intended behavior, not something left to be
+        // discovered: this also exercises the documented caveat that a
+        // string literal's punctuation (`gamma=" )"`) is rewritten too,
+        // since Python's signature span isn't cut before its default
+        // arguments the way Rust's `const`/`static` values are.
+        let py = "def wrapped(\n    alpha,\n    beta=(1,),\n    gamma=\" )\",\n):\n    pass\n";
+        let e = CodeExtractor.extract("t.py", py);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "def wrapped(alpha, beta=(1,), gamma=\")\")"),
+            "symbols: {:?}",
+            e.symbols
+        );
+
+        let go =
+            "package main\n\nfunc Wrapped(\n\ta int,\n\tb int,\n) string {\n\treturn \"\"\n}\n";
+        let e = CodeExtractor.extract("m.go", go);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "func Wrapped(a int, b int) string"),
             "symbols: {:?}",
             e.symbols
         );
