@@ -128,6 +128,10 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             // Requiring `(visibility_modifier)` excludes private items
             // structurally; `vis_filter` then drops the restricted forms
             // (`pub(crate)` and friends) that the node kind also covers.
+            // The trait-impl patterns deliberately capture no `@vis`: rustc
+            // rejects a visibility modifier there, and those items are public
+            // through the trait. The trait-declaration patterns gate on the
+            // trait's own visibility instead of the method's.
             query_src: r#"
                 (function_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
@@ -136,6 +140,12 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (const_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (static_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (type_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (impl_item trait: (_) type: (_)) @def
+                (impl_item trait: (_) body: (declaration_list (function_item name: (identifier) @name) @def))
+                (impl_item trait: (_) body: (declaration_list (type_item name: (type_identifier) @name) @def))
+                (impl_item trait: (_) body: (declaration_list (const_item name: (identifier) @name) @def))
+                (trait_item (visibility_modifier) @vis body: (declaration_list (function_signature_item name: (identifier) @name) @def))
+                (trait_item (visibility_modifier) @vis body: (declaration_list (function_item name: (identifier) @name) @def))
                 (use_declaration argument: (_) @import)
             "#,
             name_filter: keep_all,
@@ -949,6 +959,156 @@ mod tests {
             e.symbols.iter().any(|s| s == "pub struct Fixture"),
             "real export lost: {:?}",
             e.symbols
+        );
+    }
+
+    #[test]
+    fn trait_impl_emits_header_and_qualified_methods() {
+        let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
+        let e = CodeExtractor.extract("text.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "impl Extractor for TextExtractor"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        // Methods in a trait impl carry no visibility modifier — they are
+        // public through the trait — so they must not be visibility-gated.
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn two_traits_with_the_same_method_name_stay_distinct() {
+        let src = "pub struct Foo;\nimpl Display for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\nimpl Debug for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <Foo as Display>::fmt(&self) -> Result"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <Foo as Debug>::fmt(&self) -> Result"),
+            "dedup collapsed two distinct methods: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn same_trait_on_different_generic_arguments_stays_distinct() {
+        let src = "impl Encode for Vec<u8> {\n    fn go(&self) -> u8 { 0 }\n}\nimpl Encode for Vec<u16> {\n    fn go(&self) -> u8 { 1 }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <Vec<u8> as Encode>::go(&self) -> u8"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <Vec<u16> as Encode>::go(&self) -> u8"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn exotic_impl_targets_render_as_valid_paths() {
+        let src = "impl Trait for &Foo {\n    fn m(&self) {}\n}\nimpl Trait for (A, B) {\n    fn m(&self) {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <&Foo as Trait>::m(&self)"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <(A, B) as Trait>::m(&self)"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn associated_type_and_const_in_a_trait_impl_are_exported() {
+        let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "type <Counter as Iterator>::Item = u32"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "const <Counter as Iterator>::FOO: u8"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn public_trait_declaration_lists_required_and_default_methods() {
+        let src = "pub trait Extractor {\n    fn extensions(&self) -> &[&str];\n    fn helper(&self) -> u8 { 7 }\n}\ntrait Private {\n    fn n(&self);\n}\n";
+        let e = CodeExtractor.extract("mod.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn Extractor::extensions(&self) -> &[&str]"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn Extractor::helper(&self) -> u8"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        // Gated on the *trait's* visibility: a method inside a trait cannot
+        // carry a modifier, but a private trait's methods are not exports.
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("Private")),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn qualification_introduces_no_duplicate_symbols() {
+        let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn go(&self) {}\n}\nimpl Display for Wiki {\n    fn fmt(&self) {}\n}\npub fn go() {}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        // Asserting the exact list, not `dedup().len()`: extraction already
+        // deduplicates, so a self-comparison would pass no matter what. An
+        // inherent method is matched by the top-level `function_item` pattern
+        // and qualified by the ancestor walk — never by a second pattern,
+        // which would emit it twice and let `dedup` hide the bug.
+        assert_eq!(
+            e.symbols,
+            vec![
+                "fn <Wiki as Display>::fmt(&self)".to_string(),
+                "impl Display for Wiki".to_string(),
+                "pub fn Wiki::go(&self)".to_string(),
+                "pub fn go()".to_string(),
+                "pub struct Wiki".to_string(),
+            ]
         );
     }
 }
