@@ -2,6 +2,9 @@ use std::fs;
 use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
 
+mod common;
+use common::{exports, imports};
+
 fn write(root: &std::path::Path, name: &str, body: &str) {
     let p = root.join(name);
     if let Some(parent) = p.parent() {
@@ -55,10 +58,13 @@ fn output_is_deterministic_across_jobs() {
     // Named deep_py.py (not deep.py) because deep.rs already slugs to "deep";
     // a colliding slug would silently drop one fixture and this test would
     // pass for the wrong reason.
+    // MAX_IDS is listed in __all__ so the fixture genuinely exercises
+    // constant extraction under the gate; `hidden` stays off the list so it
+    // still pins the __all__ gate itself.
     write(
         &input,
         "deep_py.py",
-        "__all__ = [\"Article\", \"build\"]\nfrom .models import Base\n\nMAX_IDS = 2000\n\n@dataclass(frozen=True)\nclass Article:\n    title: str\n    url: str = \"\"\n\n    def render(self) -> str:\n        return \"\"\n\ndef build() -> Article:\n    def helper():\n        pass\n    return Article(\"\", \"\")\n\ndef hidden() -> None:\n    pass\n",
+        "__all__ = [\"Article\", \"build\", \"MAX_IDS\"]\nfrom .models import Base\n\nMAX_IDS = 2000\n\n@dataclass(frozen=True)\nclass Article:\n    title: str\n    url: str = \"\"\n\n    def render(self) -> str:\n        return \"\"\n\ndef build() -> Article:\n    def helper():\n        pass\n    return Article(\"\", \"\")\n\ndef hidden() -> None:\n    pass\n",
     );
     let out1 = dir.path().join("o1");
     let out2 = dir.path().join("o2");
@@ -98,24 +104,27 @@ fn output_is_deterministic_across_jobs() {
         py_a.contains("def Article.render(self) -> str"),
         "page: {py_a}"
     );
-    assert!(py_a.contains("MAX_IDS = 2000"), "page: {py_a}");
-    assert!(py_a.contains(".models"), "page: {py_a}");
     // `## Body` is always the untouched raw source (only Rust's test-module
-    // splice touches source pre-extraction), so `def helper`/`def hidden`
-    // legitimately appear there. The leak these guard against is into the
-    // curated `## Exports` list, so scope the check to that section.
-    let py_exports = py_a
-        .split("## Exports\n")
-        .nth(1)
-        .and_then(|s| s.split("\n## ").next())
-        .unwrap_or("");
+    // splice touches source pre-extraction), so a whole-page `contains`
+    // pins nothing about extraction — it would pass even with import or
+    // constant capture removed entirely. Scope to the curated sections.
+    let py_exports = exports(&py_a);
+    let py_imports = imports(&py_a);
     assert!(
-        !py_exports.contains("helper"),
-        "function-local leak into Exports: {py_exports}"
+        py_exports.contains(&"MAX_IDS = 2000".to_string()),
+        "constant missing from Exports: {py_exports:?}"
     );
     assert!(
-        !py_exports.contains("hidden"),
-        "__all__ gate leak into Exports: {py_exports}"
+        py_imports.contains(&".models".to_string()),
+        "import missing from Imports: {py_imports:?}"
+    );
+    assert!(
+        !py_exports.iter().any(|s| s.contains("helper")),
+        "function-local leak into Exports: {py_exports:?}"
+    );
+    assert!(
+        !py_exports.iter().any(|s| s.contains("hidden")),
+        "__all__ gate leak into Exports: {py_exports:?}"
     );
 }
 

@@ -2,6 +2,9 @@ use std::fs;
 use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
 
+mod common;
+use common::{exports, imports};
+
 fn write(dir: &std::path::Path, name: &str, body: &str) {
     fs::write(dir.join(name), body).unwrap();
 }
@@ -25,20 +28,6 @@ fn corpus(input: &std::path::Path) {
         "consumer.py",
         "from .shapes import Article\nfrom . import helpers\nimport json.decoder as jd\n\ndef run() -> Article:\n    def nested():\n        pass\n    return Article(\"\", \"\", \"\")\n",
     );
-}
-
-fn exports(page: &str) -> Vec<String> {
-    page.lines()
-        .skip_while(|l| !l.starts_with("## Exports"))
-        .skip(1)
-        .take_while(|l| !l.starts_with("## "))
-        .filter(|l| l.starts_with("- `"))
-        .map(|l| {
-            l.trim_start_matches("- `")
-                .trim_end_matches('`')
-                .to_string()
-        })
-        .collect()
 }
 
 #[test]
@@ -82,10 +71,14 @@ fn python_exports_and_imports_match_the_audited_shapes() {
     );
 
     let consumer = fs::read_to_string(out.join("consumer.md")).unwrap();
+    // `## Body` reproduces the import lines verbatim regardless of whether
+    // import capture works at all, so this must be scoped to `## Imports`
+    // (whole-page `contains` would pass even with import capture removed).
+    let consumer_imports = imports(&consumer);
     for expected in [".shapes", "helpers", "json.decoder"] {
         assert!(
-            consumer.contains(expected),
-            "{expected} missing from imports: {consumer}"
+            consumer_imports.contains(&expected.to_string()),
+            "{expected} missing from imports: {consumer_imports:?}"
         );
     }
     // `## Body` is always the untouched raw source, so `def nested` legitimately
