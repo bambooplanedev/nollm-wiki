@@ -264,8 +264,9 @@ fn signature_cut(def: Node) -> Option<Node> {
 
 /// Build a one-line signature from a definition node: its source text up to
 /// (not including) the start of its body, with internal whitespace/newlines
-/// collapsed to single spaces, trimmed, and language-specific trailing
-/// punctuation (e.g. Rust's `;`, Python's `:`) removed.
+/// collapsed to single spaces, the punctuation artifacts of that collapse
+/// tidied away, trimmed, and language-specific trailing punctuation (e.g.
+/// Rust's `;`, Python's `:`) removed.
 fn build_signature(text: &str, def: Node, body: Option<Node>, strip_trailing: &[char]) -> String {
     let start = def.start_byte();
     let end = body
@@ -294,6 +295,13 @@ fn build_signature(text: &str, def: Node, body: Option<Node>, strip_trailing: &[
 /// separated them), so matching that sequence is enough to remove it; a
 /// genuine one-element tuple written `(1,)` has no such space and is left
 /// alone.
+///
+/// Known limitation: a one-element tuple that was itself wrapped across lines
+/// collapses to `( u8, )` and is reduced to `(u8)`, losing its arity. That text
+/// is identical to a wrapped one-parameter list, which must reduce to `(u8)`,
+/// so no rule over the collapsed string can tell them apart — separating them
+/// would take the parse tree. Signatures are documentation, not compiled code,
+/// and the shape is rare enough to accept.
 fn tidy_punctuation(mut sig: String) -> String {
     for (from, to) in [("( ", "("), (", )", ")"), (" )", ")"), (" ,", ",")] {
         while sig.contains(from) {
