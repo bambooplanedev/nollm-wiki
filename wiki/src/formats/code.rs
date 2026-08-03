@@ -606,6 +606,16 @@ mod tests {
             e.symbols
         );
 
+        // The summary fallback is shared machinery that Task 9 reordered.
+        // Pin it per language so a future reordering cannot move it silently.
+        let e = CodeExtractor.extract("t.py", py);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("class Registry"),
+            "symbols: {:?}",
+            e.symbols
+        );
+
         // Go has no owner resolution and no scope guard: a nested func and a
         // method both stay exactly as they are today.
         let go = "package main\n\nfunc Foo(a int) string {\n\treturn \"\"\n}\n";
@@ -615,6 +625,17 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
+        assert_eq!(e.summary.as_deref(), Some("func Foo(a int) string"));
+
+        let js = "export function foo(a, b) {\n  return a + b;\n}\n";
+        let e = CodeExtractor.extract("m.js", js);
+        assert_eq!(e.symbols, vec!["export function foo(a, b)".to_string()]);
+        assert_eq!(e.summary.as_deref(), Some("export function foo(a, b)"));
+
+        let ts = "export class Widget {\n  x = 1;\n}\n";
+        let e = CodeExtractor.extract("m.ts", ts);
+        assert_eq!(e.symbols, vec!["export class Widget".to_string()]);
+        assert_eq!(e.summary.as_deref(), Some("export class Widget"));
     }
 
     #[test]
