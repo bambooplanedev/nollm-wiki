@@ -288,6 +288,29 @@ type CodeInfo = (
     Option<String>,
 );
 
+/// The shape a captured definition has, recorded at the point of capture
+/// rather than recovered later from its rendered signature text. The summary
+/// fallback needs to prefer a free item, then an `impl` header, before
+/// falling back to whatever sorts first — and a string sniff on the rendered
+/// signature is the wrong way to tell them apart: a generic trait impl
+/// renders as `impl<T: Clone> Display for Wrapper<T>`, which does not start
+/// with `impl ` (it starts with `impl<`), and `unsafe impl Send for Foo`
+/// starts with neither. `build_signature` already splices the owner in at a
+/// byte offset specifically so there is no substring search to mismatch;
+/// re-deriving "is this an impl header" from text would reintroduce exactly
+/// that kind of mismatch. The two `Option`s already in hand at the push site
+/// determine the kind exactly, so it is captured there instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ItemKind {
+    /// A top-level declaration: no owner, and a `@name` capture.
+    Free,
+    /// A trait-impl header. The only pattern that captures a `@def` without a
+    /// `@name` is `(impl_item trait: (_) type: (_)) @def`.
+    Header,
+    /// A method or associated item: both an owner and a `@name`.
+    Member,
+}
+
 fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
     let mut parser = Parser::new();
@@ -299,9 +322,9 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let vis_idx = query.capture_index_for_name("vis");
     let imp_idx = query.capture_index_for_name("import");
 
-    // (signature, is_free_item). A free item has a name and no owner: it is a
-    // top-level declaration rather than a method or an `impl` header.
-    let mut collected: Vec<(String, bool)> = Vec::new();
+    // (signature, kind). See `ItemKind` for why the kind is recorded here
+    // rather than recovered from the signature string later.
+    let mut collected: Vec<(String, ItemKind)> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
@@ -339,16 +362,27 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                     spec.strip_trailing,
                 );
                 if !sig.is_empty() {
-                    let is_free = owner.is_none() && name_node.is_some();
-                    collected.push((sig, is_free));
+                    let kind = if name_node.is_none() {
+                        ItemKind::Header
+                    } else if owner.is_some() {
+                        ItemKind::Member
+                    } else {
+                        ItemKind::Free
+                    };
+                    collected.push((sig, kind));
                 }
             }
         }
     }
+    // Sorting a `(String, ItemKind)` tuple ties on `ItemKind`'s derived order
+    // only when two entries share a signature. Deduplication below is keyed
+    // on the signature alone, so which kind wins such a tie is irrelevant:
+    // the surviving text is identical either way, and `symbols` (built from
+    // the signature only, after dedup) cannot observe the difference.
     collected.sort();
-    // Deduplicate on the signature alone: the flag is derived from the
-    // signature's own shape, so equal strings always agree, but comparing
-    // tuples would let a future divergence smuggle a duplicate through.
+    // Deduplicate on the signature alone: comparing the full tuple would let
+    // a future divergence between a signature and its recorded kind smuggle
+    // a duplicate through instead of surfacing the mismatch.
     collected.dedup_by(|a, b| a.0 == b.0);
     imports.sort();
     imports.dedup();
@@ -356,10 +390,13 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     // The summary fallback must not be a qualified method. `symbols` is
     // sorted, so on every extractor module `fn <X as Extractor>::extensions`
     // would outrank `pub struct X` and become the page's one-line summary.
+    // Prefer a free item, then an `impl` header (covering generic and
+    // `unsafe` impls, which no longer have a recognizable signature prefix
+    // to sniff), then whatever sorts first.
     let summary_fallback = collected
         .iter()
-        .find(|(_, is_free)| *is_free)
-        .or_else(|| collected.iter().find(|(sig, _)| sig.starts_with("impl ")))
+        .find(|(_, kind)| *kind == ItemKind::Free)
+        .or_else(|| collected.iter().find(|(_, kind)| *kind == ItemKind::Header))
         .or_else(|| collected.first())
         .map(|(sig, _)| sig.clone());
 
@@ -1192,6 +1229,30 @@ mod tests {
         let src = "impl Wiki {\n    pub fn go(&self) {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("pub fn Wiki::go(&self)"));
+    }
+
+    #[test]
+    fn summary_fallback_uses_a_generic_trait_impl_header() {
+        // `impl<T: Clone> Display for Wrapper<T>` starts with `impl<`, not
+        // `impl `, so a string sniff on the rendered signature misses it and
+        // falls through to the qualified method — exactly the regression
+        // this fallback exists to prevent.
+        let src = "impl<T: Clone> Display for Wrapper<T> {\n    fn fmt(&self) {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("impl<T: Clone> Display for Wrapper<T>")
+        );
+    }
+
+    #[test]
+    fn summary_fallback_uses_an_unsafe_impl_header() {
+        // `unsafe impl Send for Foo` starts with neither `impl ` nor `impl<`.
+        // An empty impl body yields only the header symbol.
+        let src = "unsafe impl Send for Foo {}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.symbols, vec!["unsafe impl Send for Foo".to_string()]);
+        assert_eq!(e.summary.as_deref(), Some("unsafe impl Send for Foo"));
     }
 
     #[test]
