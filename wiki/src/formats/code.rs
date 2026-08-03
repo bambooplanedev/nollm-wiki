@@ -319,28 +319,30 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     imports.sort();
     imports.dedup();
 
-    // The summary fallback must not be a qualified method. `symbols` is
-    // sorted, so on every extractor module `fn <X as Extractor>::extensions`
-    // would outrank `pub struct X` and become the page's one-line summary.
-    // Prefer a free definition, then an `impl` header (covering generic and
-    // `unsafe` impls, which no longer have a recognizable signature prefix
-    // to sniff), then a free value binding (an uppercase constant or module
-    // `type` alias, which would otherwise outrank both under plain
-    // lexicographic order), then whatever sorts first.
-    let summary_fallback = collected
-        .iter()
-        .find(|(_, kind, ..)| *kind == ItemKind::FreeDef)
-        .or_else(|| {
-            collected
-                .iter()
-                .find(|(_, kind, ..)| *kind == ItemKind::Header)
-        })
-        .or_else(|| {
-            collected
-                .iter()
-                .find(|(_, kind, ..)| *kind == ItemKind::FreeValue)
-        })
-        .or_else(|| collected.first())
+    // The summary fallback must not be a qualified method, and — since Task
+    // 12 — must not read `collected`'s sorted (grouped) order either.
+    // `collected` is sorted by (group, kind, name, signature) so `## Exports`
+    // places a definition next to its own members, but a module's summary
+    // is a different job with a different rule: the smallest *signature*
+    // among a kind, not "whichever entry the grouping happened to put
+    // first". Grouping sorts on the bare name, and an uppercase type name
+    // (`SourceFile`) outranks a lowercase function name (`walk`) there, so
+    // reading grouped order let a module's own type steal the summary from
+    // the function the module is actually about (`walk.rs`: `pub struct
+    // SourceFile` was winning over `pub fn walk(...)`). Picking the min
+    // signature within each kind reproduces the pre-Task-12 selection
+    // exactly, decoupled from the display order. Do not "simplify" this
+    // back to `.find()` — that silently reintroduces the bug.
+    let pick_min_signature = |want: ItemKind| {
+        collected
+            .iter()
+            .filter(|(_, kind, ..)| *kind == want)
+            .min_by(|a, b| a.3.cmp(&b.3))
+    };
+    let summary_fallback = pick_min_signature(ItemKind::FreeDef)
+        .or_else(|| pick_min_signature(ItemKind::Header))
+        .or_else(|| pick_min_signature(ItemKind::FreeValue))
+        .or_else(|| collected.iter().min_by(|a, b| a.3.cmp(&b.3)))
         .map(|(_, _, _, sig)| sig.clone());
 
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
@@ -568,6 +570,37 @@ fn derive_name_from_path(rel_path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_fallback_follows_signature_order_not_grouped_display_order() {
+        // `walk.rs`'s real shape: a `pub struct` whose name sorts ahead of a
+        // `pub fn`'s under the *grouping* key — uppercase `S` (0x53) sorts
+        // before lowercase `w` (0x77), so `SourceFile`'s group leads
+        // `## Exports`. If the summary fallback read that same grouped
+        // order, the struct would steal the module's summary from the
+        // function it's actually about. The fallback must instead compare
+        // signatures directly:
+        // `pub fn walk() -> u8` sorts before `pub struct SourceFile`
+        // lexicographically (`f` < `s`), so it must win the summary even
+        // though it displays second in `## Exports`.
+        let src = "pub struct SourceFile;\npub fn walk() -> u8 { 0 }\n";
+        let e = CodeExtractor.extract("walk.rs", src);
+        assert_eq!(
+            e.symbols,
+            vec![
+                "pub struct SourceFile".to_string(),
+                "pub fn walk() -> u8".to_string(),
+            ],
+            "grouped display order: {:?}",
+            e.symbols
+        );
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("pub fn walk() -> u8"),
+            "the summary must follow signature order, not grouped display order: {:?}",
+            e.symbols
+        );
+    }
 
     #[test]
     fn multi_line_parameter_lists_are_tidied() {
