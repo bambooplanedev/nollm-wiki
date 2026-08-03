@@ -159,7 +159,19 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let mut parser = Parser::new();
     parser.set_language(&spec.language).ok()?;
     let tree = parser.parse(text, None)?;
-    let query = Query::new(&spec.language, spec.query_src).ok()?;
+    let query = match Query::new(&spec.language, spec.query_src) {
+        Ok(q) => q,
+        Err(e) => {
+            // Silently returning None here strips every page of this language
+            // of all symbols and all imports while the compile still exits 0.
+            debug_assert!(false, "invalid {} query: {e:?}", spec.lang_name);
+            eprintln!(
+                "warning: invalid tree-sitter query for {} — pages of this language will have no symbols or imports: {e:?}",
+                spec.lang_name
+            );
+            return None;
+        }
+    };
     let def_idx = query.capture_index_for_name("def");
     let name_idx = query.capture_index_for_name("name");
     let vis_idx = query.capture_index_for_name("vis");
@@ -516,5 +528,15 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
+    }
+
+    #[test]
+    fn every_registered_language_query_compiles() {
+        for ext in ["rs", "py", "js", "ts", "go"] {
+            let spec = lang_for_ext(ext).unwrap_or_else(|| panic!("no spec for {ext}"));
+            if let Err(e) = Query::new(&spec.language, spec.query_src) {
+                panic!("query for {ext} failed to compile: {e:?}");
+            }
+        }
     }
 }
