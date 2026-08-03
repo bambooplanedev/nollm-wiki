@@ -49,6 +49,17 @@ fn output_is_deterministic_across_jobs() {
         "deep.rs",
         "//! Deep module.\npub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> u8 { 0 }\n}\nimpl Display for Wiki {\n    fn fmt(&self) {}\n}\npub const LIMIT: u32 = 5;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn t() {}\n}\n",
     );
+    // The Python path resolves owners by ancestry, gates on `__all__`, and
+    // splices decorators — none of which the .txt or .rs fixtures exercise.
+    // Written into the tempdir, so it never compiles into `.wiki/`.
+    // Named deep_py.py (not deep.py) because deep.rs already slugs to "deep";
+    // a colliding slug would silently drop one fixture and this test would
+    // pass for the wrong reason.
+    write(
+        &input,
+        "deep_py.py",
+        "__all__ = [\"Article\", \"build\"]\nfrom .models import Base\n\nMAX_IDS = 2000\n\n@dataclass(frozen=True)\nclass Article:\n    title: str\n    url: str = \"\"\n\n    def render(self) -> str:\n        return \"\"\n\ndef build() -> Article:\n    def helper():\n        pass\n    return Article(\"\", \"\")\n\ndef hidden() -> None:\n    pass\n",
+    );
     let out1 = dir.path().join("o1");
     let out2 = dir.path().join("o2");
     let mut o = CompileOptions {
@@ -74,6 +85,38 @@ fn output_is_deterministic_across_jobs() {
         "page: {page_a}"
     );
     assert!(!page_a.contains("super::*"), "page: {page_a}");
+
+    let py_a = fs::read_to_string(out1.join("deep_py.md")).unwrap();
+    let py_b = fs::read_to_string(out2.join("deep_py.md")).unwrap();
+    assert_eq!(py_a, py_b);
+    assert!(
+        py_a.contains("@dataclass(frozen=True) class Article"),
+        "page: {py_a}"
+    );
+    assert!(py_a.contains("Article.title: str"), "page: {py_a}");
+    assert!(
+        py_a.contains("def Article.render(self) -> str"),
+        "page: {py_a}"
+    );
+    assert!(py_a.contains("MAX_IDS = 2000"), "page: {py_a}");
+    assert!(py_a.contains(".models"), "page: {py_a}");
+    // `## Body` is always the untouched raw source (only Rust's test-module
+    // splice touches source pre-extraction), so `def helper`/`def hidden`
+    // legitimately appear there. The leak these guard against is into the
+    // curated `## Exports` list, so scope the check to that section.
+    let py_exports = py_a
+        .split("## Exports\n")
+        .nth(1)
+        .and_then(|s| s.split("\n## ").next())
+        .unwrap_or("");
+    assert!(
+        !py_exports.contains("helper"),
+        "function-local leak into Exports: {py_exports}"
+    );
+    assert!(
+        !py_exports.contains("hidden"),
+        "__all__ gate leak into Exports: {py_exports}"
+    );
 }
 
 #[test]
