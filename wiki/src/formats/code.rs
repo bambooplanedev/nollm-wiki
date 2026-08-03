@@ -16,6 +16,11 @@ struct LangSpec {
     /// Used where the grammar can't express the gate structurally (Python's
     /// leading-underscore convention, Go's capitalized-identifier convention).
     name_filter: fn(&str) -> bool,
+    /// Applied to the text of a `@vis` capture. A pattern that captures no
+    /// `@vis` is not gated at all — items inside a trait impl or a trait
+    /// declaration carry no visibility modifier yet are public through the
+    /// trait.
+    vis_filter: fn(&str) -> bool,
     /// Trailing characters to strip off a built signature (e.g. Rust's `;`
     /// on a body-less unit/tuple struct, Python's `:` after the parameter list).
     strip_trailing: &'static [char],
@@ -33,21 +38,34 @@ fn keep_go_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_uppercase())
 }
 
+fn keep_any_vis(_vis: &str) -> bool {
+    true
+}
+
+/// Rust only. `(visibility_modifier)` also covers `pub(crate)`, `pub(super)`,
+/// and `pub(in path)`, none of which leave the crate; bare `pub` is the only
+/// one that belongs in `## Exports`.
+fn keep_bare_pub(vis: &str) -> bool {
+    vis == "pub"
+}
+
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
         "rs" => LangSpec {
             lang_name: "rust",
             language: tree_sitter_rust::LANGUAGE.into(),
-            // Only `pub` items are exported; private items are excluded by
-            // requiring the `(visibility_modifier)` child in the pattern.
+            // Requiring `(visibility_modifier)` excludes private items
+            // structurally; `vis_filter` then drops the restricted forms
+            // (`pub(crate)` and friends) that the node kind also covers.
             query_src: r#"
-                (function_item (visibility_modifier) name: (identifier) @name) @def
-                (struct_item (visibility_modifier) name: (type_identifier) @name) @def
-                (enum_item (visibility_modifier) name: (type_identifier) @name) @def
-                (trait_item (visibility_modifier) name: (type_identifier) @name) @def
+                (function_item (visibility_modifier) @vis name: (identifier) @name) @def
+                (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (enum_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (trait_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (use_declaration argument: (_) @import)
             "#,
             name_filter: keep_all,
+            vis_filter: keep_bare_pub,
             strip_trailing: &[';'],
         },
         "py" => LangSpec {
@@ -62,6 +80,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (import_from_statement module_name: (dotted_name) @import)
             "#,
             name_filter: keep_python_public,
+            vis_filter: keep_any_vis,
             strip_trailing: &[':'],
         },
         "js" => LangSpec {
@@ -75,6 +94,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (import_statement source: (string) @import)
             "#,
             name_filter: keep_all,
+            vis_filter: keep_any_vis,
             strip_trailing: &[],
         },
         "ts" => LangSpec {
@@ -86,6 +106,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (import_statement source: (string) @import)
             "#,
             name_filter: keep_all,
+            vis_filter: keep_any_vis,
             strip_trailing: &[],
         },
         "go" => LangSpec {
@@ -100,6 +121,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (import_spec path: (interpreted_string_literal) @import)
             "#,
             name_filter: keep_go_exported,
+            vis_filter: keep_any_vis,
             strip_trailing: &[],
         },
         _ => return None,
@@ -165,6 +187,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let query = Query::new(&spec.language, spec.query_src).ok()?;
     let def_idx = query.capture_index_for_name("def");
     let name_idx = query.capture_index_for_name("name");
+    let vis_idx = query.capture_index_for_name("vis");
     let imp_idx = query.capture_index_for_name("import");
 
     let mut symbols = Vec::new();
@@ -174,11 +197,14 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     for m in matches {
         let mut def_node: Option<Node> = None;
         let mut name_text: Option<&str> = None;
+        let mut vis_text: Option<&str> = None;
         for cap in m.captures {
             if Some(cap.index) == def_idx {
                 def_node = Some(cap.node);
             } else if Some(cap.index) == name_idx {
                 name_text = text.get(cap.node.byte_range());
+            } else if Some(cap.index) == vis_idx {
+                vis_text = text.get(cap.node.byte_range());
             } else if Some(cap.index) == imp_idx {
                 if let Some(raw) = text.get(cap.node.byte_range()) {
                     imports.push(raw.trim().trim_matches(['"', '\'']).to_string());
@@ -186,7 +212,8 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             }
         }
         if let Some(def) = def_node {
-            let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true);
+            let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
                 let body = find_body(def);
                 let sig = build_signature(text, def, body, spec.strip_trailing);
@@ -434,6 +461,29 @@ mod tests {
         assert!(!e.symbols.iter().any(|s| s.contains("private_helper")));
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert_eq!(e.summary.as_deref(), Some("Module docs."));
+    }
+
+    #[test]
+    fn rust_restricted_visibility_is_not_an_export() {
+        let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "pub fn public_one()"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s.contains("kept")),
+            "a bare-pub inherent method must survive: {:?}",
+            e.symbols
+        );
+        for leaked in ["crate_only", "super_only", "CrateType", "impl_crate_only"] {
+            assert!(
+                !e.symbols.iter().any(|s| s.contains(leaked)),
+                "{leaked} is not exported outside the crate: {:?}",
+                e.symbols
+            );
+        }
     }
 
     #[test]
