@@ -219,6 +219,33 @@ mod tests {
     }
 
     #[test]
+    fn a_const_only_module_without_docs_prefers_an_impl_header_to_the_const() {
+        let src = "pub const LIMIT: u32 = 5;\nstruct Foo;\nimpl Display for Foo {\n    fn fmt(&self) {}\n}\n";
+        let e = CodeExtractor.extract("cache.rs", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("impl Display for Foo"),
+            "FreeValue must rank below Header: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn an_associated_const_in_a_trait_impl_is_a_member_not_a_free_value() {
+        // Classification must run AFTER `placement`. Applying the structural rule
+        // first would make this a FreeValue able to hijack the summary from its
+        // own impl header.
+        let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
+        let e = CodeExtractor.extract("c.rs", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("impl Iterator for Counter"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
     fn rust_restricted_visibility_is_not_an_export() {
         let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);

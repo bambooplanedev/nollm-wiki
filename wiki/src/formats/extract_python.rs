@@ -245,6 +245,30 @@ mod tests {
     }
 
     #[test]
+    fn summary_fallback_prefers_a_definition_over_a_constant() {
+        let src = "USER_AGENT = \"Mozilla/5.0\"\n\ndef fetch_feed(url: str) -> bytes:\n    return b\"\"\n";
+        let e = CodeExtractor.extract("fetch.py", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("def fetch_feed(url: str) -> bytes"),
+            "an uppercase constant sorts first and must not win: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn summary_fallback_prefers_a_class_over_its_own_fields() {
+        let src = "@dataclass(frozen=True)\nclass Article:\n    id: str\n    title: str\n";
+        let e = CodeExtractor.extract("models.py", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("@dataclass(frozen=True) class Article"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
     fn python_relative_and_aliased_imports_are_captured() {
         let src = "import os\nimport aggregator.main as m\nfrom graph import build\nfrom .models import Article, FeedSource\nfrom . import state\nfrom . import helpers as h\nfrom ..pkg.sub import thing\n";
         let e = CodeExtractor.extract("main.py", src);

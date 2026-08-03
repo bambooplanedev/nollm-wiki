@@ -168,13 +168,28 @@ type CodeInfo = (
 /// determine the kind exactly, so it is captured there instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum ItemKind {
-    /// A top-level declaration: no owner, and a `@name` capture.
-    Free,
-    /// A trait-impl header. The only pattern that captures a `@def` without a
-    /// `@name` is `(impl_item trait: (_) type: (_)) @def`.
+    /// A top-level `class`/`def`/`struct`/`fn` — the best summary fallback.
+    FreeDef,
+    /// A trait-impl header (a `@def` with no `@name`).
     Header,
-    /// A method or associated item: both an owner and a `@name`.
+    /// A top-level value binding: Python `assignment`, Rust
+    /// `const_item`/`static_item`/`type_item`. Uppercase constants sort ahead
+    /// of lowercase `class`/`def` under plain lexicographic order, so without
+    /// this rank they would take over the summary of every module that
+    /// declares one.
+    FreeValue,
+    /// A method, field, or associated item.
     Member,
+}
+
+/// A definition whose name binds a value rather than declaring a callable or a
+/// type. Consulted only for items `placement` already reported as free — an
+/// associated `const` inside a trait impl is a `Member`, not a `FreeValue`.
+fn is_value_item(kind: &str) -> bool {
+    matches!(
+        kind,
+        "assignment" | "const_item" | "static_item" | "type_item"
+    )
 }
 
 fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
@@ -263,8 +278,10 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                         ItemKind::Header
                     } else if owner.is_some() {
                         ItemKind::Member
+                    } else if is_value_item(def.kind()) {
+                        ItemKind::FreeValue
                     } else {
-                        ItemKind::Free
+                        ItemKind::FreeDef
                     };
                     collected.push((sig, kind));
                 }
@@ -287,13 +304,20 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     // The summary fallback must not be a qualified method. `symbols` is
     // sorted, so on every extractor module `fn <X as Extractor>::extensions`
     // would outrank `pub struct X` and become the page's one-line summary.
-    // Prefer a free item, then an `impl` header (covering generic and
+    // Prefer a free definition, then an `impl` header (covering generic and
     // `unsafe` impls, which no longer have a recognizable signature prefix
-    // to sniff), then whatever sorts first.
+    // to sniff), then a free value binding (an uppercase constant or module
+    // `type` alias, which would otherwise outrank both under plain
+    // lexicographic order), then whatever sorts first.
     let summary_fallback = collected
         .iter()
-        .find(|(_, kind)| *kind == ItemKind::Free)
+        .find(|(_, kind)| *kind == ItemKind::FreeDef)
         .or_else(|| collected.iter().find(|(_, kind)| *kind == ItemKind::Header))
+        .or_else(|| {
+            collected
+                .iter()
+                .find(|(_, kind)| *kind == ItemKind::FreeValue)
+        })
         .or_else(|| collected.first())
         .map(|(sig, _)| sig.clone());
 
