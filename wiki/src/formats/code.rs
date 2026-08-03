@@ -25,6 +25,17 @@ struct LangSpec {
     /// Trailing characters to strip off a built signature (e.g. Rust's `;`
     /// on a body-less unit/tuple struct, Python's `:` after the parameter list).
     strip_trailing: &'static [char],
+    /// Resolves the owner of a definition nested inside a type or trait scope,
+    /// already rendered for splicing into the signature. `None` means the item
+    /// is free-standing and its signature is used verbatim.
+    owner_of: fn(Node, &str) -> Option<String>,
+    /// Separator between owner and member name in a qualified signature.
+    owner_sep: &'static str,
+    /// Rejects a captured definition outright, for scopes the query cannot
+    /// express. Per-language rather than shared: Python's pattern captures
+    /// nested `def`s inside function bodies today, and a shared module-level
+    /// rule would silently change its output.
+    def_filter: fn(Node) -> bool,
 }
 
 fn keep_all(_name: &str) -> bool {
@@ -50,6 +61,65 @@ fn keep_bare_pub(vis: &str) -> bool {
     vis == "pub"
 }
 
+fn no_owner(_def: Node, _text: &str) -> Option<String> {
+    None
+}
+
+fn any_def(_def: Node) -> bool {
+    true
+}
+
+/// The owner of a Rust definition, rendered as it will appear in the
+/// signature:
+///
+///   * inherent `impl` — the type name with generic arguments stripped, so
+///     `impl<T> Holder<T>` yields `Holder::get`, valid Rust that sorts beside
+///     the type's other methods;
+///   * trait `impl` — `<Type as Trait>`, Rust's own disambiguation syntax. The
+///     trait *must* be part of the owner: `impl Display for Foo` and
+///     `impl Debug for Foo` both define `fn fmt(&self, …) -> Result`, which
+///     collapse to a single line under `dedup` if only the type is named. It
+///     also keeps the full type text, so `impl Encode for Vec<u8>` and
+///     `… for Vec<u16>` stay distinct, and it renders exotic targets as valid
+///     paths (`<&Foo as Trait>::m`).
+///   * `trait` declaration — the trait's own name.
+fn rust_owner(def: Node, text: &str) -> Option<String> {
+    let parent = def.parent()?;
+    if parent.kind() != "declaration_list" {
+        return None;
+    }
+    let holder = parent.parent()?;
+    match holder.kind() {
+        "impl_item" => {
+            let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
+            match holder.child_by_field_name("trait") {
+                Some(tr) => Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?)),
+                None => Some(ty.split('<').next().unwrap_or(ty).trim().to_string()),
+            }
+        }
+        "trait_item" => text
+            .get(holder.child_by_field_name("name")?.byte_range())
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+/// True when `node` is reachable from the file root through module and
+/// type-definition scopes only. Reaching a `block` means the item lives inside
+/// a function body — a fixture `impl` written in a helper is not part of the
+/// module's public surface, and tree-sitter queries match at any depth.
+fn rust_module_level(mut node: Node) -> bool {
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            "source_file" | "mod_item" | "declaration_list" | "impl_item" | "trait_item" => {
+                node = parent
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
         "rs" => LangSpec {
@@ -71,6 +141,9 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             name_filter: keep_all,
             vis_filter: keep_bare_pub,
             strip_trailing: &[';', '='],
+            owner_of: rust_owner,
+            owner_sep: "::",
+            def_filter: rust_module_level,
         },
         "py" => LangSpec {
             lang_name: "python",
@@ -86,6 +159,9 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             name_filter: keep_python_public,
             vis_filter: keep_any_vis,
             strip_trailing: &[':'],
+            owner_of: no_owner,
+            owner_sep: "",
+            def_filter: any_def,
         },
         "js" => LangSpec {
             lang_name: "javascript",
@@ -100,6 +176,9 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             name_filter: keep_all,
             vis_filter: keep_any_vis,
             strip_trailing: &[],
+            owner_of: no_owner,
+            owner_sep: "",
+            def_filter: any_def,
         },
         "ts" => LangSpec {
             lang_name: "typescript",
@@ -112,6 +191,9 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             name_filter: keep_all,
             vis_filter: keep_any_vis,
             strip_trailing: &[],
+            owner_of: no_owner,
+            owner_sep: "",
+            def_filter: any_def,
         },
         "go" => LangSpec {
             lang_name: "go",
@@ -127,6 +209,9 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
             name_filter: keep_go_exported,
             vis_filter: keep_any_vis,
             strip_trailing: &[],
+            owner_of: no_owner,
+            owner_sep: "",
+            def_filter: any_def,
         },
         _ => return None,
     })
@@ -200,13 +285,13 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
     for m in matches {
         let mut def_node: Option<Node> = None;
-        let mut name_text: Option<&str> = None;
+        let mut name_node: Option<Node> = None;
         let mut vis_text: Option<&str> = None;
         for cap in m.captures {
             if Some(cap.index) == def_idx {
                 def_node = Some(cap.node);
             } else if Some(cap.index) == name_idx {
-                name_text = text.get(cap.node.byte_range());
+                name_node = Some(cap.node);
             } else if Some(cap.index) == vis_idx {
                 vis_text = text.get(cap.node.byte_range());
             } else if Some(cap.index) == imp_idx {
@@ -216,11 +301,21 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             }
         }
         if let Some(def) = def_node {
+            let name_text = name_node.and_then(|n| text.get(n.byte_range()));
             let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
-                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
+                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
+                && (spec.def_filter)(def);
             if keep {
-                let body = signature_cut(def);
-                let sig = build_signature(text, def, body, spec.strip_trailing);
+                let owner = (spec.owner_of)(def, text);
+                let sig = build_signature(
+                    text,
+                    def,
+                    name_node,
+                    owner.as_deref(),
+                    spec.owner_sep,
+                    signature_cut(def),
+                    spec.strip_trailing,
+                );
                 if !sig.is_empty() {
                     symbols.push(sig);
                 }
@@ -263,19 +358,40 @@ fn signature_cut(def: Node) -> Option<Node> {
 }
 
 /// Build a one-line signature from a definition node: its source text up to
-/// (not including) the start of its body, with internal whitespace/newlines
-/// collapsed to single spaces, the punctuation artifacts of that collapse
-/// tidied away, trimmed, and language-specific trailing punctuation (e.g.
-/// Rust's `;`, Python's `:`) removed.
-fn build_signature(text: &str, def: Node, body: Option<Node>, strip_trailing: &[char]) -> String {
+/// (not including) its `cut` node, with internal whitespace collapsed,
+/// punctuation tidied, and language-specific trailing characters (Rust's `;`
+/// and `=`, Python's `:`) removed.
+///
+/// When an `owner` is known, it is spliced in at the name node's start byte —
+/// a byte-range operation, so there is no substring search to mismatch.
+fn build_signature(
+    text: &str,
+    def: Node,
+    name: Option<Node>,
+    owner: Option<&str>,
+    owner_sep: &str,
+    cut: Option<Node>,
+    strip_trailing: &[char],
+) -> String {
     let start = def.start_byte();
-    let end = body
+    let end = cut
         .map(|b| b.start_byte())
         .unwrap_or_else(|| def.end_byte())
         .max(start)
         .min(text.len());
-    let raw = text.get(start..end).unwrap_or("");
-    let mut sig = tidy_punctuation(collapse_whitespace(raw));
+    let raw = match (owner, name) {
+        (Some(owner), Some(name)) if name.start_byte() >= start && name.start_byte() <= end => {
+            format!(
+                "{}{}{}{}",
+                text.get(start..name.start_byte()).unwrap_or(""),
+                owner,
+                owner_sep,
+                text.get(name.start_byte()..end).unwrap_or("")
+            )
+        }
+        _ => text.get(start..end).unwrap_or("").to_string(),
+    };
+    let mut sig = tidy_punctuation(collapse_whitespace(&raw));
     loop {
         match sig.chars().last() {
             Some(c) if strip_trailing.contains(&c) => {
@@ -591,6 +707,69 @@ mod tests {
         assert!(
             e.symbols.iter().any(|s| s == "pub type Single = (u8,)"),
             "a one-element tuple is not a parenthesized value: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn inherent_impl_methods_are_qualified_with_their_type() {
+        let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> Vec<Hit> { todo!() }\n    fn helper(&self) {}\n}\npub fn free_function() {}\n";
+        let e = CodeExtractor.extract("query.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "pub fn free_function()"),
+            "a top-level function must stay unqualified: {:?}",
+            e.symbols
+        );
+        assert!(!e.symbols.iter().any(|s| s.contains("helper")));
+    }
+
+    #[test]
+    fn generic_inherent_impl_strips_type_arguments() {
+        let src = "impl<T: Clone> Holder<T> {\n    pub fn get(&self) -> T { todo!() }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        // `Holder::get` is valid Rust and sorts beside the type's other
+        // methods; `Holder<T>::get` would be neither.
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub fn Holder::get(&self) -> T"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn function_local_items_are_not_module_exports() {
+        let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "pub fn outer()"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        for leaked in ["Local", "hidden", "nested"] {
+            assert!(
+                !e.symbols.iter().any(|s| s.contains(leaked)),
+                "{leaked} lives in a function body and is not module surface: {:?}",
+                e.symbols
+            );
+        }
+    }
+
+    #[test]
+    fn items_in_an_inline_module_stay_unqualified() {
+        let src = "pub mod inner {\n    pub fn in_mod() {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "pub fn in_mod()"),
+            "symbols: {:?}",
             e.symbols
         );
     }
