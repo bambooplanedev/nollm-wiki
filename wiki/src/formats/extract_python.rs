@@ -126,20 +126,30 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
     Placement::Scoped(chain)
 }
 
-/// `__all__ = [...]` or `(...)` at module level, honored only when every
-/// element is a plain string literal. Anything else — `["a"] + other.__all__`,
-/// a comprehension, a bare name, an f-string (its node kind is also `string`
-/// in this grammar, but any `interpolation` child means it is computed at
-/// import time exactly like the cases above) — means the module computes its
-/// surface at import time, which no static rule can follow, so the
-/// convention applies instead. An element with no extractable
-/// `string_content` (a genuinely empty `""`) also aborts the set and falls
-/// back to the convention; that is intended, not incidental, since an empty
-/// name could never match a captured definition anyway.
+/// `__all__ = [...]` or `(...)` at module level, honored only when the LAST
+/// module-level statement that touches `__all__` is a plain assignment to a
+/// literal list/tuple of plain string literals. Anything else there —
+/// `["a"] + other.__all__`, a comprehension, a bare name, a function call
+/// (`__all__ = compute()`), an in-place mutation (`__all__ += [...]`,
+/// `__all__.append(...)`, `__all__.extend(...)`), or an f-string element (its
+/// node kind is also `string` in this grammar, but any `interpolation` child
+/// means it is computed at import time exactly like the cases above) — means
+/// the module computes or mutates its surface at import time, which no static
+/// rule can follow, so the convention applies instead. An element with no
+/// extractable `string_content` (a genuinely empty `""`) also aborts the set
+/// and falls back to the convention; that is intended, not incidental, since
+/// an empty name could never match a captured definition anyway.
 ///
-/// Python assignment is last-wins, so when a module reassigns `__all__` more
-/// than once at module level, only the last assignment governs; earlier ones
-/// are ignored entirely, including their validity.
+/// "Last statement" is a property of the whole set of `__all__`-touching
+/// statements, not just literal assignments: `__all__ = ["a"]` followed later
+/// by `__all__ += ["b"]` must fall back to the convention (the augmented
+/// assignment is last and isn't a literal assignment), even though the most
+/// recent *literal* assignment looks well-formed on its own — reading only
+/// literal assignments and ignoring everything between them is exactly the
+/// defect this cycle exists to close. Among literal assignments alone,
+/// last-wins is unchanged: when a module reassigns `__all__` to a literal list
+/// more than once with nothing else touching it in between, only the last one
+/// governs.
 ///
 /// Names listed but not defined in this file (the `__init__.py` re-export
 /// case) match no captured definition and simply have no effect.
@@ -147,28 +157,58 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     let language: Language = tree_sitter_python::LANGUAGE.into();
     let query = Query::new(
         &language,
-        "(module (expression_statement (assignment left: (identifier) @lhs right: [(list) (tuple)] @rhs)))",
+        r#"
+            (module
+              (expression_statement
+                [
+                  (assignment left: (identifier) @lhs right: (_) @rhs)
+                  (augmented_assignment left: (identifier) @lhs)
+                  (call
+                    function: (attribute
+                      object: (identifier) @lhs
+                      attribute: (identifier) @method))
+                ]
+              )
+            )
+        "#,
     )
     .ok()?;
     let lhs_idx = query.capture_index_for_name("lhs");
     let rhs_idx = query.capture_index_for_name("rhs");
+    let method_idx = query.capture_index_for_name("method");
     let mut cursor = QueryCursor::new();
-    let mut last_rhs: Option<Node> = None;
+    // Only the LAST `__all__`-touching statement matters. `last_literal_rhs`
+    // is `Some` exactly when that statement is a plain assignment to a
+    // `list`/`tuple` node; anything else touching `__all__` after a literal
+    // assignment must clear it, which is why this is reset on every match
+    // rather than only updated when a new literal is found.
+    let mut last_literal_rhs: Option<Node> = None;
     for m in cursor.matches(&query, tree.root_node(), text.as_bytes()) {
         let mut lhs = None;
         let mut rhs = None;
+        let mut method = None;
         for cap in m.captures {
             if Some(cap.index) == lhs_idx {
                 lhs = text.get(cap.node.byte_range());
             } else if Some(cap.index) == rhs_idx {
                 rhs = Some(cap.node);
+            } else if Some(cap.index) == method_idx {
+                method = text.get(cap.node.byte_range());
             }
         }
-        if lhs == Some("__all__") {
-            last_rhs = rhs;
+        if lhs != Some("__all__") {
+            continue;
         }
+        // A call only counts as touching `__all__` when it is `.append` or
+        // `.extend` — some other `__all__.something(...)` is out of scope.
+        if let Some(name) = method {
+            if name != "append" && name != "extend" {
+                continue;
+            }
+        }
+        last_literal_rhs = rhs.filter(|r| r.kind() == "list" || r.kind() == "tuple");
     }
-    let rhs = last_rhs?;
+    let rhs = last_literal_rhs?;
     let mut names = BTreeSet::new();
     let mut walker = rhs.walk();
     for el in rhs.named_children(&mut walker) {
@@ -347,11 +387,30 @@ mod tests {
 
     #[test]
     fn python_private_class_takes_its_methods_with_it() {
-        let src = "class _TextExtractor:\n    def handle_data(self, data: str) -> None:\n        pass\n    def text(self) -> str:\n        return \"\"\n";
+        // A public sibling class makes this test self-guarding: asserting only
+        // `symbols.is_empty()` would equally pass if Python extraction were
+        // disabled entirely. `Public` must survive so the empty methods of
+        // `_TextExtractor` are known to have been gated, not simply never
+        // extracted.
+        let src = "class _TextExtractor:\n    def handle_data(self, data: str) -> None:\n        pass\n    def text(self) -> str:\n        return \"\"\n\nclass Public:\n    def run(self) -> None:\n        pass\n";
         let e = CodeExtractor.extract("parse.py", src);
         assert!(
-            e.symbols.is_empty(),
+            !e.symbols.iter().any(|s| s.contains("_TextExtractor")
+                || s.contains("handle_data")
+                || s.contains("text(")),
             "a private class must not export its methods: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "class Public"),
+            "extraction must still be happening at all: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "def Public.run(self) -> None"),
+            "{:?}",
             e.symbols
         );
     }
@@ -444,6 +503,58 @@ mod tests {
     }
 
     #[test]
+    fn all_can_export_an_underscore_prefixed_free_name() {
+        // `__all__` replaces the underscore convention for the *module-level*
+        // name it lists — including a free item whose own name starts with
+        // `_`. `__version__` is a real, common idiom; a re-application of
+        // `name_filter` to the item's own name would silently override
+        // `__all__` here instead of being replaced by it.
+        let src = "__all__ = [\"_private_api\", \"__version__\", \"Public\"]\n\n__version__ = \"1.0\"\n\ndef _private_api() -> int:\n    return 1\n\nclass Public:\n    def _hidden(self) -> None:\n        pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "def _private_api() -> int"),
+            "__all__ must be able to export a free underscore-prefixed name: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "__version__ = \"1.0\""),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "class Public"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("_hidden")),
+            "a _hidden method of a listed class must stay hidden — the \
+             convention always applies inside a class: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn without_all_the_underscore_convention_still_hides_a_free_name() {
+        // Guards against an overcorrection of the fix above: with no `__all__`
+        // at all, `exports` is `None` and the convention must still apply to
+        // a free item's own name exactly as before.
+        let src =
+            "def _private_api() -> int:\n    return 1\n\ndef public_api() -> int:\n    return 2\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("_private_api")),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def public_api() -> int"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
     fn a_computed_all_falls_back_to_the_underscore_convention() {
         let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
@@ -475,6 +586,59 @@ mod tests {
         assert!(
             !e.symbols.iter().any(|s| s == "def a()"),
             "the second, later __all__ must win over the first: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn an_augmented_all_after_a_literal_falls_back_to_the_underscore_convention() {
+        // `__all__ += [...]` never matches the literal-assignment query shape
+        // at all, so a prior literal assignment stayed visible and the
+        // augmented one was invisible to `python_all` — the stale `["base_name"]`
+        // kept governing and `added_name` was silently dropped even though it
+        // is a real, file-defined, genuinely public name. The fix must see the
+        // `+=` as the LAST statement touching `__all__` and fall back to the
+        // convention for the whole module, exporting both names.
+        let src = "__all__ = [\"base_name\"]\n__all__ += [\"added_name\"]\n\ndef base_name() -> int:\n    return 1\n\ndef added_name() -> int:\n    return 2\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "def base_name() -> int"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def added_name() -> int"),
+            "`__all__ +=` must fall back to the convention, not keep the stale literal: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_recomputed_all_after_a_literal_falls_back_to_the_underscore_convention() {
+        // `__all__ = compute()` after an earlier literal assignment: the
+        // literal-only query saw only the first, literal assignment and never
+        // noticed the module later recomputed its surface non-literally. The
+        // recomputation must win as the last statement and fall back to the
+        // convention.
+        let src =
+            "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = compute()\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "def b()"),
+            "a non-literal reassignment must fall back to the convention: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn an_all_dot_extend_after_a_literal_falls_back_to_the_underscore_convention() {
+        let src = "__all__ = [\"a\"]\n__all__.extend([\"b\"])\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "def b()"),
+            "__all__.extend(...) must fall back to the convention: {:?}",
             e.symbols
         );
     }
@@ -570,6 +734,22 @@ mod tests {
     #[test]
     fn python_line_continuations_do_not_strand_the_strip_loop() {
         let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "Z: int"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "X = compute()"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn crlf_line_continuations_do_not_strand_the_strip_loop() {
+        // Under CRLF the continuation sequence is `\` `\r` `\n`, not `\` `\n`
+        // — a plain `.replace("\\\n", " ")` never matches it, so `Z: int = \`
+        // survives unfixed on a CRLF file, exactly the defect the join was
+        // added to prevent. The CRLF form must be replaced first.
+        let src = "Z: int = \\\r\n    5\r\nX = \\\r\n    compute()\r\n";
         let e = CodeExtractor.extract("m.py", src);
         assert!(e.symbols.iter().any(|s| s == "Z: int"), "{:?}", e.symbols);
         assert!(

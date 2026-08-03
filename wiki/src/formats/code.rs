@@ -268,8 +268,22 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                 (_, Some(root)) => (spec.name_filter)(root),
                 (_, None) => true,
             };
+            // For a free item (`chain` empty), `gate_root` above IS `name_text`,
+            // so `root_ok` has already decided this exact name against
+            // `exports` when the module declares one. Re-applying `name_filter`
+            // to it here would let the underscore convention override `__all__`
+            // instead of being replaced by it — `__all__ = ["__version__"]`
+            // would otherwise never export `__version__`. A member's own name
+            // is not `gate_root` (the outermost enclosing class is), so the
+            // convention must still gate it unconditionally: `__all__` says
+            // nothing about what is public *within* a class it lists.
+            let own_name_ok = if exports.is_some() && chain.is_empty() {
+                true
+            } else {
+                name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+            };
             let keep = root_ok
-                && name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+                && own_name_ok
                 && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
                 && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
@@ -436,7 +450,11 @@ fn build_signature(
     // default-parameter value sits inside the retained signature span, so
     // joining it there would silently rewrite `"x\<newline>y"` to `"x y"`.
     let raw = if spec.join_continuations {
-        raw.replace("\\\n", " ")
+        // CRLF line endings make the continuation sequence `\` `\r` `\n`, not
+        // `\` `\n` — replace the CRLF form first, or a CRLF file leaves the
+        // backslash unjoined (`Z: int = \` survives untouched), exactly the
+        // defect this join exists to prevent.
+        raw.replace("\\\r\n", " ").replace("\\\n", " ")
     } else {
         raw
     };
@@ -719,6 +737,38 @@ mod tests {
             e.symbols
                 .iter()
                 .any(|s| s == "func Wrapped(a int, b int) string"),
+            "symbols: {:?}",
+            e.symbols
+        );
+
+        // The name promises "every language" but the fixtures above cover
+        // only Python and Go — JS, TS, and Rust close the gap.
+        let js = "export function wrapped(\n  a,\n  b,\n) {\n  return a + b;\n}\n";
+        let e = CodeExtractor.extract("t.js", js);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "export function wrapped(a, b)"),
+            "symbols: {:?}",
+            e.symbols
+        );
+
+        let ts = "export function wrapped(\n  a: number,\n  b: number,\n): number {\n  return a + b;\n}\n";
+        let e = CodeExtractor.extract("t.ts", ts);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "export function wrapped(a: number, b: number): number"),
+            "symbols: {:?}",
+            e.symbols
+        );
+
+        let rust = "pub fn wrapped(\n    a: u8,\n    b: u8,\n) -> u8 {\n    a + b\n}\n";
+        let e = CodeExtractor.extract("t.rs", rust);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub fn wrapped(a: u8, b: u8) -> u8"),
             "symbols: {:?}",
             e.symbols
         );
