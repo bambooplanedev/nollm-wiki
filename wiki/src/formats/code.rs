@@ -274,7 +274,7 @@ fn build_signature(text: &str, def: Node, body: Option<Node>, strip_trailing: &[
         .max(start)
         .min(text.len());
     let raw = text.get(start..end).unwrap_or("");
-    let mut sig = collapse_whitespace(raw);
+    let mut sig = tidy_punctuation(collapse_whitespace(raw));
     loop {
         match sig.chars().last() {
             Some(c) if strip_trailing.contains(&c) => {
@@ -282,6 +282,22 @@ fn build_signature(text: &str, def: Node, body: Option<Node>, strip_trailing: &[
                 sig = sig.trim_end().to_string();
             }
             _ => break,
+        }
+    }
+    sig
+}
+
+/// Remove the artifacts whitespace collapsing leaves around the punctuation of
+/// a multi-line parameter list: `fn f( a: u8, b: u8, )` becomes
+/// `fn f(a: u8, b: u8)`. The trailing comma before a collapsed closing
+/// delimiter always arrives as `, )` (with a space, from the newline that
+/// separated them), so matching that sequence is enough to remove it; a
+/// genuine one-element tuple written `(1,)` has no such space and is left
+/// alone.
+fn tidy_punctuation(mut sig: String) -> String {
+    for (from, to) in [("( ", "("), (", )", ")"), (" )", ")"), (" ,", ",")] {
+        while sig.contains(from) {
+            sig = sig.replace(from, to);
         }
     }
     sig
@@ -543,6 +559,30 @@ mod tests {
         assert!(
             !e.symbols.iter().any(|s| s.contains("PRIVATE")),
             "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn multi_line_parameter_lists_are_tidied() {
+        let src = "pub fn generate(\n    out: &Path,\n    n: usize,\n) -> Result<(), Error> { todo!() }\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub fn generate(out: &Path, n: usize) -> Result<(), Error>"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn one_element_tuple_survives_tidying() {
+        let src = "pub type Single = (u8,);\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "pub type Single = (u8,)"),
+            "a one-element tuple is not a parenthesized value: {:?}",
             e.symbols
         );
     }
