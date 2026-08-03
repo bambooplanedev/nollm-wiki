@@ -25,17 +25,12 @@ pub(crate) struct LangSpec {
     /// Trailing characters to strip off a built signature (e.g. Rust's `;`
     /// on a body-less unit/tuple struct, Python's `:` after the parameter list).
     pub(crate) strip_trailing: &'static [char],
-    /// Resolves the owner of a definition nested inside a type or trait scope,
-    /// already rendered for splicing into the signature. `None` means the item
-    /// is free-standing and its signature is used verbatim.
-    pub(crate) owner_of: fn(Node, &str) -> Option<String>,
+    /// Rejects a definition, or reports the scopes enclosing it. Per-language
+    /// because Rust guards module level with an allow-list of item containers
+    /// while Python denies exactly one (a function body).
+    pub(crate) placement: fn(Node, &str) -> Placement,
     /// Separator between owner and member name in a qualified signature.
     pub(crate) owner_sep: &'static str,
-    /// Rejects a captured definition outright, for scopes the query cannot
-    /// express. Per-language rather than shared: Python's pattern captures
-    /// nested `def`s inside function bodies today, and a shared module-level
-    /// rule would silently change its output.
-    pub(crate) def_filter: fn(Node) -> bool,
 }
 
 pub(crate) fn keep_all(_name: &str) -> bool {
@@ -46,12 +41,22 @@ pub(crate) fn keep_any_vis(_vis: &str) -> bool {
     true
 }
 
-pub(crate) fn no_owner(_def: Node, _text: &str) -> Option<String> {
-    None
+/// Where a captured definition sits relative to the module's public surface.
+///
+/// Replaces the previous `owner_of` + `def_filter` pair. The two were split
+/// only because Rust could answer them independently; Python answers both from
+/// a single upward traversal of the tree, and keeping them apart would
+/// traverse it twice and duplicate the privacy check.
+pub(crate) enum Placement {
+    /// Not part of the module's surface — drop the definition outright.
+    Rejected,
+    /// Enclosing scope names, outermost first. Empty means a free item whose
+    /// signature is used verbatim.
+    Scoped(Vec<String>),
 }
 
-pub(crate) fn any_def(_def: Node) -> bool {
-    true
+pub(crate) fn always_free(_def: Node, _text: &str) -> Placement {
+    Placement::Scoped(Vec::new())
 }
 
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
@@ -184,12 +189,18 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             }
         }
         if let Some(def) = def_node {
+            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
+                continue;
+            };
             let name_text = name_node.and_then(|n| text.get(n.byte_range()));
             let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
-                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
-                && (spec.def_filter)(def);
+                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
-                let owner = (spec.owner_of)(def, text);
+                let owner = if chain.is_empty() {
+                    None
+                } else {
+                    Some(chain.join(spec.owner_sep))
+                };
                 let sig = build_signature(
                     text,
                     def,
@@ -338,7 +349,7 @@ fn build_signature(
 /// would take the parse tree. Signatures are documentation, not compiled code,
 /// and the shape is rare enough to accept.
 ///
-/// Unlike `owner_of`, `vis_filter`, `owner_sep` and `def_filter`, this pass is
+/// Unlike `placement`, `vis_filter` and `owner_sep`, this pass is
 /// not a `LangSpec` field: it runs inside `build_signature` for all five
 /// languages, not just Rust. It is a plain substring substitution over the
 /// collapsed text, so it also rewrites punctuation sitting inside a string

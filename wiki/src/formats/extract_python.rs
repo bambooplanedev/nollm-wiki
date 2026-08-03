@@ -1,6 +1,6 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention and
 //! AST-verified module docstring extraction.
-use super::code::{any_def, keep_any_vis, no_owner, LangSpec};
+use super::code::{always_free, keep_any_vis, LangSpec};
 use tree_sitter::Tree;
 
 fn keep_python_public(name: &str) -> bool {
@@ -22,9 +22,8 @@ pub(crate) fn python_spec() -> LangSpec {
         name_filter: keep_python_public,
         vis_filter: keep_any_vis,
         strip_trailing: &[':'],
-        owner_of: no_owner,
+        placement: always_free,
         owner_sep: "",
-        def_filter: any_def,
     }
 }
 

@@ -1,6 +1,6 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
-use super::code::{keep_all, LangSpec};
+use super::code::{keep_all, LangSpec, Placement};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
 /// Rust only. `(visibility_modifier)` also covers `pub(crate)`, `pub(super)`,
@@ -61,6 +61,19 @@ fn rust_module_level(mut node: Node) -> bool {
     true
 }
 
+/// The previous cycle's `rust_module_level` guard and `rust_owner` resolution,
+/// composed. Order is unobservable: both were pure functions, and the old loop
+/// called `rust_owner` only after `rust_module_level` had passed.
+pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
+    if !rust_module_level(def) {
+        return Placement::Rejected;
+    }
+    match rust_owner(def, text) {
+        Some(owner) => Placement::Scoped(vec![owner]),
+        None => Placement::Scoped(Vec::new()),
+    }
+}
+
 pub(crate) fn rust_spec() -> LangSpec {
     LangSpec {
         lang_name: "rust",
@@ -91,9 +104,8 @@ pub(crate) fn rust_spec() -> LangSpec {
         name_filter: keep_all,
         vis_filter: keep_bare_pub,
         strip_trailing: &[';', '='],
-        owner_of: rust_owner,
+        placement: rust_placement,
         owner_sep: "::",
-        def_filter: rust_module_level,
     }
 }
 
@@ -674,5 +686,23 @@ mod tests {
         let e = CodeExtractor.extract("t.rs", src);
         assert_eq!(e.symbols, vec!["unsafe impl Send for Foo".to_string()]);
         assert_eq!(e.summary.as_deref(), Some("unsafe impl Send for Foo"));
+    }
+
+    #[test]
+    fn placement_reproduces_the_module_level_guard_and_owner() {
+        let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
+        let e = CodeExtractor.extract("q.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub fn Wiki::search(&self) -> u8"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("hidden")),
+            "function-local item leaked: {:?}",
+            e.symbols
+        );
     }
 }
