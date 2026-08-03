@@ -182,6 +182,17 @@ breaking any of them reintroduces nondeterminism.
   `## Exports` displays — because grouping sorts on the bare name, and an
   uppercase type name outranks a lowercase function name there even when the
   function is what the module is about.
+- **The `ItemKind::FreeValue` rank (the classification this bullet's `kind`
+  depends on) is not itself ordering-only.** It can change which signature a
+  Rust page picks as its *summary*, not just where `## Exports` displays it: a
+  Rust module whose only free items are `const`/`static`/`type` and which has
+  no `//!` doc comment will summarize differently than it would under plain
+  lexicographic order, because an uppercase constant would otherwise outrank a
+  lowercase `impl` header. Inert on this repository — pinned by
+  `a_const_only_module_without_docs_prefers_an_impl_header_to_the_const`
+  (`extract_rust.rs`) — but real for any Rust crate with that shape, and it
+  landed in the same commit as the Python symbols overhaul, not the later
+  grouping-order commit.
 
 ## Incremental build
 
