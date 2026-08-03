@@ -1,6 +1,7 @@
 use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, Entity, SourceKind};
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
+use std::collections::BTreeSet;
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
 
 pub struct CodeExtractor;
 
@@ -31,6 +32,10 @@ pub(crate) struct LangSpec {
     pub(crate) placement: fn(Node, &str) -> Placement,
     /// Separator between owner and member name in a qualified signature.
     pub(crate) owner_sep: &'static str,
+    /// The module's own declaration of its public surface, when the language
+    /// has one and the module states it literally. `None` means fall back to
+    /// `name_filter`.
+    pub(crate) export_set: fn(&Tree, &str) -> Option<BTreeSet<String>>,
 }
 
 pub(crate) fn keep_all(_name: &str) -> bool {
@@ -39,6 +44,10 @@ pub(crate) fn keep_all(_name: &str) -> bool {
 
 pub(crate) fn keep_any_vis(_vis: &str) -> bool {
     true
+}
+
+pub(crate) fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
+    None
 }
 
 /// Where a captured definition sits relative to the module's public surface.
@@ -176,6 +185,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let name_idx = query.capture_index_for_name("name");
     let vis_idx = query.capture_index_for_name("vis");
     let imp_idx = query.capture_index_for_name("import");
+    let exports = (spec.export_set)(&tree, text);
 
     // (signature, kind). See `ItemKind` for why the kind is recorded here
     // rather than recovered from the signature string later.
@@ -205,8 +215,20 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                 continue;
             };
             let name_text = name_node.and_then(|n| text.get(n.byte_range()));
-            let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
-                && chain.iter().all(|c| (spec.name_filter)(c))
+            // Two gates. `__all__`, when the module declares one literally,
+            // replaces the convention for the *module-level* name — the item
+            // itself when free, the outermost enclosing class when a member.
+            // The convention always applies inside a class, because `__all__`
+            // says nothing about what is public within one.
+            let gate_root = chain.first().map(String::as_str).or(name_text);
+            let root_ok = match (&exports, gate_root) {
+                (Some(set), Some(root)) => set.contains(root),
+                (_, Some(root)) => (spec.name_filter)(root),
+                (_, None) => true,
+            };
+            let keep = root_ok
+                && name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+                && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
                 && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
                 let owner = if chain.is_empty() {

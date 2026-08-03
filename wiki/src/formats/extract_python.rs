@@ -1,7 +1,9 @@
-//! Python extraction: PEP 8 leading-underscore visibility convention and
-//! AST-verified module docstring extraction.
+//! Python extraction: PEP 8 leading-underscore visibility convention,
+//! `__all__` as the authoritative override, and AST-verified module docstring
+//! extraction.
 use super::code::{keep_any_vis, LangSpec, Placement};
-use tree_sitter::{Node, Tree};
+use std::collections::BTreeSet;
+use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
 
 fn keep_python_public(name: &str) -> bool {
     !name.starts_with('_')
@@ -44,6 +46,7 @@ pub(crate) fn python_spec() -> LangSpec {
         strip_trailing: &[':'],
         placement: python_placement,
         owner_sep: ".",
+        export_set: python_all,
     }
 }
 
@@ -88,6 +91,60 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
     // `Inner.Article.deep`.
     chain.reverse();
     Placement::Scoped(chain)
+}
+
+/// `__all__ = [...]` or `(...)` at module level, honored only when every
+/// element is a plain string literal. Anything else — `["a"] + other.__all__`,
+/// a comprehension, a bare name — means the module computes its surface at
+/// import time, which no static rule can follow, so the convention applies
+/// instead.
+///
+/// Names listed but not defined in this file (the `__init__.py` re-export
+/// case) match no captured definition and simply have no effect.
+pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
+    let language: Language = tree_sitter_python::LANGUAGE.into();
+    let query = Query::new(
+        &language,
+        "(module (expression_statement (assignment left: (identifier) @lhs right: [(list) (tuple)] @rhs)))",
+    )
+    .ok()?;
+    let lhs_idx = query.capture_index_for_name("lhs");
+    let rhs_idx = query.capture_index_for_name("rhs");
+    let mut cursor = QueryCursor::new();
+    for m in cursor.matches(&query, tree.root_node(), text.as_bytes()) {
+        let mut lhs = None;
+        let mut rhs = None;
+        for cap in m.captures {
+            if Some(cap.index) == lhs_idx {
+                lhs = text.get(cap.node.byte_range());
+            } else if Some(cap.index) == rhs_idx {
+                rhs = Some(cap.node);
+            }
+        }
+        if lhs != Some("__all__") {
+            continue;
+        }
+        let rhs = rhs?;
+        let mut names = BTreeSet::new();
+        let mut walker = rhs.walk();
+        for el in rhs.named_children(&mut walker) {
+            if el.kind() != "string" {
+                return None;
+            }
+            let mut sc = el.walk();
+            let content = el
+                .named_children(&mut sc)
+                .find(|n| n.kind() == "string_content");
+            match content.and_then(|n| text.get(n.byte_range())) {
+                Some(s) => {
+                    names.insert(s.to_string());
+                }
+                None => return None,
+            }
+        }
+        return Some(names);
+    }
+    None
 }
 
 /// A Python module-level docstring: the first non-comment top-level
@@ -248,6 +305,59 @@ mod tests {
             e.symbols,
             vec!["def outer()".to_string()],
             "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_all_is_the_authoritative_export_gate() {
+        let src = "__all__ = [\"Public\", \"shown\"]\n\nclass Public:\n    field: str\n    def m(self) -> None:\n        pass\n    def _hidden(self) -> None:\n        pass\n\nclass NotListed:\n    field: int\n\ndef shown() -> int:\n    return 1\n\ndef not_listed() -> int:\n    return 2\n\nHIDDEN_CONST = 5\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "class Public"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def Public.m(self) -> None"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def shown() -> int"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("NotListed")),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("not_listed")),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("HIDDEN_CONST")),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("_hidden")),
+            "__all__ says nothing about what is public inside a class: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_computed_all_falls_back_to_the_underscore_convention() {
+        let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "def b()"),
+            "a non-literal __all__ must not gate anything: {:?}",
             e.symbols
         );
     }
