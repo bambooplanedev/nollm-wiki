@@ -32,6 +32,17 @@ pub(crate) fn python_spec() -> LangSpec {
         // prefix anyway. `from . import *` and `from __future__ import x`
         // capture nothing; neither resolves to a page.
         query_src: r#"
+                ; One pattern covers module constants AND class fields:
+                ; tree-sitter matches at any depth, so a second class-scoped
+                ; pattern would fire on the same nodes and emit every field twice.
+                ; This is the trap the Rust cycle documented for `impl` methods.
+                ;
+                ; `left: (identifier)` means `HOST, PORT = "x", 80` (a
+                ; `pattern_list`) and `X += 1` (an `augmented_assignment`) match
+                ; nothing, and `A = B = 2` yields only `A` because the inner
+                ; assignment is a descendant of `right:`, not of an
+                ; `expression_statement`. All three are losses, not features.
+                (expression_statement (assignment left: (identifier) @name) @def)
                 (function_definition name: (identifier) @name) @def
                 (class_definition name: (identifier) @name) @def
                 (import_statement name: (dotted_name) @import)
@@ -43,7 +54,7 @@ pub(crate) fn python_spec() -> LangSpec {
             "#,
         name_filter: keep_python_public,
         vis_filter: keep_any_vis,
-        strip_trailing: &[':'],
+        strip_trailing: &[':', '='],
         placement: python_placement,
         owner_sep: ".",
         export_set: python_all,
@@ -402,6 +413,119 @@ mod tests {
             "the second, later __all__ must win over the first: {:?}",
             e.symbols
         );
+    }
+
+    #[test]
+    fn python_annotated_assignments_cut_the_value_and_unannotated_keep_it() {
+        let src = "MAX_IDS = 2000\nSUMMARY_LIMIT: int = 300\nPRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]\nAlias = list[int]\n_PRIVATE = 1\n";
+        let e = CodeExtractor.extract("state.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "MAX_IDS = 2000"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "SUMMARY_LIMIT: int"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "PRISM_FILES: list[tuple[str, str]]"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "Alias = list[int]"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("_PRIVATE")),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_class_fields_are_qualified_and_gated() {
+        let src = "class Article:\n    title: str\n    url: str = \"\"\n    published: datetime | None = None\n    _hidden: int = 0\n";
+        let e = CodeExtractor.extract("models.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "Article.title: str"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "Article.url: str"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "Article.published: datetime | None"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("_hidden")),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_class_fields_are_emitted_once_not_twice() {
+        let src = "class Article:\n    title: str\n";
+        let e = CodeExtractor.extract("m.py", src);
+        let hits = e
+            .symbols
+            .iter()
+            .filter(|s| *s == "Article.title: str")
+            .count();
+        assert_eq!(hits, 1, "one pattern, one emission: {:?}", e.symbols);
+    }
+
+    #[test]
+    fn python_long_values_are_truncated_on_a_character_boundary() {
+        // Cyrillic: a byte-indexed cut panics here. The real corpus has exactly
+        // this shape in prism-agent's judge.py.
+        let src = "SYSTEM_PROMPT = \"Ти — редакторський фільтр каналу, який оцінює статті дуже суворо\"\n";
+        let e = CodeExtractor.extract("judge.py", src);
+        let sig = e
+            .symbols
+            .iter()
+            .find(|s| s.starts_with("SYSTEM_PROMPT"))
+            .unwrap_or_else(|| panic!("no SYSTEM_PROMPT in {:?}", e.symbols));
+        assert!(sig.ends_with('…'), "must be truncated: {sig}");
+        assert!(sig.chars().count() < 80, "budget not applied: {sig}");
+    }
+
+    #[test]
+    fn python_line_continuations_do_not_strand_the_strip_loop() {
+        let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "Z: int"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "X = compute()"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_chained_assignment_yields_only_the_outer_name() {
+        // Known loss, pinned so it is visible rather than surprising: `B` is
+        // equally a public module-level name and is dropped — only `A` is
+        // captured (the query anchors `assignment` as a direct child of
+        // `expression_statement`; the nested `B = 2` sits under `right:`
+        // instead). `A`'s value is kept whole, per the unannotated rule, and
+        // that whole value happens to be the literal text `B = 2`.
+        let src = "A = B = 2\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert_eq!(e.symbols, vec!["A = B = 2".to_string()], "{:?}", e.symbols);
     }
 
     #[test]

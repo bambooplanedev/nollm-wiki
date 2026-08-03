@@ -319,7 +319,19 @@ fn signature_cut(def: Node) -> Option<Node> {
             return Some(body);
         }
     }
-    def.child_by_field_name("value")
+    if let Some(value) = def.child_by_field_name("value") {
+        return Some(value);
+    }
+    // Assignments cut at the value ONLY when a type annotation carries the
+    // contract. Rust cuts a `const`'s value because the type always survives;
+    // Python's annotation is optional, so cutting an unannotated assignment
+    // would leave a bare identifier with no kind, no type, and no value. The
+    // Rust cycle made the same distinction for `type` aliases, which it
+    // refused to cut because "an alias without its target would be useless".
+    if def.kind() == "assignment" && def.child_by_field_name("type").is_some() {
+        return def.child_by_field_name("right");
+    }
+    None
 }
 
 /// Build a one-line signature from a definition node: its source text up to
@@ -366,7 +378,32 @@ fn build_signature(
             _ => break,
         }
     }
+    if def.kind() == "assignment" && def.child_by_field_name("type").is_none() {
+        sig = truncate_value(sig);
+    }
     sig
+}
+
+/// Characters of an unannotated assignment's value kept in a signature.
+/// Measured: the smallest round budget under which every real constant in the
+/// audit corpora survives intact, truncating only a multi-line prompt and a
+/// multi-line user-agent string.
+const PY_VALUE_BUDGET: usize = 48;
+
+/// Bound a retained assignment value. Counts `chars()`, never bytes: the audit
+/// corpus contains a Cyrillic prompt literal that a byte slice would split
+/// mid-scalar and panic on.
+fn truncate_value(sig: String) -> String {
+    let Some(eq) = sig.find(" = ") else {
+        return sig;
+    };
+    let split = eq + " = ".len();
+    let (head, value) = sig.split_at(split);
+    if value.chars().count() <= PY_VALUE_BUDGET {
+        return sig;
+    }
+    let kept: String = value.chars().take(PY_VALUE_BUDGET).collect();
+    format!("{head}{kept}…")
 }
 
 /// Remove the artifacts whitespace collapsing leaves around the punctuation of
@@ -402,6 +439,12 @@ fn tidy_punctuation(mut sig: String) -> String {
 }
 
 fn collapse_whitespace(s: &str) -> String {
+    // A backslash immediately followed by a newline is Python's explicit line
+    // continuation. It is not whitespace, so it survives collapsing and
+    // strands the strip loop one character short of the `=` it must remove:
+    // `Z: int = \` never reaches `Z: int`. Residual risk: a literal backslash
+    // ending a line inside a retained string.
+    let s = s.replace("\\\n", " ");
     let mut out = String::with_capacity(s.len());
     let mut prev_ws = false;
     for ch in s.trim().chars() {
