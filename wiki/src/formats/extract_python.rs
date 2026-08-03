@@ -95,9 +95,18 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
 
 /// `__all__ = [...]` or `(...)` at module level, honored only when every
 /// element is a plain string literal. Anything else — `["a"] + other.__all__`,
-/// a comprehension, a bare name — means the module computes its surface at
-/// import time, which no static rule can follow, so the convention applies
-/// instead.
+/// a comprehension, a bare name, an f-string (its node kind is also `string`
+/// in this grammar, but any `interpolation` child means it is computed at
+/// import time exactly like the cases above) — means the module computes its
+/// surface at import time, which no static rule can follow, so the
+/// convention applies instead. An element with no extractable
+/// `string_content` (a genuinely empty `""`) also aborts the set and falls
+/// back to the convention; that is intended, not incidental, since an empty
+/// name could never match a captured definition anyway.
+///
+/// Python assignment is last-wins, so when a module reassigns `__all__` more
+/// than once at module level, only the last assignment governs; earlier ones
+/// are ignored entirely, including their validity.
 ///
 /// Names listed but not defined in this file (the `__init__.py` re-export
 /// case) match no captured definition and simply have no effect.
@@ -111,6 +120,7 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     let lhs_idx = query.capture_index_for_name("lhs");
     let rhs_idx = query.capture_index_for_name("rhs");
     let mut cursor = QueryCursor::new();
+    let mut last_rhs: Option<Node> = None;
     for m in cursor.matches(&query, tree.root_node(), text.as_bytes()) {
         let mut lhs = None;
         let mut rhs = None;
@@ -121,30 +131,38 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
                 rhs = Some(cap.node);
             }
         }
-        if lhs != Some("__all__") {
-            continue;
+        if lhs == Some("__all__") {
+            last_rhs = rhs;
         }
-        let rhs = rhs?;
-        let mut names = BTreeSet::new();
-        let mut walker = rhs.walk();
-        for el in rhs.named_children(&mut walker) {
-            if el.kind() != "string" {
-                return None;
-            }
-            let mut sc = el.walk();
-            let content = el
-                .named_children(&mut sc)
-                .find(|n| n.kind() == "string_content");
-            match content.and_then(|n| text.get(n.byte_range())) {
-                Some(s) => {
-                    names.insert(s.to_string());
-                }
-                None => return None,
-            }
-        }
-        return Some(names);
     }
-    None
+    let rhs = last_rhs?;
+    let mut names = BTreeSet::new();
+    let mut walker = rhs.walk();
+    for el in rhs.named_children(&mut walker) {
+        if el.kind() != "string" {
+            return None;
+        }
+        // An f-string is also a `string` node; only an `interpolation` child
+        // distinguishes it from a plain literal.
+        let mut ic = el.walk();
+        if el
+            .named_children(&mut ic)
+            .any(|n| n.kind() == "interpolation")
+        {
+            return None;
+        }
+        let mut sc = el.walk();
+        let content = el
+            .named_children(&mut sc)
+            .find(|n| n.kind() == "string_content");
+        match content.and_then(|n| text.get(n.byte_range())) {
+            Some(s) => {
+                names.insert(s.to_string());
+            }
+            None => return None,
+        }
+    }
+    Some(names)
 }
 
 /// A Python module-level docstring: the first non-comment top-level
@@ -358,6 +376,30 @@ mod tests {
         assert!(
             e.symbols.iter().any(|s| s == "def b()"),
             "a non-literal __all__ must not gate anything: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn an_all_containing_an_fstring_element_falls_back_to_the_underscore_convention() {
+        let src =
+            "x = 1\n__all__ = [f\"a{x}\", \"b\"]\n\ndef b():\n    pass\n\ndef c():\n    pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "def c()"),
+            "an f-string element must invalidate __all__, falling back to the convention: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_second_module_level_all_assignment_wins() {
+        let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = [\"b\"]\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(e.symbols.iter().any(|s| s == "def b()"), "{:?}", e.symbols);
+        assert!(
+            !e.symbols.iter().any(|s| s == "def a()"),
+            "the second, later __all__ must win over the first: {:?}",
             e.symbols
         );
     }
