@@ -1,5 +1,9 @@
-//! Query surface over a compiled wiki: full-text search, page lookup, and
-//! budgeted neighbor context packs.
+//! Query surface over a compiled wiki: search, page lookup, neighbor packs.
+//!
+//! `leading_doc` takes only the first line of this comment as the page
+//! summary, so that line has to stand on its own. Detail goes below it:
+//! `neighbors` walks outward from a page and stops at a caller-supplied
+//! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::model::SourceKind;
 use serde::Deserialize;
