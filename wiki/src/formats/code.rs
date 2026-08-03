@@ -206,6 +206,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             };
             let name_text = name_node.and_then(|n| text.get(n.byte_range()));
             let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+                && chain.iter().all(|c| (spec.name_filter)(c))
                 && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
                 let owner = if chain.is_empty() {
@@ -471,25 +472,35 @@ mod tests {
     }
 
     #[test]
-    fn rust_qualification_does_not_leak_into_other_languages() {
-        // Python nested defs and class methods are captured today and must
-        // stay captured, unqualified: the module-level guard and the owner
-        // walk are Rust-only.
+    fn each_language_keeps_its_own_scope_rules() {
+        // Python now qualifies members and drops function-local definitions.
         let py = "class Registry:\n    def register(self, x):\n        pass\n\ndef outer():\n    def inner():\n        pass\n    return inner\n";
         let e = CodeExtractor.extract("t.py", py);
-        for expected in ["def register(self, x)", "def inner()", "def outer()"] {
-            assert!(
-                e.symbols.iter().any(|s| s == expected),
-                "{expected} missing: {:?}",
-                e.symbols
-            );
-        }
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "def Registry.register(self, x)"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def outer()"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("inner")),
+            "function-local def must be dropped: {:?}",
+            e.symbols
+        );
         assert!(
             !e.symbols.iter().any(|s| s.contains("::")),
-            "Python symbols must not be qualified: {:?}",
+            "Python must use `.`, never Rust's `::`: {:?}",
             e.symbols
         );
 
+        // Go has no owner resolution and no scope guard: a nested func and a
+        // method both stay exactly as they are today.
         let go = "package main\n\nfunc Foo(a int) string {\n\treturn \"\"\n}\n";
         let e = CodeExtractor.extract("m.go", go);
         assert!(

@@ -1,7 +1,7 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention and
 //! AST-verified module docstring extraction.
-use super::code::{always_free, keep_any_vis, LangSpec};
-use tree_sitter::Tree;
+use super::code::{keep_any_vis, LangSpec, Placement};
+use tree_sitter::{Node, Tree};
 
 fn keep_python_public(name: &str) -> bool {
     !name.starts_with('_')
@@ -42,9 +42,52 @@ pub(crate) fn python_spec() -> LangSpec {
         name_filter: keep_python_public,
         vis_filter: keep_any_vis,
         strip_trailing: &[':'],
-        placement: always_free,
-        owner_sep: "",
+        placement: python_placement,
+        owner_sep: ".",
     }
+}
+
+/// Python's module-level guard and owner chain, resolved in one upward walk.
+///
+/// A **deny-list**, where Rust uses an allow-list, because the grammars are
+/// mirror images: Rust has many kinds of item container, while Python's module
+/// level has exactly one excluder — a function body. An allow-list would have
+/// to enumerate `if_statement`, `try_statement`, `except_clause`,
+/// `with_statement`, `match_statement` and more, and would silently drop the
+/// `def`s under `if TYPE_CHECKING:` and `try: … except ImportError:` that are
+/// genuine module-level exports.
+///
+/// The two conventions fail in opposite directions: a new node kind that can
+/// host a definition is silently admitted here and would be silently rejected
+/// by Rust's rule. A tree-sitter bump must be reviewed under both.
+pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
+    let mut chain: Vec<String> = Vec::new();
+    let mut node = def;
+    while let Some(parent) = node.parent() {
+        match parent.kind() {
+            // `lambda` is defensive: no definition or assignment can be a
+            // descendant of one in valid Python (a lambda body is an
+            // expression, and a walrus is `named_expression`). Probed — it
+            // never fires. Kept because absorbing a grammar change is cheaper
+            // than noticing one.
+            "function_definition" | "lambda" => return Placement::Rejected,
+            "class_definition" => {
+                let Some(name) = parent
+                    .child_by_field_name("name")
+                    .and_then(|n| text.get(n.byte_range()))
+                else {
+                    return Placement::Rejected;
+                };
+                chain.push(name.to_string());
+            }
+            _ => {}
+        }
+        node = parent;
+    }
+    // The walk is bottom-up. Without this, `Article.Inner.deep` renders as
+    // `Inner.Article.deep`.
+    chain.reverse();
+    Placement::Scoped(chain)
 }
 
 /// A Python module-level docstring: the first non-comment top-level
@@ -123,6 +166,105 @@ mod tests {
             vec![".models".to_string()],
             "imports: {:?}",
             e.imports
+        );
+    }
+
+    #[test]
+    fn python_methods_are_qualified_by_their_class() {
+        let src = "class Wiki:\n    def search(self, q: str) -> list:\n        return []\n    async def fetch(self) -> bytes:\n        return b\"\"\n\ndef free_function() -> int:\n    return 1\n";
+        let e = CodeExtractor.extract("q.py", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "def Wiki.search(self, q: str) -> list"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "async def Wiki.fetch(self) -> bytes"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def free_function() -> int"),
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_nested_class_chain_is_outermost_first() {
+        let src =
+            "class Article:\n    class Inner:\n        def deep(self) -> None:\n            pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "class Article.Inner"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "def Article.Inner.deep(self) -> None"),
+            "chain must be outermost-first, not Inner.Article: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_private_class_takes_its_methods_with_it() {
+        let src = "class _TextExtractor:\n    def handle_data(self, data: str) -> None:\n        pass\n    def text(self) -> str:\n        return \"\"\n";
+        let e = CodeExtractor.extract("parse.py", src);
+        assert!(
+            e.symbols.is_empty(),
+            "a private class must not export its methods: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_two_classes_with_the_same_method_stay_distinct() {
+        let src = "class A2:\n    def run(self) -> None:\n        pass\n\nclass B2:\n    def run(self) -> None:\n        pass\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "def A2.run(self) -> None"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def B2.run(self) -> None"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_function_local_definitions_are_not_module_exports() {
+        let src = "def outer():\n    def nested():\n        pass\n    class LocalClass:\n        def m(self):\n            pass\n";
+        let e = CodeExtractor.extract("t.py", src);
+        assert_eq!(
+            e.symbols,
+            vec!["def outer()".to_string()],
+            "symbols: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_conditionally_defined_module_functions_are_kept() {
+        let src = "if TYPE_CHECKING:\n    def type_only():\n        pass\n\ntry:\n    def optional_dep():\n        pass\nexcept ImportError:\n    pass\n";
+        let e = CodeExtractor.extract("t.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "def type_only()"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "def optional_dep()"),
+            "{:?}",
+            e.symbols
         );
     }
 }
