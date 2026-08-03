@@ -11,6 +11,7 @@ struct LangSpec {
     ///   @def    - the definition node whose text is shortened to a signature
     ///   @name   - the definition's name (used for post-hoc export/visibility filtering)
     ///   @import - a module path node
+    ///   @vis    - the visibility-modifier text that `vis_filter` gates on
     query_src: &'static str,
     /// Keep a captured definition only if its @name text passes this filter.
     /// Used where the grammar can't express the gate structurally (Python's
@@ -62,11 +63,14 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
                 (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (enum_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (trait_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (const_item (visibility_modifier) @vis name: (identifier) @name) @def
+                (static_item (visibility_modifier) @vis name: (identifier) @name) @def
+                (type_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (use_declaration argument: (_) @import)
             "#,
             name_filter: keep_all,
             vis_filter: keep_bare_pub,
-            strip_trailing: &[';'],
+            strip_trailing: &[';', '='],
         },
         "py" => LangSpec {
             lang_name: "python",
@@ -215,7 +219,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             let keep = name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
                 && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
             if keep {
-                let body = find_body(def);
+                let body = signature_cut(def);
                 let sig = build_signature(text, def, body, spec.strip_trailing);
                 if !sig.is_empty() {
                     symbols.push(sig);
@@ -237,16 +241,25 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     Some((spec.lang_name.to_string(), symbols, imports, docstring))
 }
 
-/// Locate the "body" of a definition node, so its text can be excluded from
-/// the extracted signature. Most grammars expose this directly as a `body`
-/// field; JS/TS definitions captured through an `export_statement` wrapper
-/// expose it one level down, via the wrapped `declaration`'s own `body`.
-fn find_body(def: Node) -> Option<Node> {
+/// Locate the node at which a definition's signature stops, so the rest of its
+/// text can be excluded. Most grammars expose this as a `body` field; JS/TS
+/// definitions captured through an `export_statement` wrapper expose it one
+/// level down via the wrapped `declaration`; Rust `const`/`static` items have
+/// no body at all and stop at their `value`.
+///
+/// Written as three independent lookups rather than a chain of `?`: a
+/// `const_item` has no `declaration` field, so an early return there would
+/// skip the `value` lookup and leave the initializer in the signature.
+fn signature_cut(def: Node) -> Option<Node> {
     if let Some(body) = def.child_by_field_name("body") {
         return Some(body);
     }
-    let declaration = def.child_by_field_name("declaration")?;
-    declaration.child_by_field_name("body")
+    if let Some(declaration) = def.child_by_field_name("declaration") {
+        if let Some(body) = declaration.child_by_field_name("body") {
+            return Some(body);
+        }
+    }
+    def.child_by_field_name("value")
 }
 
 /// Build a one-line signature from a definition node: its source text up to
@@ -498,6 +511,38 @@ mod tests {
         assert!(
             !e.symbols.iter().any(|s| s.contains("Private")),
             "private trait leaked as export: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn rust_module_level_const_static_and_type_alias() {
+        let src = "pub const CACHE_VERSION: u32 = 1;\npub static NAME: &str = \"x\";\npub type Pack = Vec<u8>;\nconst PRIVATE: u8 = 3;\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        // A const's contract is its type; the literal stays visible in `## Body`,
+        // exactly as a function's body does.
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "pub const CACHE_VERSION: u32"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols.iter().any(|s| s == "pub static NAME: &str"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        // An alias without its target would be useless, and `type_item` has no
+        // `value:` field, so nothing is cut.
+        assert!(
+            e.symbols.iter().any(|s| s == "pub type Pack = Vec<u8>"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("PRIVATE")),
+            "symbols: {:?}",
             e.symbols
         );
     }
