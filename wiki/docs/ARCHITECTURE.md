@@ -285,7 +285,18 @@ otherwise identical strings that `dedup` would merge. Trait impls also emit an
 `impl Trait for Type` header, and a `pub` trait declaration emits its required
 and default methods. Because tree-sitter queries match at any depth, only
 items reachable from the file root through module and type scopes are
-captured; an `impl` written inside a function body is not module surface.
+captured; an `impl` written inside a function body is not module surface. A
+trait impl is gated on neither its own visibility (rustc forbids a modifier
+there) nor its target type's, so an `impl Trait for PrivateType` does reach
+`## Exports` — resolving that needs name resolution across files (dogfood
+finding 16).
+
+**Signature normalization is language-agnostic**, unlike the visibility and
+owner machinery above: `build_signature` collapses whitespace and tidies the
+punctuation a wrapped parameter list leaves behind, for all five languages.
+A multi-line Python `def` or Go `func` renders on one line with `( ` and `, )`
+cleaned up. This is deliberate; the pass and its limits are documented on
+`tidy_punctuation`.
 
 **Rust test-module stripping:** before body assembly,
 `strip_rust_test_modules` (`src/formats/code.rs`) removes each
