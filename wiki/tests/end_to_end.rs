@@ -41,6 +41,14 @@ fn output_is_deterministic_across_jobs() {
             &format!("# Node {i}\n\nNode {i} mentions Node {}.\n", (i + 1) % 20),
         );
     }
+    // The .txt corpus never reaches formats/code.rs. Extraction walks the
+    // syntax tree and resolves owners by ancestry, so the determinism test
+    // has to include a file that exercises it.
+    write(
+        &input,
+        "deep.rs",
+        "//! Deep module.\npub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> u8 { 0 }\n}\nimpl Display for Wiki {\n    fn fmt(&self) {}\n}\npub const LIMIT: u32 = 5;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn t() {}\n}\n",
+    );
     let out1 = dir.path().join("o1");
     let out2 = dir.path().join("o2");
     let mut o = CompileOptions {
@@ -53,6 +61,19 @@ fn output_is_deterministic_across_jobs() {
     let a = fs::read_to_string(out1.join("index.json")).unwrap();
     let b = fs::read_to_string(out2.join("index.json")).unwrap();
     assert_eq!(a, b);
+
+    let page_a = fs::read_to_string(out1.join("deep.md")).unwrap();
+    let page_b = fs::read_to_string(out2.join("deep.md")).unwrap();
+    assert_eq!(page_a, page_b);
+    assert!(
+        page_a.contains("pub fn Wiki::search(&self, q: &str) -> u8"),
+        "page: {page_a}"
+    );
+    assert!(
+        page_a.contains("fn <Wiki as Display>::fmt(&self)"),
+        "page: {page_a}"
+    );
+    assert!(!page_a.contains("super::*"), "page: {page_a}");
 }
 
 #[test]

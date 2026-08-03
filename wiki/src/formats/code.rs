@@ -808,6 +808,33 @@ mod tests {
     }
 
     #[test]
+    fn function_local_trait_impls_and_traits_are_not_exports() {
+        let src = "pub fn outer() {\n    struct Local;\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.symbols, vec!["pub fn outer()".to_string()]);
+    }
+
+    #[test]
+    fn generic_trait_impl_keeps_its_type_arguments() {
+        let src = "impl<T: Clone> Display for Wrapper<T> {\n    fn fmt(&self) {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "impl<T: Clone> Display for Wrapper<T>"),
+            "symbols: {:?}",
+            e.symbols
+        );
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "fn <Wrapper<T> as Display>::fmt(&self)"),
+            "a trait impl keeps the full type, unlike an inherent impl: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
     fn items_in_an_inline_module_stay_unqualified() {
         let src = "pub mod inner {\n    pub fn in_mod() {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
@@ -1158,5 +1185,41 @@ mod tests {
         let src = "impl Extractor for Foo {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("impl Extractor for Foo"));
+    }
+
+    #[test]
+    fn summary_fallback_falls_through_to_the_first_symbol() {
+        let src = "impl Wiki {\n    pub fn go(&self) {}\n}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.summary.as_deref(), Some("pub fn Wiki::go(&self)"));
+    }
+
+    #[test]
+    fn non_rust_languages_are_unaffected_by_rust_qualification() {
+        // Python nested defs and class methods are captured today and must
+        // stay captured, unqualified: the module-level guard and the owner
+        // walk are Rust-only.
+        let py = "class Registry:\n    def register(self, x):\n        pass\n\ndef outer():\n    def inner():\n        pass\n    return inner\n";
+        let e = CodeExtractor.extract("t.py", py);
+        for expected in ["def register(self, x)", "def inner()", "def outer()"] {
+            assert!(
+                e.symbols.iter().any(|s| s == expected),
+                "{expected} missing: {:?}",
+                e.symbols
+            );
+        }
+        assert!(
+            !e.symbols.iter().any(|s| s.contains("::")),
+            "Python symbols must not be qualified: {:?}",
+            e.symbols
+        );
+
+        let go = "package main\n\nfunc Foo(a int) string {\n\treturn \"\"\n}\n";
+        let e = CodeExtractor.extract("m.go", go);
+        assert!(
+            e.symbols.iter().any(|s| s == "func Foo(a int) string"),
+            "symbols: {:?}",
+            e.symbols
+        );
     }
 }
