@@ -210,7 +210,8 @@ struct CaptureIdx {
     imp: Option<u32>,
 }
 
-/// The three single-valued nodes one query match can contribute. Imports are
+/// The three single-valued captures one query match can contribute: the
+/// definition and name nodes, plus the visibility keyword's text. Imports are
 /// deliberately absent: a single match may carry several, so they go straight
 /// into the caller's list rather than through this struct.
 struct MatchParts<'a> {
@@ -248,7 +249,11 @@ fn split_captures<'a>(
     parts
 }
 
-/// Two gates. `__all__`, when the module declares one literally, replaces the
+/// Four gates, all of which must pass. In the order of the returned
+/// expression: `root_ok` (the module-level name), `own_name_ok` (the item's
+/// own name), the intervening scopes in `chain`, and `vis`.
+///
+/// `__all__`, when the module declares one literally, replaces the
 /// convention for the *module-level* name — the item itself when free, the
 /// outermost enclosing class when a member. The convention always applies
 /// inside a class, because `__all__` says nothing about what is public within
@@ -262,10 +267,16 @@ fn split_captures<'a>(
 /// member's own name is not `gate_root` (the outermost enclosing class is), so
 /// the convention must still gate it unconditionally.
 ///
-/// A third, independent gate: `vis`, when the language's query captured a
-/// visibility keyword for this definition, must pass `spec.vis_filter` (e.g.
-/// rejecting Rust's private-by-default items). Absent a `vis` capture, the
-/// gate passes by default.
+/// The third gate covers the scopes *between* the outermost one and the item
+/// itself: `chain.iter().skip(1)`, skipping the first because
+/// `chain.first()` is already `gate_root`. Every intervening scope name must
+/// pass `name_filter`, so a public method on a private inner class stays out.
+///
+/// The fourth is `vis`: when the language's query captured a visibility
+/// keyword for this definition, it must pass `spec.vis_filter` (e.g.
+/// rejecting Rust's private-by-default items). Absent a `vis` capture the
+/// gate passes, which is what lets trait-impl items through — they carry no
+/// visibility modifier yet are public through the trait.
 fn should_keep(
     vis: Option<&str>,
     chain: &[String],
@@ -291,7 +302,8 @@ fn should_keep(
 }
 
 /// The shape of a kept definition, decided from the two `Option`s already in
-/// hand rather than sniffed back out of the rendered signature.
+/// hand plus the node's own kind, rather than sniffed back out of the
+/// rendered signature.
 fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind {
     if name_node.is_none() {
         ItemKind::Header
@@ -308,8 +320,9 @@ fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind
 /// comment at `collected`'s declaration below for what each field means.
 type Collected = (String, ItemKind, String, String);
 
-/// The sort key that groups a definition with its own members: `class Article`
-/// and `Article.title: str` share the group `Article`.
+/// The `group` component of the sort key — the field that places a definition
+/// next to its own members: `class Article` and `Article.title: str` both
+/// group under `Article`.
 fn group_key(
     owner: Option<&str>,
     name_text: Option<&str>,

@@ -47,8 +47,7 @@ fn build_phrase_index(
 /// would silently change which phrase wins and, with it, the wiki's graph
 /// edges. `slice::starts_with` subsumes the explicit end-of-slice bound the
 /// original loop checked (`end <= n`): it is false whenever the phrase would
-/// run past the end of `toks`, so no separate bound is needed. This replaced
-/// an equivalent `while`/`break` loop.
+/// run past the end of `toks`, so no separate bound is needed.
 fn phrase_targets(
     toks: &[String],
     index: &BTreeMap<String, Vec<(Vec<String>, String)>>,
