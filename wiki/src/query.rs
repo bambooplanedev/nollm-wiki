@@ -280,6 +280,28 @@ impl Wiki {
         hits
     }
 
+    /// Ids within `depth` hops of `id` along either edge direction,
+    /// including `id` itself.
+    fn bfs_neighborhood(&self, id: &str, depth: usize) -> std::collections::BTreeSet<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        seen.insert(id.to_string());
+        let mut frontier = vec![id.to_string()];
+        for _ in 0..depth {
+            let mut next = Vec::new();
+            for nid in &frontier {
+                if let Some(e) = self.entries.get(nid) {
+                    for n in e.neighbors_out.iter().chain(e.neighbors_in.iter()) {
+                        if seen.insert(n.clone()) {
+                            next.push(n.clone());
+                        }
+                    }
+                }
+            }
+            frontier = next;
+        }
+        seen
+    }
+
     /// BFS to `depth` over neighbors_out+neighbors_in, then build a budgeted
     /// context pack: target first, neighbors ordered ascending by pagerank
     /// (highest-centrality lands last — "lost in the middle").
@@ -303,23 +325,7 @@ impl Wiki {
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
-        // BFS collect neighbor ids up to `depth`.
-        let mut seen = std::collections::BTreeSet::new();
-        seen.insert(id.to_string());
-        let mut frontier = vec![id.to_string()];
-        for _ in 0..depth {
-            let mut next = Vec::new();
-            for nid in &frontier {
-                if let Some(e) = self.entries.get(nid) {
-                    for n in e.neighbors_out.iter().chain(e.neighbors_in.iter()) {
-                        if seen.insert(n.clone()) {
-                            next.push(n.clone());
-                        }
-                    }
-                }
-            }
-            frontier = next;
-        }
+        let seen = self.bfs_neighborhood(id, depth);
 
         // Candidates (excluding target), descending by pagerank, so every
         // budget below always considers the highest-centrality neighbor
