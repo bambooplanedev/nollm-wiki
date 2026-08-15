@@ -36,6 +36,32 @@ fn build_phrase_index(
     index
 }
 
+/// Ids whose registered phrase occurs in `toks`, scanning left to right.
+///
+/// At each position the first candidate that matches wins and the scan
+/// advances by one token. `slice::starts_with` subsumes both the explicit
+/// end-of-slice bound and the `break`: `find` already stops at the first
+/// match, and `starts_with` is false whenever the phrase would run past the
+/// end. The selection therefore does not depend on how `build_phrase_index`
+/// orders its candidates — only on first-match order, which is unchanged.
+fn phrase_targets(
+    toks: &[String],
+    index: &BTreeMap<String, Vec<(Vec<String>, String)>>,
+    eid: &str,
+) -> BTreeSet<String> {
+    let mut targets = BTreeSet::new();
+    for (i, tok) in toks.iter().enumerate() {
+        if let Some(cands) = index.get(tok) {
+            if let Some((_, target_id)) = cands.iter().find(|(w, _)| toks[i..].starts_with(w)) {
+                if target_id != eid {
+                    targets.insert(target_id.clone());
+                }
+            }
+        }
+    }
+    targets
+}
+
 pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
     let mut edges: BTreeMap<String, Edges> = entities
         .keys()
@@ -51,23 +77,7 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
 
     for (eid, ent) in entities {
         let toks = tokens(&ent.body);
-        let mut targets: BTreeSet<String> = BTreeSet::new();
-        let n = toks.len();
-        let mut i = 0;
-        while i < n {
-            if let Some(cands) = index.get(&toks[i]) {
-                for (words, target_id) in cands {
-                    let end = i + words.len();
-                    if end <= n && &toks[i..end] == words.as_slice() {
-                        if target_id != eid {
-                            targets.insert(target_id.clone());
-                        }
-                        break;
-                    }
-                }
-            }
-            i += 1;
-        }
+        let mut targets = phrase_targets(&toks, &index, eid);
         // Import edges: resolve each import string to an entity id if it matches a
         // known id or the stem of a known source path.
         for imp in &ent.imports {
