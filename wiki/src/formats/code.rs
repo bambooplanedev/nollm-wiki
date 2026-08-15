@@ -1,7 +1,7 @@
 use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, Entity, SourceKind};
 use std::collections::BTreeSet;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch, Tree};
 
 pub struct CodeExtractor;
 
@@ -202,6 +202,147 @@ fn is_value_item(kind: &str) -> bool {
     )
 }
 
+/// Capture indices for one language's query, resolved once per extraction.
+struct CaptureIdx {
+    def: Option<u32>,
+    name: Option<u32>,
+    vis: Option<u32>,
+    imp: Option<u32>,
+}
+
+/// The three single-valued nodes one query match can contribute. Imports are
+/// deliberately absent: a single match may carry several, so they go straight
+/// into the caller's list rather than through this struct.
+struct MatchParts<'a> {
+    def: Option<Node<'a>>,
+    name: Option<Node<'a>>,
+    vis: Option<&'a str>,
+}
+
+/// Sort one match's captures into the def/name/vis slots, appending any
+/// import capture to `imports` in encounter order.
+fn split_captures<'a>(
+    m: &QueryMatch<'a, 'a>,
+    idx: &CaptureIdx,
+    text: &'a str,
+    imports: &mut Vec<String>,
+) -> MatchParts<'a> {
+    let mut parts = MatchParts {
+        def: None,
+        name: None,
+        vis: None,
+    };
+    for cap in m.captures {
+        if Some(cap.index) == idx.def {
+            parts.def = Some(cap.node);
+        } else if Some(cap.index) == idx.name {
+            parts.name = Some(cap.node);
+        } else if Some(cap.index) == idx.vis {
+            parts.vis = text.get(cap.node.byte_range());
+        } else if Some(cap.index) == idx.imp {
+            if let Some(raw) = text.get(cap.node.byte_range()) {
+                imports.push(raw.trim().trim_matches(['"', '\'']).to_string());
+            }
+        }
+    }
+    parts
+}
+
+/// Two gates. `__all__`, when the module declares one literally, replaces the
+/// convention for the *module-level* name — the item itself when free, the
+/// outermost enclosing class when a member. The convention always applies
+/// inside a class, because `__all__` says nothing about what is public within
+/// one.
+///
+/// For a free item (`chain` empty), `gate_root` IS `name_text`, so `root_ok`
+/// has already decided this exact name against `exports` when the module
+/// declares one. Re-applying `name_filter` to it here would let the underscore
+/// convention override `__all__` instead of being replaced by it —
+/// `__all__ = ["__version__"]` would otherwise never export `__version__`. A
+/// member's own name is not `gate_root` (the outermost enclosing class is), so
+/// the convention must still gate it unconditionally.
+fn should_keep(
+    parts: &MatchParts,
+    chain: &[String],
+    name_text: Option<&str>,
+    exports: &Option<BTreeSet<String>>,
+    spec: &LangSpec,
+) -> bool {
+    let gate_root = chain.first().map(String::as_str).or(name_text);
+    let root_ok = match (exports, gate_root) {
+        (Some(set), Some(root)) => set.contains(root),
+        (_, Some(root)) => (spec.name_filter)(root),
+        (_, None) => true,
+    };
+    let own_name_ok = if exports.is_some() && chain.is_empty() {
+        true
+    } else {
+        name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+    };
+    root_ok
+        && own_name_ok
+        && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
+        && parts.vis.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
+}
+
+/// The shape of a kept definition, decided from the two `Option`s already in
+/// hand rather than sniffed back out of the rendered signature.
+fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind {
+    if name_node.is_none() {
+        ItemKind::Header
+    } else if owner.is_some() {
+        ItemKind::Member
+    } else if is_value_item(def.kind()) {
+        ItemKind::FreeValue
+    } else {
+        ItemKind::FreeDef
+    }
+}
+
+/// The sort key that groups a definition with its own members: `class Article`
+/// and `Article.title: str` share the group `Article`.
+fn group_key(
+    owner: Option<&str>,
+    name_text: Option<&str>,
+    def: Node,
+    text: &str,
+    spec: &LangSpec,
+) -> String {
+    match (owner, name_text) {
+        (Some(o), _) => o.to_string(),
+        (None, Some(n)) => n.to_string(),
+        (None, None) => (spec.header_group)(def, text).unwrap_or_default(),
+    }
+}
+
+/// The module's summary when no docstring supplies one.
+///
+/// This must not read `collected`'s sorted (grouped) order. `collected` is
+/// sorted by (group, kind, name, signature) so `## Exports` places a
+/// definition next to its own members, but a module's summary is a different
+/// job with a different rule: the smallest *signature* among a kind, not
+/// "whichever entry the grouping happened to put first". Grouping sorts on the
+/// bare name, and an uppercase type name (`SourceFile`) outranks a lowercase
+/// function name (`walk`) there, so reading grouped order let a module's own
+/// type steal the summary from the function the module is actually about
+/// (`walk.rs`: `pub struct SourceFile` was winning over `pub fn walk(...)`).
+/// Picking the min signature within each kind decouples selection from display
+/// order. Do not "simplify" this back to `.find()` — that silently
+/// reintroduces the bug.
+fn pick_summary_fallback(collected: &[(String, ItemKind, String, String)]) -> Option<String> {
+    let pick_min_signature = |want: ItemKind| {
+        collected
+            .iter()
+            .filter(|(_, kind, ..)| *kind == want)
+            .min_by(|a, b| a.3.cmp(&b.3))
+    };
+    pick_min_signature(ItemKind::FreeDef)
+        .or_else(|| pick_min_signature(ItemKind::Header))
+        .or_else(|| pick_min_signature(ItemKind::FreeValue))
+        .or_else(|| collected.iter().min_by(|a, b| a.3.cmp(&b.3)))
+        .map(|(_, _, _, sig)| sig.clone())
+}
+
 fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
     let mut parser = Parser::new();
@@ -220,10 +361,12 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             return None;
         }
     };
-    let def_idx = query.capture_index_for_name("def");
-    let name_idx = query.capture_index_for_name("name");
-    let vis_idx = query.capture_index_for_name("vis");
-    let imp_idx = query.capture_index_for_name("import");
+    let idx = CaptureIdx {
+        def: query.capture_index_for_name("def"),
+        name: query.capture_index_for_name("name"),
+        vis: query.capture_index_for_name("vis"),
+        imp: query.capture_index_for_name("import"),
+    };
     let exports = (spec.export_set)(&tree, text);
 
     // (group, kind, name, signature). The sort key groups a definition with
@@ -236,85 +379,25 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
     for m in matches {
-        let mut def_node: Option<Node> = None;
-        let mut name_node: Option<Node> = None;
-        let mut vis_text: Option<&str> = None;
-        for cap in m.captures {
-            if Some(cap.index) == def_idx {
-                def_node = Some(cap.node);
-            } else if Some(cap.index) == name_idx {
-                name_node = Some(cap.node);
-            } else if Some(cap.index) == vis_idx {
-                vis_text = text.get(cap.node.byte_range());
-            } else if Some(cap.index) == imp_idx {
-                if let Some(raw) = text.get(cap.node.byte_range()) {
-                    imports.push(raw.trim().trim_matches(['"', '\'']).to_string());
-                }
-            }
-        }
-        if let Some(def) = def_node {
+        let parts = split_captures(&m, &idx, text, &mut imports);
+        if let Some(def) = parts.def {
             let Placement::Scoped(chain) = (spec.placement)(def, text) else {
                 continue;
             };
-            let name_text = name_node.and_then(|n| text.get(n.byte_range()));
-            // Two gates. `__all__`, when the module declares one literally,
-            // replaces the convention for the *module-level* name — the item
-            // itself when free, the outermost enclosing class when a member.
-            // The convention always applies inside a class, because `__all__`
-            // says nothing about what is public within one.
-            let gate_root = chain.first().map(String::as_str).or(name_text);
-            let root_ok = match (&exports, gate_root) {
-                (Some(set), Some(root)) => set.contains(root),
-                (_, Some(root)) => (spec.name_filter)(root),
-                (_, None) => true,
-            };
-            // For a free item (`chain` empty), `gate_root` above IS `name_text`,
-            // so `root_ok` has already decided this exact name against
-            // `exports` when the module declares one. Re-applying `name_filter`
-            // to it here would let the underscore convention override `__all__`
-            // instead of being replaced by it — `__all__ = ["__version__"]`
-            // would otherwise never export `__version__`. A member's own name
-            // is not `gate_root` (the outermost enclosing class is), so the
-            // convention must still gate it unconditionally: `__all__` says
-            // nothing about what is public *within* a class it lists.
-            let own_name_ok = if exports.is_some() && chain.is_empty() {
-                true
-            } else {
-                name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
-            };
-            let keep = root_ok
-                && own_name_ok
-                && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
-                && vis_text.map(|v| (spec.vis_filter)(v)).unwrap_or(true);
-            if keep {
-                let owner = if chain.is_empty() {
-                    None
-                } else {
-                    Some(chain.join(spec.owner_sep))
-                };
+            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+            if should_keep(&parts, &chain, name_text, &exports, &spec) {
+                let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 let sig = build_signature(
                     text,
                     def,
-                    name_node,
+                    parts.name,
                     owner.as_deref(),
                     &spec,
                     signature_cut(def),
                 );
                 if !sig.is_empty() {
-                    let kind = if name_node.is_none() {
-                        ItemKind::Header
-                    } else if owner.is_some() {
-                        ItemKind::Member
-                    } else if is_value_item(def.kind()) {
-                        ItemKind::FreeValue
-                    } else {
-                        ItemKind::FreeDef
-                    };
-                    let group = match (&owner, name_text) {
-                        (Some(o), _) => o.clone(),
-                        (None, Some(n)) => n.to_string(),
-                        (None, None) => (spec.header_group)(def, text).unwrap_or_default(),
-                    };
+                    let kind = classify(parts.name, owner.as_deref(), def);
+                    let group = group_key(owner.as_deref(), name_text, def, text, &spec);
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
@@ -333,31 +416,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     imports.sort();
     imports.dedup();
 
-    // The summary fallback must not be a qualified method, and — since Task
-    // 12 — must not read `collected`'s sorted (grouped) order either.
-    // `collected` is sorted by (group, kind, name, signature) so `## Exports`
-    // places a definition next to its own members, but a module's summary
-    // is a different job with a different rule: the smallest *signature*
-    // among a kind, not "whichever entry the grouping happened to put
-    // first". Grouping sorts on the bare name, and an uppercase type name
-    // (`SourceFile`) outranks a lowercase function name (`walk`) there, so
-    // reading grouped order let a module's own type steal the summary from
-    // the function the module is actually about (`walk.rs`: `pub struct
-    // SourceFile` was winning over `pub fn walk(...)`). Picking the min
-    // signature within each kind reproduces the pre-Task-12 selection
-    // exactly, decoupled from the display order. Do not "simplify" this
-    // back to `.find()` — that silently reintroduces the bug.
-    let pick_min_signature = |want: ItemKind| {
-        collected
-            .iter()
-            .filter(|(_, kind, ..)| *kind == want)
-            .min_by(|a, b| a.3.cmp(&b.3))
-    };
-    let summary_fallback = pick_min_signature(ItemKind::FreeDef)
-        .or_else(|| pick_min_signature(ItemKind::Header))
-        .or_else(|| pick_min_signature(ItemKind::FreeValue))
-        .or_else(|| collected.iter().min_by(|a, b| a.3.cmp(&b.3)))
-        .map(|(_, _, _, sig)| sig.clone());
+    let summary_fallback = pick_summary_fallback(&collected);
 
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
