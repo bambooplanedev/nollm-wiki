@@ -261,8 +261,13 @@ fn split_captures<'a>(
 /// `__all__ = ["__version__"]` would otherwise never export `__version__`. A
 /// member's own name is not `gate_root` (the outermost enclosing class is), so
 /// the convention must still gate it unconditionally.
+///
+/// A third, independent gate: `vis`, when the language's query captured a
+/// visibility keyword for this definition, must pass `spec.vis_filter` (e.g.
+/// rejecting Rust's private-by-default items). Absent a `vis` capture, the
+/// gate passes by default.
 fn should_keep(
-    parts: &MatchParts,
+    vis: Option<&str>,
     chain: &[String],
     name_text: Option<&str>,
     exports: &Option<BTreeSet<String>>,
@@ -282,7 +287,7 @@ fn should_keep(
     root_ok
         && own_name_ok
         && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
-        && parts.vis.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
+        && vis.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
 }
 
 /// The shape of a kept definition, decided from the two `Option`s already in
@@ -298,6 +303,10 @@ fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind
         ItemKind::FreeDef
     }
 }
+
+/// One kept definition: `(group, kind, name, signature)`. See the sort
+/// comment at `collected`'s declaration below for what each field means.
+type Collected = (String, ItemKind, String, String);
 
 /// The sort key that groups a definition with its own members: `class Article`
 /// and `Article.title: str` share the group `Article`.
@@ -329,7 +338,15 @@ fn group_key(
 /// Picking the min signature within each kind decouples selection from display
 /// order. Do not "simplify" this back to `.find()` — that silently
 /// reintroduces the bug.
-fn pick_summary_fallback(collected: &[(String, ItemKind, String, String)]) -> Option<String> {
+///
+/// The `or_else` chain also prefers `FreeDef`, then `Header`, then
+/// `FreeValue` over a qualified method (`ItemKind::Member`), because a bare
+/// method signature (`fn new(...)`) makes a poor, decontextualized summary.
+/// This is a preference order, not an exclusion: the final rung falls back to
+/// the minimum signature over every collected item with no kind filter at
+/// all, so a qualified method can still win when the module has no
+/// `FreeDef`, `Header`, or `FreeValue`.
+fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
     let pick_min_signature = |want: ItemKind| {
         collected
             .iter()
@@ -374,7 +391,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     // group `Article`, so a class no longer scatters across the section
     // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
     // stays a plain `Vec<String>`.
-    let mut collected: Vec<(String, ItemKind, String, String)> = Vec::new();
+    let mut collected: Vec<Collected> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
@@ -385,7 +402,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
                 continue;
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-            if should_keep(&parts, &chain, name_text, &exports, &spec) {
+            if should_keep(parts.vis, &chain, name_text, &exports, &spec) {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 let sig = build_signature(
                     text,

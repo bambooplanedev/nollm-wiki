@@ -7,7 +7,7 @@
 
 use crate::model::SourceKind;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 #[derive(Deserialize)]
@@ -282,8 +282,8 @@ impl Wiki {
 
     /// Ids within `depth` hops of `id` along either edge direction,
     /// including `id` itself.
-    fn bfs_neighborhood(&self, id: &str, depth: usize) -> std::collections::BTreeSet<String> {
-        let mut seen = std::collections::BTreeSet::new();
+    fn bfs_neighborhood(&self, id: &str, depth: usize) -> BTreeSet<String> {
+        let mut seen = BTreeSet::new();
         seen.insert(id.to_string());
         let mut frontier = vec![id.to_string()];
         for _ in 0..depth {

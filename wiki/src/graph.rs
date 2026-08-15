@@ -39,11 +39,16 @@ fn build_phrase_index(
 /// Ids whose registered phrase occurs in `toks`, scanning left to right.
 ///
 /// At each position the first candidate that matches wins and the scan
-/// advances by one token. `slice::starts_with` subsumes both the explicit
-/// end-of-slice bound and the `break`: `find` already stops at the first
-/// match, and `starts_with` is false whenever the phrase would run past the
-/// end. The selection therefore does not depend on how `build_phrase_index`
-/// orders its candidates — only on first-match order, which is unchanged.
+/// advances by one token. `build_phrase_index` (see its own doc above) hands
+/// back each first-word bucket sorted longest tuple first, so "first match"
+/// here means "longest match": a candidate is only skipped in favor of a
+/// shorter one if the longer one doesn't actually match at this position.
+/// That sort order is therefore load-bearing — reordering or dropping it
+/// would silently change which phrase wins and, with it, the wiki's graph
+/// edges. `slice::starts_with` subsumes the explicit end-of-slice bound the
+/// original loop checked (`end <= n`): it is false whenever the phrase would
+/// run past the end of `toks`, so no separate bound is needed. This replaced
+/// an equivalent `while`/`break` loop.
 fn phrase_targets(
     toks: &[String],
     index: &BTreeMap<String, Vec<(Vec<String>, String)>>,
