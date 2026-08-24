@@ -111,3 +111,7 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 `selfhost.sh` — compiles this repository into its own wiki at `.wiki/`
 (always rebuilds the release binary first). See the repo root
 [`README.md`](../README.md#self-hosting).
+
+`search-eval.sh` — top-1 hit rate of `wiki search` over 15 fixed queries
+against the self-hosted `.wiki/` (run `selfhost.sh` first). Prints `N/15`;
+baseline on 2026-08-24 is `11/15`. Pass a different compiled dir as `$1`.
