@@ -97,10 +97,17 @@ fn compile_inner(
         .filter(|sf| !is_under(&sf.abs_path, output))
         .collect();
     let registry = Registry::with_defaults();
-    let extracted: Vec<Entity> = files
+    let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
         .collect();
+
+    // 1b. Qualify names that would otherwise share a slug. An extractor names
+    // a page from its own file alone and cannot see the rest of the tree, so
+    // this runs here, where every entity is in hand. Ordering is irrelevant to
+    // the result — the pass depends on the set of (name, source_path) pairs,
+    // not on the order `extracted` arrives in.
+    disambiguate_ids(&mut extracted);
 
     // 2. Dedup slug collisions deterministically (first by sorted rel_path
     // wins — `extracted` is already ordered by rel_path from the walk, so a
@@ -269,6 +276,92 @@ fn is_reserved_manifest_name(id: &str) -> bool {
 /// remapped). `entities` is a `BTreeMap`, so iteration is in sorted key
 /// order — the same input always produces the same remap, regardless of
 /// thread count or machine.
+/// The directory segments of `source_path`, outermost first, with the
+/// filename dropped.
+fn parent_segments(source_path: &str) -> Vec<&str> {
+    let mut segs: Vec<&str> = source_path.split('/').filter(|s| !s.is_empty()).collect();
+    segs.pop();
+    segs
+}
+
+/// `base` with the innermost `depth` directory segments prefixed to it:
+/// `("Models", "app/api/models.py", 1)` is `"Api Models"`.
+fn qualify(base: &str, source_path: &str, depth: usize) -> String {
+    if depth == 0 {
+        return base.to_string();
+    }
+    let segs = parent_segments(source_path);
+    let start = segs.len().saturating_sub(depth);
+    let mut name = String::new();
+    for seg in &segs[start..] {
+        name.push_str(&crate::model::title_case(&seg.replace(['_', '-'], " ")));
+        name.push(' ');
+    }
+    name.push_str(base);
+    name
+}
+
+/// Give every page a unique id by prefixing parent directory segments to its
+/// name until no two entities share a slug.
+///
+/// A page is named after its file's basename alone, so the conventional
+/// layouts all collapse onto a single slug — `app/{api,db,web}/models.py`,
+/// `src/*/mod.rs`, and every `__init__.py` in a package tree. Without this
+/// pass the collision loop in `compile_inner` drops every file but the first
+/// with nothing louder than a stderr warning: a seven-file Django-shaped tree
+/// compiled to two pages while the run still exited 0 and lint reported no
+/// broken links.
+///
+/// Qualification is collision-driven, not unconditional: a name that is
+/// already unique is never touched, so the short titles the wiki is readable
+/// with survive, and a qualified title is always evidence of a real clash.
+///
+/// The loop extends every member of a colliding group by one segment per
+/// round, which is what lets a group separate even when a shorter prefix is
+/// itself ambiguous (`a/x/mod.rs` and `b/x/mod.rs` both qualify to `X Mod`
+/// before the second round reaches `A X Mod` / `B X Mod`). It terminates
+/// because a path has finitely many segments and a round that extends nobody
+/// breaks out — which is also what happens to a file at the project root,
+/// where there is no segment left to take. That case, and two files with
+/// genuinely identical paths, still fall through to the first-wins dedup in
+/// `compile_inner`, which stays as the backstop.
+///
+/// Renaming a page also changes what `graph::build_graph` matches against
+/// body text: `Api Models` is a two-token phrase where `Models` was one, so a
+/// qualified page picks up fewer lexical edges than it would have. That is a
+/// trade against pages that previously did not exist at all.
+fn disambiguate_ids(extracted: &mut [Entity]) {
+    let base: Vec<String> = extracted.iter().map(|e| e.name.clone()).collect();
+    let mut depth = vec![0usize; extracted.len()];
+    loop {
+        let mut by_id: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (i, e) in extracted.iter().enumerate() {
+            by_id.entry(e.id.as_str()).or_default().push(i);
+        }
+        let clashing: Vec<usize> = by_id
+            .into_values()
+            .filter(|g| g.len() > 1)
+            .flatten()
+            .collect();
+
+        let mut extended = Vec::new();
+        for i in clashing {
+            if depth[i] < parent_segments(&extracted[i].source_path).len() {
+                depth[i] += 1;
+                extended.push(i);
+            }
+        }
+        if extended.is_empty() {
+            return;
+        }
+        for i in extended {
+            let name = qualify(&base[i], &extracted[i].source_path, depth[i]);
+            extracted[i].id = crate::model::slugify(&name);
+            extracted[i].name = name;
+        }
+    }
+}
+
 fn remap_reserved_names(entities: BTreeMap<String, Entity>) -> BTreeMap<String, Entity> {
     let mut used: BTreeSet<String> = entities
         .keys()
@@ -324,6 +417,84 @@ mod tests {
 
     fn map(ids: &[&str]) -> BTreeMap<String, Entity> {
         ids.iter().map(|id| (id.to_string(), ent(id))).collect()
+    }
+
+    fn ent_at(name: &str, path: &str) -> Entity {
+        let mut e = ent(name);
+        e.id = crate::model::slugify(name);
+        e.name = name.into();
+        e.source_path = path.into();
+        e
+    }
+
+    fn ids_after_disambiguation(pairs: &[(&str, &str)]) -> Vec<String> {
+        let mut v: Vec<Entity> = pairs.iter().map(|(n, p)| ent_at(n, p)).collect();
+        disambiguate_ids(&mut v);
+        v.into_iter().map(|e| e.id).collect()
+    }
+
+    #[test]
+    fn colliding_basenames_are_qualified_by_their_parent_directory() {
+        // The canonical Python app layout: every package has its own
+        // `models.py`, and before qualification all but the first were
+        // dropped outright by the dedup below.
+        assert_eq!(
+            ids_after_disambiguation(&[
+                ("Models", "app/api/models.py"),
+                ("Models", "app/db/models.py"),
+                ("Models", "app/web/models.py"),
+            ]),
+            vec!["api_models", "db_models", "web_models"]
+        );
+    }
+
+    #[test]
+    fn a_unique_basename_is_left_alone() {
+        // Qualification is collision-driven: a page that never collides keeps
+        // the short title, so a rename is always evidence of a real clash.
+        assert_eq!(
+            ids_after_disambiguation(&[
+                ("Graph", "src/graph.rs"),
+                ("Models", "app/api/models.py"),
+                ("Store", "app/db/store.py"),
+            ]),
+            vec!["graph", "models", "store"]
+        );
+    }
+
+    #[test]
+    fn qualification_extends_until_unique() {
+        // One directory is not enough here — both files sit under a `mod`
+        // directory named `x`, so the walk has to take a second segment.
+        assert_eq!(
+            ids_after_disambiguation(&[("Mod", "a/x/mod.rs"), ("Mod", "b/x/mod.rs")]),
+            vec!["a_x_mod", "b_x_mod"]
+        );
+    }
+
+    #[test]
+    fn a_root_file_that_cannot_extend_keeps_its_name() {
+        // A file at the project root has no segment left to prefix. It keeps
+        // the bare id and the file that *can* extend moves aside, so the pair
+        // still separates without either page being dropped.
+        assert_eq!(
+            ids_after_disambiguation(&[("Readme", "README.md"), ("Readme", "docs/README.md")]),
+            vec!["readme", "docs_readme"]
+        );
+    }
+
+    #[test]
+    fn qualification_preserves_a_content_derived_title() {
+        // Markdown and text pages take their name from an H1 or frontmatter
+        // title, not from the path. Qualification must PREFIX that title, not
+        // replace it with the filename.
+        let mut v = vec![
+            ent_at("Overview", "docs/api/index.md"),
+            ent_at("Overview", "docs/db/index.md"),
+        ];
+        disambiguate_ids(&mut v);
+        assert_eq!(v[0].name, "Api Overview");
+        assert_eq!(v[1].name, "Db Overview");
     }
 
     #[test]

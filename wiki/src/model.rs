@@ -84,6 +84,24 @@ impl LintReport {
 /// falls back to a deterministic `page_<hash>` so it is never empty (and never
 /// silently dropped by slug dedup). Uses `char::to_ascii_lowercase` (ASCII-only,
 /// no Unicode case-expansion) and a single pass (no `String::replace` loop).
+/// Capitalize each whitespace-separated word and lowercase the rest of it.
+/// Shared by every name-deriving path — the text extractor's ALL-CAPS first
+/// line, the markdown/code filename fallbacks, and `disambiguate_ids`'
+/// directory prefixes — so that a page named from a path and a page named
+/// from its own content are cased by one rule rather than three copies of it.
+pub(crate) fn title_case(s: &str) -> String {
+    s.split_whitespace()
+        .map(|w| {
+            let mut ch = w.chars();
+            match ch.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + &ch.as_str().to_lowercase(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub fn slugify(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut pending_sep = false;

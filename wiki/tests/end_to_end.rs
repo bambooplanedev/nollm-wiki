@@ -256,3 +256,57 @@ fn incremental_recompile_with_no_changes_writes_nothing() {
         second.pages_written
     );
 }
+
+#[test]
+fn same_named_files_in_different_directories_all_survive() {
+    // The canonical Python package layout: a `models.py` and an `__init__.py`
+    // per app. All four used to slugify to two ids (`models`, `init`), and the
+    // dedup in `compile_inner` dropped the losers with nothing louder than a
+    // stderr warning — the run still exited 0 and lint still reported no
+    // broken links, so the loss was invisible to both CI and an agent.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    for app in ["api", "db"] {
+        write(
+            &input,
+            &format!("app/{app}/__init__.py"),
+            "\"\"\"Facade.\"\"\"\n",
+        );
+        write(
+            &input,
+            &format!("app/{app}/models.py"),
+            "def handle():\n    \"\"\"Handle it.\"\"\"\n    return 1\n",
+        );
+    }
+
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(result.pages_total, 4, "no file may be dropped");
+    for id in ["api_models", "db_models", "api_init", "db_init"] {
+        assert!(output.join(format!("{id}.md")).exists(), "missing {id}.md");
+    }
+    // The qualified title is what the page is headed with, not just its slug.
+    let page = fs::read_to_string(output.join("api_models.md")).unwrap();
+    assert!(page.starts_with("# Api Models\n"), "page head:\n{page}");
+}
+
+#[test]
+fn a_unique_filename_keeps_its_short_page_id() {
+    // Qualification must stay collision-driven: prefixing every page with its
+    // directory would make every wikilink target long and every title with it.
+    // (Deliberately not named `graph` — that slug is a reserved manifest name
+    // and gets remapped by a different pass, which would mask this one.)
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    write(
+        &input,
+        "src/deep/nested/walker.py",
+        "def build():\n    return 1\n",
+    );
+
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert!(output.join("walker.md").exists());
+}

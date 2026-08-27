@@ -1,5 +1,5 @@
 use crate::formats::{summarize, Extractor};
-use crate::model::{slugify, Entity, SourceKind};
+use crate::model::{slugify, title_case, Entity, SourceKind};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -78,19 +78,6 @@ fn derive_name_from_path(rel_path: &str) -> String {
     let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let stem = base.strip_suffix(".txt").unwrap_or(base);
     title_case(&stem.replace('_', " "))
-}
-
-fn title_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|w| {
-            let mut ch = w.chars();
-            match ch.next() {
-                Some(f) => f.to_uppercase().collect::<String>() + &ch.as_str().to_lowercase(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 #[cfg(test)]

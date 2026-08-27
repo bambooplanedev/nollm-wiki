@@ -12,7 +12,7 @@ written: every parallel step collects into an order-preserving `Vec` or a
 `BTreeMap`/`BTreeSet` before the next stage (or disk) sees it.
 
 ```
-walk               →  extract            →  dedup + remap        →  graph + PageRank  →  render               →  manifest             →  lint
+walk               →  extract            →  qualify + remap      →  graph + PageRank  →  render               →  manifest             →  lint
 src/walk.rs           src/formats/            src/lib.rs             src/graph.rs         src/rewrite.rs          src/manifest.rs         src/lint.rs
                        (Registry)
 
@@ -33,10 +33,18 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `Entity`. Because the input `Vec` was already sorted, `.collect()`ing the
    `par_iter()` output preserves that order regardless of which thread
    finishes first.
-3. **Dedup / remap** (`compile_inner` in `src/lib.rs`) — on an `id` (slug)
-   collision, the entity with the lexicographically-first `rel_path` wins;
-   any id that collides with a reserved manifest name (`index`, `llms`,
-   `agents`, `graph`) is remapped to `<id>_page`, `<id>_page_2`, ... Produces
+3. **Qualify / remap** (`compile_inner` in `src/lib.rs`) — an extractor
+   names a page from its own file alone and cannot see the rest of the tree,
+   so ids are made unique here, where every entity is in hand.
+   `disambiguate_ids` prefixes parent directory segments to the names that
+   would otherwise share a slug, one segment per round until the clash
+   clears (`app/api/models.py` → `Api Models` → `api_models`); a name that
+   is already unique is never touched. Whatever still collides afterwards —
+   a file at the project root with no segment left to take, or two paths
+   equal but for case — falls through to the older rule, where the entity
+   with the lexicographically-first `rel_path` wins. Any id that collides
+   with a reserved manifest name (`index`, `llms`, `agents`, `graph`) is then
+   remapped to `<id>_page`, `<id>_page_2`, ... Produces
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links by scanning entity bodies for mentions of other entity names (and
@@ -62,7 +70,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 | Module | Responsibility |
 |---|---|
-| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
+| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering; produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
@@ -72,7 +80,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/extract_python.rs` | The Python `LangSpec`: class-chain owner qualification, `__all__` handling, module docstring extraction. |
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
-| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
+| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`). |
@@ -117,6 +125,12 @@ breaking any of them reintroduces nondeterminism.
   process (`RandomState`), so `HashMap` iteration order — and therefore any
   order derived from it — would differ from run to run even with identical
   input.
+- **Name qualification depends on the set of files, not their order.**
+  `disambiguate_ids` reads only each entity's `(name, source_path)` pair and
+  extends every member of a colliding group together, so the ids it produces
+  are the same whichever order extraction finished in. It terminates because
+  a path has finitely many segments and a round that extends nobody stops the
+  loop.
 - **Slug-collision dedup keeps the entity with the lexicographically-first
   `rel_path`.** Combined with the sorted-walk guarantee above, this makes
   the winner a pure function of the input paths, not of extraction

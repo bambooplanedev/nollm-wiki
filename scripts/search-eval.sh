@@ -13,7 +13,7 @@ determinism rules|architecture
 incremental cache|cache
 broken wikilinks orphans|lint
 mcp server stdio|serve
-neighbors budget max tokens|query
+neighbors budget max tokens|src_query
 python docstring extraction|extract_python
 rust impl methods owner|extract_rust
 go exported identifier|extract_simple

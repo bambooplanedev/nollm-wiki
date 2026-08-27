@@ -1,5 +1,5 @@
 use crate::formats::{summarize, Extractor};
-use crate::model::{slugify, Entity, SourceKind};
+use crate::model::{slugify, title_case, Entity, SourceKind};
 use std::collections::BTreeSet;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch, Tree};
 
@@ -661,17 +661,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
 fn derive_name_from_path(rel_path: &str) -> String {
     let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
-    stem.replace(['_', '-'], " ")
-        .split_whitespace()
-        .map(|w| {
-            let mut c = w.chars();
-            match c.next() {
-                Some(f) => f.to_uppercase().collect::<String>() + &c.as_str().to_lowercase(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    title_case(&stem.replace(['_', '-'], " "))
 }
 
 #[cfg(test)]
