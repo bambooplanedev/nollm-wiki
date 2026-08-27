@@ -522,6 +522,37 @@ fn signature_cut(def: Node) -> Option<Node> {
     None
 }
 
+/// The shared text pipeline for one fragment of a signature: Python's explicit
+/// line continuations joined, internal whitespace collapsed, punctuation
+/// artifacts tidied.
+///
+/// Shared by the head and by a retained value. A `line_continuation` can sit
+/// *inside* a value node (`X = 1 + \`⏎`2` parses the continuation as a child of
+/// the `binary_operator` that is the `right` field), and a wrapped argument
+/// list inside a value collects the same `( ` / `, )` artifacts a wrapped
+/// parameter list does. Running one pipeline over both is what keeps those two
+/// cases correct; a value appended without it renders `1 + \ 2` and
+/// `compute( 1, 2, )`.
+fn normalize(raw: &str, spec: &LangSpec) -> String {
+    // A backslash immediately followed by a newline is Python's explicit line
+    // continuation: it is not whitespace, so it survives collapsing and
+    // strands the trailing-strip loop one character short of the `=` it must
+    // remove (`Z: int = \` never reduces to `Z: int`). Gated per-language:
+    // JS and TS allow the identical sequence inside a string literal, and a
+    // default-parameter value sits inside the retained signature span, so
+    // joining it there would silently rewrite `"x\<newline>y"` to `"x y"`.
+    //
+    // CRLF line endings make the continuation sequence `\` `\r` `\n`, not
+    // `\` `\n` — replace the CRLF form first, or a CRLF file leaves the
+    // backslash unjoined, exactly the defect this join exists to prevent.
+    let joined = if spec.join_continuations {
+        raw.replace("\\\r\n", " ").replace("\\\n", " ")
+    } else {
+        raw.to_string()
+    };
+    tidy_punctuation(collapse_whitespace(&joined))
+}
+
 /// Build a one-line signature from a definition node: its source text up to
 /// (not including) its `cut` node, with internal whitespace collapsed,
 /// punctuation tidied, and language-specific trailing characters (Rust's `;`
@@ -555,23 +586,7 @@ fn build_signature(
         }
         _ => text.get(start..end).unwrap_or("").to_string(),
     };
-    // A backslash immediately followed by a newline is Python's explicit line
-    // continuation: it is not whitespace, so it survives collapsing and
-    // strands the trailing-strip loop one character short of the `=` it must
-    // remove (`Z: int = \` never reduces to `Z: int`). Gated per-language:
-    // JS and TS allow the identical sequence inside a string literal, and a
-    // default-parameter value sits inside the retained signature span, so
-    // joining it there would silently rewrite `"x\<newline>y"` to `"x y"`.
-    let raw = if spec.join_continuations {
-        // CRLF line endings make the continuation sequence `\` `\r` `\n`, not
-        // `\` `\n` — replace the CRLF form first, or a CRLF file leaves the
-        // backslash unjoined (`Z: int = \` survives untouched), exactly the
-        // defect this join exists to prevent.
-        raw.replace("\\\r\n", " ").replace("\\\n", " ")
-    } else {
-        raw
-    };
-    let mut sig = tidy_punctuation(collapse_whitespace(&raw));
+    let mut sig = normalize(&raw, spec);
     loop {
         match sig.chars().last() {
             Some(c) if spec.strip_trailing.contains(&c) => {
