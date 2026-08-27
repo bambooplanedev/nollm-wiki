@@ -308,16 +308,13 @@ pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
 mod tests {
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
+    use crate::formats::code::testutil::{assert_has, assert_lacks};
 
     #[test]
     fn python_signatures_gated_docstring_and_imports() {
         let src = "\"\"\"\nTop docstring.\n\"\"\"\nimport os\nfrom graph import build\ndef extract_all(d):\n    pass\ndef _private():\n    pass\n";
         let e = CodeExtractor.extract("extractor.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def extract_all(d)"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def extract_all(d)");
         assert!(!e.symbols.iter().any(|s| s.contains("_private")));
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert!(e.imports.iter().any(|i| i.contains("os")));
@@ -384,25 +381,9 @@ mod tests {
     fn python_methods_are_qualified_by_their_class() {
         let src = "class Wiki:\n    def search(self, q: str) -> list:\n        return []\n    async def fetch(self) -> bytes:\n        return b\"\"\n\ndef free_function() -> int:\n    return 1\n";
         let e = CodeExtractor.extract("q.py", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "def Wiki.search(self, q: str) -> list"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "async def Wiki.fetch(self) -> bytes"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def free_function() -> int"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def Wiki.search(self, q: str) -> list");
+        assert_has(&e.symbols, "async def Wiki.fetch(self) -> bytes");
+        assert_has(&e.symbols, "def free_function() -> int");
     }
 
     #[test]
@@ -410,11 +391,7 @@ mod tests {
         let src =
             "class Article:\n    class Inner:\n        def deep(self) -> None:\n            pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "class Article.Inner"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "class Article.Inner");
         assert!(
             e.symbols
                 .iter()
@@ -445,29 +422,15 @@ mod tests {
             "extraction must still be happening at all: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "def Public.run(self) -> None"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def Public.run(self) -> None");
     }
 
     #[test]
     fn python_two_classes_with_the_same_method_stay_distinct() {
         let src = "class A2:\n    def run(self) -> None:\n        pass\n\nclass B2:\n    def run(self) -> None:\n        pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def A2.run(self) -> None"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def B2.run(self) -> None"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def A2.run(self) -> None");
+        assert_has(&e.symbols, "def B2.run(self) -> None");
     }
 
     #[test]
@@ -504,36 +467,12 @@ mod tests {
     fn python_all_is_the_authoritative_export_gate() {
         let src = "__all__ = [\"Public\", \"shown\"]\n\nclass Public:\n    field: str\n    def m(self) -> None:\n        pass\n    def _hidden(self) -> None:\n        pass\n\nclass NotListed:\n    field: int\n\ndef shown() -> int:\n    return 1\n\ndef not_listed() -> int:\n    return 2\n\nHIDDEN_CONST = 5\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "class Public"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def Public.m(self) -> None"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def shown() -> int"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("NotListed")),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("not_listed")),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("HIDDEN_CONST")),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "class Public");
+        assert_has(&e.symbols, "def Public.m(self) -> None");
+        assert_has(&e.symbols, "def shown() -> int");
+        assert_lacks(&e.symbols, "NotListed");
+        assert_lacks(&e.symbols, "not_listed");
+        assert_lacks(&e.symbols, "HIDDEN_CONST");
         assert!(
             !e.symbols.iter().any(|s| s.contains("_hidden")),
             "__all__ says nothing about what is public inside a class: {:?}",
@@ -555,16 +494,8 @@ mod tests {
             "__all__ must be able to export a free underscore-prefixed name: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "__version__ = \"1.0\""),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "class Public"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "__version__ = \"1.0\"");
+        assert_has(&e.symbols, "class Public");
         assert!(
             !e.symbols.iter().any(|s| s.contains("_hidden")),
             "a _hidden method of a listed class must stay hidden — the \
@@ -581,23 +512,15 @@ mod tests {
         let src =
             "def _private_api() -> int:\n    return 1\n\ndef public_api() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("_private_api")),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def public_api() -> int"),
-            "{:?}",
-            e.symbols
-        );
+        assert_lacks(&e.symbols, "_private_api");
+        assert_has(&e.symbols, "def public_api() -> int");
     }
 
     #[test]
     fn a_computed_all_falls_back_to_the_underscore_convention() {
         let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert_has(&e.symbols, "def a()");
         assert!(
             e.symbols.iter().any(|s| s == "def b()"),
             "a non-literal __all__ must not gate anything: {:?}",
@@ -621,7 +544,7 @@ mod tests {
     fn a_second_module_level_all_assignment_wins() {
         let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = [\"b\"]\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "def b()"), "{:?}", e.symbols);
+        assert_has(&e.symbols, "def b()");
         assert!(
             !e.symbols.iter().any(|s| s == "def a()"),
             "the second, later __all__ must win over the first: {:?}",
@@ -640,11 +563,7 @@ mod tests {
         // convention for the whole module, exporting both names.
         let src = "__all__ = [\"base_name\"]\n__all__ += [\"added_name\"]\n\ndef base_name() -> int:\n    return 1\n\ndef added_name() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def base_name() -> int"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def base_name() -> int");
         assert!(
             e.symbols.iter().any(|s| s == "def added_name() -> int"),
             "`__all__ +=` must fall back to the convention, not keep the stale literal: {:?}",
@@ -662,7 +581,7 @@ mod tests {
         let src =
             "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = compute()\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert_has(&e.symbols, "def a()");
         assert!(
             e.symbols.iter().any(|s| s == "def b()"),
             "a non-literal reassignment must fall back to the convention: {:?}",
@@ -674,7 +593,7 @@ mod tests {
     fn an_all_dot_extend_after_a_literal_falls_back_to_the_underscore_convention() {
         let src = "__all__ = [\"a\"]\n__all__.extend([\"b\"])\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "def a()"), "{:?}", e.symbols);
+        assert_has(&e.symbols, "def a()");
         assert!(
             e.symbols.iter().any(|s| s == "def b()"),
             "__all__.extend(...) must fall back to the convention: {:?}",
@@ -686,61 +605,21 @@ mod tests {
     fn python_assignments_keep_their_values_annotated_or_not() {
         let src = "MAX_IDS = 2000\nSUMMARY_LIMIT: int = 300\nPRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]\nAlias = list[int]\n_PRIVATE = 1\n";
         let e = CodeExtractor.extract("state.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "MAX_IDS = 2000"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "SUMMARY_LIMIT: int = 300"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "PRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "Alias = list[int]"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("_PRIVATE")),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "MAX_IDS = 2000");
+        assert_has(&e.symbols, "SUMMARY_LIMIT: int = 300");
+        assert_has(&e.symbols, "PRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]");
+        assert_has(&e.symbols, "Alias = list[int]");
+        assert_lacks(&e.symbols, "_PRIVATE");
     }
 
     #[test]
     fn python_class_fields_are_qualified_and_gated() {
         let src = "class Article:\n    title: str\n    url: str = \"\"\n    published: datetime | None = None\n    _hidden: int = 0\n";
         let e = CodeExtractor.extract("models.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "Article.title: str"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "Article.url: str = \"\""),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "Article.published: datetime | None = None"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("_hidden")),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "Article.title: str");
+        assert_has(&e.symbols, "Article.url: str = \"\"");
+        assert_has(&e.symbols, "Article.published: datetime | None = None");
+        assert_lacks(&e.symbols, "_hidden");
     }
 
     #[test]
@@ -774,16 +653,8 @@ mod tests {
     fn python_line_continuations_do_not_strand_the_strip_loop() {
         let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "Z: int = 5"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "X = compute()"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "Z: int = 5");
+        assert_has(&e.symbols, "X = compute()");
     }
 
     #[test]
@@ -794,16 +665,8 @@ mod tests {
         // added to prevent. The CRLF form must be replaced first.
         let src = "Z: int = \\\r\n    5\r\nX = \\\r\n    compute()\r\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "Z: int = 5"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "X = compute()"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "Z: int = 5");
+        assert_has(&e.symbols, "X = compute()");
     }
 
     #[test]
@@ -823,18 +686,8 @@ mod tests {
     fn python_decorators_are_kept_with_their_arguments() {
         let src = "@dataclass(frozen=True)\nclass Article:\n    title: str\n";
         let e = CodeExtractor.extract("models.py", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "@dataclass(frozen=True) class Article"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "Article.title: str"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "@dataclass(frozen=True) class Article");
+        assert_has(&e.symbols, "Article.title: str");
     }
 
     #[test]
@@ -842,42 +695,22 @@ mod tests {
         let src =
             "class Article:\n    @property\n    def slug(self) -> str:\n        return \"\"\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "@property def Article.slug(self) -> str"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "@property def Article.slug(self) -> str");
     }
 
     #[test]
     fn python_stacked_decorators_all_survive() {
         let src = "@a\n@b(1)\n@c.d.e\ndef stacked() -> int:\n    return 0\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "@a @b(1) @c.d.e def stacked() -> int"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "@a @b(1) @c.d.e def stacked() -> int");
     }
 
     #[test]
     fn python_conditionally_defined_module_functions_are_kept() {
         let src = "if TYPE_CHECKING:\n    def type_only():\n        pass\n\ntry:\n    def optional_dep():\n        pass\nexcept ImportError:\n    pass\n";
         let e = CodeExtractor.extract("t.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def type_only()"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols.iter().any(|s| s == "def optional_dep()"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def type_only()");
+        assert_has(&e.symbols, "def optional_dep()");
     }
 
     #[test]
@@ -886,11 +719,7 @@ mod tests {
         // head must not still carry it: `MAX_IDS = 2000 = 2000` is the failure.
         let src = "MAX_IDS = 2000\n";
         let e = CodeExtractor.extract("state.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "MAX_IDS = 2000"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "MAX_IDS = 2000");
         assert!(
             !e.symbols.iter().any(|s| s.matches(" = ").count() > 1),
             "value appended twice: {:?}",
@@ -907,13 +736,7 @@ mod tests {
         let long = "y".repeat(200);
         let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "CACHE_DIR = \"/var/cache/store\""),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "CACHE_DIR = \"/var/cache/store\"");
         let big = e
             .symbols
             .iter()
@@ -930,7 +753,7 @@ mod tests {
         let long = "z".repeat(200);
         let src = format!("BIG: str = \"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);
-        assert!(e.symbols.iter().any(|s| s == "BIG: str"), "{:?}", e.symbols);
+        assert_has(&e.symbols, "BIG: str");
         assert!(
             !e.symbols.iter().any(|s| s.contains('…')),
             "annotated must omit, not truncate: {:?}",
@@ -945,22 +768,14 @@ mod tests {
         // value. Without the shared pipeline this renders `X = 1 + \ 2`.
         let src = "X = 1 + \\\n    2\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "X = 1 + 2"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "X = 1 + 2");
     }
 
     #[test]
     fn a_crlf_continuation_inside_the_value_is_joined() {
         let src = "X = 1 + \\\r\n    2\r\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "X = 1 + 2"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "X = 1 + 2");
     }
 
     #[test]
@@ -968,11 +783,7 @@ mod tests {
         // Without the shared pipeline this renders `Y = compute( 1, 2, )`.
         let src = "Y = compute(\n    1,\n    2,\n)\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "Y = compute(1, 2)"),
-            "{:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "Y = compute(1, 2)");
     }
 
     #[test]

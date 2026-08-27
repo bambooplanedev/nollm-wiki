@@ -28,16 +28,11 @@ fn keep_bare_pub(vis: &str) -> bool {
 /// The owner of a Rust definition, rendered as it will appear in the
 /// signature:
 ///
+///   * a field's or a variant's owner — the declaring type's name;
 ///   * inherent `impl` — the type name with generic arguments stripped, so
 ///     `impl<T> Holder<T>` yields `Holder::get`, valid Rust that sorts beside
 ///     the type's other methods;
-///   * trait `impl` — `<Type as Trait>`, Rust's own disambiguation syntax. The
-///     trait *must* be part of the owner: `impl Display for Foo` and
-///     `impl Debug for Foo` both define `fn fmt(&self, …) -> Result`, which
-///     collapse to a single line under `dedup` if only the type is named. It
-///     also keeps the full type text, so `impl Encode for Vec<u8>` and
-///     `… for Vec<u16>` stay distinct, and it renders exotic targets as valid
-///     paths (`<&Foo as Trait>::m`).
+///   * trait `impl` — see `trait_impl_owner`;
 ///   * `trait` declaration — the trait's own name.
 fn rust_owner(def: Node, text: &str) -> Option<String> {
     let parent = def.parent()?;
@@ -61,13 +56,16 @@ fn rust_owner(def: Node, text: &str) -> Option<String> {
         "struct_item" | "union_item" | "enum_item" => text
             .get(holder.child_by_field_name("name")?.byte_range())
             .map(str::to_string),
-        "impl_item" => {
-            let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
-            match holder.child_by_field_name("trait") {
-                Some(tr) => Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?)),
-                None => Some(ty.split('<').next().unwrap_or(ty).trim().to_string()),
+        "impl_item" => match trait_impl_owner(holder, text) {
+            Some(owner) => Some(owner),
+            // An inherent impl: the type name with generic arguments stripped,
+            // so `impl<T> Holder<T>` yields `Holder::get` — valid Rust that
+            // sorts beside the type's other methods.
+            None => {
+                let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
+                Some(ty.split('<').next().unwrap_or(ty).trim().to_string())
             }
-        }
+        },
         "trait_item" => text
             .get(holder.child_by_field_name("name")?.byte_range())
             .map(str::to_string),
@@ -147,16 +145,31 @@ pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
     }
 }
 
-/// The group a trait-impl header shares with its own methods. `rust_owner`
-/// resolves the owner of a node *inside* a `declaration_list`; a header is the
-/// `impl_item`, so the same rendering is reproduced here from its own fields.
+/// A trait impl rendered as an owner, in Rust's own disambiguation syntax:
+/// `<Type as Trait>`. `None` when `impl_item` is an inherent impl.
+///
+/// The trait *must* be part of the owner: `impl Display for Foo` and
+/// `impl Debug for Foo` both define `fn fmt(&self, …) -> Result`, which would
+/// collapse to a single line under `dedup` if only the type were named. Keeping
+/// the full type text also holds `impl Encode for Vec<u8>` and `… for Vec<u16>`
+/// apart, and renders exotic targets as valid paths (`<&Foo as Trait>::m`).
+///
+/// Shared by both callers so they cannot drift: `rust_owner` reaches an
+/// `impl_item` from a member inside its `declaration_list`, while
+/// `rust_header_group` starts at the header itself — and a member must land in
+/// the same group its own header does.
+fn trait_impl_owner(impl_item: Node, text: &str) -> Option<String> {
+    let ty = text.get(impl_item.child_by_field_name("type")?.byte_range())?;
+    let tr = impl_item.child_by_field_name("trait")?;
+    Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?))
+}
+
+/// The group a trait-impl header shares with its own methods.
 pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
     if def.kind() != "impl_item" {
         return None;
     }
-    let ty = text.get(def.child_by_field_name("type")?.byte_range())?;
-    let tr = def.child_by_field_name("trait")?;
-    Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?))
+    trait_impl_owner(def, text)
 }
 
 /// Rust's grammar-specific shapes. Everything here was previously a
@@ -336,6 +349,7 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<String> {
 mod tests {
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
+    use crate::formats::code::testutil::{assert_has, assert_lacks};
 
     #[test]
     fn rust_signatures_gated_and_imports() {
@@ -345,13 +359,7 @@ mod tests {
             crate::model::SourceKind::Code { lang } => assert_eq!(lang, "rust"),
             _ => panic!("expected Code kind"),
         }
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub fn render_page(x: i32) -> String"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn render_page(x: i32) -> String");
         assert!(!e.symbols.iter().any(|s| s.contains("private_helper")));
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert_eq!(e.summary.as_deref(), Some("Module docs."));
@@ -394,11 +402,7 @@ mod tests {
     fn rust_restricted_visibility_is_not_an_export() {
         let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn public_one()"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn public_one()");
         assert!(
             e.symbols.iter().any(|s| s.contains("kept")),
             "a bare-pub inherent method must survive: {:?}",
@@ -417,11 +421,7 @@ mod tests {
     fn rust_trait_visibility_gated() {
         let src = "pub trait Public {\n    fn m(&self);\n}\ntrait Private {\n    fn n(&self);\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub trait Public"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub trait Public");
         assert!(
             !e.symbols.iter().any(|s| s.contains("Private")),
             "private trait leaked as export: {:?}",
@@ -435,45 +435,19 @@ mod tests {
         let e = CodeExtractor.extract("t.rs", src);
         // A const's contract is its type AND its value; the value is the half a
         // reader cannot guess from the name.
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub const CACHE_VERSION: u32 = 1"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub static NAME: &str = \"x\""),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub const CACHE_VERSION: u32 = 1");
+        assert_has(&e.symbols, "pub static NAME: &str = \"x\"");
         // An alias without its target would be useless, and `type_item` has no
         // `value:` field, so nothing is cut.
-        assert!(
-            e.symbols.iter().any(|s| s == "pub type Pack = Vec<u8>"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("PRIVATE")),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub type Pack = Vec<u8>");
+        assert_lacks(&e.symbols, "PRIVATE");
     }
 
     #[test]
     fn inherent_impl_methods_are_qualified_with_their_type() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> Vec<Hit> { todo!() }\n    fn helper(&self) {}\n}\npub fn free_function() {}\n";
         let e = CodeExtractor.extract("query.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>");
         assert!(
             e.symbols.iter().any(|s| s == "pub fn free_function()"),
             "a top-level function must stay unqualified: {:?}",
@@ -488,24 +462,14 @@ mod tests {
         let e = CodeExtractor.extract("t.rs", src);
         // `Holder::get` is valid Rust and sorts beside the type's other
         // methods; `Holder<T>::get` would be neither.
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub fn Holder::get(&self) -> T"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn Holder::get(&self) -> T");
     }
 
     #[test]
     fn function_local_items_are_not_module_exports() {
         let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn outer()"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn outer()");
         for leaked in ["Local", "hidden", "nested"] {
             assert!(
                 !e.symbols.iter().any(|s| s.contains(leaked)),
@@ -526,13 +490,7 @@ mod tests {
     fn generic_trait_impl_keeps_its_type_arguments() {
         let src = "impl<T: Clone> Display for Wrapper<T> {\n    fn fmt(&self) {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "impl<T: Clone> Display for Wrapper<T>"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "impl<T: Clone> Display for Wrapper<T>");
         assert!(
             e.symbols
                 .iter()
@@ -546,11 +504,7 @@ mod tests {
     fn items_in_an_inline_module_stay_unqualified() {
         let src = "pub mod inner {\n    pub fn in_mod() {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn in_mod()"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn in_mod()");
     }
 
     #[test]
@@ -674,22 +628,10 @@ mod tests {
     fn trait_impl_emits_header_and_qualified_methods() {
         let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
         let e = CodeExtractor.extract("text.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "impl Extractor for TextExtractor"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "impl Extractor for TextExtractor");
         // Methods in a trait impl carry no visibility modifier — they are
         // public through the trait — so they must not be visibility-gated.
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity");
     }
 
     #[test]
@@ -713,13 +655,7 @@ mod tests {
     fn two_traits_with_the_same_method_name_stay_distinct() {
         let src = "pub struct Foo;\nimpl Display for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\nimpl Debug for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <Foo as Display>::fmt(&self) -> Result"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "fn <Foo as Display>::fmt(&self) -> Result");
         assert!(
             e.symbols
                 .iter()
@@ -733,87 +669,35 @@ mod tests {
     fn same_trait_on_different_generic_arguments_stays_distinct() {
         let src = "impl Encode for Vec<u8> {\n    fn go(&self) -> u8 { 0 }\n}\nimpl Encode for Vec<u16> {\n    fn go(&self) -> u8 { 1 }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <Vec<u8> as Encode>::go(&self) -> u8"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <Vec<u16> as Encode>::go(&self) -> u8"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "fn <Vec<u8> as Encode>::go(&self) -> u8");
+        assert_has(&e.symbols, "fn <Vec<u16> as Encode>::go(&self) -> u8");
     }
 
     #[test]
     fn exotic_impl_targets_render_as_valid_paths() {
         let src = "impl Trait for &Foo {\n    fn m(&self) {}\n}\nimpl Trait for (A, B) {\n    fn m(&self) {}\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <&Foo as Trait>::m(&self)"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn <(A, B) as Trait>::m(&self)"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "fn <&Foo as Trait>::m(&self)");
+        assert_has(&e.symbols, "fn <(A, B) as Trait>::m(&self)");
     }
 
     #[test]
     fn associated_type_and_const_in_a_trait_impl_are_exported() {
         let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "type <Counter as Iterator>::Item = u32"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "const <Counter as Iterator>::FOO: u8 = 1"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "type <Counter as Iterator>::Item = u32");
+        assert_has(&e.symbols, "const <Counter as Iterator>::FOO: u8 = 1");
     }
 
     #[test]
     fn public_trait_declaration_lists_required_and_default_methods() {
         let src = "pub trait Extractor {\n    fn extensions(&self) -> &[&str];\n    fn helper(&self) -> u8 { 7 }\n}\ntrait Private {\n    fn n(&self);\n}\n";
         let e = CodeExtractor.extract("mod.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn Extractor::extensions(&self) -> &[&str]"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "fn Extractor::helper(&self) -> u8"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "fn Extractor::extensions(&self) -> &[&str]");
+        assert_has(&e.symbols, "fn Extractor::helper(&self) -> u8");
         // Gated on the *trait's* visibility: a method inside a trait cannot
         // carry a modifier, but a private trait's methods are not exports.
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("Private")),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_lacks(&e.symbols, "Private");
     }
 
     #[test]
@@ -886,13 +770,7 @@ mod tests {
     fn placement_reproduces_the_module_level_guard_and_owner() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
         let e = CodeExtractor.extract("q.rs", src);
-        assert!(
-            e.symbols
-                .iter()
-                .any(|s| s == "pub fn Wiki::search(&self) -> u8"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
         assert!(
             !e.symbols.iter().any(|s| s.contains("hidden")),
             "function-local item leaked: {:?}",
@@ -910,17 +788,14 @@ mod surface_tests {
         CodeExtractor.extract("t.rs", src).symbols
     }
 
+    /// These curry `syms` onto the shared assertions; the matching rules and
+    /// the failure messages live in `code::testutil`.
     fn assert_has(src: &str, want: &str) {
-        let s = syms(src);
-        assert!(s.iter().any(|x| x == want), "want {want:?} in {s:?}");
+        crate::formats::code::testutil::assert_has(&syms(src), want);
     }
 
     fn assert_lacks(src: &str, unwanted: &str) {
-        let s = syms(src);
-        assert!(
-            !s.iter().any(|x| x.contains(unwanted)),
-            "{unwanted:?} must not appear in {s:?}"
-        );
+        crate::formats::code::testutil::assert_lacks(&syms(src), unwanted);
     }
 
     #[test]

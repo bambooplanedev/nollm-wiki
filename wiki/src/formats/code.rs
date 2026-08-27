@@ -798,6 +798,37 @@ fn derive_name_from_path(rel_path: &str) -> String {
     title_case(&stem.replace(['_', '-'], " "))
 }
 
+/// Assertions shared by every language's extraction tests.
+///
+/// The two are deliberately asymmetric, and both pick the *strict* option for
+/// their direction: `assert_has` matches a signature exactly, so it cannot be
+/// satisfied by a longer signature that merely contains the wanted text, and
+/// `assert_lacks` matches a substring, so it fails on any signature that
+/// mentions the name at all. Loosening either — an `assert_has` that accepted
+/// a substring especially — would let tests keep passing while the extractor
+/// regressed.
+///
+/// They take an already-extracted symbol list rather than source text, so a
+/// test with several assertions extracts once.
+#[cfg(test)]
+pub(crate) mod testutil {
+    /// The exact signature `want` must be among `symbols`.
+    pub(crate) fn assert_has(symbols: &[String], want: &str) {
+        assert!(
+            symbols.iter().any(|s| s == want),
+            "want {want:?} in {symbols:?}"
+        );
+    }
+
+    /// No signature may so much as mention `unwanted`.
+    pub(crate) fn assert_lacks(symbols: &[String], unwanted: &str) {
+        assert!(
+            !symbols.iter().any(|s| s.contains(unwanted)),
+            "{unwanted:?} must not appear in {symbols:?}"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
