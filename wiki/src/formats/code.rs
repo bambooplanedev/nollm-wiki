@@ -104,6 +104,21 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     })
 }
 
+/// The per-language `Shape` hook. Kept beside `lang_for_ext` rather than as a
+/// `LangSpec` field so that adding this seam needed no edit to the three
+/// unfinished JS/TS/Go specs, which spell every field out literally. If those
+/// languages ever grow grammar-specific shapes, this folds into `LangSpec`.
+///
+/// Everything this dispatches to lives in the language's own module: no Rust
+/// or Python node kind appears in this file.
+fn shape_for(ext: &str) -> fn(Node) -> Shape {
+    match ext {
+        "rs" => super::extract_rust::rust_shape,
+        "py" => super::extract_python::python_shape,
+        _ => default_shape,
+    }
+}
+
 /// Every extension `CodeExtractor` claims. Shared by `extensions()` and by
 /// `QUERIES` so the registry can never miss a language the extractor accepts —
 /// a missing entry would strip that language of all symbols and imports.
@@ -242,14 +257,78 @@ enum ItemKind {
     Member,
 }
 
-/// A definition whose name binds a value rather than declaring a callable or a
-/// type. Consulted only for items `placement` already reported as free — an
-/// associated `const` inside a trait impl is a `Member`, not a `FreeValue`.
-fn is_value_item(kind: &str) -> bool {
-    matches!(
-        kind,
-        "assignment" | "const_item" | "static_item" | "type_item"
-    )
+/// What a definition is, as far as its own grammar is concerned.
+///
+/// Only the shape's *own language* can answer this — `Rank::Value` covers
+/// Rust's `const`/`static`/`type` and Python's `assignment`, node kinds that
+/// have nothing to do with each other. Consulted only for items `placement`
+/// already reported as free: an associated `const` inside a trait impl is a
+/// `Member`, not a `FreeValue`, and `classify` enforces that precedence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rank {
+    /// A callable or type declaration — `fn`, `struct`, `class`, `def`.
+    Def,
+    /// A name bound to a value.
+    Value,
+    /// A module declaration.
+    Module,
+}
+
+/// The grammar-derived facts about one definition node that the shared core
+/// cannot know: what it is, where its signature stops, and what value (if any)
+/// it re-appends.
+///
+/// This is the seam that keeps Rust and Python node kinds out of this file.
+/// It follows the same consolidation `Placement` made — one hook answering
+/// several questions from one look at the node, rather than several switches
+/// each re-deriving the node's kind.
+pub(crate) struct Shape<'a> {
+    pub(crate) rank: Rank,
+    /// Where the signature stops. `None` renders the whole node.
+    pub(crate) cut: Option<Node<'a>>,
+    /// A value to re-append after the head, subject to `VALUE_BUDGET`.
+    ///
+    /// Deliberately independent of `rank`: a Rust type alias is `Rank::Value`
+    /// with `value: None`, because it names its target in a `type` field, not
+    /// a `value` field, and already renders whole. Deriving one from the other
+    /// — `rank == Value` implying `value.is_some()` or the reverse — breaks
+    /// type aliases. `rust_module_level_const_static_and_type_alias` catches it.
+    pub(crate) value: Option<Node<'a>>,
+    /// Whether the head still states a type once the value is dropped. Decides
+    /// omit-vs-truncate when the value is over budget. See `append_value`.
+    pub(crate) has_type: bool,
+}
+
+/// The signature cut every language shares: stop at the body, at a wrapped
+/// declaration's body, or at a value.
+///
+/// Written as three independent lookups rather than a chain of `?`: a Rust
+/// `const_item` has no `declaration` field, so an early return there would
+/// skip the `value` lookup and leave the initializer in the signature.
+pub(crate) fn default_cut(def: Node) -> Option<Node> {
+    if let Some(body) = def.child_by_field_name("body") {
+        return Some(body);
+    }
+    if let Some(declaration) = def.child_by_field_name("declaration") {
+        if let Some(body) = declaration.child_by_field_name("body") {
+            return Some(body);
+        }
+    }
+    def.child_by_field_name("value")
+}
+
+/// A plain definition: cut at the shared boundary, retain no value.
+///
+/// `has_type: true` is the safe default — it means an over-budget value is
+/// omitted rather than truncated. Languages with no retained value never
+/// consult it.
+pub(crate) fn default_shape(def: Node) -> Shape {
+    Shape {
+        rank: Rank::Def,
+        cut: default_cut(def),
+        value: None,
+        has_type: true,
+    }
 }
 
 /// Capture indices for one language's query, resolved once per extraction.
@@ -354,17 +433,32 @@ fn should_keep(
 /// The shape of a kept definition, decided from the two `Option`s already in
 /// hand plus the node's own kind, rather than sniffed back out of the
 /// rendered signature.
-fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind {
+/// Precedence is Header > Member > `rank`: an associated `const` inside a
+/// trait impl carries `Rank::Value` from the grammar but is a `Member`.
+///
+/// Mutation-tested, and the honest result is that no current output
+/// distinguishes the two. A `const`/`static`/`type` member always renders a
+/// signature that sorts ahead of a `fn` member's (same `pub ` prefix, then
+/// `c`/`s`/`t` before `f`), so the group sort and `pick_summary_fallback`'s
+/// min-signature both land identically whether such an item is `Member` or
+/// `FreeValue`. Swapping the precedence here breaks no test — not because the
+/// suite is weak, but because the difference is currently unobservable.
+///
+/// Keep the order anyway. It stops being unobservable the moment
+/// `pick_summary_fallback`'s rungs or `ItemKind`'s derived `Ord` change, and a
+/// `Member` reported as a free item is wrong on its face regardless of whether
+/// today's sort happens to hide it.
+fn classify(name_node: Option<Node>, owner: Option<&str>, rank: Rank) -> ItemKind {
     if name_node.is_none() {
         ItemKind::Header
     } else if owner.is_some() {
         ItemKind::Member
-    } else if def.kind() == "mod_item" {
-        ItemKind::Module
-    } else if is_value_item(def.kind()) {
-        ItemKind::FreeValue
     } else {
-        ItemKind::FreeDef
+        match rank {
+            Rank::Module => ItemKind::Module,
+            Rank::Value => ItemKind::FreeValue,
+            Rank::Def => ItemKind::FreeDef,
+        }
     }
 }
 
@@ -442,6 +536,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
         imp: query.capture_index_for_name("import"),
     };
     let exports = (spec.export_set)(&tree, text);
+    let shape_of = shape_for(ext);
 
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
@@ -461,16 +556,13 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
             if should_keep(parts.vis, &chain, name_text, &exports, &spec) {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
-                let sig = build_signature(
-                    text,
-                    def,
-                    parts.name,
-                    owner.as_deref(),
-                    &spec,
-                    signature_cut(def),
-                );
+                // Resolved once, after `placement` has accepted the item, and
+                // then used for both the signature and the classification —
+                // the two used to re-derive the node's kind independently.
+                let shape = shape_of(def);
+                let sig = build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
                 if !sig.is_empty() {
-                    let kind = classify(parts.name, owner.as_deref(), def);
+                    let kind = classify(parts.name, owner.as_deref(), shape.rank);
                     let group = group_key(owner.as_deref(), name_text, def, text, &spec);
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
@@ -507,80 +599,6 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
         docstring,
         summary_fallback,
     ))
-}
-
-/// Locate the node at which a definition's signature stops, so the rest of its
-/// text can be excluded. Most grammars expose this as a `body` field; JS/TS
-/// definitions captured through an `export_statement` wrapper expose it one
-/// level down via the wrapped `declaration`; Rust `const`/`static` items have
-/// no body at all and stop at their `value`.
-///
-/// Written as three independent lookups rather than a chain of `?`: a
-/// `const_item` has no `declaration` field, so an early return there would
-/// skip the `value` lookup and leave the initializer in the signature.
-fn signature_cut(def: Node) -> Option<Node> {
-    // A variant IS its payload. Cutting at `body` the way a struct is cut
-    // would reduce `Remote(String)` to `Remote` and `Sqlite { path: String }`
-    // to `Sqlite`, dropping the only part that says what the variant carries.
-    // Variants are a single line's worth of text, so they render whole.
-    if def.kind() == "enum_variant" {
-        return None;
-    }
-    // A `macro_definition`'s rules are plain children, not a `body` field, so
-    // without an explicit cut the entire macro would become its signature.
-    // The first rule opens right after the delimiter, leaving a trailing `{`
-    // for Rust's `strip_trailing` to remove.
-    if def.kind() == "macro_definition" {
-        let mut cursor = def.walk();
-        return def.children(&mut cursor).find(|c| c.kind() == "macro_rule");
-    }
-    if let Some(body) = def.child_by_field_name("body") {
-        return Some(body);
-    }
-    if let Some(declaration) = def.child_by_field_name("declaration") {
-        if let Some(body) = declaration.child_by_field_name("body") {
-            return Some(body);
-        }
-    }
-    if let Some(value) = def.child_by_field_name("value") {
-        return Some(value);
-    }
-    // Both assignment forms cut at their value, which `retained_value` and
-    // `append_value` re-append. The gate that once spared unannotated
-    // assignments is gone: an unannotated head alone would be a bare
-    // identifier with no kind, no type and no value, so the value comes back —
-    // truncated rather than omitted, since nothing else would remain.
-    //
-    // Cutting BOTH forms is also what normalizes spacing. The ` = ` in a
-    // rendered signature is now always emitted by the join and never copied
-    // from source, so `X="v"` and `X = "v"` render identically.
-    if def.kind() == "assignment" {
-        return def.child_by_field_name("right");
-    }
-    None
-}
-
-/// The value node a signature keeps and re-appends, rather than cuts away.
-///
-/// Keyed on node kind, never on field presence: keying on a `value` field would
-/// make this fire for any future grammar node that happens to name a child
-/// `value`, and the three kinds here are the whole set that binds a name to a
-/// literal.
-///
-/// `type_item` is deliberately absent. A Rust type alias names its target in a
-/// field called `type`, not `value`, so aliases never reached this path and do
-/// not now — they already render their target in full, which is why they were
-/// the one shape that was already correct.
-///
-/// `enum_variant` is also absent: it renders its discriminant through the
-/// uncut whole-node span instead (`signature_cut` returns early for it), so a
-/// variant's value is unbudgeted. Recorded as a deferral, not fixed here.
-fn retained_value(def: Node) -> Option<Node> {
-    match def.kind() {
-        "const_item" | "static_item" => def.child_by_field_name("value"),
-        "assignment" => def.child_by_field_name("right"),
-        _ => None,
-    }
 }
 
 /// The shared text pipeline for one fragment of a signature: Python's explicit
@@ -627,10 +645,11 @@ fn build_signature(
     name: Option<Node>,
     owner: Option<&str>,
     spec: &LangSpec,
-    cut: Option<Node>,
+    shape: &Shape,
 ) -> String {
     let start = (spec.sig_start)(def).start_byte();
-    let end = cut
+    let end = shape
+        .cut
         .map(|b| b.start_byte())
         .unwrap_or_else(|| def.end_byte())
         .max(start)
@@ -657,12 +676,9 @@ fn build_signature(
             _ => break,
         }
     }
-    if let Some(value) = retained_value(def) {
-        // A Rust `const`/`static` always carries a type; only a Python
-        // assignment can lack one.
-        let has_type = def.kind() != "assignment" || def.child_by_field_name("type").is_some();
+    if let Some(value) = shape.value {
         let raw_value = text.get(value.byte_range()).unwrap_or("");
-        sig = append_value(sig, &normalize(raw_value, spec), has_type);
+        sig = append_value(sig, &normalize(raw_value, spec), shape.has_type);
     }
     sig
 }

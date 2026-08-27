@@ -1,7 +1,9 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention,
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
-use super::code::{keep_any_vis, no_header_group, LangSpec, Placement};
+use super::code::{
+    default_shape, keep_any_vis, no_header_group, LangSpec, Placement, Rank, Shape,
+};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
@@ -56,6 +58,31 @@ pub(crate) fn python_sig_start(def: Node) -> Node {
 
 fn keep_python_public(name: &str) -> bool {
     !name.starts_with('_')
+}
+
+/// Python's one grammar-specific shape. Everything else — `function_definition`,
+/// `class_definition` — cuts at its `body` like any other language.
+///
+/// An assignment cuts at its value and re-appends it. Cutting rather than
+/// keeping the source span is also what normalizes spacing: the ` = ` in a
+/// rendered signature is always emitted by the join and never copied from
+/// source, so `X="v"` and `X = "v"` render identically.
+///
+/// `has_type` is the one place a language answers it dynamically: only an
+/// unannotated assignment lacks a type, and it is the one binding whose value
+/// is truncated rather than omitted when over budget — a bare `SYSTEM_PROMPT`
+/// with no kind, no type and no value would say nothing at all.
+pub(crate) fn python_shape(def: Node) -> Shape {
+    if def.kind() != "assignment" {
+        return default_shape(def);
+    }
+    let right = def.child_by_field_name("right");
+    Shape {
+        rank: Rank::Value,
+        cut: right,
+        value: right,
+        has_type: def.child_by_field_name("type").is_some(),
+    }
 }
 
 pub(crate) fn python_spec() -> LangSpec {

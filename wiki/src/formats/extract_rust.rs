@@ -1,6 +1,8 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
-use super::code::{keep_all, no_export_set, sig_start_identity, LangSpec, Placement};
+use super::code::{
+    default_shape, keep_all, no_export_set, sig_start_identity, LangSpec, Placement, Rank, Shape,
+};
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
 
@@ -157,6 +159,66 @@ pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
     Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?))
 }
 
+/// Rust's grammar-specific shapes. Everything here was previously a
+/// `def.kind()` arm inside the shared core.
+pub(crate) fn rust_shape(def: Node) -> Shape {
+    match def.kind() {
+        // A variant IS its payload. Cutting at `body` the way a struct is cut
+        // would reduce `Remote(String)` to `Remote` and `Sqlite { path: String }`
+        // to `Sqlite`, dropping the only part that says what the variant carries.
+        // Variants are a single line's worth of text, so they render whole.
+        //
+        // A variant's discriminant rides along in that uncut span, so unlike
+        // every other value it is unbudgeted. Recorded as a deferral, not fixed
+        // here.
+        "enum_variant" => Shape {
+            rank: Rank::Def,
+            cut: None,
+            value: None,
+            has_type: true,
+        },
+        // A `macro_definition`'s rules are plain children, not a `body` field,
+        // so without an explicit cut the entire macro would become its
+        // signature. The first rule opens right after the delimiter, leaving a
+        // trailing `{` for `strip_trailing` to remove.
+        "macro_definition" => {
+            let mut cursor = def.walk();
+            // Bound before the struct literal: the child iterator borrows
+            // `cursor`, and inside the literal that borrow would outlive it.
+            let cut = def.children(&mut cursor).find(|c| c.kind() == "macro_rule");
+            Shape {
+                rank: Rank::Def,
+                cut,
+                value: None,
+                has_type: true,
+            }
+        }
+        // A `const`/`static` cuts at its value and then re-appends it: the
+        // contract is the type AND the value, and the value is the half a
+        // reader cannot guess from the name. Always typed, so an over-budget
+        // value is omitted rather than truncated.
+        "const_item" | "static_item" => Shape {
+            rank: Rank::Value,
+            cut: def.child_by_field_name("value"),
+            value: def.child_by_field_name("value"),
+            has_type: true,
+        },
+        // A type alias is a value binding for ranking purposes, but it names
+        // its target in a `type` field, not `value` — so `default_cut` finds
+        // nothing, it renders whole, and it re-appends nothing. This is the
+        // pairing that breaks if `value` is ever derived from `rank`.
+        "type_item" => Shape {
+            rank: Rank::Value,
+            ..default_shape(def)
+        },
+        "mod_item" => Shape {
+            rank: Rank::Module,
+            ..default_shape(def)
+        },
+        _ => default_shape(def),
+    }
+}
+
 pub(crate) fn rust_spec() -> LangSpec {
     LangSpec {
         lang_name: "rust",
@@ -309,9 +371,15 @@ mod tests {
 
     #[test]
     fn an_associated_const_in_a_trait_impl_is_a_member_not_a_free_value() {
-        // Classification must run AFTER `placement`. Applying the structural rule
-        // first would make this a FreeValue able to hijack the summary from its
-        // own impl header.
+        // Classification must run AFTER `placement`, so an associated item
+        // inside a trait impl is a Member rather than a free value.
+        //
+        // Note what this test does NOT prove, despite its name: it cannot fail
+        // by misclassification alone. `pick_summary_fallback` ranks Header
+        // above FreeValue, so the impl header wins this summary either way.
+        // Mutating the precedence in `classify` leaves the whole suite green —
+        // see the note there for why the distinction is unobservable in
+        // current output. What this pins is the summary itself.
         let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
         let e = CodeExtractor.extract("c.rs", src);
         assert_eq!(
