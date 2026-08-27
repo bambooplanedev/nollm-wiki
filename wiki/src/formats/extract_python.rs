@@ -644,7 +644,7 @@ mod tests {
     }
 
     #[test]
-    fn python_annotated_assignments_cut_the_value_and_unannotated_keep_it() {
+    fn python_assignments_keep_their_values_annotated_or_not() {
         let src = "MAX_IDS = 2000\nSUMMARY_LIMIT: int = 300\nPRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]\nAlias = list[int]\n_PRIVATE = 1\n";
         let e = CodeExtractor.extract("state.py", src);
         assert!(
@@ -653,14 +653,14 @@ mod tests {
             e.symbols
         );
         assert!(
-            e.symbols.iter().any(|s| s == "SUMMARY_LIMIT: int"),
+            e.symbols.iter().any(|s| s == "SUMMARY_LIMIT: int = 300"),
             "{:?}",
             e.symbols
         );
         assert!(
             e.symbols
                 .iter()
-                .any(|s| s == "PRISM_FILES: list[tuple[str, str]]"),
+                .any(|s| s == "PRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]"),
             "{:?}",
             e.symbols
         );
@@ -686,14 +686,14 @@ mod tests {
             e.symbols
         );
         assert!(
-            e.symbols.iter().any(|s| s == "Article.url: str"),
+            e.symbols.iter().any(|s| s == "Article.url: str = \"\""),
             "{:?}",
             e.symbols
         );
         assert!(
             e.symbols
                 .iter()
-                .any(|s| s == "Article.published: datetime | None"),
+                .any(|s| s == "Article.published: datetime | None = None"),
             "{:?}",
             e.symbols
         );
@@ -735,7 +735,11 @@ mod tests {
     fn python_line_continuations_do_not_strand_the_strip_loop() {
         let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "Z: int"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "Z: int = 5"),
+            "{:?}",
+            e.symbols
+        );
         assert!(
             e.symbols.iter().any(|s| s == "X = compute()"),
             "{:?}",
@@ -751,7 +755,11 @@ mod tests {
         // added to prevent. The CRLF form must be replaced first.
         let src = "Z: int = \\\r\n    5\r\nX = \\\r\n    compute()\r\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(e.symbols.iter().any(|s| s == "Z: int"), "{:?}", e.symbols);
+        assert!(
+            e.symbols.iter().any(|s| s == "Z: int = 5"),
+            "{:?}",
+            e.symbols
+        );
         assert!(
             e.symbols.iter().any(|s| s == "X = compute()"),
             "{:?}",
@@ -830,6 +838,117 @@ mod tests {
             e.symbols.iter().any(|s| s == "def optional_dep()"),
             "{:?}",
             e.symbols
+        );
+    }
+
+    #[test]
+    fn python_unannotated_assignment_renders_its_value_once() {
+        // `signature_cut` no longer stops short of an unannotated value, so the
+        // head must not still carry it: `MAX_IDS = 2000 = 2000` is the failure.
+        let src = "MAX_IDS = 2000\n";
+        let e = CodeExtractor.extract("state.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "MAX_IDS = 2000"),
+            "{:?}",
+            e.symbols
+        );
+        assert!(
+            !e.symbols.iter().any(|s| s.matches(" = ").count() > 1),
+            "value appended twice: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn python_assignment_without_spaces_is_normalized_and_budgeted() {
+        // The ` = ` is emitted by the join now, never copied from source, so a
+        // no-space assignment renders like every sibling. Previously
+        // `truncate_value`'s `sig.find(" = ")` missed this line entirely and
+        // the budget was bypassed however long the value was.
+        let long = "y".repeat(200);
+        let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
+        let e = CodeExtractor.extract("state.py", &src);
+        assert!(
+            e.symbols
+                .iter()
+                .any(|s| s == "CACHE_DIR = \"/var/cache/store\""),
+            "{:?}",
+            e.symbols
+        );
+        let big = e
+            .symbols
+            .iter()
+            .find(|s| s.starts_with("BIG"))
+            .unwrap_or_else(|| panic!("no BIG in {:?}", e.symbols));
+        assert!(big.starts_with("BIG = "), "normalized spacing: {big}");
+        assert!(big.ends_with('…'), "budget must apply: {big}");
+    }
+
+    #[test]
+    fn python_annotated_over_budget_omits_the_value() {
+        // An annotation survives to carry the contract, so omit rather than
+        // truncate — the same rule Rust follows, for the same reason.
+        let long = "z".repeat(200);
+        let src = format!("BIG: str = \"{long}\"\n");
+        let e = CodeExtractor.extract("state.py", &src);
+        assert!(e.symbols.iter().any(|s| s == "BIG: str"), "{:?}", e.symbols);
+        assert!(
+            !e.symbols.iter().any(|s| s.contains('…')),
+            "annotated must omit, not truncate: {:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_continuation_inside_the_value_is_joined() {
+        // The continuation is a child of the `binary_operator` that IS the
+        // `right` field — it is inside the value, not between `=` and the
+        // value. Without the shared pipeline this renders `X = 1 + \ 2`.
+        let src = "X = 1 + \\\n    2\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "X = 1 + 2"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_crlf_continuation_inside_the_value_is_joined() {
+        let src = "X = 1 + \\\r\n    2\r\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "X = 1 + 2"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_wrapped_call_value_keeps_its_punctuation_tidied() {
+        // Without the shared pipeline this renders `Y = compute( 1, 2, )`.
+        let src = "Y = compute(\n    1,\n    2,\n)\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert!(
+            e.symbols.iter().any(|s| s == "Y = compute(1, 2)"),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn a_const_only_module_does_not_summarize_as_a_truncated_value() {
+        // `pick_summary_fallback` reaches FreeValue when a module has no
+        // FreeDef and no docstring, and summaries are scored at W_SUMMARY=1.5
+        // in search — higher than body text. A truncated fragment must never
+        // land there.
+        let long = "q".repeat(200);
+        let src = format!("TOPICS: list[str] = [\"{long}\"]\n");
+        let e = CodeExtractor.extract("settings.py", &src);
+        let summary = e.summary.unwrap_or_default();
+        assert!(
+            !summary.contains('…'),
+            "summary must not be a truncated value: {summary}"
         );
     }
 }

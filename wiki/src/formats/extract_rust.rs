@@ -352,17 +352,19 @@ mod tests {
     fn rust_module_level_const_static_and_type_alias() {
         let src = "pub const CACHE_VERSION: u32 = 1;\npub static NAME: &str = \"x\";\npub type Pack = Vec<u8>;\nconst PRIVATE: u8 = 3;\n";
         let e = CodeExtractor.extract("t.rs", src);
-        // A const's contract is its type; the literal stays visible in `## Body`,
-        // exactly as a function's body does.
+        // A const's contract is its type AND its value; the value is the half a
+        // reader cannot guess from the name.
         assert!(
             e.symbols
                 .iter()
-                .any(|s| s == "pub const CACHE_VERSION: u32"),
+                .any(|s| s == "pub const CACHE_VERSION: u32 = 1"),
             "symbols: {:?}",
             e.symbols
         );
         assert!(
-            e.symbols.iter().any(|s| s == "pub static NAME: &str"),
+            e.symbols
+                .iter()
+                .any(|s| s == "pub static NAME: &str = \"x\""),
             "symbols: {:?}",
             e.symbols
         );
@@ -700,7 +702,7 @@ mod tests {
         assert!(
             e.symbols
                 .iter()
-                .any(|s| s == "const <Counter as Iterator>::FOO: u8"),
+                .any(|s| s == "const <Counter as Iterator>::FOO: u8 = 1"),
             "symbols: {:?}",
             e.symbols
         );
@@ -946,5 +948,43 @@ mod surface_tests {
         let src = "pub mod a;\npub struct Store;\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("pub struct Store"));
+    }
+
+    #[test]
+    fn an_oversized_rust_value_is_omitted_not_truncated() {
+        // 48 chars of a tree-sitter query source or a long aggregate is a
+        // fragment of grammar syntax — measurably worse than the type it would
+        // replace. Rust always has a type to fall back on, so it omits.
+        let long = "x".repeat(200);
+        let src = format!("pub const QUERY: &str = \"{long}\";\n");
+        assert_has(&src, "pub const QUERY: &str");
+        let s = syms(&src);
+        assert!(
+            !s.iter().any(|x| x.contains('…')),
+            "Rust must never truncate a value: {s:?}"
+        );
+    }
+
+    #[test]
+    fn a_valueless_associated_const_renders_unchanged() {
+        // A trait *declaration*'s const has no value node at all. It must not
+        // pick up a dangling ` = `.
+        let src = "pub trait Persist {\n    const VERSION: u32;\n}\n";
+        assert_has(src, "const Persist::VERSION: u32");
+        let s = syms(src);
+        assert!(
+            !s.iter().any(|x| x.contains("VERSION: u32 =")),
+            "no dangling `=`: {s:?}"
+        );
+    }
+
+    #[test]
+    fn a_rust_string_value_shares_the_tidy_punctuation_limitation() {
+        // `tidy_punctuation` is a substring pass over collapsed text, so it
+        // rewrites punctuation inside a string literal that survives into a
+        // signature. Python and JS/TS already carry this; retaining Rust values
+        // extends it to Rust. Pinned deliberately so it is visible, not latent.
+        let src = "pub const SEP: &str = \" , \";\n";
+        assert_has(src, "pub const SEP: &str = \", \"");
     }
 }

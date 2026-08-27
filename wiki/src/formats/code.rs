@@ -510,16 +510,42 @@ fn signature_cut(def: Node) -> Option<Node> {
     if let Some(value) = def.child_by_field_name("value") {
         return Some(value);
     }
-    // Assignments cut at the value ONLY when a type annotation carries the
-    // contract. Rust cuts a `const`'s value because the type always survives;
-    // Python's annotation is optional, so cutting an unannotated assignment
-    // would leave a bare identifier with no kind, no type, and no value. The
-    // Rust cycle made the same distinction for `type` aliases, which it
-    // refused to cut because "an alias without its target would be useless".
-    if def.kind() == "assignment" && def.child_by_field_name("type").is_some() {
+    // Both assignment forms cut at their value, which `retained_value` and
+    // `append_value` re-append. The gate that once spared unannotated
+    // assignments is gone: an unannotated head alone would be a bare
+    // identifier with no kind, no type and no value, so the value comes back —
+    // truncated rather than omitted, since nothing else would remain.
+    //
+    // Cutting BOTH forms is also what normalizes spacing. The ` = ` in a
+    // rendered signature is now always emitted by the join and never copied
+    // from source, so `X="v"` and `X = "v"` render identically.
+    if def.kind() == "assignment" {
         return def.child_by_field_name("right");
     }
     None
+}
+
+/// The value node a signature keeps and re-appends, rather than cuts away.
+///
+/// Keyed on node kind, never on field presence: keying on a `value` field would
+/// make this fire for any future grammar node that happens to name a child
+/// `value`, and the three kinds here are the whole set that binds a name to a
+/// literal.
+///
+/// `type_item` is deliberately absent. A Rust type alias names its target in a
+/// field called `type`, not `value`, so aliases never reached this path and do
+/// not now — they already render their target in full, which is why they were
+/// the one shape that was already correct.
+///
+/// `enum_variant` is also absent: it renders its discriminant through the
+/// uncut whole-node span instead (`signature_cut` returns early for it), so a
+/// variant's value is unbudgeted. Recorded as a deferral, not fixed here.
+fn retained_value(def: Node) -> Option<Node> {
+    match def.kind() {
+        "const_item" | "static_item" => def.child_by_field_name("value"),
+        "assignment" => def.child_by_field_name("right"),
+        _ => None,
+    }
 }
 
 /// The shared text pipeline for one fragment of a signature: Python's explicit
@@ -596,32 +622,48 @@ fn build_signature(
             _ => break,
         }
     }
-    if def.kind() == "assignment" && def.child_by_field_name("type").is_none() {
-        sig = truncate_value(sig);
+    if let Some(value) = retained_value(def) {
+        // A Rust `const`/`static` always carries a type; only a Python
+        // assignment can lack one.
+        let has_type = def.kind() != "assignment" || def.child_by_field_name("type").is_some();
+        let raw_value = text.get(value.byte_range()).unwrap_or("");
+        sig = append_value(sig, &normalize(raw_value, spec), has_type);
     }
     sig
 }
 
-/// Characters of an unannotated assignment's value kept in a signature.
-/// Measured: the smallest round budget under which every real constant in the
-/// audit corpora survives intact, truncating only a multi-line prompt and a
-/// multi-line user-agent string.
-const PY_VALUE_BUDGET: usize = 48;
+/// Characters of a retained value kept in a signature. Measured on the Python
+/// audit corpora: the smallest round budget under which every real constant
+/// survives intact, truncating only a multi-line prompt and a multi-line
+/// user-agent string.
+///
+/// It governs a *typed* binding only as an omit-or-keep threshold — those are
+/// never truncated. See `append_value`.
+const VALUE_BUDGET: usize = 48;
 
-/// Bound a retained assignment value. Counts `chars()`, never bytes: the audit
-/// corpus contains a Cyrillic prompt literal that a byte slice would split
-/// mid-scalar and panic on.
-fn truncate_value(sig: String) -> String {
-    let Some(eq) = sig.find(" = ") else {
-        return sig;
-    };
-    let split = eq + " = ".len();
-    let (head, value) = sig.split_at(split);
-    if value.chars().count() <= PY_VALUE_BUDGET {
-        return sig;
+/// Append a retained value to a head signature, bounded.
+///
+/// Over budget, what happens depends on what the head would still say without
+/// the value. A Rust `const`/`static` and a Python annotated assignment both
+/// keep a type, so the value is dropped and the reader loses nothing they could
+/// not already see — and a truncated aggregate or raw string is measurably
+/// worse than the type it would replace: 48 characters of this crate's own
+/// `query_src` is `r#" ; One pattern covers module constants AND cl…`, a source
+/// comment from inside the string that reads as documentation of the constant.
+///
+/// An unannotated Python assignment keeps nothing, so its value is truncated
+/// rather than dropped: a bare `SYSTEM_PROMPT` has no kind, no type and no
+/// value. Counts `chars()`, never bytes — the audit corpus contains a Cyrillic
+/// prompt literal that a byte slice would split mid-scalar and panic on.
+fn append_value(head: String, value: &str, has_type: bool) -> String {
+    if value.chars().count() <= VALUE_BUDGET {
+        return format!("{head} = {value}");
     }
-    let kept: String = value.chars().take(PY_VALUE_BUDGET).collect();
-    format!("{head}{kept}…")
+    if has_type {
+        return head;
+    }
+    let kept: String = value.chars().take(VALUE_BUDGET).collect();
+    format!("{head} = {kept}…")
 }
 
 /// Remove the artifacts whitespace collapsing leaves around the punctuation of
@@ -644,9 +686,11 @@ fn truncate_value(sig: String) -> String {
 /// languages, not just Rust. It is a plain substring substitution over the
 /// collapsed text, so it also rewrites punctuation sitting inside a string
 /// literal that survives into a signature — a measured example is a Python
-/// default argument `gamma=" )"`, which renders as `gamma=")"`. Rust is immune
-/// because `signature_cut` stops a `const`/`static` signature at `value:`, but
-/// Python and JS/TS default arguments sit inside the retained span.
+/// default argument `gamma=" )"`, which renders as `gamma=")"`. Rust used to be
+/// immune because `signature_cut` dropped a `const`/`static` value entirely;
+/// since values are retained, a Rust `pub const SEP: &str = " , ";` renders
+/// `", "` and shares the limitation. Pinned by
+/// `a_rust_string_value_shares_the_tidy_punctuation_limitation`.
 fn tidy_punctuation(mut sig: String) -> String {
     for (from, to) in [("( ", "("), (", )", ")"), (" )", ")"), (" ,", ",")] {
         while sig.contains(from) {
