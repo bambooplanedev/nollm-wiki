@@ -1,6 +1,7 @@
 use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch, Tree};
 
 pub struct CodeExtractor;
@@ -103,9 +104,52 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     })
 }
 
+/// Every extension `CodeExtractor` claims. Shared by `extensions()` and by
+/// `QUERIES` so the registry can never miss a language the extractor accepts —
+/// a missing entry would strip that language of all symbols and imports.
+const CODE_EXTENSIONS: &[&str] = &["rs", "py", "js", "ts", "go"];
+
+/// Each language's query, compiled once per process instead of once per file.
+///
+/// Compilation is a flat ~1.3ms and does not depend on the file, so doing it
+/// per file dominated extraction for ordinary source sizes (88% of tree-sitter
+/// work at 2KB, 43% at 20KB). Matches the `LazyLock<Regex>` statics in
+/// `graph`, `lint`, `rewrite`, and `text`.
+///
+/// Panicking here is deliberate and mirrors those `Regex::new(...).unwrap()`
+/// sites: the query strings are compile-time constants, so a failure is a
+/// programming error, not a runtime condition. `validate_queries` forces this
+/// before any output is written, so the panic cannot arrive mid-compile with
+/// pages already on disk.
+static QUERIES: LazyLock<BTreeMap<&'static str, Query>> = LazyLock::new(|| {
+    CODE_EXTENSIONS
+        .iter()
+        .map(|ext| {
+            let spec = lang_for_ext(ext)
+                .unwrap_or_else(|| panic!("no LangSpec registered for extension {ext:?}"));
+            let query = Query::new(&spec.language, spec.query_src).unwrap_or_else(|e| {
+                panic!("invalid tree-sitter query for {}: {e:?}", spec.lang_name)
+            });
+            (*ext, query)
+        })
+        .collect()
+});
+
+/// Force every language query to compile.
+///
+/// Called at the top of a compile so a malformed query fails loudly and
+/// deterministically *before* any page is written. Without this the first
+/// failure would surface lazily inside a rayon worker, partway through a
+/// parallel run, with output already committed for other files.
+pub fn validate_queries() {
+    LazyLock::force(&QUERIES);
+    super::extract_python::validate_queries();
+    super::extract_rust::validate_queries();
+}
+
 impl Extractor for CodeExtractor {
     fn extensions(&self) -> &[&str] {
-        &["rs", "py", "js", "ts", "go"]
+        CODE_EXTENSIONS
     }
 
     fn extract(&self, rel_path: &str, text: &str) -> Entity {
@@ -384,22 +428,13 @@ fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
 
 fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
+    // Compiled once per process. A malformed query can no longer strip a
+    // language of its symbols while the compile exits 0 — `QUERIES` panics on
+    // a bad query, and `validate_queries` forces that before any output.
+    let query = QUERIES.get(ext)?;
     let mut parser = Parser::new();
     parser.set_language(&spec.language).ok()?;
     let tree = parser.parse(text, None)?;
-    let query = match Query::new(&spec.language, spec.query_src) {
-        Ok(q) => q,
-        Err(e) => {
-            // Silently returning None here strips every page of this language
-            // of all symbols and all imports while the compile still exits 0.
-            debug_assert!(false, "invalid {} query: {e:?}", spec.lang_name);
-            eprintln!(
-                "warning: invalid tree-sitter query for {} — pages of this language will have no symbols or imports: {e:?}",
-                spec.lang_name
-            );
-            return None;
-        }
-    };
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),
         name: query.capture_index_for_name("name"),
@@ -416,7 +451,7 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
     let mut collected: Vec<Collected> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
-    let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    let matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     for m in matches {
         let parts = split_captures(&m, &idx, text, &mut imports);
         if let Some(def) = parts.def {
@@ -959,11 +994,23 @@ mod tests {
 
     #[test]
     fn every_registered_language_query_compiles() {
-        for ext in ["rs", "py", "js", "ts", "go"] {
-            let spec = lang_for_ext(ext).unwrap_or_else(|| panic!("no spec for {ext}"));
-            if let Err(e) = Query::new(&spec.language, spec.query_src) {
-                panic!("query for {ext} failed to compile: {e:?}");
-            }
+        // Forcing the statics IS the check: `QUERIES` panics on a malformed
+        // query, and this is the same call `compile` makes before writing any
+        // output. A language present in `CODE_EXTENSIONS` but missing a
+        // `LangSpec` panics here too.
+        validate_queries();
+        for ext in CODE_EXTENSIONS {
+            assert!(QUERIES.contains_key(ext), "no compiled query for {ext}");
         }
+    }
+
+    #[test]
+    fn the_query_registry_covers_exactly_the_claimed_extensions() {
+        // A language accepted by `extensions()` but absent from `QUERIES`
+        // would extract nothing while the compile still exits 0 — the silent
+        // failure the old per-file `Query::new` path allowed.
+        let claimed: BTreeSet<&str> = CodeExtractor.extensions().iter().copied().collect();
+        let compiled: BTreeSet<&str> = QUERIES.keys().copied().collect();
+        assert_eq!(claimed, compiled);
     }
 }

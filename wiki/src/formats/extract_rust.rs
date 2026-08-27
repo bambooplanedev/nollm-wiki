@@ -1,7 +1,20 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
 use super::code::{keep_all, no_export_set, sig_start_identity, LangSpec, Placement};
+use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor};
+
+/// The `#[cfg(test)]` module scan's query, compiled once per process rather
+/// than once per Rust file. See `code::QUERIES` for why.
+static MOD_ITEM_QUERY: LazyLock<Query> = LazyLock::new(|| {
+    let language: Language = tree_sitter_rust::LANGUAGE.into();
+    Query::new(&language, "(mod_item) @m").expect("mod_item query must compile")
+});
+
+/// Force this module's query to compile. See `code::validate_queries`.
+pub(crate) fn validate_queries() {
+    LazyLock::force(&MOD_ITEM_QUERY);
+}
 
 /// Rust only. `(visibility_modifier)` also covers `pub(crate)`, `pub(super)`,
 /// and `pub(in path)`, none of which leave the crate; bare `pub` is the only
@@ -203,12 +216,12 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<String> {
     let mut parser = Parser::new();
     parser.set_language(&language).ok()?;
     let tree = parser.parse(text, None)?;
-    let query = Query::new(&language, "(mod_item) @m").ok()?;
+    let query = &*MOD_ITEM_QUERY;
     let mut cursor = QueryCursor::new();
 
     // (start, end, mod name) per cfg(test) module, at any nesting depth.
     let mut spans: Vec<(usize, usize, String)> = Vec::new();
-    let matches = cursor.matches(&query, tree.root_node(), text.as_bytes());
+    let matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     for m in matches {
         for cap in m.captures {
             let node = cap.node;

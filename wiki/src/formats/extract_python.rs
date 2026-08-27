@@ -3,7 +3,37 @@
 //! extraction.
 use super::code::{keep_any_vis, no_header_group, LangSpec, Placement};
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
+
+/// The `__all__` scan's query, compiled once per process rather than once per
+/// Python file. See `code::QUERIES` for why.
+static ALL_QUERY: LazyLock<Query> = LazyLock::new(|| {
+    let language: Language = tree_sitter_python::LANGUAGE.into();
+    Query::new(
+        &language,
+        r#"
+            (module
+              (expression_statement
+                [
+                  (assignment left: (identifier) @lhs right: (_) @rhs)
+                  (augmented_assignment left: (identifier) @lhs)
+                  (call
+                    function: (attribute
+                      object: (identifier) @lhs
+                      attribute: (identifier) @method))
+                ]
+              )
+            )
+        "#,
+    )
+    .expect("__all__ query must compile")
+});
+
+/// Force this module's query to compile. See `code::validate_queries`.
+pub(crate) fn validate_queries() {
+    LazyLock::force(&ALL_QUERY);
+}
 
 /// A decorated definition parses as
 /// `(decorated_definition (decorator)+ (function_definition|class_definition))`
@@ -154,25 +184,7 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
 /// Names listed but not defined in this file (the `__init__.py` re-export
 /// case) match no captured definition and simply have no effect.
 pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
-    let language: Language = tree_sitter_python::LANGUAGE.into();
-    let query = Query::new(
-        &language,
-        r#"
-            (module
-              (expression_statement
-                [
-                  (assignment left: (identifier) @lhs right: (_) @rhs)
-                  (augmented_assignment left: (identifier) @lhs)
-                  (call
-                    function: (attribute
-                      object: (identifier) @lhs
-                      attribute: (identifier) @method))
-                ]
-              )
-            )
-        "#,
-    )
-    .ok()?;
+    let query = &*ALL_QUERY;
     let lhs_idx = query.capture_index_for_name("lhs");
     let rhs_idx = query.capture_index_for_name("rhs");
     let method_idx = query.capture_index_for_name("method");
@@ -183,7 +195,7 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     // assignment must clear it, which is why this is reset on every match
     // rather than only updated when a new literal is found.
     let mut last_literal_rhs: Option<Node> = None;
-    for m in cursor.matches(&query, tree.root_node(), text.as_bytes()) {
+    for m in cursor.matches(query, tree.root_node(), text.as_bytes()) {
         let mut lhs = None;
         let mut rhs = None;
         let mut method = None;

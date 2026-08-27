@@ -80,6 +80,12 @@ fn compile_inner(
     output: &Path,
     opts: &CompileOptions,
 ) -> Result<CompileResult, WikiError> {
+    // Compile every language query up front. They are constant strings, so a
+    // failure is a programming error — but it must surface here, before any
+    // page is written, rather than lazily inside a rayon worker with output
+    // already committed for other files.
+    formats::code::validate_queries();
+
     let project = opts.project.clone().unwrap_or_else(|| {
         input
             .file_name()
