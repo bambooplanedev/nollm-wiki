@@ -76,7 +76,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
 | `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `extract_code`, `build_signature`, `signature_cut`, `tidy_punctuation`, `collapse_whitespace`, `Placement`, `ItemKind`. |
-| `src/formats/extract_rust.rs` | The Rust `LangSpec`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes, `#[cfg(test)]` module stripping. |
+| `src/formats/extract_rust.rs` | The Rust `LangSpec`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping. |
 | `src/formats/extract_python.rs` | The Python `LangSpec`: class-chain owner qualification, `__all__` handling, module docstring extraction. |
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
@@ -174,7 +174,9 @@ breaking any of them reintroduces nondeterminism.
 - **Rust and Python guard module level with opposite conventions, on
   purpose.** `rust_placement` (`extract_rust.rs`) is an allow-list of item
   containers (`source_file`, `mod_item`, `declaration_list`, `impl_item`,
-  `trait_item`); `python_placement` (`extract_python.rs`) is a deny-list of
+  `trait_item`, plus the type bodies that hold fields and variants:
+  `struct_item`, `union_item`, `enum_item`, `field_declaration_list`,
+  `enum_variant_list`); `python_placement` (`extract_python.rs`) is a deny-list of
   one node kind (`function_definition`/`lambda`). The grammars are mirror
   images — Rust has many kinds of item container, Python's module level has
   exactly one excluder — so the two rules fail in opposite directions: a new

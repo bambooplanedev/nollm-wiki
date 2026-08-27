@@ -188,6 +188,12 @@ enum ItemKind {
     /// this rank they would take over the summary of every module that
     /// declares one.
     FreeValue,
+    /// A `pub mod` declaration. Ranked below every real definition: a module
+    /// list says what the file *contains*, not what it *is*, and as a bare
+    /// signature `pub mod a` sorts ahead of `pub struct Store` (`m` < `s`),
+    /// so without its own rank a module would take over the summary of every
+    /// file that declares one — `lib.rs`, which declares nothing else, first.
+    Module,
     /// A method, field, or associated item.
     Member,
 }
@@ -309,6 +315,8 @@ fn classify(name_node: Option<Node>, owner: Option<&str>, def: Node) -> ItemKind
         ItemKind::Header
     } else if owner.is_some() {
         ItemKind::Member
+    } else if def.kind() == "mod_item" {
+        ItemKind::Module
     } else if is_value_item(def.kind()) {
         ItemKind::FreeValue
     } else {
@@ -369,6 +377,7 @@ fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
     pick_min_signature(ItemKind::FreeDef)
         .or_else(|| pick_min_signature(ItemKind::Header))
         .or_else(|| pick_min_signature(ItemKind::FreeValue))
+        .or_else(|| pick_min_signature(ItemKind::Module))
         .or_else(|| collected.iter().min_by(|a, b| a.3.cmp(&b.3)))
         .map(|(_, _, _, sig)| sig.clone())
 }
@@ -475,6 +484,21 @@ fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
 /// `const_item` has no `declaration` field, so an early return there would
 /// skip the `value` lookup and leave the initializer in the signature.
 fn signature_cut(def: Node) -> Option<Node> {
+    // A variant IS its payload. Cutting at `body` the way a struct is cut
+    // would reduce `Remote(String)` to `Remote` and `Sqlite { path: String }`
+    // to `Sqlite`, dropping the only part that says what the variant carries.
+    // Variants are a single line's worth of text, so they render whole.
+    if def.kind() == "enum_variant" {
+        return None;
+    }
+    // A `macro_definition`'s rules are plain children, not a `body` field, so
+    // without an explicit cut the entire macro would become its signature.
+    // The first rule opens right after the delimiter, leaving a trailing `{`
+    // for Rust's `strip_trailing` to remove.
+    if def.kind() == "macro_definition" {
+        let mut cursor = def.walk();
+        return def.children(&mut cursor).find(|c| c.kind() == "macro_rule");
+    }
     if let Some(body) = def.child_by_field_name("body") {
         return Some(body);
     }

@@ -26,11 +26,26 @@ fn keep_bare_pub(vis: &str) -> bool {
 ///   * `trait` declaration — the trait's own name.
 fn rust_owner(def: Node, text: &str) -> Option<String> {
     let parent = def.parent()?;
-    if parent.kind() != "declaration_list" {
+    // The three list nodes that can hold a *named* member: `impl`/`trait`
+    // bodies, struct/union field lists, and enum variant lists. A tuple
+    // struct's `ordered_field_declaration_list` is deliberately absent — its
+    // fields are positional and have no name to qualify.
+    if !matches!(
+        parent.kind(),
+        "declaration_list" | "field_declaration_list" | "enum_variant_list"
+    ) {
         return None;
     }
     let holder = parent.parent()?;
     match holder.kind() {
+        // A field's or a variant's owner is just the declaring type's name.
+        // `enum_variant` is not listed: a struct variant's fields are
+        // qualifiable only through both the enum and the variant, and the
+        // query never captures them (it requires the field list to be a
+        // `struct_item`/`union_item` body) — this arm would be unreachable.
+        "struct_item" | "union_item" | "enum_item" => text
+            .get(holder.child_by_field_name("name")?.byte_range())
+            .map(str::to_string),
         "impl_item" => {
             let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
             match holder.child_by_field_name("trait") {
@@ -52,19 +67,62 @@ fn rust_owner(def: Node, text: &str) -> Option<String> {
 fn rust_module_level(mut node: Node) -> bool {
     while let Some(parent) = node.parent() {
         match parent.kind() {
-            "source_file" | "mod_item" | "declaration_list" | "impl_item" | "trait_item" => {
-                node = parent
-            }
+            "source_file"
+            | "mod_item"
+            | "declaration_list"
+            | "impl_item"
+            | "trait_item"
+            | "struct_item"
+            | "union_item"
+            | "enum_item"
+            | "field_declaration_list"
+            | "enum_variant_list" => node = parent,
             _ => return false,
         }
     }
     true
 }
 
+/// The contiguous run of `attribute_item`s directly above `node`, nearest
+/// first. Both callers need the whole run rather than just the nearest
+/// attribute: `#[macro_export]` may sit above `#[doc(hidden)]`, and
+/// `strip_rust_test_modules` splices from the run's outermost start so that
+/// `#[cfg(test)]` itself is removed along with the module.
+fn attribute_run(node: Node) -> Vec<Node> {
+    let mut run = Vec::new();
+    let mut prev = node.prev_named_sibling();
+    while let Some(p) = prev {
+        if p.kind() != "attribute_item" {
+            break;
+        }
+        run.push(p);
+        prev = p.prev_named_sibling();
+    }
+    run
+}
+
+/// True when the attribute run above `node` contains `want`, compared with
+/// all whitespace removed so `#[cfg( test )]` matches `#[cfg(test)]`.
+fn has_attribute(node: Node, text: &str, want: &str) -> bool {
+    attribute_run(node).iter().any(|p| {
+        text.get(p.byte_range())
+            .unwrap_or("")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .eq(want.chars())
+    })
+}
+
 /// The previous cycle's `rust_module_level` guard and `rust_owner` resolution,
 /// composed. Order is unobservable: both were pure functions, and the old loop
 /// called `rust_owner` only after `rust_module_level` had passed.
 pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
+    // A macro carries no visibility modifier, so the query cannot gate it
+    // structurally the way it gates every other item: `#[macro_export]` is
+    // the whole of a `macro_rules!` macro's public surface.
+    if def.kind() == "macro_definition" && !has_attribute(def, text, "#[macro_export]") {
+        return Placement::Rejected;
+    }
     if !rust_module_level(def) {
         return Placement::Rejected;
     }
@@ -105,6 +163,14 @@ pub(crate) fn rust_spec() -> LangSpec {
                 (const_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (static_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (type_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (union_item (visibility_modifier) @vis name: (type_identifier) @name) @def
+                (mod_item (visibility_modifier) @vis name: (identifier) @name) @def
+                (macro_definition name: (identifier) @name) @def
+                (struct_item (visibility_modifier) body: (field_declaration_list (field_declaration (visibility_modifier) @vis name: (field_identifier) @name) @def))
+                (union_item (visibility_modifier) body: (field_declaration_list (field_declaration (visibility_modifier) @vis name: (field_identifier) @name) @def))
+                (enum_item (visibility_modifier) @vis body: (enum_variant_list (enum_variant name: (identifier) @name) @def))
+                (trait_item (visibility_modifier) @vis body: (declaration_list (associated_type name: (type_identifier) @name) @def))
+                (trait_item (visibility_modifier) @vis body: (declaration_list (const_item name: (identifier) @name) @def))
                 (impl_item trait: (_) type: (_)) @def
                 (impl_item trait: (_) body: (declaration_list (function_item name: (identifier) @name) @def))
                 (impl_item trait: (_) body: (declaration_list (type_item name: (type_identifier) @name) @def))
@@ -115,7 +181,7 @@ pub(crate) fn rust_spec() -> LangSpec {
             "#,
         name_filter: keep_all,
         vis_filter: keep_bare_pub,
-        strip_trailing: &[';', '='],
+        strip_trailing: &[';', '=', '{'],
         placement: rust_placement,
         owner_sep: "::",
         export_set: no_export_set,
@@ -146,30 +212,15 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<String> {
     for m in matches {
         for cap in m.captures {
             let node = cap.node;
-            // Walk the contiguous run of attribute_items directly above the
-            // mod; the whole run is spliced when any of them is cfg(test).
-            let mut start = node.start_byte();
-            let mut is_test_mod = false;
-            let mut prev = node.prev_named_sibling();
-            while let Some(p) = prev {
-                if p.kind() != "attribute_item" {
-                    break;
-                }
-                let attr: String = text
-                    .get(p.byte_range())
-                    .unwrap_or("")
-                    .chars()
-                    .filter(|c| !c.is_whitespace())
-                    .collect();
-                if attr == "#[cfg(test)]" {
-                    is_test_mod = true;
-                }
-                start = p.start_byte();
-                prev = p.prev_named_sibling();
-            }
-            if !is_test_mod {
+            // The whole attribute run above the mod is spliced when any of
+            // them is cfg(test), so `#[cfg(test)]` itself goes with it.
+            if !has_attribute(node, text, "#[cfg(test)]") {
                 continue;
             }
+            let start = attribute_run(node)
+                .last()
+                .map(|a| a.start_byte())
+                .unwrap_or_else(|| node.start_byte());
             let name = node
                 .child_by_field_name("name")
                 .and_then(|n| text.get(n.byte_range()))
@@ -764,5 +815,136 @@ mod tests {
             "function-local item leaked: {:?}",
             e.symbols
         );
+    }
+}
+
+#[cfg(test)]
+mod surface_tests {
+    use crate::formats::code::CodeExtractor;
+    use crate::formats::Extractor;
+
+    fn syms(src: &str) -> Vec<String> {
+        CodeExtractor.extract("t.rs", src).symbols
+    }
+
+    fn assert_has(src: &str, want: &str) {
+        let s = syms(src);
+        assert!(s.iter().any(|x| x == want), "want {want:?} in {s:?}");
+    }
+
+    fn assert_lacks(src: &str, unwanted: &str) {
+        let s = syms(src);
+        assert!(
+            !s.iter().any(|x| x.contains(unwanted)),
+            "{unwanted:?} must not appear in {s:?}"
+        );
+    }
+
+    #[test]
+    fn a_public_union_and_its_fields_are_exported() {
+        let src =
+            "pub union Raw {\n    pub bits: u64,\n    pub halves: [u32; 2],\n    private: u8,\n}\n";
+        assert_has(src, "pub union Raw");
+        assert_has(src, "pub Raw::bits: u64");
+        assert_has(src, "pub Raw::halves: [u32; 2]");
+        assert_lacks(src, "private");
+    }
+
+    #[test]
+    fn public_struct_fields_are_exported_and_private_ones_are_not() {
+        // The Python extractor has shown class fields since its own cycle;
+        // a Rust struct's fields are the same contract and were invisible.
+        let src = "pub struct Store {\n    pub path: String,\n    pub(crate) internal: u8,\n    seen: u32,\n}\n";
+        assert_has(src, "pub struct Store");
+        assert_has(src, "pub Store::path: String");
+        assert_lacks(src, "internal"); // pub(crate) does not leave the crate
+        assert_lacks(src, "seen");
+    }
+
+    #[test]
+    fn enum_variants_keep_their_payload() {
+        // Cutting a variant at its `body` the way a struct is cut would
+        // reduce `Remote(String)` to `Remote`, dropping the only part that
+        // says what the variant carries.
+        let src = "pub enum Backend {\n    Memory,\n    Sqlite { path: String },\n    Remote(String),\n}\n";
+        assert_has(src, "pub enum Backend");
+        assert_has(src, "Backend::Memory");
+        assert_has(src, "Backend::Sqlite { path: String }");
+        assert_has(src, "Backend::Remote(String)");
+    }
+
+    #[test]
+    fn a_struct_variants_fields_are_not_exported_on_their_own() {
+        // `path` here is reachable only through `Backend::Sqlite`. Emitting it
+        // as a member would put a bare, unqualifiable `pub path: String` in
+        // `## Exports`; the variant already renders its fields verbatim.
+        let src = "pub enum Backend {\n    Sqlite { pub path: String },\n}\n";
+        assert_lacks(src, "::path");
+    }
+
+    #[test]
+    fn a_public_module_declaration_is_exported() {
+        assert_has("pub mod backends;\n", "pub mod backends");
+        assert_has("pub mod inline {\n    pub fn f() {}\n}\n", "pub mod inline");
+        assert_lacks("mod private_mod;\n", "private_mod");
+        assert_lacks("pub(crate) mod internal;\n", "internal");
+    }
+
+    #[test]
+    fn a_traits_associated_items_are_exported_like_its_methods() {
+        // The impl side of both already rendered (`type <Store as Persist>::Key`),
+        // so their absence on the declaration side was an asymmetry visible
+        // within a single page.
+        let src =
+            "pub trait Persist {\n    type Key;\n    const VERSION: u32;\n    fn save(&self);\n}\n";
+        assert_has(src, "type Persist::Key");
+        assert_has(src, "const Persist::VERSION: u32");
+        assert_has(src, "fn Persist::save(&self)");
+    }
+
+    #[test]
+    fn a_private_traits_associated_items_stay_private() {
+        let src = "trait Hidden {\n    type Key;\n    const VERSION: u32;\n}\n";
+        assert_lacks(src, "Key");
+        assert_lacks(src, "VERSION");
+    }
+
+    #[test]
+    fn only_an_exported_macro_is_a_symbol() {
+        let exported = "#[macro_export]\nmacro_rules! store_key {\n    ($a:expr) => { $a };\n}\n";
+        assert_has(exported, "macro_rules! store_key");
+        // The rules are the body, not the signature — none of it may leak in.
+        assert_lacks(exported, "expr");
+
+        let internal = "macro_rules! helper {\n    () => { 1 };\n}\n";
+        assert_lacks(internal, "helper");
+    }
+
+    #[test]
+    fn an_exported_macro_keeps_its_other_attributes() {
+        // The attribute run is contiguous; `#[macro_export]` need not be the
+        // one directly above the macro.
+        let src = "#[macro_export]\n#[doc(hidden)]\nmacro_rules! k {\n    () => { 1 };\n}\n";
+        assert_has(src, "macro_rules! k");
+    }
+
+    #[test]
+    fn items_inside_a_function_body_are_still_rejected() {
+        // Widening `rust_module_level` for fields and variants must not open
+        // a path out of a function body.
+        let src = "pub fn f() {\n    pub struct Inner { pub x: u8 }\n    pub enum E { A }\n}\n";
+        assert_lacks(src, "Inner");
+        assert_lacks(src, "::x");
+        assert_lacks(src, "E::A");
+    }
+
+    #[test]
+    fn a_module_never_takes_the_summary_from_a_real_definition() {
+        // `pub mod a` sorts below `pub struct Store` as a bare signature, so
+        // without an explicit rank a module list would take over the summary
+        // of every module that declares one (`lib.rs` declares nothing else).
+        let src = "pub mod a;\npub struct Store;\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(e.summary.as_deref(), Some("pub struct Store"));
     }
 }
