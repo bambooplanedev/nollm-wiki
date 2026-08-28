@@ -266,13 +266,8 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
         let mut sc = el.walk();
         let content = el
             .named_children(&mut sc)
-            .find(|n| n.kind() == "string_content");
-        match content.and_then(|n| text.get(n.byte_range())) {
-            Some(s) => {
-                names.insert(s.to_string());
-            }
-            None => return None,
-        }
+            .find(|n| n.kind() == "string_content")?;
+        names.insert(text.get(content.byte_range())?.to_string());
     }
     Some(names)
 }
