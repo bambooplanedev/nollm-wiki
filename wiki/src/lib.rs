@@ -296,7 +296,20 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
     if depth == 0 {
         return base.to_string();
     }
-    let segs = parent_segments(source_path);
+    let mut segs = parent_segments(source_path);
+    // A directory-module page (`app/api/__init__.py`, `a/common/mod.rs`) is
+    // already named for its nearest directory, so prepending that same segment
+    // would render "Api Api" — a name whose tokens appear in no other page's
+    // body, which is exactly the unreachability the naming rule exists to fix.
+    // Qualify from the segment above it instead.
+    if segs
+        .last()
+        .map(|s| crate::model::title_case(&s.replace(['_', '-'], " ")))
+        .as_deref()
+        == Some(base)
+    {
+        segs.pop();
+    }
     let start = segs.len().saturating_sub(depth);
     let mut name = String::new();
     for seg in &segs[start..] {

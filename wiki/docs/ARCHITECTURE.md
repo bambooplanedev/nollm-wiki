@@ -105,6 +105,21 @@ compiler's own `SourceKind` string, and it tokenizes to the adjacent words
 dogfood finding: generic titles match prose through punctuation).
 `extract_rust.rs`/`extract_python.rs`/`extract_simple.rs` avoid both traps.
 
+**A directory-module page takes its directory's name, and inherits the
+one-word cost above.** `mod.rs` and `__init__.py` say nothing about the module
+they open — every importer refers to them by the directory (`mod common;`,
+`from pkg import x`). Naming such a page from its own stem produced `Mod` /
+`Init`, and where several existed they collided and were qualified to
+`common_mod` / `formats_mod`: names appearing in no other page's body, so the
+page was unreachable by the phrase index and by import resolution alike.
+`tests/common/mod.rs` was a permanent orphan for exactly this reason.
+
+Naming it `Common` fixes that and costs the prose-mention noise described
+above — `generator.rs`'s sentence template "A common mistake is tuning …"
+now draws an edge. That trade is deliberate: reachable-with-noise beats
+unreachable, the directory name is not ours to choose, and it is the same
+exposure every one-word page here already carries (`Code`, `Text`, `Hash`).
+
 ## Determinism rules
 
 Compiling the same input twice — on any machine, with any `--jobs` value —

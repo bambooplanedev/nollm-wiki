@@ -1,5 +1,5 @@
-use crate::formats::{summarize, Extractor};
-use crate::model::{slugify, title_case, Entity, SourceKind};
+use crate::formats::{derive_name_from_path, summarize, Extractor};
+use crate::model::{slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
 
@@ -84,12 +84,6 @@ fn first_h1(body: &str) -> Option<String> {
     body.lines()
         .map(str::trim)
         .find_map(|l| l.strip_prefix("# ").map(|h| h.trim().to_string()))
-}
-
-fn derive_name_from_path(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
-    let stem = base.split('.').next().unwrap_or(base);
-    title_case(&stem.replace('_', " "))
 }
 
 #[cfg(test)]

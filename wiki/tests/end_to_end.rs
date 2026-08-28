@@ -260,10 +260,17 @@ fn incremental_recompile_with_no_changes_writes_nothing() {
 #[test]
 fn same_named_files_in_different_directories_all_survive() {
     // The canonical Python package layout: a `models.py` and an `__init__.py`
-    // per app. All four used to slugify to two ids (`models`, `init`), and the
-    // dedup in `compile_inner` dropped the losers with nothing louder than a
+    // per app. The `models.py` pair collides on the id `models`, and the dedup
+    // in `compile_inner` used to drop the loser with nothing louder than a
     // stderr warning — the run still exited 0 and lint still reported no
     // broken links, so the loss was invisible to both CI and an agent.
+    //
+    // The `__init__.py` pair no longer collides: a directory-module file is
+    // named for its directory, so these are `api` and `db` rather than two
+    // pages both called "Init". That is the point of the naming rule — the
+    // page for `app/api/__init__.py` IS the `api` package, and code refers to
+    // it that way. Disambiguation for directory modules is still exercised
+    // below, by two packages that genuinely share a directory name.
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
@@ -283,12 +290,38 @@ fn same_named_files_in_different_directories_all_survive() {
 
     let result = compile(&input, &output, &CompileOptions::default()).unwrap();
     assert_eq!(result.pages_total, 4, "no file may be dropped");
-    for id in ["api_models", "db_models", "api_init", "db_init"] {
+    for id in ["api_models", "db_models", "api", "db"] {
         assert!(output.join(format!("{id}.md")).exists(), "missing {id}.md");
     }
     // The qualified title is what the page is headed with, not just its slug.
     let page = fs::read_to_string(output.join("api_models.md")).unwrap();
     assert!(page.starts_with("# Api Models\n"), "page head:\n{page}");
+    // The directory-module page is headed with its directory's name.
+    let page = fs::read_to_string(output.join("api.md")).unwrap();
+    assert!(page.starts_with("# Api\n"), "page head:\n{page}");
+}
+
+#[test]
+fn directory_modules_sharing_a_directory_name_are_still_disambiguated() {
+    // Naming a directory module for its directory moves the collision rather
+    // than removing it: two packages both called `api` still need qualifying,
+    // and must not silently drop one another.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    for top in ["app", "lib"] {
+        write(
+            &input,
+            &format!("{top}/api/__init__.py"),
+            "\"\"\"Facade.\"\"\"\n",
+        );
+    }
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(result.pages_total, 2, "no file may be dropped");
+    for id in ["app_api", "lib_api"] {
+        assert!(output.join(format!("{id}.md")).exists(), "missing {id}.md");
+    }
 }
 
 #[test]

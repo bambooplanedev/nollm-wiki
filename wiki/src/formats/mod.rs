@@ -16,6 +16,21 @@ use crate::model::Entity;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// A page name derived from the file path: the basename's stem, with `_` and
+/// `-` turned into spaces, title-cased.
+///
+/// Shared by `CodeExtractor` and `MarkdownExtractor`, which each carried a
+/// private copy. The copies had already drifted — markdown's replaced only
+/// `_`, so `my-notes.md` rendered "My-notes" while `my-code.rs` rendered
+/// "My Code". Cosmetic (both slugify to one id, and the phrase index
+/// tokenizes them identically), but it is the drift a verbatim duplicate
+/// invites.
+pub(crate) fn derive_name_from_path(rel_path: &str) -> String {
+    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let stem = base.split('.').next().unwrap_or(base);
+    crate::model::title_case(&stem.replace(['_', '-'], " "))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExtractError {
     #[error("parse error in {path}: {msg}")]

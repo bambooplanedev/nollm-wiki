@@ -199,7 +199,7 @@ impl Extractor for CodeExtractor {
         // sentence" produces garbage. Only a real docstring, or (failing
         // that) an exported signature, is an acceptable summary.
         let summary = summarize(None, docstring.as_deref(), "", summary_fallback.as_deref());
-        let name = derive_name_from_path(rel_path);
+        let name = derive_code_name(rel_path);
 
         Entity {
             id: slugify(&name),
@@ -941,10 +941,35 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
     None
 }
 
-fn derive_name_from_path(rel_path: &str) -> String {
+/// Filenames that say nothing about the module's own identity: the language
+/// names such a module after its DIRECTORY.
+///
+/// `index.js` / `index.ts` is the same shape for JS and TS. Left out while
+/// those languages are unfinished rather than added blind.
+const DIRECTORY_MODULES: &[(&str, &str)] = &[("rs", "mod"), ("py", "__init__")];
+
+/// A code page's name: the file's own stem, except for a directory-module
+/// file, which borrows its parent directory's name.
+///
+/// `tests/common/mod.rs` named "Mod" was unreachable. Every importer refers to
+/// it as `common` — `mod common;`, `use common::helper` — so the page's own
+/// name appeared in no other page's body, and neither the phrase index nor
+/// import resolution could link it. With several such files present they also
+/// collided on the id `mod` and were qualified to `common_mod` / `formats_mod`,
+/// which matched nothing either. Naming it "Common" makes the ordinary phrase
+/// index find it, with no change to `resolve_import`.
+fn derive_code_name(rel_path: &str) -> String {
     let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
-    title_case(&stem.replace(['_', '-'], " "))
+    let ext = rel_path.rsplit('.').next().unwrap_or("");
+    if DIRECTORY_MODULES.iter().any(|(e, m)| *e == ext && *m == stem) {
+        // At the corpus root there is no directory to borrow from, so the
+        // stem stands.
+        if let Some(parent) = rel_path.rsplit('/').nth(1) {
+            return title_case(&parent.replace(['_', '-'], " "));
+        }
+    }
+    super::derive_name_from_path(rel_path)
 }
 
 /// Assertions shared by every language's extraction tests.
@@ -1011,6 +1036,51 @@ mod tests {
             "the summary must follow signature order, not grouped display order: {:?}",
             e.symbols
         );
+    }
+
+    #[test]
+    fn a_directory_module_is_named_for_its_directory() {
+        // Rust's `mod.rs` and Python's `__init__.py` carry no identity in
+        // their own filename — both languages refer to such a module by its
+        // DIRECTORY. Naming the page "Mod"/"Init" made it unreachable: an
+        // importer's body says `mod common; use common::helper`, which never
+        // contains the page's own name, so neither the phrase index nor
+        // import resolution could ever link it. Measured on this repo,
+        // `tests/common/mod.rs` was a permanent orphan.
+        let e = CodeExtractor.extract("tests/common/mod.rs", "pub fn helper() -> u8 { 0 }\n");
+        assert_eq!(e.name, "Common");
+        assert_eq!(e.id, "common");
+
+        let e = CodeExtractor.extract("pkg/__init__.py", "def exported():\n    pass\n");
+        assert_eq!(e.name, "Pkg");
+        assert_eq!(e.id, "pkg");
+    }
+
+    #[test]
+    fn a_directory_module_at_the_corpus_root_keeps_its_own_stem() {
+        // Nothing to borrow a name from, so the old behaviour stands.
+        let e = CodeExtractor.extract("mod.rs", "pub fn f() {}\n");
+        assert_eq!(e.name, "Mod");
+        let e = CodeExtractor.extract("__init__.py", "def f():\n    pass\n");
+        assert_eq!(e.name, "Init");
+    }
+
+    #[test]
+    fn an_ordinary_file_is_still_named_for_itself_not_its_directory() {
+        // Guards the overcorrection: only the two directory-module markers
+        // borrow the parent name.
+        let e = CodeExtractor.extract("src/formats/code.rs", "pub fn f() {}\n");
+        assert_eq!(e.name, "Code");
+        let e = CodeExtractor.extract("src/models.py", "def f():\n    pass\n");
+        assert_eq!(e.name, "Models");
+    }
+
+    #[test]
+    fn a_mod_file_in_another_language_is_not_treated_as_a_directory_module() {
+        // `mod` is only a directory-module marker for Rust; a `mod.py` is an
+        // ordinary module named `mod`.
+        let e = CodeExtractor.extract("pkg/mod.py", "def f():\n    pass\n");
+        assert_eq!(e.name, "Mod");
     }
 
     #[test]
