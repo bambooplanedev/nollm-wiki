@@ -1,5 +1,5 @@
 use crate::model::{slugify, LintReport};
-use crate::rewrite::parse_sections;
+use crate::rewrite::{mask_code, parse_sections};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
@@ -44,7 +44,11 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
     let mut broken_links = Vec::new();
 
     for (id, text) in pages {
-        for cap in LINK.captures_iter(text) {
+        // Scan a code mask, not the raw page: a page carries its source body
+        // verbatim, so every `[[slug|Name]]` written as a syntax example in a
+        // doc comment or a fenced block would otherwise be reported as a
+        // broken link to a page that was never meant to exist.
+        for cap in LINK.captures_iter(&mask_code(text)) {
             let inner = &cap[1];
             if !known.contains(&slugify(link_target(inner))) {
                 broken_links.push((id.clone(), link_display(inner).to_string()));
@@ -160,6 +164,30 @@ mod tests {
         );
         // beta is referenced by alpha's Related section → not an orphan.
         assert!(!r.orphans.contains(&"beta".to_string()));
+    }
+
+    #[test]
+    fn wikilink_examples_in_code_are_not_broken_links() {
+        let mut pages = render_all(vec![ent("alpha", "Alpha", "nothing")]);
+        let alpha = pages.get_mut("alpha").unwrap();
+        // Inline code: a doc comment explaining the link syntax.
+        alpha.push_str("\nLinks look like `[[target|display]]`, and `[[x]]` is bare.\n");
+        // Fenced block: a quoted example of a rendered page.
+        alpha.push_str("\n```\n## Related\n- [[ghost_page|Ghost Page]]\n```\n");
+        assert_eq!(lint(&pages).broken_links, vec![]);
+    }
+
+    #[test]
+    fn a_real_broken_link_beside_a_code_example_is_still_reported() {
+        let mut pages = render_all(vec![ent("alpha", "Alpha", "nothing")]);
+        pages
+            .get_mut("alpha")
+            .unwrap()
+            .push_str("\nSyntax is `[[target|display]]`; see [[Ghost Page]].\n");
+        assert_eq!(
+            lint(&pages).broken_links,
+            vec![("alpha".to_string(), "Ghost Page".to_string())]
+        );
     }
 
     #[test]

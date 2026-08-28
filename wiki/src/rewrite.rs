@@ -16,9 +16,120 @@ static SECTION: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^##\s+(.+)$"
 /// needlessly rewrites every page.
 const NOTES_PLACEHOLDER: &str = "_(add your own notes here — preserved on recompile)_";
 
+/// The `(char, run length)` of a fence delimiter — a line whose first
+/// non-space run is three or more backticks or tildes.
+fn fence_delim(trimmed: &str) -> Option<(char, usize)> {
+    let c = trimmed.chars().next()?;
+    if c != '`' && c != '~' {
+        return None;
+    }
+    let n = trimmed.chars().take_while(|x| *x == c).count();
+    (n >= 3).then_some((c, n))
+}
+
+/// Overwrite every byte of `line` except its newline with an ASCII space.
+/// Byte length is preserved, so offsets taken from a mask stay valid in the
+/// original text; blanking whole ranges (never a fragment of a multi-byte
+/// char) keeps the result valid UTF-8.
+fn blank_into(out: &mut String, line: &str) {
+    out.extend(line.bytes().map(|b| if b == b'\n' { '\n' } else { ' ' }));
+}
+
+/// `text` with fenced code blocks — delimiters included — blanked, byte for
+/// byte. A rendered page carries its source's body verbatim, so a doc that
+/// shows an example wiki page puts `## Body` and `[[slug|Name]]` inside a
+/// fence; scanned raw, those examples masquerade as a real heading or link.
+/// Callers scan the mask and slice the original.
+fn mask_fenced_code(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut open: Option<(char, usize)> = None;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let delim = fence_delim(trimmed);
+        let was_open = open.is_some();
+        match (open, delim) {
+            (None, Some(d)) => open = Some(d),
+            // A closing fence carries no info string: same char, at least as
+            // long as the opener, and nothing else on the line.
+            (Some((c, n)), Some((dc, dn)))
+                if dc == c && dn >= n && trimmed.trim_end().chars().all(|x| x == c) =>
+            {
+                open = None
+            }
+            _ => {}
+        }
+        if was_open || open.is_some() {
+            blank_into(&mut out, line);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// `text` with inline code spans blanked, byte for byte. A run of N backticks
+/// opens a span that closes at the next run of exactly N **on the same line**;
+/// an unclosed run is literal text and is left alone. The single-line bound is
+/// what keeps the mask honest on a code page, whose body is verbatim source:
+/// one odd backtick in a comment would otherwise re-pair every span below it.
+fn mask_inline_code(text: &str) -> String {
+    let mut out: Vec<u8> = Vec::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let src = line.as_bytes();
+        let mut buf = src.to_vec();
+        let mut i = 0;
+        while i < src.len() {
+            if src[i] != b'`' {
+                i += 1;
+                continue;
+            }
+            let n = src[i..].iter().take_while(|b| **b == b'`').count();
+            let mut j = i + n;
+            let close = loop {
+                if j >= src.len() {
+                    break None;
+                }
+                if src[j] != b'`' {
+                    j += 1;
+                    continue;
+                }
+                let m = src[j..].iter().take_while(|b| **b == b'`').count();
+                if m == n {
+                    break Some(j);
+                }
+                j += m;
+            };
+            match close {
+                Some(j) => {
+                    for b in &mut buf[i..j + n] {
+                        if *b != b'\n' {
+                            *b = b' ';
+                        }
+                    }
+                    i = j + n;
+                }
+                None => i += n,
+            }
+        }
+        out.extend_from_slice(&buf);
+    }
+    String::from_utf8(out).expect("blanked whole ranges with ASCII spaces — still UTF-8")
+}
+
+/// `text` with both fenced blocks and inline code spans blanked. Byte offsets
+/// are preserved throughout, so a caller may scan this and index `text`.
+pub(crate) fn mask_code(text: &str) -> String {
+    mask_inline_code(&mask_fenced_code(text))
+}
+
+/// Split a rendered page into `## Heading` -> body. Headings are matched
+/// against a fenced-code mask, so an example page quoted inside a fence never
+/// overwrites the real section of the same name; the bodies are sliced from
+/// `text` itself and keep the fence verbatim.
 pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
     let mut sections = BTreeMap::new();
-    let caps: Vec<_> = SECTION.captures_iter(text).collect();
+    let masked = mask_fenced_code(text);
+    let caps: Vec<_> = SECTION.captures_iter(&masked).collect();
     for (i, cap) in caps.iter().enumerate() {
         let m = cap.get(0).expect("capture group 0 always present");
         let heading = cap[1].trim().to_string();
@@ -223,6 +334,68 @@ mod tests {
     use crate::graph::build_graph;
     use crate::model::{Entity, SourceKind};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn fenced_example_headings_do_not_overwrite_real_sections() {
+        // A page whose body shows an example rendered wiki page — exactly what
+        // this project's own README does. Before the mask, the fenced `## Body`
+        // won (BTreeMap insert is last-write-wins) and the real body was lost.
+        let page = "## Body\nthe real body\n\n```\n## Body\nexample body\n```\n";
+        let sections = parse_sections(page);
+        assert_eq!(sections.len(), 1);
+        let body = &sections["Body"];
+        assert!(body.starts_with("the real body"), "got: {body:?}");
+        // Sliced from the original, so the fenced example survives verbatim.
+        assert!(body.contains("example body"), "got: {body:?}");
+    }
+
+    #[test]
+    fn fenced_notes_do_not_masquerade_as_preserved_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("p.md");
+        std::fs::write(
+            &path,
+            "## Notes\nmy real notes\n\n## Body\n```\n## Notes\nexample notes\n```\n",
+        )
+        .unwrap();
+        assert_eq!(read_preserved_notes(&path), "my real notes");
+    }
+
+    #[test]
+    fn mask_preserves_byte_offsets_through_multibyte_code() {
+        // Offsets from the mask index back into the original, so a mask that
+        // changed length would panic or slice mid-char.
+        let page = "## Body\n`«кодування»`\n\n```\nтіло → приклад\n```\n\n## Notes\nx\n";
+        assert_eq!(mask_code(page).len(), page.len());
+        assert_eq!(mask_fenced_code(page).len(), page.len());
+        let sections = parse_sections(page);
+        assert_eq!(sections["Notes"], "x");
+        assert!(sections["Body"].contains("«кодування»"));
+    }
+
+    #[test]
+    fn unclosed_backtick_run_is_literal_text() {
+        let text = "a `b [[ghost]] c\n";
+        assert_eq!(mask_code(text), text);
+    }
+
+    #[test]
+    fn a_stray_backtick_does_not_re_pair_later_lines() {
+        // A code page's body is verbatim source; odd backticks in comments are
+        // routine. Each line pairs on its own, so line 1 cannot swallow line 3.
+        let text = "// a lone ` tick\n[[real_link]]\n// `[[example]]` shown\n";
+        let masked = mask_code(text);
+        assert_eq!(masked.len(), text.len());
+        assert!(masked.contains("[[real_link]]"), "got: {masked:?}");
+        assert!(!masked.contains("[[example]]"), "got: {masked:?}");
+    }
+
+    #[test]
+    fn tilde_fence_closes_only_on_its_own_char() {
+        let text = "~~~\n```\n## Inside\n~~~\n\n## Outside\ny\n";
+        let sections = parse_sections(text);
+        assert_eq!(sections.keys().collect::<Vec<_>>(), vec!["Outside"]);
+    }
 
     fn ent(id: &str, name: &str, body: &str) -> Entity {
         Entity {
