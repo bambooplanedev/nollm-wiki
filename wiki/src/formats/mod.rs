@@ -71,6 +71,15 @@ impl Registry {
             .map(|e| e.to_lowercase())
     }
 
+    /// Whether any registered extractor claims this path's extension.
+    ///
+    /// `extract` answers the same question, but only once it has been handed
+    /// the file's bytes. Callers that have to *read* a file to call `extract`
+    /// should ask this first, so an unhandled file is never read at all.
+    pub fn handles(&self, rel_path: &str) -> bool {
+        Self::ext_of(rel_path).is_some_and(|e| self.by_ext.contains_key(&e))
+    }
+
     /// Decode bytes lossily, dispatch by extension, fill source_path + content_hash.
     pub fn extract(&self, rel_path: &str, bytes: &[u8]) -> Option<Entity> {
         let ext = Self::ext_of(rel_path)?;

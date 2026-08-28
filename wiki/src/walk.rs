@@ -21,7 +21,15 @@ pub struct SourceFile {
 /// Results are sorted by `rel_path` for determinism, and files are read as
 /// raw bytes. Entries that error out (permission issues, broken symlinks,
 /// unreadable files) are skipped rather than aborting the walk.
-pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::io::Error> {
+///
+/// `keep` decides, from the relative path alone, whether a file is worth
+/// reading. It is consulted *before* the file is opened, which is the whole
+/// point: see the note at the read site below.
+pub fn walk(
+    root: &Path,
+    respect_ignore: bool,
+    keep: &dyn Fn(&str) -> bool,
+) -> Result<Vec<SourceFile>, std::io::Error> {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(respect_ignore)
@@ -54,11 +62,20 @@ pub fn walk(root: &Path, respect_ignore: bool) -> Result<Vec<SourceFile>, std::i
             continue;
         }
         let abs_path = entry.path().to_path_buf();
+        let rel_path = normalize_path(root, &abs_path);
+        // Decide from the path BEFORE opening the file. `fs::read` allocates
+        // the entire file, and every `SourceFile` stays resident until the
+        // caller is done, so peak memory is the sum of everything read here.
+        // Deciding afterwards (in `Registry::extract`, on the extension) is
+        // too late: one stray 20GB video sitting in the input tree costs 20GB
+        // of RSS before anything ever looks at its name.
+        if !keep(&rel_path) {
+            continue;
+        }
         let bytes = match std::fs::read(&abs_path) {
             Ok(b) => b,
             Err(_) => continue,
         };
-        let rel_path = normalize_path(root, &abs_path);
         files.push(SourceFile {
             abs_path,
             rel_path,
@@ -76,6 +93,12 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    /// Read every file the walk reaches: these tests exercise walk's own
+    /// traversal rules, not the caller's relevance filter.
+    fn all(_: &str) -> bool {
+        true
+    }
+
     #[test]
     fn walk_returns_sorted_relative_files_and_honors_gitignore() {
         let dir = tempdir().unwrap();
@@ -87,7 +110,7 @@ mod tests {
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
 
-        let files = walk(root, true).unwrap();
+        let files = walk(root, true, &all).unwrap();
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["a.txt", "b.txt", "sub/c.txt"]);
         assert_eq!(files[0].bytes, b"aaa");
@@ -99,7 +122,7 @@ mod tests {
         let root = dir.path();
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
-        let files = walk(root, false).unwrap();
+        let files = walk(root, false, &all).unwrap();
         assert!(files.iter().any(|f| f.rel_path == "ignored.txt"));
     }
 
@@ -114,7 +137,7 @@ mod tests {
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
 
-        let files = walk(root, true).unwrap();
+        let files = walk(root, true, &all).unwrap();
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
 
         assert!(rels.contains(&"keep.txt".to_string()));
@@ -128,6 +151,30 @@ mod tests {
         );
     }
 
+    /// Regression: a compile once held every byte of the input tree in memory,
+    /// including files no extractor could ever handle. An input directory that
+    /// happened to sit next to ~48GB of raw `.mov` footage took ~48GB of RSS
+    /// and never finished. `keep` has to reject on the path, before the read —
+    /// so the bytes are not merely dropped later, they are never allocated.
+    #[test]
+    fn unhandled_files_are_not_read_into_memory() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("notes.txt"), b"small").unwrap();
+        // Stands in for the video: big enough that holding it would show up.
+        fs::write(root.join("footage.mov"), vec![0u8; 8 * 1024 * 1024]).unwrap();
+
+        let files = walk(root, true, &|p| p.ends_with(".txt")).unwrap();
+
+        let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
+        assert_eq!(rels, vec!["notes.txt"]);
+        let held: usize = files.iter().map(|f| f.bytes.len()).sum();
+        assert_eq!(
+            held, 5,
+            "walk retained bytes for a file it was told to skip: {held}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn symlinks_are_not_followed() {
@@ -137,7 +184,7 @@ mod tests {
         fs::write(root.join("real.txt"), b"real").unwrap();
         symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
 
-        let files = walk(root, true).unwrap();
+        let files = walk(root, true, &all).unwrap();
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert!(
             rels.contains(&"real.txt".to_string()),

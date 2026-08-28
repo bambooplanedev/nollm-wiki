@@ -98,11 +98,11 @@ fn compile_inner(
     // `output` are excluded so a nested output dir never feeds its own
     // generated pages back in as sources (which would also self-trigger a
     // `--watch` recompile loop).
-    let files: Vec<_> = walk::walk(input, opts.respect_ignore)?
+    let registry = Registry::with_defaults();
+    let files: Vec<_> = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?
         .into_iter()
         .filter(|sf| !is_under(&sf.abs_path, output))
         .collect();
-    let registry = Registry::with_defaults();
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
