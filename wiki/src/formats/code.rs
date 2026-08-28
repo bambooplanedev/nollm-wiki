@@ -629,7 +629,132 @@ fn normalize(raw: &str, spec: &LangSpec) -> String {
     } else {
         raw.to_string()
     };
-    tidy_punctuation(collapse_whitespace(&joined))
+    tidy_punctuation(collapse_runs(&joined))
+}
+
+/// A comment node, in any of the five grammars: Rust's `line_comment` and
+/// `block_comment`, everyone else's `comment`.
+fn is_comment_kind(kind: &str) -> bool {
+    kind.contains("comment")
+}
+
+/// Byte ranges of `root`'s descendants that satisfy `want`, clipped to
+/// `[start, end)`, in source order and non-overlapping.
+///
+/// Only the outermost match is reported: descending into a matched node would
+/// report a nested string inside a comment twice, and the caller treats a whole
+/// matched range as one unit anyway.
+fn descendant_spans(
+    root: Node,
+    start: usize,
+    end: usize,
+    want: fn(&str) -> bool,
+) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut cursor = root.walk();
+    let mut descend = true;
+    loop {
+        let node = cursor.node();
+        let (a, b) = (node.start_byte(), node.end_byte());
+        let matched = want(node.kind()) && b > start && a < end;
+        if matched {
+            out.push((a.max(start), b.min(end)));
+        }
+        // Skip the subtree of a match, and any subtree that cannot overlap.
+        if descend && !matched && a < end && b > start && cursor.goto_first_child() {
+            continue;
+        }
+        descend = true;
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                out.sort_unstable();
+                return out;
+            }
+        }
+    }
+}
+
+/// Render one fragment of a signature from source, with the parse tree in hand.
+///
+/// Replaces a flat `normalize` over the raw span. Three segment kinds, decided
+/// structurally rather than by searching the text:
+///
+///   * a **comment** is dropped. A `///` on a field inside an enum variant's
+///     body used to collapse into the signature — real crates render
+///     `MatchErrorKind::UnsupportedStream { /// The match semantics … got: MatchKind, }`
+///     — and a `//` line comment inside a one-line signature would comment out
+///     everything after it for anyone who copied it. Also closes the two
+///     documented Python risks: a comment between a decorator and its
+///     definition, and one inside a retained value.
+///   * a **string literal** is collapsed but never tidied, so a `" , "` stays
+///     `" , "` instead of being rewritten to `", "`.
+///   * everything else is collapsed and tidied, exactly as before.
+///
+/// Order is load-bearing. Segmentation reads node offsets, so it must happen
+/// on the *raw* span: `join_continuations` is a `replace` that changes length
+/// and would invalidate every offset if it ran first. It therefore runs per
+/// segment, where it behaves identically.
+///
+/// Deliberately does not trim. `build_signature` splices an owner in at the
+/// name node's start byte, so it renders two fragments and concatenates them;
+/// trimming each would delete the space between `pub fn` and the owner and
+/// yield `pub fnWiki::search`. The caller trims once, at the end.
+fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec) -> String {
+    if start >= end {
+        return String::new();
+    }
+    let comments = descendant_spans(root, start, end, is_comment_kind);
+    let literals = descendant_spans(root, start, end, |k| {
+        k.contains("string") || k.ends_with("char_literal") || k.ends_with("rune_literal")
+    });
+
+    let mut out = String::with_capacity(end - start);
+    let mut pos = start;
+    // Comments and literals never overlap, so one merged walk over both is
+    // enough: at each step take whichever boundary comes first.
+    let push_plain = |out: &mut String, a: usize, b: usize| {
+        if a < b {
+            if let Some(s) = text.get(a..b) {
+                out.push_str(&normalize(s, spec));
+            }
+        }
+    };
+    while pos < end {
+        let next_comment = comments.iter().find(|(a, b)| *b > pos && *a < end);
+        let next_literal = literals.iter().find(|(a, b)| *b > pos && *a < end);
+        let next = match (next_comment, next_literal) {
+            (Some(c), Some(l)) => Some(if c.0 <= l.0 { (*c, true) } else { (*l, false) }),
+            (Some(c), None) => Some((*c, true)),
+            (None, Some(l)) => Some((*l, false)),
+            (None, None) => None,
+        };
+        match next {
+            Some(((a, b), is_comment)) => {
+                push_plain(&mut out, pos, a.max(pos));
+                if !is_comment {
+                    // Collapsed so a multi-line literal cannot break the
+                    // one-line invariant, but never tidied.
+                    if let Some(s) = text.get(a.max(pos)..b) {
+                        out.push_str(&collapse_runs(s));
+                    }
+                }
+                pos = b.max(pos + 1);
+            }
+            None => {
+                push_plain(&mut out, pos, end);
+                break;
+            }
+        }
+    }
+    // Dropping a comment leaves the whitespace on either side of it in two
+    // different segments, each collapsed to its own space — `pub /* c */ fn`
+    // would render `pub  fn`. One final pass merges runs that a segment
+    // boundary split. Idempotent for literals: they were already collapsed,
+    // and this adds no tidying.
+    collapse_runs(&out)
 }
 
 /// Build a one-line signature from a definition node: its source text up to
@@ -647,26 +772,30 @@ fn build_signature(
     spec: &LangSpec,
     shape: &Shape,
 ) -> String {
-    let start = (spec.sig_start)(def).start_byte();
+    let root = (spec.sig_start)(def);
+    let start = root.start_byte();
     let end = shape
         .cut
         .map(|b| b.start_byte())
         .unwrap_or_else(|| def.end_byte())
         .max(start)
         .min(text.len());
+    // Each fragment is rendered from source with the tree in hand, then the
+    // assembled whole is trimmed once — see `render_span` on why it must not
+    // trim its own output.
     let raw = match (owner, name) {
         (Some(owner), Some(name)) if name.start_byte() >= start && name.start_byte() <= end => {
             format!(
                 "{}{}{}{}",
-                text.get(start..name.start_byte()).unwrap_or(""),
+                render_span(text, root, start, name.start_byte(), spec),
                 owner,
                 spec.owner_sep,
-                text.get(name.start_byte()..end).unwrap_or("")
+                render_span(text, root, name.start_byte(), end, spec)
             )
         }
-        _ => text.get(start..end).unwrap_or("").to_string(),
+        _ => render_span(text, root, start, end, spec),
     };
-    let mut sig = normalize(&raw, spec);
+    let mut sig = raw.trim().to_string();
     loop {
         match sig.chars().last() {
             Some(c) if spec.strip_trailing.contains(&c) => {
@@ -677,8 +806,8 @@ fn build_signature(
         }
     }
     if let Some(value) = shape.value {
-        let raw_value = text.get(value.byte_range()).unwrap_or("");
-        sig = append_value(sig, &normalize(raw_value, spec), shape.has_type);
+        let rendered = render_span(text, value, value.start_byte(), value.end_byte(), spec);
+        sig = append_value(sig, rendered.trim(), shape.has_type);
     }
     sig
 }
@@ -725,23 +854,24 @@ fn append_value(head: String, value: &str, has_type: bool) -> String {
 /// genuine one-element tuple written `(1,)` has no such space and is left
 /// alone.
 ///
-/// Known limitation: a one-element tuple that was itself wrapped across lines
-/// collapses to `( u8, )` and is reduced to `(u8)`, losing its arity. That text
-/// is identical to a wrapped one-parameter list, which must reduce to `(u8)`,
-/// so no rule over the collapsed string can tell them apart — separating them
-/// would take the parse tree. Signatures are documentation, not compiled code,
-/// and the shape is rare enough to accept.
+/// Known limitation, still open: a one-element tuple that was itself wrapped
+/// across lines collapses to `( u8, )` and is reduced to `(u8)`, losing its
+/// arity. Withholding string literals does not help here — the text is
+/// identical to a wrapped one-parameter list, which must reduce to `(u8)`, so
+/// telling them apart needs the tuple's own node kind, not just its span.
+/// Measured at 4 occurrences across 154 real stdlib modules; deferred as not
+/// worth the machinery.
 ///
-/// Unlike `placement`, `vis_filter` and `owner_sep`, this pass is
-/// not a `LangSpec` field: it runs inside `build_signature` for all five
-/// languages, not just Rust. It is a plain substring substitution over the
-/// collapsed text, so it also rewrites punctuation sitting inside a string
-/// literal that survives into a signature — a measured example is a Python
-/// default argument `gamma=" )"`, which renders as `gamma=")"`. Rust used to be
-/// immune because `signature_cut` dropped a `const`/`static` value entirely;
-/// since values are retained, a Rust `pub const SEP: &str = " , ";` renders
-/// `", "` and shares the limitation. Pinned by
-/// `a_rust_string_value_shares_the_tidy_punctuation_limitation`.
+/// Unlike `placement`, `vis_filter` and `owner_sep`, this pass is not a
+/// `LangSpec` field: it runs inside `render_span` for all five languages, not
+/// just Rust.
+///
+/// It is still a plain substring substitution, but it is no longer applied to
+/// the whole signature: `render_span` withholds string-literal spans from it,
+/// so a Python default `gamma=" )"` and a Rust `pub const SEP: &str = " , "`
+/// now keep their own punctuation. Pinned by
+/// `a_rust_string_value_keeps_its_own_punctuation` and by the Python fixture in
+/// `wrapped_parameter_lists_are_tidied_in_every_language`.
 fn tidy_punctuation(mut sig: String) -> String {
     for (from, to) in [("( ", "("), (", )", ")"), (" )", ")"), (" ,", ",")] {
         while sig.contains(from) {
@@ -751,10 +881,15 @@ fn tidy_punctuation(mut sig: String) -> String {
     sig
 }
 
-fn collapse_whitespace(s: &str) -> String {
+/// Collapse each run of whitespace to a single space, **without** trimming.
+///
+/// Trimming here would be wrong now that a signature is rendered as several
+/// fragments and concatenated: it would eat the space between `pub fn` and a
+/// spliced-in owner. `build_signature` trims the assembled signature once.
+fn collapse_runs(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_ws = false;
-    for ch in s.trim().chars() {
+    for ch in s.chars() {
         if ch.is_whitespace() {
             if !prev_ws {
                 out.push(' ');
@@ -960,16 +1095,16 @@ mod tests {
         // `tidy_punctuation` is not gated by `LangSpec` the way owner/vis
         // machinery is — it runs inside `build_signature` for all five
         // languages. Pin that as intended behavior, not something left to be
-        // discovered: this also exercises the documented caveat that a
-        // string literal's punctuation (`gamma=" )"`) is rewritten too,
-        // since Python's signature span isn't cut before its default
-        // arguments the way Rust's `const`/`static` values are.
+        // discovered. The fixture also guards the boundary: `beta=(1,)` is
+        // real punctuation and must still be tidied to `(1,)`, while
+        // `gamma=" )"` is inside a string literal and must survive untouched.
+        // One fixture, both sides of the rule.
         let py = "def wrapped(\n    alpha,\n    beta=(1,),\n    gamma=\" )\",\n):\n    pass\n";
         let e = CodeExtractor.extract("t.py", py);
         assert!(
             e.symbols
                 .iter()
-                .any(|s| s == "def wrapped(alpha, beta=(1,), gamma=\")\")"),
+                .any(|s| s == "def wrapped(alpha, beta=(1,), gamma=\" )\")"),
             "symbols: {:?}",
             e.symbols
         );

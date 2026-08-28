@@ -75,7 +75,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
-| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `default_cut`, `tidy_punctuation`, `collapse_whitespace`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds no language's grammar node kinds — those live behind the `Shape` hook in each language's module. |
+| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds no language's grammar node kinds — those live behind the `Shape` hook in each language's module. |
 | `src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
 | `src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |

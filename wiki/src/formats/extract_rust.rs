@@ -935,12 +935,41 @@ mod surface_tests {
     }
 
     #[test]
-    fn a_rust_string_value_shares_the_tidy_punctuation_limitation() {
-        // `tidy_punctuation` is a substring pass over collapsed text, so it
-        // rewrites punctuation inside a string literal that survives into a
-        // signature. Python and JS/TS already carry this; retaining Rust values
-        // extends it to Rust. Pinned deliberately so it is visible, not latent.
+    fn an_enum_variant_does_not_render_its_inner_doc_comments() {
+        // A variant renders its whole node, body included, so a `///` on a
+        // field inside it used to collapse into the signature. Measured in
+        // real crates: aho-corasick renders `MatchErrorKind::UnsupportedStream
+        // { /// The match semantics ... got: MatchKind, }`. Beyond being noise
+        // that inflates token_estimate, a `///` inside a one-line signature
+        // comments out everything after it for anyone who copies it.
+        let src = "pub enum E {\n    /// Doc on the variant.\n    V {\n        /// Doc on the field.\n        got: Kind,\n    },\n}\n";
+        assert_has(src, "E::V { got: Kind, }");
+        assert_lacks(src, "///");
+        assert_lacks(src, "Doc on");
+    }
+
+    #[test]
+    fn a_block_comment_inside_a_signature_span_is_dropped() {
+        let src = "pub fn f(a: /* why */ u8) -> u8 { 0 }\n";
+        assert_has(src, "pub fn f(a: u8) -> u8");
+    }
+
+    #[test]
+    fn a_comment_is_dropped_without_welding_the_tokens_around_it() {
+        // Dropping the comment's bytes must leave the whitespace on either
+        // side intact, or `pub /*c*/ fn f` renders `pubfn f`.
+        let src = "pub /* c */ fn f() {}\n";
+        assert_has(src, "pub fn f()");
+    }
+
+    #[test]
+    fn a_rust_string_value_keeps_its_own_punctuation() {
+        // `tidy_punctuation` used to be a flat substring pass over collapsed
+        // text, so it rewrote punctuation *inside* a string literal that
+        // survived into a signature: this rendered `", "`, silently
+        // misreporting the constant's value. `render_span` now decides
+        // structurally, leaving literal spans untidied.
         let src = "pub const SEP: &str = \" , \";\n";
-        assert_has(src, "pub const SEP: &str = \", \"");
+        assert_has(src, "pub const SEP: &str = \" , \"");
     }
 }

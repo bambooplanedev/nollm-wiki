@@ -45,10 +45,12 @@ pub(crate) fn validate_queries() {
 /// it immutable, so cutting the arguments would hide the very semantics that
 /// make the extracted fields interpretable.
 ///
-/// Two accepted risks, both absent from the audit corpora: an unbounded
-/// argument list (`@pytest.mark.parametrize("a,b", [(1, 2), …])`) is spliced in
-/// full, and a comment between decorator and definition
-/// (`@dataclass  # noqa`) is spliced in with it.
+/// One accepted risk, absent from the audit corpora: an unbounded argument
+/// list (`@pytest.mark.parametrize("a,b", [(1, 2), …])`) is spliced in full.
+///
+/// A comment between the decorator and the definition (`@dataclass  # noqa`)
+/// used to be spliced in with it. `render_span` drops comment nodes, so that
+/// risk is closed.
 pub(crate) fn python_sig_start(def: Node) -> Node {
     match def.parent() {
         Some(p) if p.kind() == "decorated_definition" => p,
@@ -680,6 +682,33 @@ mod tests {
         let src = "A = B = 2\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_eq!(e.symbols, vec!["A = B = 2".to_string()], "{:?}", e.symbols);
+    }
+
+    #[test]
+    fn a_comment_between_a_decorator_and_its_definition_is_dropped() {
+        // Previously documented on `python_sig_start` as an accepted risk:
+        // the decorator span reaches the definition, so the comment came too.
+        let src = "@dataclass  # noqa: D101\nclass Article:\n    title: str\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert_has(&e.symbols, "@dataclass class Article");
+        assert_lacks(&e.symbols, "noqa");
+    }
+
+    #[test]
+    fn a_comment_inside_a_retained_value_is_dropped() {
+        // The value is rendered through the same path as the head, so a
+        // comment inside it was spliced in the same way.
+        let src = "CONFIG = {  # inline\n    \"a\": 1,\n}\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
+        assert_lacks(&e.symbols, "inline");
+    }
+
+    #[test]
+    fn a_python_string_value_keeps_its_own_punctuation() {
+        let src = "SEP = \" , \"\n";
+        let e = CodeExtractor.extract("m.py", src);
+        assert_has(&e.symbols, "SEP = \" , \"");
     }
 
     #[test]
