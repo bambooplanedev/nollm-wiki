@@ -175,14 +175,20 @@ impl Extractor for CodeExtractor {
         // splice them out, leaving an honest omission marker. Stripping runs
         // BEFORE extraction (finding #13) so the body, the symbols, the
         // imports, and the doc comment all describe the same source.
-        let source = if ext == "rs" {
-            super::extract_rust::strip_rust_test_modules(text).unwrap_or_else(|| text.to_string())
-        } else {
-            text.to_string()
+        // When stripping finds nothing it hands back the tree it already
+        // parsed, and extraction reuses it rather than parsing the same bytes
+        // again. A file that IS stripped must reparse: the text changed.
+        let (source, pre_parsed) = match (ext == "rs")
+            .then(|| super::extract_rust::strip_rust_test_modules(text))
+            .flatten()
+        {
+            Some(super::extract_rust::Stripped::Unchanged(tree)) => (text.to_string(), Some(tree)),
+            Some(super::extract_rust::Stripped::Rewritten(out)) => (out, None),
+            None => (text.to_string(), None),
         };
 
         let (lang_name, symbols, imports, docstring, summary_fallback) =
-            match extract_code(ext, &source) {
+            match extract_code(ext, &source, pre_parsed) {
                 Some(v) => v,
                 None => (ext.to_string(), Vec::new(), Vec::new(), None, None),
             };
@@ -520,15 +526,23 @@ fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
         .map(|(_, _, _, sig)| sig.clone())
 }
 
-fn extract_code(ext: &str, text: &str) -> Option<CodeInfo> {
+/// `pre_parsed` must be a tree of exactly `text`. The only caller that passes
+/// one does so when `strip_rust_test_modules` reported that it spliced
+/// nothing, so the bytes are provably the same.
+fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
     // Compiled once per process. A malformed query can no longer strip a
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
     let query = QUERIES.get(ext)?;
-    let mut parser = Parser::new();
-    parser.set_language(&spec.language).ok()?;
-    let tree = parser.parse(text, None)?;
+    let tree = match pre_parsed {
+        Some(tree) => tree,
+        None => {
+            let mut parser = Parser::new();
+            parser.set_language(&spec.language).ok()?;
+            parser.parse(text, None)?
+        }
+    };
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),
         name: query.capture_index_for_name("name"),
