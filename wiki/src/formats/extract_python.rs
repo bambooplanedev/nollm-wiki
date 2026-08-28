@@ -1,9 +1,7 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention,
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
-use super::code::{
-    default_shape, keep_any_vis, no_header_group, LangSpec, Placement, Rank, Shape,
-};
+use super::code::{default_shape, keep_any_vis, no_header_group, LangSpec, Placement, Rank, Shape};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
@@ -308,9 +306,9 @@ pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::formats::code::testutil::{assert_has, assert_lacks};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
 
     #[test]
     fn python_signatures_gated_docstring_and_imports() {
@@ -609,7 +607,10 @@ mod tests {
         let e = CodeExtractor.extract("state.py", src);
         assert_has(&e.symbols, "MAX_IDS = 2000");
         assert_has(&e.symbols, "SUMMARY_LIMIT: int = 300");
-        assert_has(&e.symbols, "PRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]");
+        assert_has(
+            &e.symbols,
+            "PRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]",
+        );
         assert_has(&e.symbols, "Alias = list[int]");
         assert_lacks(&e.symbols, "_PRIVATE");
     }

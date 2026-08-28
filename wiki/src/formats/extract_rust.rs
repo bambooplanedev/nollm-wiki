@@ -362,9 +362,9 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
 
 #[cfg(test)]
 mod tests {
+    use crate::formats::code::testutil::{assert_has, assert_lacks};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
 
     #[test]
     fn rust_signatures_gated_and_imports() {
@@ -462,7 +462,10 @@ mod tests {
     fn inherent_impl_methods_are_qualified_with_their_type() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> Vec<Hit> { todo!() }\n    fn helper(&self) {}\n}\npub fn free_function() {}\n";
         let e = CodeExtractor.extract("query.rs", src);
-        assert_has(&e.symbols, "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>");
+        assert_has(
+            &e.symbols,
+            "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>",
+        );
         assert!(
             e.symbols.iter().any(|s| s == "pub fn free_function()"),
             "a top-level function must stay unqualified: {:?}",
@@ -646,7 +649,10 @@ mod tests {
         assert_has(&e.symbols, "impl Extractor for TextExtractor");
         // Methods in a trait impl carry no visibility modifier — they are
         // public through the trait — so they must not be visibility-gated.
-        assert_has(&e.symbols, "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity");
+        assert_has(
+            &e.symbols,
+            "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity",
+        );
     }
 
     #[test]

@@ -155,6 +155,17 @@ fn main() -> Result<()> {
                 r.broken_links.len(),
                 r.orphans.len()
             );
+            // Counts alone are not actionable: print what to go fix. The MCP
+            // `lint` tool already returns both lists.
+            for (page, link) in &r.broken_links {
+                // Quoted, not wikilink-shaped: this text lands in terminals and
+                // logs, and a literal `[[...]]` here is one more link-looking
+                // string for a renderer (or our own lint) to trip over.
+                println!("  broken: {page} -> \"{link}\"");
+            }
+            for id in &r.orphans {
+                println!("  orphan: {id}");
+            }
         }
         Command::Serve { dir } => {
             wiki::serve::run(&dir)?;

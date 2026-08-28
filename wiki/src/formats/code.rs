@@ -962,7 +962,10 @@ fn derive_code_name(rel_path: &str) -> String {
     let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
     let ext = rel_path.rsplit('.').next().unwrap_or("");
-    if DIRECTORY_MODULES.iter().any(|(e, m)| *e == ext && *m == stem) {
+    if DIRECTORY_MODULES
+        .iter()
+        .any(|(e, m)| *e == ext && *m == stem)
+    {
         // At the corpus root there is no directory to borrow from, so the
         // stem stands.
         if let Some(parent) = rel_path.rsplit('/').nth(1) {
