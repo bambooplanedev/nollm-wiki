@@ -31,12 +31,6 @@ pub(crate) fn derive_name_from_path(rel_path: &str) -> String {
     crate::model::title_case(&stem.replace(['_', '-'], " "))
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ExtractError {
-    #[error("parse error in {path}: {msg}")]
-    Parse { path: String, msg: String },
-}
-
 /// Every extractor turns already-decoded text into a semantic `Entity`.
 /// `source_path` and `content_hash` are filled by the `Registry`, not the extractor.
 pub trait Extractor: Send + Sync {
@@ -66,7 +60,6 @@ impl Registry {
         reg.register(Arc::new(TextExtractor));
         reg.register(Arc::new(MarkdownExtractor));
         reg.register(Arc::new(CodeExtractor));
-        // Feature seams (pdf/ocr/audio) register here under #[cfg(feature = ...)].
         reg
     }
 

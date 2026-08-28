@@ -332,23 +332,11 @@ both edge directions, then builds a budgeted context pack:
    `Registry::register` maps every extension from `extensions()` to the
    extractor, so one extractor can claim multiple extensions.
 3. If the extractor needs a heavy dependency (a PDF parser, an OCR engine,
-   an audio-transcription library), feature-gate it in `Cargo.toml` rather
-   than adding it to the default dependency set. The `pdf`, `ocr`, and
-   `audio` features already exist for exactly this purpose:
-   ```toml
-   [features]
-   default = []
-   pdf = []
-   ocr = []
-   audio = []
-   full = ["pdf", "ocr", "audio"]
-   ```
-   These are currently **empty seams** — no extractor is registered under
-   them yet, and no backend crate is pulled in. Adding one means adding the
-   real dependency under that feature name, registering the extractor
-   behind `#[cfg(feature = "pdf")]` (etc.) at the `// Feature seams` comment
-   in `Registry::with_defaults()`, and building with
-   `cargo build --features pdf` (or `--features full`) to opt in.
+   an audio-transcription library), put it behind a Cargo feature rather
+   than in the default dependency set, and gate the `reg.register` call on
+   the same `#[cfg(feature = ...)]`. Declare the feature when you add the
+   extractor, not before: an empty feature is a promise the build cannot
+   keep.
 
 **Export-only contract for code extraction:** `CodeExtractor`
 (`src/formats/code.rs`) only captures symbols that are part of a language's

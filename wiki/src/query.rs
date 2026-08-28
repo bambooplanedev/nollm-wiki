@@ -25,8 +25,6 @@ struct Entry {
 
 #[derive(Deserialize)]
 struct IndexFile {
-    #[allow(dead_code)]
-    project: String,
     entries: Vec<Entry>,
 }
 

@@ -40,13 +40,6 @@ predicates = "3"
 tempfile = "3"
 criterion = "0.5"
 
-[features]
-default = []
-pdf = []
-ocr = []
-audio = []
-full = ["pdf", "ocr", "audio"]
-
 [[bench]]
 name = "pipeline"
 harness = false

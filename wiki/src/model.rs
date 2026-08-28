@@ -8,9 +8,6 @@ pub enum SourceKind {
     Text,
     Markdown,
     Code { lang: String },
-    Pdf,
-    Image,
-    Audio,
 }
 
 impl SourceKind {
@@ -19,9 +16,6 @@ impl SourceKind {
             SourceKind::Text => "text".into(),
             SourceKind::Markdown => "markdown".into(),
             SourceKind::Code { lang } => format!("code:{lang}"),
-            SourceKind::Pdf => "pdf".into(),
-            SourceKind::Image => "image".into(),
-            SourceKind::Audio => "audio".into(),
         }
     }
 
@@ -29,9 +23,6 @@ impl SourceKind {
         match s {
             "text" => Some(SourceKind::Text),
             "markdown" => Some(SourceKind::Markdown),
-            "pdf" => Some(SourceKind::Pdf),
-            "image" => Some(SourceKind::Image),
-            "audio" => Some(SourceKind::Audio),
             other => other.strip_prefix("code:").map(|lang| SourceKind::Code {
                 lang: lang.to_string(),
             }),
@@ -71,12 +62,6 @@ pub struct LintReport {
     pub total_pages: usize,
     pub broken_links: Vec<(String, String)>,
     pub orphans: Vec<String>,
-}
-
-impl LintReport {
-    pub fn is_clean(&self) -> bool {
-        self.broken_links.is_empty() && self.orphans.is_empty()
-    }
 }
 
 /// A filesystem/URL-clean id: lowercase, every run of non-`[a-z0-9]` collapsed

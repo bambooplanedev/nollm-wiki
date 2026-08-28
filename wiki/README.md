@@ -16,16 +16,6 @@ The binary is written to `target/release/wiki`. For local runs without a
 separate build step, use `cargo run --release -- <args>` in place of the
 binary path.
 
-By default `wiki` builds the text, markdown, and code extractors only. The
-`pdf`, `ocr`, and `audio` format backends are feature-gated:
-
-```bash
-cargo build --features full
-```
-
-`--features full` currently only enables the **seams** for pdf/ocr/audio
-extraction — the extractors themselves are **not yet implemented**.
-
 ## Quickstart
 
 Run from `wiki/`:
@@ -174,7 +164,7 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 wiki search [OPTIONS] <QUERY>
 ```
 
-- `--kind <k>` (none — all kinds) — filter by `SourceKind`: `text`, `markdown`, `pdf`, `image`, `audio`, or `code:<lang>` (e.g. `code:rust`).
+- `--kind <k>` (none — all kinds) — filter by `SourceKind`: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
 - `--limit <N>` (`10`) — maximum number of hits returned.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
@@ -368,9 +358,9 @@ oversights:
   `@dataclass(frozen=True) class Article`). `#[cfg(test)]`
   modules are omitted from `## Body` and replaced with a
   `// [tests omitted: …]` marker.
-- **PDF/OCR/audio extractors are seams, not backends.** `--features
-  full` compiles the registry hooks for them, but no extractor is
-  implemented (see [Install & build](#install--build)).
+- **Text, markdown, and code are the only formats.** There is no PDF,
+  OCR, or audio extractor; adding one means adding an `Extractor` (see
+  [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 - **MCP server is query-only.** `wiki serve` exposes search/neighbors/lint
   and page resources over stdio (see [MCP server](#mcp-server)); there is
   deliberately no compile-over-MCP tool and no HTTP transport.
