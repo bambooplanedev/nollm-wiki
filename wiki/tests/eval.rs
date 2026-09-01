@@ -248,9 +248,41 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
     (top1, mrr, table)
 }
 
+// Floors, written as exact fractions. **Never transcribe these from the
+// snapshot table**: it formats with `{:.4}`, which rounds half-up, so `top1`
+// prints 0.4211 against a true 0.42105… — a floor copied from the printed
+// value sits *above* the baseline and fails on day one.
+const MIN_TOP1: f64 = 8.0 / 19.0; // 0.4210526…
+const MIN_MRR10: f64 = 55.0 / 114.0; // 0.4824561…
+
+/// Slack on the floor comparisons. Not defensive padding — without it the
+/// harness fails on its own baseline: `mrr@10` is accumulated as
+/// `Σ(1.0/rank) / 19.0`, which is 0.48245614035087714, while `55.0 / 114.0`
+/// evaluates to 0.48245614035087719. Same rational, different double, one ULP
+/// apart. One case is worth 1/19 ≈ 5.3 percentage points, so 1e-9 cannot hide
+/// a real move.
+const FLOOR_EPS: f64 = 1e-9;
+
 #[test]
 fn retrieval_quality() {
     let (_dir, wiki) = load_corpus();
-    let (_top1, _mrr, table) = score(&wiki);
+    let (top1, mrr, table) = score(&wiki);
+
+    // Floors before the snapshot: a regression must fail directionally,
+    // naming the number that moved, rather than as an undifferentiated
+    // snapshot diff one `cargo insta accept` away from being waved through.
+    //
+    // Each message carries the whole table because this ordering
+    // short-circuits `assert_snapshot!` — no rerun recovers it (not even with
+    // INSTA_FORCE_UPDATE), and the corpus tempdir is already gone.
+    assert!(
+        top1 >= MIN_TOP1 - FLOOR_EPS,
+        "top1 regressed: {top1} < {MIN_TOP1}\n{table}"
+    );
+    assert!(
+        mrr >= MIN_MRR10 - FLOOR_EPS,
+        "mrr@10 regressed: {mrr} < {MIN_MRR10}\n{table}"
+    );
+
     insta::assert_snapshot!(table);
 }
