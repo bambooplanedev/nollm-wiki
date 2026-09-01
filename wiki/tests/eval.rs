@@ -18,7 +18,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use wiki::query::Wiki;
+use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
 /// Every page the corpus must compile to, **ascending by id** — the order
@@ -285,4 +285,47 @@ fn retrieval_quality() {
     );
 
     insta::assert_snapshot!(table);
+}
+
+#[test]
+fn pack_ceiling_holds_on_a_real_graph() {
+    let (_dir, wiki) = load_corpus();
+    let mut floor_fires = 0usize;
+    let mut checked = 0usize;
+
+    for id in EXPECTED_IDS {
+        for budget in [50usize, 100, 200, 400, 1000, 2000] {
+            let pack = wiki
+                .neighbors(
+                    id,
+                    1,
+                    &PackBudget {
+                        max_tokens: Some(budget),
+                        ..Default::default()
+                    },
+                )
+                .expect("id came from the compiled index");
+            // The documented floor exception: the degraded target block is
+            // always emitted, even when it alone exceeds the budget.
+            let is_floor = pack.included.len() == 1 && pack.text.contains("exceeds the budget");
+            if is_floor {
+                floor_fires += 1;
+            }
+            checked += 1;
+            assert!(
+                pack.text.chars().count() / 4 <= budget || is_floor,
+                "pack for {id} at budget {budget} is {} tokens, included {:?}",
+                pack.text.chars().count() / 4,
+                pack.included,
+            );
+        }
+    }
+
+    assert_eq!(checked, 102, "17 pages x 6 budgets");
+    // Pinned so a change that stops degrading targets — which would make the
+    // ceiling trivially satisfiable — is visible rather than silent.
+    assert_eq!(
+        floor_fires, 7,
+        "floor exception fired an unexpected number of times"
+    );
 }
