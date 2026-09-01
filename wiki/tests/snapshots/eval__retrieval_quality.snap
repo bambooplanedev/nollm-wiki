@@ -1,0 +1,28 @@
+---
+source: tests/eval.rs
+expression: table
+---
+query                                  expected      rank  hits  top1_id
+------------------------------------------------------------------------
+determinism rules                      architecture     1     3  architecture
+incremental cache                      cache            1     4  cache
+broken wikilinks orphans               lint             -     1  wiki
+content hash                           hash             -     7  architecture
+walk source tree sorted                walk             1     2  walk
+watch recompile on change              watch            1     3  watch
+manifest                               manifest         1     3  manifest
+synthetic corpus generator seed        generator        -     2  architecture
+extractor registry extension dispatch  formats          1     2  formats
+plain txt extractor aliases            text             -     1  architecture
+pagerank centrality damping            graph_page       -     0  -
+slugify title case                     model            3     4  architecture
+one line summary fallback chain        summary          1     2  summary
+markdown extractor sections            markdown         -     2  architecture
+insta redacted snapshot                snapshot         1     2  snapshot
+compile then search cli binary         cli              -     2  wiki
+obsidian wikilink slug format          wiki             2     3  architecture
+token estimate chars                   manifest         3     3  architecture
+cache version hash algo mismatch       cache            -     1  architecture
+
+top1         0.4211
+mrr@10       0.4825

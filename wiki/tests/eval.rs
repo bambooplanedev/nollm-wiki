@@ -15,6 +15,7 @@
 //! the self-hosted wiki), while compiling it *as* the walk root still yields
 //! every file — the walker never filters its own root.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use wiki::query::Wiki;
@@ -187,4 +188,69 @@ fn every_label_names_a_page_that_could_answer_it() {
              a deliberate minimal repro.",
         );
     }
+}
+
+/// Run every case and return `(top1, mrr@10, table)`.
+///
+/// The table is both the snapshot payload and the body of Task 4's floor
+/// messages, so it is built once here.
+///
+/// Columns: the rank of the expected page (`-` when absent from the top ten),
+/// the number of hits returned, and the id that actually placed first. The
+/// hits count disambiguates a zero — `pagerank centrality damping` returns no
+/// hits at all, while the other zeros return one to seven wrong pages. The
+/// rank-1 id is load-bearing: the corpus compiles into a tempdir that is
+/// deleted on exit, so without it a row moving from `2` to `-` says something
+/// outranked the expected page but not what.
+fn score(wiki: &Wiki) -> (f64, f64, String) {
+    let mut table = String::new();
+    writeln!(
+        table,
+        "{:<39}{:<14}{:>4}{:>6}  top1_id",
+        "query", "expected", "rank", "hits"
+    )
+    .unwrap();
+    writeln!(table, "{}", "-".repeat(72)).unwrap();
+
+    let (mut top1, mut mrr) = (0.0, 0.0);
+    for (query, expected) in CASES {
+        let hits = wiki.search(query, None, 10);
+        let rank = hits.iter().position(|h| h.id == *expected).map(|i| i + 1);
+        let top1_id = hits.first().map(|h| h.id.as_str());
+
+        if top1_id == Some(*expected) {
+            top1 += 1.0;
+        }
+        if let Some(r) = rank {
+            mrr += 1.0 / r as f64;
+        }
+
+        writeln!(
+            table,
+            "{:<39}{:<14}{:>4}{:>6}  {}",
+            query,
+            expected,
+            rank.map_or("-".to_string(), |r| r.to_string()),
+            hits.len(),
+            top1_id.unwrap_or("-"),
+        )
+        .unwrap();
+    }
+
+    let n = CASES.len() as f64;
+    let (top1, mrr) = (top1 / n, mrr / n);
+    write!(
+        table,
+        "\n{:<13}{top1:.4}\n{:<13}{mrr:.4}\n",
+        "top1", "mrr@10",
+    )
+    .unwrap();
+    (top1, mrr, table)
+}
+
+#[test]
+fn retrieval_quality() {
+    let (_dir, wiki) = load_corpus();
+    let (_top1, _mrr, table) = score(&wiki);
+    insta::assert_snapshot!(table);
 }
