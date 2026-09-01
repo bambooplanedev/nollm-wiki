@@ -10,10 +10,11 @@
 //! The corpus is re-cut only by explicit decision when a scoring cycle
 //! closes, in a commit that quotes both the old and the new table.
 //!
-//! The directory is dot-prefixed so `walk`'s `.hidden(true)` prunes it when
-//! the repository root is the walk root (keeping 17 duplicate pages out of
-//! the self-hosted wiki), while compiling it *as* the walk root still yields
-//! every file — the walker never filters its own root.
+//! The directory is dot-prefixed so `walk` prunes it whenever ignore rules
+//! are respected (`.hidden(respect_ignore)`, and `respect_ignore` defaults to
+//! true) when the repository root is the walk root (keeping 17 duplicate
+//! pages out of the self-hosted wiki), while compiling it *as* the walk root
+//! still yields every file — the walker never filters its own root.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -48,14 +49,57 @@ const EXPECTED_IDS: &[&str] = &[
     "wiki",
 ];
 
+/// Content hash pinning the frozen corpus, so a re-sync is caught even
+/// though `corpus_compiles_to_the_expected_pages` only sees the page *set* —
+/// a reviewer once copied the live `docs/ARCHITECTURE.md` over the frozen
+/// copy and all other tests, snapshot included, passed unchanged. This is
+/// what makes the freeze rule at the top of this file mechanically
+/// enforceable rather than aspirational.
+///
+/// A **deliberate** re-cut updates this constant in the same commit that
+/// quotes the old and new tables (see the freeze rule and the floor-ratchet
+/// note above `MIN_TOP1`).
+const CORPUS_HASH: &str = "3cb65763c753f33981baf851f94424817562cb1496df2fa28c866368ba5e5359";
+
+/// Hash the corpus directory's relative paths and contents, in sorted path
+/// order, so the result does not depend on directory-listing order.
+///
+/// Line endings are normalised (`\r\n` -> `\n`) before hashing: a corpus
+/// checked out with CRLF moves no scoring metric, so it must not move this
+/// hash either, or the check would fail spuriously on a Windows checkout.
+fn corpus_hash(corpus: &Path) -> String {
+    let mut files = wiki::walk::walk(corpus, false, &|_| true).unwrap();
+    // `walk` already sorts by `rel_path`, but the hash's determinism is the
+    // point here, not an incidental property of the walker, so make it
+    // explicit rather than relying on that guarantee silently.
+    files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
+    let mut parts: Vec<Vec<u8>> = Vec::new();
+    for f in &files {
+        let normalized = String::from_utf8_lossy(&f.bytes).replace("\r\n", "\n");
+        parts.push(f.rel_path.clone().into_bytes());
+        parts.push(normalized.into_bytes());
+    }
+    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
+    wiki::hash::to_hex(&wiki::hash::combine(&refs))
+}
+
 /// Compile the frozen corpus into a fresh tempdir and load it.
 ///
 /// The `TempDir` is returned alongside the `Wiki` because dropping it deletes
 /// the compiled pages, and `Wiki` reads page bodies from disk on demand.
 fn load_corpus() -> (TempDir, Wiki) {
+    let corpus: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.eval_corpus");
+    assert_eq!(
+        corpus_hash(&corpus),
+        CORPUS_HASH,
+        "the frozen corpus's content changed. The id-set assertion in \
+         `corpus_compiles_to_the_expected_pages` cannot catch this: it only \
+         sees which pages exist, not what they say. If this is a deliberate \
+         re-cut, update CORPUS_HASH in the same commit that quotes the old \
+         and new tables; if it is not, revert the corpus.",
+    );
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("out");
-    let corpus: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.eval_corpus");
     compile(&corpus, &output, &CompileOptions::default()).unwrap();
     let wiki = Wiki::load(&output).unwrap();
     (dir, wiki)
@@ -86,6 +130,9 @@ const MIN_TOKEN_CHARS: usize = 4;
 /// does not contain (e.g. a stemming case like `wikilinks` against a page
 /// that only has `wikilink`). Empty today. Adding an entry is a claim that
 /// the label is a known-unreachable target, not an oversight.
+///
+/// The guard this exempts from is narrower than "unreachable target": see
+/// `covers_majority`'s doc comment for what it actually checks and does not.
 const EXEMPT: &[&str] = &[];
 
 /// The searchable content of a rendered page: every section except the
@@ -103,6 +150,18 @@ fn searchable_content(page: &str) -> String {
 /// Whether at least half of `query`'s tokens of `MIN_TOKEN_CHARS` or more
 /// occur in `content`. A query whose tokens are all short is unjudgeable and
 /// passes.
+///
+/// This checks token coverage against one page **in isolation** — it never
+/// compares that coverage to the other sixteen pages, so it does not detect
+/// "the expected page merely exists" the way a nearest-neighbour or ranking
+/// check would. Measured, it catches a mislabel pointed at a small page (few
+/// tokens to coincidentally match) but **passes** a mislabel pointed at a
+/// large page that happens to cover half the query's long tokens purely by
+/// vocabulary size — e.g. `("incremental cache", "architecture")` and
+/// `("slugify title case", "wiki")` both pass this guard today, even though
+/// neither page is the answer. Repointing a failing label at a large page it
+/// happens to cover is therefore a way to raise the metrics that this guard
+/// does not catch.
 fn covers_majority(query: &str, content: &str) -> bool {
     let toks: Vec<String> = query
         .to_lowercase()
@@ -252,6 +311,15 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 // snapshot table**: it formats with `{:.4}`, which rounds half-up, so `top1`
 // prints 0.4211 against a true 0.42105… — a floor copied from the printed
 // value sits *above* the baseline and fails on day one.
+//
+// These floors are static, so they only catch a drop below the *original*
+// baseline — a commit that raises `top1`/`mrr@10` and then a later commit
+// that gives the gain back both pass with both floors green, leaving only
+// the snapshot diff to catch it, which is directionless (an accept-by-reflex
+// waves it through). **A commit that accepts an improved table must also
+// raise `MIN_TOP1`/`MIN_MRR10` to the new exact fractions, in the same
+// commit** — computed the same way as below (e.g. `13.0 / 19.0`), never
+// transcribed from the `{:.4}` table.
 const MIN_TOP1: f64 = 8.0 / 19.0; // 0.4210526…
 const MIN_MRR10: f64 = 55.0 / 114.0; // 0.4824561…
 
@@ -263,6 +331,10 @@ const MIN_MRR10: f64 = 55.0 / 114.0; // 0.4824561…
 /// a real move.
 const FLOOR_EPS: f64 = 1e-9;
 
+/// The function name is load-bearing: `insta` derives the snapshot file name
+/// (`eval__retrieval_quality.snap`) from it, so renaming this test orphans
+/// the existing snapshot and fails CI with "no stored snapshot" instead of a
+/// diff.
 #[test]
 fn retrieval_quality() {
     let (_dir, wiki) = load_corpus();
@@ -305,17 +377,21 @@ fn pack_ceiling_holds_on_a_real_graph() {
                     },
                 )
                 .expect("id came from the compiled index");
-            // The documented floor exception: the degraded target block is
-            // always emitted, even when it alone exceeds the budget.
+            // The documented floor exception: a degraded target with no
+            // neighbours admitted (`included.len() == 1`) and its own
+            // degraded-block text still reporting "exceeds the budget" —
+            // today that always coincides with the degraded block alone
+            // exceeding the budget, but that coincidence is what this checks
+            // for, not the condition itself.
             let is_floor = pack.included.len() == 1 && pack.text.contains("exceeds the budget");
             if is_floor {
                 floor_fires += 1;
             }
             checked += 1;
+            let tokens = wiki::manifest::token_estimate(&pack.text);
             assert!(
-                pack.text.chars().count() / 4 <= budget || is_floor,
-                "pack for {id} at budget {budget} is {} tokens, included {:?}",
-                pack.text.chars().count() / 4,
+                tokens <= budget || is_floor,
+                "pack for {id} at budget {budget} is {tokens} tokens, included {:?}",
                 pack.included,
             );
         }

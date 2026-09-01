@@ -446,10 +446,11 @@ still not stripped.
     **The corpus is frozen at `a55cc54` and must never be re-synced with the
     live files it was copied from** — re-syncing restores the moving target
     the harness exists to remove. It is re-cut only by explicit decision when
-    a scoring cycle closes. The directory is dot-prefixed so `walk`'s
-    `.hidden(true)` keeps 17 duplicate pages out of the self-hosted wiki
-    while the harness, which compiles it as its own walk root, still sees
-    every file.
+    a scoring cycle closes. The directory is dot-prefixed so `walk` prunes it
+    whenever ignore rules are respected (`.hidden(respect_ignore)`, and
+    `respect_ignore` defaults to true), keeping 17 duplicate pages out of the
+    self-hosted wiki, while the harness, which compiles it as its own walk
+    root, still sees every file.
 
     **Every commit that accepts this snapshot must quote the accepted table
     in its message and say which direction each changed aggregate moved.**
@@ -457,7 +458,13 @@ still not stripped.
     per-case changes that leave the aggregates flat. Neither catches an
     accept-by-reflex, and the commit message is the only thing that does.
     `cargo insta review` needs the `cargo-insta` binary, which is not a
-    dev-dependency.
+    dev-dependency. **A commit that accepts an improved table must also
+    raise `MIN_TOP1`/`MIN_MRR10` to the new exact fractions, in the same
+    commit** — the floors are static, so once a cycle raises them, a later
+    change can give the gain back with both floors still green, leaving only
+    the (directionless) snapshot diff to catch it. Compute the new fractions
+    exactly (e.g. `13.0 / 19.0`); never transcribe them from the `{:.4}`
+    table, which rounds.
 - **Snapshot test:** `tests/snapshot.rs` uses `insta` to pin the exact
   rendered Markdown of one page from a seeded generated corpus
   (`generate_corpus(&input, 12, 42)`), with `source_hash` lines redacted so
