@@ -435,6 +435,29 @@ still not stripped.
   - `tests/mcp_serve.rs` — end-to-end MCP: spawns `wiki serve` and speaks
     raw newline-delimited JSON-RPC over stdio, covering tools and
     resources.
+  - `tests/eval.rs` — the retrieval eval harness. Compiles the frozen
+    17-page corpus in `tests/.eval_corpus/` and scores 19 labelled queries
+    through `Wiki::search`, gating on `top1` and `mrr@10` floors before
+    snapshotting a per-case table. Also asserts the `neighbors` pack-size
+    ceiling over that real graph (102 packs), which
+    `tests/query.rs::max_tokens_is_a_hard_ceiling_on_pack_size` covers only
+    on a three-page synthetic fixture.
+
+    **The corpus is frozen at `a55cc54` and must never be re-synced with the
+    live files it was copied from** — re-syncing restores the moving target
+    the harness exists to remove. It is re-cut only by explicit decision when
+    a scoring cycle closes. The directory is dot-prefixed so `walk`'s
+    `.hidden(true)` keeps 17 duplicate pages out of the self-hosted wiki
+    while the harness, which compiles it as its own walk root, still sees
+    every file.
+
+    **Every commit that accepts this snapshot must quote the accepted table
+    in its message and say which direction each changed aggregate moved.**
+    The floors catch a drop in level; the snapshot catches offsetting
+    per-case changes that leave the aggregates flat. Neither catches an
+    accept-by-reflex, and the commit message is the only thing that does.
+    `cargo insta review` needs the `cargo-insta` binary, which is not a
+    dev-dependency.
 - **Snapshot test:** `tests/snapshot.rs` uses `insta` to pin the exact
   rendered Markdown of one page from a seeded generated corpus
   (`generate_corpus(&input, 12, 42)`), with `source_hash` lines redacted so

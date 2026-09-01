@@ -112,6 +112,6 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 (always rebuilds the release binary first). See the repo root
 [`README.md`](../README.md#self-hosting).
 
-`search-eval.sh` — top-1 hit rate of `wiki search` over 15 fixed queries
-against the self-hosted `.wiki/` (run `selfhost.sh` first). Prints `N/15`;
-baseline on 2026-08-24 is `11/15`. Pass a different compiled dir as `$1`.
+Search-quality measurement now lives in `wiki/tests/eval.rs`, which scores a
+frozen corpus rather than the moving self-hosted one and runs in CI. See the
+Testing section of [`wiki/docs/ARCHITECTURE.md`](../wiki/docs/ARCHITECTURE.md).

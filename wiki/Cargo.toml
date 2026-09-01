@@ -4,6 +4,7 @@ version = "0.3.0"
 edition = "2021"
 description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license = "MIT"
+publish = false
 
 [[bin]]
 name = "wiki"
