@@ -67,3 +67,124 @@ fn corpus_compiles_to_the_expected_pages() {
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     assert_eq!(ids, EXPECTED_IDS, "corpus did not compile as expected");
 }
+
+/// Sections that `Wiki::search` does not score. Kept in sync with
+/// `query.rs`'s `CHROME_SECTIONS` — the label guard must judge a label
+/// against the text search actually reads, not the whole rendered page.
+/// (Scanning the rendered page instead makes `source_hash:` in the Metadata
+/// block put the token `hash` on every page.)
+const CHROME_SECTIONS: [&str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
+
+/// Minimum token length the label guard considers. Without it, `on` and
+/// `line` — which occur in 16 and 15 of the 17 corpus pages — let any label
+/// pass for any page.
+const MIN_TOKEN_CHARS: usize = 4;
+
+/// Queries exempt from the majority-coverage guard: deliberate minimal
+/// repros for a specific fix, whose whole point is a word the target page
+/// does not contain (e.g. a stemming case like `wikilinks` against a page
+/// that only has `wikilink`). Empty today. Adding an entry is a claim that
+/// the label is a known-unreachable target, not an oversight.
+const EXEMPT: &[&str] = &[];
+
+/// The searchable content of a rendered page: every section except the
+/// generated chrome, lowercased.
+fn searchable_content(page: &str) -> String {
+    wiki::rewrite::parse_sections(page)
+        .into_iter()
+        .filter(|(k, _)| !CHROME_SECTIONS.contains(&k.as_str()))
+        .map(|(_, v)| v)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase()
+}
+
+/// Whether at least half of `query`'s tokens of `MIN_TOKEN_CHARS` or more
+/// occur in `content`. A query whose tokens are all short is unjudgeable and
+/// passes.
+fn covers_majority(query: &str, content: &str) -> bool {
+    let toks: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .filter(|t| t.chars().count() >= MIN_TOKEN_CHARS)
+        .map(str::to_string)
+        .collect();
+    if toks.is_empty() {
+        return true;
+    }
+    let hit = toks.iter().filter(|t| content.contains(t.as_str())).count();
+    hit * 2 >= toks.len()
+}
+
+#[test]
+fn covers_majority_ignores_short_tokens_and_needs_half() {
+    // Short tokens are dropped: "on" and "the" occur in nearly every page and
+    // would let any label pass for any page.
+    assert!(covers_majority(
+        "watch on the change",
+        "recompile on change"
+    ));
+    // Half is enough.
+    assert!(covers_majority("cache version", "the cache guard"));
+    // Below half fires.
+    assert!(!covers_majority(
+        "atomic write temp file rename",
+        "renders pages and writes them"
+    ));
+    // A query with no long tokens cannot be judged, so it passes.
+    assert!(covers_majority("a b c", ""));
+}
+
+/// `(query, the one page that should answer it)`.
+///
+/// Eight of these score zero today: `search` ANDs over substring `contains`,
+/// so a page missing any one token is dropped before ranking. They are kept
+/// deliberately — each becomes reachable under stemming or coverage-weighted
+/// partial matching, which is exactly what the next scoring cycle changes. A
+/// set containing only passing cases would be blind to the recall hole that
+/// is search's actual defect.
+const CASES: &[(&str, &str)] = &[
+    ("determinism rules", "architecture"),
+    ("incremental cache", "cache"),
+    ("broken wikilinks orphans", "lint"),
+    ("content hash", "hash"),
+    ("walk source tree sorted", "walk"),
+    ("watch recompile on change", "watch"),
+    ("manifest", "manifest"),
+    ("synthetic corpus generator seed", "generator"),
+    ("extractor registry extension dispatch", "formats"),
+    ("plain txt extractor aliases", "text"),
+    ("pagerank centrality damping", "graph_page"),
+    ("slugify title case", "model"),
+    ("one line summary fallback chain", "summary"),
+    ("markdown extractor sections", "markdown"),
+    ("insta redacted snapshot", "snapshot"),
+    ("compile then search cli binary", "cli"),
+    ("obsidian wikilink slug format", "wiki"),
+    ("token estimate chars", "manifest"),
+    ("cache version hash algo mismatch", "cache"),
+];
+
+#[test]
+fn every_label_names_a_page_that_could_answer_it() {
+    let (_dir, wiki) = load_corpus();
+    for (query, expected) in CASES {
+        // A label naming a page that does not exist is always a bug; a page
+        // that exists but does not rank is a legitimate zero.
+        assert!(
+            wiki.has_page(expected),
+            "label `{query}` expects page `{expected}`, which does not exist",
+        );
+        if EXEMPT.contains(query) {
+            continue;
+        }
+        let page = wiki.page(expected).expect("has_page just succeeded");
+        assert!(
+            covers_majority(query, &searchable_content(&page)),
+            "label `{query}` -> `{expected}`: fewer than half its tokens \
+             appear in that page's searchable content, so the page is not \
+             the answer. Fix the label, or add the query to EXEMPT if it is \
+             a deliberate minimal repro.",
+        );
+    }
+}
