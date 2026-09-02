@@ -205,8 +205,10 @@ wiki lint [OPTIONS]
 
 Prints the counts, then one `  broken: <page> -> "<link>"` or `  orphan: <id>`
 line per offender. `[[links]]` inside fenced blocks or inline code are not
-counted: a page carries its source verbatim, so a wikilink quoted as a syntax
-example is not a link.
+counted, and the `## Body` of a code page is skipped entirely: it is verbatim
+source, where a wikilink is a string literal or a comment, not a link. Exits
+1 when any broken link is found, so `lint` can gate a build; orphans alone
+exit 0.
 
 ### `serve`
 

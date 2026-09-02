@@ -109,7 +109,8 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 ## Also in this directory
 
 `selfhost.sh` — compiles this repository into its own wiki at `.wiki/`
-(always rebuilds the release binary first). See the repo root
+(always rebuilds the release binary first) and fails on a broken wikilink
+(`wiki lint`). See the repo root
 [`README.md`](../README.md#self-hosting).
 
 Search-quality measurement now lives in `wiki/tests/eval.rs`, which scores a

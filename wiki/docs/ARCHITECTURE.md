@@ -71,7 +71,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
    broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
-   inline code span is never reported.
+   inline code span is never reported, and a code page's `## Body` (verbatim
+   source, per its `## Metadata` kind) is dropped from the scan altogether.
+   The CLI exits 1 on any broken link; orphans are advisory.
 
 ## Module map
 

@@ -15,8 +15,9 @@ optionally publish it as a browsable static site with `scripts/`.
 
 This repo compiles itself. `scripts/selfhost.sh` always runs
 `cargo build --release` (a no-op when sources are unchanged, so the binary
-can never go stale) and compiles the repository into `.wiki/` (gitignored;
-incremental on re-runs):
+can never go stale), compiles the repository into `.wiki/` (gitignored;
+incremental on re-runs), and then runs `wiki lint` on the result — a broken
+wikilink fails the script:
 
 ```bash
 scripts/selfhost.sh
