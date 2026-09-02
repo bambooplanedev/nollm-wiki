@@ -48,6 +48,15 @@ pub struct Entity {
     pub summary: Option<String>,
     pub symbols: Vec<String>,
     pub imports: Vec<String>,
+    /// Names of the page's top-level definitions (`ItemKind::FreeDef` and
+    /// `FreeValue`: fn, struct, enum, trait, type, const, static, class,
+    /// def, module constant), exactly as the tree-sitter `@name` capture
+    /// reads them — original case, no owner, no generics. Sorted,
+    /// deduplicated. Empty for non-code pages and for pages whose items are
+    /// all restricted-visibility. Methods, fields, `mod` declarations and
+    /// impl headers are excluded by kind, never by text (see the 2026-09-02
+    /// defined-names design).
+    pub defined: Vec<String>,
 }
 
 #[derive(Default, Clone, Debug)]

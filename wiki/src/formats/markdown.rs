@@ -37,6 +37,7 @@ impl Extractor for MarkdownExtractor {
             summary,
             symbols: Vec::new(),
             imports: Vec::new(),
+            defined: Vec::new(),
         }
     }
 }
@@ -91,6 +92,12 @@ fn first_h1(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_pages_define_no_names() {
+        let e = MarkdownExtractor.extract("a.md", "# A\n\nSome prose about Beta.\n");
+        assert!(e.defined.is_empty(), "defined: {:?}", e.defined);
+    }
 
     #[test]
     fn frontmatter_fields_parsed() {

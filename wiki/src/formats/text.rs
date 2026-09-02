@@ -72,6 +72,7 @@ impl Extractor for TextExtractor {
             summary,
             symbols: Vec::new(),
             imports: Vec::new(),
+            defined: Vec::new(),
         }
     }
 }
@@ -80,6 +81,12 @@ impl Extractor for TextExtractor {
 mod tests {
     use super::*;
     use crate::formats::Registry;
+
+    #[test]
+    fn text_pages_define_no_names() {
+        let e = TextExtractor.extract("a.txt", "# A\n\nSome prose.\n");
+        assert!(e.defined.is_empty(), "defined: {:?}", e.defined);
+    }
 
     #[test]
     fn hash_header_extracted() {

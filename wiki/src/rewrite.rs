@@ -412,6 +412,7 @@ mod tests {
             summary: None,
             symbols: vec![],
             imports: vec![],
+            defined: vec![],
         }
     }
     fn map(v: Vec<Entity>) -> BTreeMap<String, Entity> {

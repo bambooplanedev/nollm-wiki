@@ -306,6 +306,18 @@ mod tests {
     use crate::formats::Extractor;
 
     #[test]
+    fn defined_excludes_dataclass_fields_and_keeps_class_def_constant() {
+        let src = "from dataclasses import dataclass\n\n@dataclass\nclass Invoice:\n    total: float\n\ndef render():\n    pass\n\nDEFAULT = 3\n";
+        let e = CodeExtractor.extract("billing.py", src);
+        assert_eq!(
+            e.defined,
+            vec!["DEFAULT", "Invoice", "render"],
+            "defined: {:?}",
+            e.defined
+        );
+    }
+
+    #[test]
     fn python_signatures_gated_docstring_and_imports() {
         let src = "\"\"\"\nTop docstring.\n\"\"\"\nimport os\nfrom graph import build\ndef extract_all(d):\n    pass\ndef _private():\n    pass\n";
         let e = CodeExtractor.extract("extractor.py", src);

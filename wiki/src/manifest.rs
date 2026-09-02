@@ -166,6 +166,7 @@ mod tests {
             summary: summary.map(String::from),
             symbols: vec![],
             imports: vec![],
+            defined: vec![],
         }
     }
 

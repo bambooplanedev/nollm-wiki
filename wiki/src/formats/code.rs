@@ -189,10 +189,17 @@ impl Extractor for CodeExtractor {
             None => (text.to_string(), None),
         };
 
-        let (lang_name, symbols, imports, docstring, summary_fallback) =
+        let (lang_name, symbols, imports, defined, docstring, summary_fallback) =
             match extract_code(ext, &source, pre_parsed) {
                 Some(v) => v,
-                None => (ext.to_string(), Vec::new(), Vec::new(), None, None),
+                None => (
+                    ext.to_string(),
+                    Vec::new(),
+                    Vec::new(),
+                    Vec::new(),
+                    None,
+                    None,
+                ),
             };
 
         let docstring = docstring.or_else(|| leading_doc(&source, ext));
@@ -215,16 +222,18 @@ impl Extractor for CodeExtractor {
             summary,
             symbols,
             imports,
+            defined,
         }
     }
 }
 
-/// `(language, symbols, imports, docstring, summary_fallback)`. The fallback
-/// is chosen here rather than by the caller: freeness is known only while the
-/// captures are in hand, and `symbols` alone cannot be reinterpreted after
-/// sorting.
+/// `(language, symbols, imports, defined, docstring, summary_fallback)`. The
+/// fallback is chosen here rather than by the caller: freeness is known only
+/// while the captures are in hand, and `symbols` alone cannot be
+/// reinterpreted after sorting.
 type CodeInfo = (
     String,
+    Vec<String>,
     Vec<String>,
     Vec<String>,
     Option<String>,
@@ -600,6 +609,20 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 
     let summary_fallback = pick_summary_fallback(&collected);
 
+    // Second projection over the same items: the bare names of top-level
+    // definitions, for `Wiki::search`'s defined-names field. `Module`,
+    // `Header` and `Member` are excluded by kind — `pub mod x`, impl headers,
+    // methods and fields never enter — so no text parsing of signatures is
+    // needed downstream. A set: two `fn f()` in different inline modules
+    // collapse to one `f`.
+    let mut defined: Vec<String> = collected
+        .iter()
+        .filter(|(_, kind, ..)| matches!(kind, ItemKind::FreeDef | ItemKind::FreeValue))
+        .map(|(_, _, name, _)| name.clone())
+        .collect();
+    defined.sort();
+    defined.dedup();
+
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
     let docstring = if ext == "py" {
@@ -612,6 +635,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         spec.lang_name.to_string(),
         symbols,
         imports,
+        defined,
         docstring,
         summary_fallback,
     ))
@@ -1011,6 +1035,36 @@ pub(crate) mod testutil {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn defined_keeps_top_level_names_only() {
+        // Module declaration, struct field, trait-impl method, trait with a
+        // bound, typed const, free fn. Only the four top-level definitions
+        // survive: `a` (Module), `f` (field = Member) and `m` (method =
+        // Member) are excluded by `ItemKind`, never by text inspection.
+        let src = "pub mod a;\npub struct S { pub f: u8 }\nimpl T for S {\n    fn m(&self) {}\n}\npub trait Tr: Send {}\npub const C: u32 = 1;\npub fn g() {}\n";
+        let e = CodeExtractor.extract("s.rs", src);
+        assert_eq!(
+            e.defined,
+            vec!["C", "S", "Tr", "g"],
+            "defined: {:?}",
+            e.defined
+        );
+    }
+
+    #[test]
+    fn defined_is_a_sorted_set_and_inline_module_items_are_unqualified() {
+        let src = "pub mod inner {\n    pub fn in_mod() {}\n}\npub mod other {\n    pub fn in_mod() {}\n}\npub fn in_mod() {}\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(e.defined, vec!["in_mod"], "defined: {:?}", e.defined);
+    }
+
+    #[test]
+    fn defined_ignores_trait_impl_headers_and_qualified_methods() {
+        let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> u8 { 0 }\n}\n";
+        let e = CodeExtractor.extract("text.rs", src);
+        assert_eq!(e.defined, vec!["TextExtractor"], "defined: {:?}", e.defined);
+    }
 
     #[test]
     fn summary_fallback_follows_signature_order_not_grouped_display_order() {

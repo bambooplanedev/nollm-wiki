@@ -119,6 +119,7 @@ mod tests {
             summary: None,
             symbols: vec![],
             imports: vec![],
+            defined: vec![],
         }
     }
 

@@ -84,6 +84,17 @@ mod tests {
     use crate::formats::Extractor;
 
     #[test]
+    fn defined_ts_generic_function_and_go_struct_keep_original_case() {
+        let ts = "export function createClient<T>(url: string): T {\n  return null as T;\n}\n";
+        let e = CodeExtractor.extract("api.ts", ts);
+        assert_eq!(e.defined, vec!["createClient"], "defined: {:?}", e.defined);
+
+        let go = "package s\n\ntype Server struct {}\n\nfunc New() *Server { return nil }\n";
+        let e = CodeExtractor.extract("server.go", go);
+        assert_eq!(e.defined, vec!["New", "Server"], "defined: {:?}", e.defined);
+    }
+
+    #[test]
     fn js_export_gated_signatures() {
         let src = "export function foo(a, b) {\n  return a + b;\n}\nfunction helper() {\n  return 1;\n}\n";
         let e = CodeExtractor.extract("mod.js", src);
