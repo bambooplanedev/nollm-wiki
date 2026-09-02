@@ -3,6 +3,7 @@
 use crate::model::{slugify, LintReport};
 use crate::rewrite::{mask_code, parse_sections};
 use regex::Regex;
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
@@ -39,6 +40,14 @@ fn link_display(inner: &str) -> &str {
     inner.rsplit('|').next().unwrap_or(inner)
 }
 
+/// Whether a rendered page's `## Metadata` says `- kind: code:<lang>`.
+fn is_code_page(sections: &BTreeMap<String, String>) -> bool {
+    sections.get("Metadata").is_some_and(|m| {
+        m.lines()
+            .any(|l| l.trim_start().starts_with("- kind: code:"))
+    })
+}
+
 /// `pages`: page id -> rendered markdown. Purely in-memory (no disk re-read).
 pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
     let known: std::collections::BTreeSet<&String> = pages.keys().collect();
@@ -46,18 +55,27 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
     let mut broken_links = Vec::new();
 
     for (id, text) in pages {
-        // Scan a code mask, not the raw page: a page carries its source body
-        // verbatim, so every `[[slug|Name]]` written as a syntax example in a
-        // doc comment or a fenced block would otherwise be reported as a
-        // broken link to a page that was never meant to exist.
-        for cap in LINK.captures_iter(&mask_code(text)) {
+        let sections = parse_sections(text);
+        // Scan a code mask, not the raw page: a `[[slug|Name]]` written as a
+        // syntax example in a fenced block or inline code is not a link. A code
+        // page goes further: its `## Body` is verbatim source, where a
+        // `[[...]]` is a string literal or a comment, so the whole section is
+        // dropped before the scan. Text and markdown bodies are scanned — a
+        // wikilink there is the author's, and a broken one is the point.
+        let scan: Cow<str> = match sections.get("Body") {
+            Some(body) if is_code_page(&sections) && !body.is_empty() => {
+                text.replacen(body.as_str(), "", 1).into()
+            }
+            _ => text.into(),
+        };
+        for cap in LINK.captures_iter(&mask_code(&scan)) {
             let inner = &cap[1];
             if !known.contains(&slugify(link_target(inner))) {
                 broken_links.push((id.clone(), link_display(inner).to_string()));
             }
         }
         // Orphan counting uses ONLY the Related section (true outgoing edges).
-        if let Some(related) = parse_sections(text).get("Related") {
+        if let Some(related) = sections.get("Related") {
             for cap in LINK.captures_iter(related) {
                 let slug = slugify(link_target(&cap[1]));
                 if let Some(c) = incoming.get_mut(&slug) {
@@ -121,6 +139,26 @@ mod tests {
         let r = lint(&pages);
         assert!(r.orphans.contains(&"alpha".to_string())); // nothing links to Alpha
         assert!(!r.orphans.contains(&"beta".to_string())); // Beta is referenced by Alpha
+    }
+
+    #[test]
+    fn code_page_body_is_not_scanned_for_links() {
+        // The same `[[...]]` literal: in a code body it is source text (a
+        // string in a test, a format template), in a text body it is a link.
+        let mut code = ent(
+            "alpha",
+            "Alpha",
+            "assert!(s.contains(\"[[ghost|Ghost]]\"));",
+        );
+        code.kind = SourceKind::Code {
+            lang: "rust".into(),
+        };
+        let text = ent("beta", "Beta", "see [[ghost|Ghost]]");
+        let r = lint(&render_all(vec![code, text]));
+        assert_eq!(
+            r.broken_links,
+            vec![("beta".to_string(), "Ghost".to_string())]
+        );
     }
 
     #[test]
