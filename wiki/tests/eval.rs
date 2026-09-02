@@ -205,9 +205,10 @@ fn covers_majority_ignores_short_tokens_and_needs_half() {
 /// built against, because a page missing any one token was dropped before
 /// ranking. They were kept deliberately, and the 2026-09-02 scoring cycle
 /// (partial matching, IDF, length normalisation, section-heading field)
-/// made all eight reachable. The set still contains the one remaining miss
-/// (`slugify title case`) for the same reason: a set of only passing cases
-/// is blind to the next defect.
+/// made all eight reachable. The set still contains one deliberate miss
+/// (`extractor` → `formats`, rank 3 since the 2026-09-02 defined-names
+/// cycle; before it, `slugify title case`) for the same reason: a set of
+/// only passing cases is blind to the next defect.
 const CASES: &[(&str, &str)] = &[
     ("determinism rules", "architecture"),
     ("incremental cache", "cache"),
@@ -228,6 +229,14 @@ const CASES: &[(&str, &str)] = &[
     ("obsidian wikilink slug format", "wiki"),
     ("token estimate chars", "manifest"),
     ("cache version hash algo mismatch", "cache"),
+    // 2026-09-02 defined-names cycle. `extractor trait`: baseline rank 2,
+    // now 1 — pins "definer over implementer". `extractor`: baseline rank 4,
+    // now 3 — `text` and `markdown` also earn the word from
+    // `TextExtractor`/`MarkdownExtractor`, so the trait's page does not win
+    // the bare word. This is the set's deliberate miss, replacing
+    // `slugify title case`, which the defined-names field fixed.
+    ("extractor trait", "formats"),
+    ("extractor", "formats"),
 ];
 
 #[test]
@@ -325,15 +334,15 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 // raise `MIN_TOP1`/`MIN_MRR10` to the new exact fractions, in the same
 // commit** — computed the same way as below (e.g. `13.0 / 19.0`), never
 // transcribed from the `{:.4}` table.
-const MIN_TOP1: f64 = 18.0 / 19.0; // 0.9473684…
-const MIN_MRR10: f64 = 37.0 / 38.0; // 0.9736842…
+const MIN_TOP1: f64 = 20.0 / 21.0; // 0.9523809…
+const MIN_MRR10: f64 = 61.0 / 63.0; // 0.9682539… = (20 + 1/3) / 21
 
 /// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
 /// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
 /// from the same rational written as a fraction (the original baseline,
 /// 55/114, did exactly that). The current floors happen to be bit-identical
 /// to their accumulations, but a future re-cut may not be. One case is worth
-/// 1/19 ≈ 5.3 percentage points, so 1e-9 cannot hide a real move.
+/// 1/21 ≈ 4.8 percentage points, so 1e-9 cannot hide a real move.
 const FLOOR_EPS: f64 = 1e-9;
 
 /// The function name is load-bearing: `insta` derives the snapshot file name
