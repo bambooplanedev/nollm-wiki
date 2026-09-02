@@ -19,6 +19,9 @@ pub struct ManifestEntry {
     pub token_estimate: usize,
     pub neighbors_out: Vec<String>,
     pub neighbors_in: Vec<String>,
+    /// Top-level definition names of the page (see `Entity::defined`).
+    /// Declared last so it is the last key of every `index.json` entry.
+    pub defined: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -60,6 +63,7 @@ pub fn build_manifest(
                 token_estimate: token_estimate(&e.body),
                 neighbors_out: out,
                 neighbors_in: inc,
+                defined: e.defined.clone(),
             }
         })
         .collect();
@@ -216,6 +220,28 @@ mod tests {
         assert!(
             !md.contains("`[[Name]]`"),
             "AGENTS.md still describes the old [[Name]] format: {md}"
+        );
+    }
+
+    #[test]
+    fn index_json_carries_defined_names_as_the_last_entry_key() {
+        let (mut ents, g) = setup();
+        ents.get_mut("alpha").unwrap().defined = vec!["Alpha".into(), "build_alpha".into()];
+        let m = build_manifest("My Project", &ents, &g);
+        let json = render_index_json(&m);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let alpha = &v["entries"][0];
+        assert_eq!(alpha["id"], "alpha");
+        assert_eq!(
+            alpha["defined"],
+            serde_json::json!(["Alpha", "build_alpha"])
+        );
+        assert_eq!(v["entries"][1]["defined"], serde_json::json!([]));
+        // Last key: `neighbors_in` precedes it in the pretty output.
+        let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
+        assert!(
+            a_text.find("\"neighbors_in\"").unwrap() < a_text.find("\"defined\"").unwrap(),
+            "defined must be serialised after neighbors_in:\n{json}"
         );
     }
 }
