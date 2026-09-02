@@ -1,3 +1,5 @@
+//! Markdown extractor: `---` frontmatter (title, created, description, aliases), first `# H1` as a title fallback, then the body.
+
 use crate::formats::{derive_name_from_path, summarize, Extractor};
 use crate::model::{slugify, Entity, SourceKind};
 

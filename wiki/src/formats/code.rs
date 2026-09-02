@@ -1,3 +1,5 @@
+//! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
+
 use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
 use std::collections::{BTreeMap, BTreeSet};

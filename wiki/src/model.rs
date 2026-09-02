@@ -66,11 +66,6 @@ pub struct LintReport {
     pub orphans: Vec<String>,
 }
 
-/// A filesystem/URL-clean id: lowercase, every run of non-`[a-z0-9]` collapsed
-/// to a single `_`, no leading/trailing `_`. A name that is entirely non-alnum
-/// falls back to a deterministic `page_<hash>` so it is never empty (and never
-/// silently dropped by slug dedup). Uses `char::to_ascii_lowercase` (ASCII-only,
-/// no Unicode case-expansion) and a single pass (no `String::replace` loop).
 /// Capitalize each whitespace-separated word and lowercase the rest of it.
 /// Shared by every name-deriving path — the text extractor's ALL-CAPS first
 /// line, the markdown/code filename fallbacks, and `disambiguate_ids`'
@@ -89,6 +84,11 @@ pub(crate) fn title_case(s: &str) -> String {
         .join(" ")
 }
 
+/// A filesystem/URL-clean id: lowercase, every run of non-`[a-z0-9]` collapsed
+/// to a single `_`, no leading/trailing `_`. A name that is entirely non-alnum
+/// falls back to a deterministic `page_<hash>` so it is never empty (and never
+/// silently dropped by slug dedup). Uses `char::to_ascii_lowercase` (ASCII-only,
+/// no Unicode case-expansion) and a single pass (no `String::replace` loop).
 pub fn slugify(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
     let mut pending_sep = false;

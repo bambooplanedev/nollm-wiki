@@ -1,4 +1,7 @@
-/// Deterministic, no-LLM one-line summary via a fallback chain.
+//! Deterministic, no-LLM one-line summaries via a fallback chain.
+
+/// First non-empty of: frontmatter description, docstring, the body's first
+/// sentence, the first signature.
 pub fn summarize(
     frontmatter_desc: Option<&str>,
     docstring: Option<&str>,

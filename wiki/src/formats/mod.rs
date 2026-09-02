@@ -1,3 +1,5 @@
+//! Extractor registry: routes a file by extension to its extractor and fills in `source_path` and `content_hash`.
+
 pub mod code;
 pub mod extract_python;
 pub mod extract_rust;
@@ -19,8 +21,8 @@ use std::sync::Arc;
 /// A page name derived from the file path: the basename's stem, with `_` and
 /// `-` turned into spaces, title-cased.
 ///
-/// Shared by `CodeExtractor` and `MarkdownExtractor`, which each carried a
-/// private copy. The copies had already drifted — markdown's replaced only
+/// Shared by `CodeExtractor`, `MarkdownExtractor`, and `TextExtractor`, which
+/// each carried a private copy. The copies had already drifted — markdown's replaced only
 /// `_`, so `my-notes.md` rendered "My-notes" while `my-code.rs` rendered
 /// "My Code". Cosmetic (both slugify to one id, and the phrase index
 /// tokenizes them identically), but it is the drift a verbatim duplicate

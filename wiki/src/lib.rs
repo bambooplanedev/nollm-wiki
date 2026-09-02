@@ -276,14 +276,6 @@ fn is_reserved_manifest_name(id: &str) -> bool {
     RESERVED_MANIFEST_NAMES.contains(&id.to_lowercase().as_str())
 }
 
-/// Rewrite any entity id that collides with a reserved manifest base name to
-/// a non-colliding id, deterministically. Ids that already exist and are not
-/// themselves reserved are treated as fixed and never displaced; a remapped
-/// id gets an `_page` suffix, then `_page_2`, `_page_3`, ... until it clears
-/// both the reserved set and every id already claimed (fixed or previously
-/// remapped). `entities` is a `BTreeMap`, so iteration is in sorted key
-/// order — the same input always produces the same remap, regardless of
-/// thread count or machine.
 /// The directory segments of `source_path`, outermost first, with the
 /// filename dropped.
 fn parent_segments(source_path: &str) -> Vec<&str> {
@@ -383,6 +375,14 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
     }
 }
 
+/// Rewrite any entity id that collides with a reserved manifest base name to
+/// a non-colliding id, deterministically. Ids that already exist and are not
+/// themselves reserved are treated as fixed and never displaced; a remapped
+/// id gets an `_page` suffix, then `_page_2`, `_page_3`, ... until it clears
+/// both the reserved set and every id already claimed (fixed or previously
+/// remapped). `entities` is a `BTreeMap`, so iteration is in sorted key
+/// order — the same input always produces the same remap, regardless of
+/// thread count or machine.
 fn remap_reserved_names(entities: BTreeMap<String, Entity>) -> BTreeMap<String, Entity> {
     let mut used: BTreeSet<String> = entities
         .keys()

@@ -1,3 +1,5 @@
+//! Plain-text extractor: `# Title` or an ALL-CAPS first line, `created:`/`aliases:` header fields, then the body.
+
 use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
 use regex::Regex;

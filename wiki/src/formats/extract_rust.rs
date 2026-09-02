@@ -279,13 +279,6 @@ pub(crate) fn rust_spec() -> LangSpec {
     }
 }
 
-/// Remove `#[cfg(test)]`-annotated `mod` items from Rust source, replacing
-/// each with a one-line omission marker (`// [tests omitted: mod <name>,
-/// <N> lines]`). The spliced span starts at the first attribute in the
-/// contiguous run of attributes directly above the `mod` (so `#[cfg(test)]`
-/// itself is removed) and ends at the module's closing brace; `<N>` is that
-/// span's line count. Returns `None` when there is nothing to strip or the
-/// source fails to parse — the caller keeps the raw text.
 /// The outcome of a test-module scan.
 ///
 /// `Unchanged` carries the tree the scan already parsed. Nothing was spliced,
@@ -299,6 +292,13 @@ pub(crate) enum Stripped {
     Rewritten(String),
 }
 
+/// Remove `#[cfg(test)]`-annotated `mod` items from Rust source, replacing
+/// each with a one-line omission marker (`// [tests omitted: mod <name>,
+/// <N> lines]`). The spliced span starts at the first attribute in the
+/// contiguous run of attributes directly above the `mod` (so `#[cfg(test)]`
+/// itself is removed) and ends at the module's closing brace; `<N>` is that
+/// span's line count. Returns `None` when there is nothing to strip or the
+/// source fails to parse — the caller keeps the raw text.
 pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
     let language: Language = tree_sitter_rust::LANGUAGE.into();
     let mut parser = Parser::new();
