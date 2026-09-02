@@ -113,5 +113,6 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 [`README.md`](../README.md#self-hosting).
 
 Search-quality measurement now lives in `wiki/tests/eval.rs`, which scores a
-frozen corpus rather than the moving self-hosted one and runs in CI. See the
+frozen corpus rather than the moving self-hosted one and runs in CI
+(`.github/workflows/rust.yml`: fmt, clippy, build, test). See the
 Testing section of [`wiki/docs/ARCHITECTURE.md`](../wiki/docs/ARCHITECTURE.md).

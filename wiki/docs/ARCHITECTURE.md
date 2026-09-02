@@ -24,7 +24,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 1. **Walk** (`walk::walk`) — recursively lists `input`, respecting
    `.gitignore`/`.ignore`/hidden-file rules when `respect_ignore` is set, and
-   sorts the result by `rel_path`. `compile_inner` then filters out anything
+   sorts the result by `rel_path`. A `keep` predicate (the registry's
+   extension set) is consulted on the path *before* a file is opened, so an
+   unhandled file is never read into memory. `compile_inner` then filters out anything
    under `output` (`is_under`, so a nested output dir can't feed its own
    generated pages back in as sources) before extraction runs. Produces
    `Vec<SourceFile>`.
@@ -32,7 +34,10 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    each file to the `Extractor` registered for its extension and produces an
    `Entity`. Because the input `Vec` was already sorted, `.collect()`ing the
    `par_iter()` output preserves that order regardless of which thread
-   finishes first.
+   finishes first. Tree-sitter queries are compiled once per process
+   (`QUERIES`, a `LazyLock`), and `validate_queries()` forces them at the top
+   of `compile_inner`, so a bad query fails before any page is written rather
+   than inside a worker with other pages already on disk.
 3. **Qualify / remap** (`compile_inner` in `src/lib.rs`) — an extractor
    names a page from its own file alone and cannot see the rest of the tree,
    so ids are made unique here, where every entity is in hand.
@@ -44,7 +49,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    equal but for case — falls through to the older rule, where the entity
    with the lexicographically-first `rel_path` wins. Any id that collides
    with a reserved manifest name (`index`, `llms`, `agents`, `graph`) is then
-   remapped to `<id>_page`, `<id>_page_2`, ... Produces
+   remapped to `<id>_page`, `<id>_page_2`, ..., with a warning on stderr. Produces
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links by scanning entity bodies for mentions of other entity names (and
@@ -64,7 +69,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
    `graph.json` from the final entity map and graph.
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
-   broken `[[links]]` and orphaned pages; no disk re-read.
+   broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
+   on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
+   inline code span is never reported.
 
 ## Module map
 
@@ -73,24 +80,24 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering; produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
-| `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines. |
+| `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`. |
 | `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds no language's grammar node kinds — those live behind the `Shape` hook in each language's module. |
 | `src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
 | `src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
-| `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). |
+| `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
-| `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`). |
+| `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
-| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `index.md`, `llms.txt`, `AGENTS.md`, `graph.json`. |
+| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
-| `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
+| `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search`/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources; `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes, keeping the last good snapshot if a reload fails. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring events under `output`. |
+| `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring events under `output`, debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. |
 | `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `serve`, `generate`. |
 
 **The `extract_*.rs` names are two words on purpose, not tidiness.** Page
@@ -159,7 +166,7 @@ breaking any of them reintroduces nondeterminism.
   seed, so identical bytes always hash identically, on any machine.
   `combine()` additionally length-prefixes each part before hashing, so
   `["ab","c"]` and `["a","bc"]` never collide.
-- **PageRank runs a fixed 40 iterations over a `BTreeMap<String, Edges>`**
+- **PageRank runs a fixed 40 iterations at damping 0.85 over a `BTreeMap<String, Edges>`**
   (`graph::pagerank`) — no convergence-threshold early exit and no
   hash-map-order iteration, so rank computation is a pure function of the
   graph, not of float-convergence timing or map iteration order.
@@ -252,7 +259,11 @@ current entity set is pruned: the corresponding page file is deleted from
 `output`, and `cache.retain_ids()` drops it from the cache before it is
 saved back to `.wiki/cache.json`. This keeps stale pages from a deleted or
 renamed source from lingering in the output directory across incremental
-runs.
+runs. Pages the prune cannot account for — ids recorded in a cache written
+by an earlier compiler version (`cache::prior_page_ids` reads them past the
+version guard) that no current entity produces — are only reported:
+`warning: N page(s) from a previous id scheme remain in …` on stderr, never
+deleted.
 
 **Notes preservation:** before rendering a page, `rewrite::read_preserved_notes`
 reads the *existing* file at that output path (if any) and extracts its
@@ -368,7 +379,9 @@ as `pub fn Wiki::search(…)`, and one in a trait impl as
 syntax, required because `Display::fmt` and `Debug::fmt` on one type are
 otherwise identical strings that `dedup` would merge. Trait impls also emit an
 `impl Trait for Type` header, and a `pub` trait declaration emits its required
-and default methods. Because tree-sitter queries match at any depth, only
+and default methods. A `pub const`/`static` re-appends its value
+(`pub const LIMIT: u32 = 5`) under the 48-char budget described with Python
+below. Because tree-sitter queries match at any depth, only
 items reachable from the file root through module and type scopes are
 captured; an `impl` written inside a function body is not module surface. A
 trait impl is gated on neither its own visibility (rustc forbids a modifier
@@ -448,6 +461,12 @@ still not stripped.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
   - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
+  - `tests/python_extraction.rs` — Python extraction through `compile()`
+    on a reduced stand-in for the audit corpora (dataclass, constant,
+    private helper, relative imports), asserting on `## Exports`/`## Imports`.
+  - `tests/common/mod.rs` — `section`/`exports`/`imports` helpers shared
+    by the integration tests, so assertions scope to a curated section
+    rather than the whole page (whose `## Body` is verbatim source).
   - `tests/search_quality.rs` — behavioural pins for search ranking over
     in-test fixtures: the 2026-07-14 dogfood checklist queries, and the
     2026-09-02 scoring cycle's partial matching, occurrence monotonicity,
@@ -493,9 +512,15 @@ still not stripped.
   hash-format churn doesn't force a snapshot update for unrelated reasons.
   Snapshots live under `tests/snapshots/`; review changes with
   `cargo insta review` before accepting them.
+- **Benchmark:** `benches/pipeline.rs` (criterion) times a full `compile()`
+  of a generated 100- and 1000-file corpus (`compile_100`, `compile_1000`);
+  run with `cargo bench`.
 - **Gate trio** — run all three before sending a change:
   ```bash
   cargo test
   cargo clippy --all-targets -- -D warnings
   cargo fmt --check
   ```
+  `.github/workflows/rust.yml` runs the same on every push and pull request
+  to `main`, in four steps: `cargo fmt --check`, `cargo clippy --all-targets
+  -- -D warnings`, `cargo build`, `cargo test`.

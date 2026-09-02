@@ -1,7 +1,8 @@
 # wiki
 
 A deterministic, no-LLM-at-generation-time wiki compiler. It turns a folder
-of source files (`.txt`, `.md`, code) into a cross-linked Markdown wiki plus
+of source files (`.txt`, `.md`/`.markdown`, and `.rs`/`.py`/`.js`/`.ts`/`.go`
+code) into a cross-linked Markdown wiki plus
 machine-readable artifacts (`index.json`, `llms.txt`, `AGENTS.md`) built *for*
 LLM/agent consumption — no model call happens during compilation, and output
 is byte-identical across runs and machines.
@@ -165,7 +166,12 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 - `--incremental` (off) — reuse `.wiki/cache.json` render fingerprints and skip unchanged pages.
 - `--no-ignore` (off) — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
 - `--emit-json` (off) — also write `graph.json` (node/edge graph).
-- `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change.
+- `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change. Events are debounced for 150 ms and events under `<OUTPUT>` are ignored; each run reports `recompiled: N pages (M written)` on stderr.
+
+If `<OUTPUT>` still holds pages written under a previous id scheme (an
+earlier compiler version, or sources renamed since), `compile` warns
+`warning: N page(s) from a previous id scheme remain in <OUTPUT> …` on stderr
+and leaves them in place — delete them or recompile into a clean directory.
 
 ### `search`
 
@@ -196,6 +202,11 @@ wiki lint [OPTIONS]
 ```
 
 - `--dir <out>` (`out`) — the compiled wiki directory to check for broken links and orphan pages.
+
+Prints the counts, then one `  broken: <page> -> "<link>"` or `  orphan: <id>`
+line per offender. `[[links]]` inside fenced blocks or inline code are not
+counted: a page carries its source verbatim, so a wikilink quoted as a syntax
+example is not a link.
 
 ### `serve`
 
@@ -245,9 +256,10 @@ source tree. Three artifacts drive that:
   each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`,
   `degree_in`, `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`,
   `neighbors_in`.
-- **`llms.txt`** — a compact, human- and LLM-readable index grouping pages
-  (e.g. "Docs" vs "Optional") with one-line summaries, meant to be pasted
-  into a prompt or skimmed cheaply.
+- **`llms.txt`** — a compact, human- and LLM-readable index with one-line
+  summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
+  or above the median PageRank go under `## Docs`, the rest under
+  `## Optional`.
 - **`AGENTS.md`** — a short usage guide written into every compiled wiki,
   telling an agent where to start (`index.md`/`index.json`), how to fetch a
   neighborhood (`wiki neighbors <id> --depth N`), and that the `## Notes`
@@ -344,6 +356,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+`CompileOptions.project` sets the project name written to `index.json`,
+`llms.txt`, and `AGENTS.md`; it defaults to the input directory's basename.
+Besides `search` and `neighbors`, `Wiki` exposes `page(id)` (a rendered
+page's Markdown), `has_page(id)`, and `list_pages()` (`(id, title)` pairs,
+ascending by id) — the same calls the MCP server's resources use.
 
 ## Determinism
 
