@@ -1,3 +1,5 @@
+//! Link graph: wikilink and import edges between pages, orphan detection, and PageRank centrality with damping.
+
 use crate::model::{Edges, Entity, Graph};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};

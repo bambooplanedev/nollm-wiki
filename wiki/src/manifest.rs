@@ -1,3 +1,5 @@
+//! Manifest and index rendering: the page index (JSON and markdown), the llms-txt and AGENTS files, the graph export, and the per-page token estimate.
+
 use crate::model::{Entity, Graph};
 use serde::Serialize;
 use std::collections::BTreeMap;

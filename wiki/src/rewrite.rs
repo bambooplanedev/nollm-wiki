@@ -1,3 +1,5 @@
+//! Page rendering: section parsing, preserved `## Notes`, wikilink rewriting, the render fingerprint, and atomic writes.
+
 use crate::hash::{combine, to_hex};
 use crate::model::{Edges, Entity, SourceKind};
 use regex::Regex;

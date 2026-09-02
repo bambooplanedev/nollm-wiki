@@ -1,3 +1,5 @@
+//! Core data types: `SourceKind`, `Entity`, `Graph`, `LintReport`, plus `slugify` for page ids and path normalisation.
+
 use crate::hash::{hash_str, to_hex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

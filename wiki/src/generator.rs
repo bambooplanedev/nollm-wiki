@@ -1,3 +1,5 @@
+//! Synthetic corpus generator (`wiki generate`): a seeded, deterministic set of cross-linked source files for benchmarks and tests.
+
 use crate::model::slugify;
 use std::path::{Path, PathBuf};
 

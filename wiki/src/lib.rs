@@ -1,3 +1,5 @@
+//! The `wiki` compiler library: `compile` turns a source tree into a deterministic markdown wiki plus index files.
+
 pub mod cache;
 pub mod formats;
 pub mod generator;

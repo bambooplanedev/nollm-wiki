@@ -1,3 +1,5 @@
+//! CLI entry point for `wiki`: compile, search, neighbors, lint, serve, and generate subcommands.
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

@@ -1,3 +1,5 @@
+//! Watch mode (`wiki compile --watch`): recompile on source change, ignoring events from the output directory.
+
 use crate::{compile, CompileOptions, WikiError};
 use notify::{RecursiveMode, Watcher};
 use std::path::Path;

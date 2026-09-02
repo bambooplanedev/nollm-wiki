@@ -1,3 +1,5 @@
+//! Source tree walk: gitignore-aware, sorted, deterministic file discovery for the compiler.
+
 use crate::model::normalize_path;
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};

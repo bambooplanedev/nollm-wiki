@@ -1,3 +1,5 @@
+//! Wiki health checks (`wiki lint`, MCP `lint` tool): broken wikilinks and orphan pages over a compiled output directory.
+
 use crate::model::{slugify, LintReport};
 use crate::rewrite::{mask_code, parse_sections};
 use regex::Regex;
