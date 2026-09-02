@@ -1,5 +1,6 @@
 use std::fs;
 use tempfile::tempdir;
+use wiki::model::SourceKind;
 use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
@@ -398,4 +399,86 @@ fn no_max_tokens_keeps_full_target_and_all_neighbors() {
     );
     assert!(pack.included.contains(&"popular".to_string()));
     assert!(pack.included.contains(&"rare".to_string()));
+}
+
+/// The kind filter scopes ranking stats and results to one `SourceKind`:
+/// a token shared by a text page and a Rust page must come back as only
+/// the text page under `Text`, only the code page under `Code{rust}`, and
+/// both unfiltered.
+#[test]
+fn search_kind_filter_restricts_to_that_kind() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("guide.txt"),
+        "# Guide\n\nThe zebra token lives in prose.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("zoo.rs"),
+        "//! zebra module\npub fn zebra() -> u8 { 0 }\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let ids =
+        |hits: Vec<wiki::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
+
+    assert_eq!(
+        ids(w.search("zebra", Some(SourceKind::Text), 10)),
+        ["guide"]
+    );
+    assert_eq!(
+        ids(w.search(
+            "zebra",
+            Some(SourceKind::Code {
+                lang: "rust".into()
+            }),
+            10
+        )),
+        ["zoo"]
+    );
+    let mut both = ids(w.search("zebra", None, 10));
+    both.sort();
+    assert_eq!(both, ["guide", "zoo"]);
+}
+
+/// alpha -> beta -> gamma, with no alpha -> gamma edge: depth 1 stops at
+/// beta, depth 2 reaches gamma.
+#[test]
+fn neighbors_depth_two_reaches_the_second_hop() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha mentions Beta.\n").unwrap();
+    fs::write(input.join("beta.txt"), "# Beta\n\nBeta mentions Gamma.\n").unwrap();
+    fs::write(input.join("gamma.txt"), "# Gamma\n\nGamma stands alone.\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+
+    let one = w.neighbors("alpha", 1, &PackBudget::default()).unwrap();
+    assert!(
+        one.included.contains(&"beta".to_string()),
+        "{:?}",
+        one.included
+    );
+    assert!(
+        !one.included.contains(&"gamma".to_string()),
+        "depth 1 must not reach the second hop: {:?}",
+        one.included
+    );
+    assert!(!one.text.contains("## Gamma (gamma)"), "pack: {}", one.text);
+
+    let two = w.neighbors("alpha", 2, &PackBudget::default()).unwrap();
+    assert_eq!(two.included.first().map(String::as_str), Some("alpha"));
+    assert!(
+        two.included.contains(&"gamma".to_string()),
+        "depth 2 must reach the second hop: {:?}",
+        two.included
+    );
+    // Non-full neighbor blocks are `## Title (id)` + summary.
+    assert!(two.text.contains("## Gamma (gamma)"), "pack: {}", two.text);
 }
