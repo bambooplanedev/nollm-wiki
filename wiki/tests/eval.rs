@@ -8,7 +8,11 @@
 //! target this harness exists to remove: a score change would no longer be
 //! attributable to the scorer, because the corpus could have moved instead.
 //! The corpus is re-cut only by explicit decision when a scoring cycle
-//! closes, in a commit that quotes both the old and the new table.
+//! closes, in a commit that quotes both the old and the new table. The next
+//! re-cut must add a `lib.rs`-style page whose `pub mod` lines name other
+//! pages: the 2026-09-02 exports-field prototype scored 19/19 here while
+//! dropping title-as-query own-page hits on the live wiki from 35/37 to
+//! 29/37 — a defect class this corpus cannot see.
 //!
 //! The directory is dot-prefixed so `walk` prunes it whenever ignore rules
 //! are respected (`.hidden(respect_ignore)`, and `respect_ignore` defaults to
@@ -358,6 +362,33 @@ fn retrieval_quality() {
     );
 
     insta::assert_snapshot!(table);
+}
+
+/// Every page's own title, typed as a query, ranks that page first. The
+/// cheapest ranking invariant there is: a scorer change that breaks it has
+/// let some other field outweigh a full title match (weight 3.0). 17/17 at
+/// the 2026-09-02 freeze.
+#[test]
+fn every_page_title_ranks_its_own_page_first() {
+    let (_dir, wiki) = load_corpus();
+    let misses: Vec<String> = wiki
+        .list_pages()
+        .into_iter()
+        .filter_map(|(id, title)| {
+            let top = wiki
+                .search(&title, None, 1)
+                .into_iter()
+                .next()
+                .map(|h| h.id);
+            (top.as_deref() != Some(id.as_str()))
+                .then(|| format!("{title:?} -> {top:?}, expected {id}"))
+        })
+        .collect();
+    assert!(
+        misses.is_empty(),
+        "title-as-query misses:\n{}",
+        misses.join("\n")
+    );
 }
 
 #[test]
