@@ -197,12 +197,13 @@ fn covers_majority_ignores_short_tokens_and_needs_half() {
 
 /// `(query, the one page that should answer it)`.
 ///
-/// Eight of these score zero today: `search` ANDs over substring `contains`,
-/// so a page missing any one token is dropped before ranking. They are kept
-/// deliberately — each becomes reachable under stemming or coverage-weighted
-/// partial matching, which is exactly what the next scoring cycle changes. A
-/// set containing only passing cases would be blind to the recall hole that
-/// is search's actual defect.
+/// Eight of these scored zero under the strict-AND scorer this harness was
+/// built against, because a page missing any one token was dropped before
+/// ranking. They were kept deliberately, and the 2026-09-02 scoring cycle
+/// (partial matching, IDF, length normalisation, section-heading field)
+/// made all eight reachable. The set still contains the one remaining miss
+/// (`slugify title case`) for the same reason: a set of only passing cases
+/// is blind to the next defect.
 const CASES: &[(&str, &str)] = &[
     ("determinism rules", "architecture"),
     ("incremental cache", "cache"),
@@ -256,8 +257,8 @@ fn every_label_names_a_page_that_could_answer_it() {
 ///
 /// Columns: the rank of the expected page (`-` when absent from the top ten),
 /// the number of hits returned, and the id that actually placed first. The
-/// hits count disambiguates a zero — `pagerank centrality damping` returns no
-/// hits at all, while the other zeros return one to seven wrong pages. The
+/// hits count disambiguates a zero — a query that returns no hits at all
+/// reads differently from one that returns ten wrong pages. The
 /// rank-1 id is load-bearing: the corpus compiles into a tempdir that is
 /// deleted on exit, so without it a row moving from `2` to `-` says something
 /// outranked the expected page but not what.
@@ -320,8 +321,8 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 // raise `MIN_TOP1`/`MIN_MRR10` to the new exact fractions, in the same
 // commit** — computed the same way as below (e.g. `13.0 / 19.0`), never
 // transcribed from the `{:.4}` table.
-const MIN_TOP1: f64 = 8.0 / 19.0; // 0.4210526…
-const MIN_MRR10: f64 = 55.0 / 114.0; // 0.4824561…
+const MIN_TOP1: f64 = 18.0 / 19.0; // 0.9473684…
+const MIN_MRR10: f64 = 37.0 / 38.0; // 0.9736842…
 
 /// Slack on the floor comparisons. Not defensive padding — without it the
 /// harness fails on its own baseline: `mrr@10` is accumulated as

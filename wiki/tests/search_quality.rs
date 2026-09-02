@@ -1,8 +1,10 @@
-//! Regression tests for the 2026-07-14 search-quality cycle.
+//! Regression tests for search ranking.
 //!
-//! Coverage: the four dogfood checklist queries that failed pre-fix, plus AND
-//! semantics and occurrence-graded ranking. Fixtures are authored in-test
-//! (modeled on the self-hosted corpus), not a checkout of this repo.
+//! Coverage: the four dogfood checklist queries from the 2026-07-14 cycle,
+//! plus the 2026-09-02 scoring cycle's pins — partial matching, occurrence
+//! monotonicity, the heading field, and IDF over volume. Fixtures are
+//! authored in-test (modeled on the self-hosted corpus), not a checkout of
+//! this repo.
 
 use std::fs;
 use tempfile::tempdir;
@@ -39,9 +41,8 @@ fn build_corpus() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     // ranking pair: many mentions vs one incidental mention. Neither title
-    // contains the query word, so pre-fix both score identically (binary
-    // body weight) and rank by id — which puts "aside" first. Only the
-    // graded occurrence bonus can rank "hub" above it.
+    // contains the query word, so only body term frequency can rank "hub"
+    // above "aside" (which would otherwise lead on id order).
     fs::write(
         input.join("hub.md"),
         "# Hub\n\nkumquat kumquat kumquat kumquat kumquat.\n",
@@ -52,8 +53,8 @@ fn build_corpus() -> (tempfile::TempDir, std::path::PathBuf) {
         "# Aside\n\nMentions a kumquat once, in passing.\n",
     )
     .unwrap();
-    // cap pair: both far beyond OCCURRENCE_CAP (20), both unlinked (equal
-    // pagerank) — their scores must be identical once the bonus saturates.
+    // monotonicity pair: 25 vs 40 occurrences, both unlinked (equal
+    // pagerank) — the higher count must never score lower.
     fs::write(
         input.join("flood_a.md"),
         format!("# Flood A\n\n{}\n", "quokka ".repeat(25).trim()),
@@ -88,16 +89,103 @@ fn dogfood_queries_find_their_pages() {
 }
 
 #[test]
-fn and_semantics_require_every_token() {
+fn partial_match_returns_every_page_with_a_token() {
     let (_dir, out) = build_corpus();
     let w = Wiki::load(&out).unwrap();
-    // "incremental" appears only in cache.md; "orphans" only in lint.md —
-    // no page contains both, so the AND query returns nothing.
+    // "incremental" appears only in cache.md; "orphans" only in lint.md.
+    // No page has both. Each is a hit on its single token; neither token
+    // is rarer than the other, so `cache` leads on its shorter body.
     let hits = w.search("incremental orphans", None, 10);
+    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        ["cache", "lint"],
+        "each page matching one token must be a hit"
+    );
+}
+
+#[test]
+fn more_occurrences_never_score_lower() {
+    let (_dir, out) = build_corpus();
+    let w = Wiki::load(&out).unwrap();
+    let hits = w.search("quokka", None, 10);
+    let a = hits.iter().find(|h| h.id == "flood_a").expect("flood_a");
+    let b = hits.iter().find(|h| h.id == "flood_b").expect("flood_b");
+    // 25 vs 40 occurrences on otherwise identical, unlinked pages. BM25
+    // term frequency saturates but is monotonic: more mentions never
+    // score lower. (The old scorer capped at 20 and forced an exact tie;
+    // that concept is gone.)
     assert!(
-        hits.is_empty(),
-        "AND across tokens must yield no hit: {:?}",
-        hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>()
+        b.score >= a.score,
+        "40 occurrences must not score below 25: {} vs {}",
+        b.score,
+        a.score
+    );
+}
+
+#[test]
+fn section_headings_are_searchable() {
+    let (_dir, out) = build_corpus();
+    let w = Wiki::load(&out).unwrap();
+    // "rules" occurs only in architecture.md's `## Determinism rules`
+    // heading — never in any body — so this hit comes from the heading
+    // field alone and carries no snippet.
+    let hits = w.search("rules", None, 10);
+    let top = hits.first().expect("heading-only match must be a hit");
+    assert_eq!(top.id, "architecture");
+    assert!(
+        top.snippet.is_none(),
+        "no body occurrence, so no snippet: {:?}",
+        top.snippet
+    );
+}
+
+#[test]
+fn rare_title_match_beats_volume_on_a_common_word() {
+    // Own fixture: adding pages to `build_corpus` would shift N, df and
+    // avglen under every other test in this file.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    // The `content hash` shape from the eval corpus: a tiny page titled
+    // with the rare term, versus a long page that mentions the rare term
+    // many times alongside a word almost every page contains.
+    fs::write(
+        input.join("hash.md"),
+        "# Hash\n\nBlake3 digest of a file.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("architecture.md"),
+        format!(
+            "# Architecture\n\n{}\n",
+            "content flows through the pipeline and each stage records a hash of its input. "
+                .repeat(60)
+                .trim()
+        ),
+    )
+    .unwrap();
+    for i in 0..5 {
+        fs::write(
+            input.join(format!("filler_{i}.md")),
+            format!("# Filler {i}\n\nSome content about topic {i}.\n"),
+        )
+        .unwrap();
+    }
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+
+    let hits = w.search("content hash", None, 10);
+    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
+    // Under strict AND `hash` was not even a hit (it lacks "content").
+    // Under the old additive scorer `architecture` won on volume. IDF
+    // makes "content" nearly weightless and the title hit on "hash"
+    // decisive.
+    assert_eq!(ids.first(), Some(&"hash"), "got {ids:?}");
+    assert!(
+        ids.contains(&"architecture"),
+        "partial hit must still appear: {ids:?}"
     );
 }
 
@@ -112,23 +200,6 @@ fn occurrence_count_grades_ranking() {
     assert!(
         hub < aside,
         "many-mentions page must outrank one-mention page: {ids:?}"
-    );
-}
-
-#[test]
-fn occurrence_bonus_saturates_at_cap() {
-    let (_dir, out) = build_corpus();
-    let w = Wiki::load(&out).unwrap();
-    let hits = w.search("quokka", None, 10);
-    let a = hits.iter().find(|h| h.id == "flood_a").expect("flood_a");
-    let b = hits.iter().find(|h| h.id == "flood_b").expect("flood_b");
-    // 25 and 40 occurrences both saturate the cap (20); the pages are
-    // structurally identical and unlinked, so their scores must tie exactly.
-    assert!(
-        (a.score - b.score).abs() < 1e-9,
-        "scores must tie once the bonus saturates: {} vs {}",
-        a.score,
-        b.score
     );
 }
 

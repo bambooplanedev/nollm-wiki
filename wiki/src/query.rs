@@ -34,7 +34,8 @@ pub struct Hit {
     pub summary: Option<String>,
     pub score: f64,
     /// Deterministic excerpt around the earliest body match (`None` for
-    /// title/alias/summary-only hits — the summary explains those).
+    /// hits that matched only title, alias, summary, or a section heading —
+    /// the summary explains those).
     pub snippet: Option<String>,
 }
 
@@ -48,6 +49,19 @@ pub struct PackBudget {
 pub struct ContextPack {
     pub text: String,
     pub included: Vec<String>,
+}
+
+/// What `Wiki::search` learns about one page in its first pass. Scores
+/// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
+/// held until every page has been seen; the page text itself is not.
+struct Candidate<'a> {
+    entry: &'a Entry,
+    /// Per query token, in query order: (summed field weights, body
+    /// occurrences).
+    per_token: Vec<(f64, usize)>,
+    /// Whitespace-word count of the searchable content.
+    len: usize,
+    snippet: Option<String>,
 }
 
 pub struct Wiki {
@@ -97,30 +111,38 @@ impl Wiki {
     /// "related" or "metadata" does not false-positive on every page.
     const CHROME_SECTIONS: [&'static str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
 
-    // Field weights and the graded-occurrence bonus for search scoring.
-    // Values from the 2026-07-14 search-quality design; tuning is a
-    // constants-only change.
+    /// Generated content headings excluded from the `heading` field: they
+    /// sit on nearly every page and say nothing about it. Measured on the
+    /// eval corpus, leaving them in made `exports` hit 17 of 17 pages.
+    const GENERATED_HEADINGS: [&'static str; 3] = ["Body", "Exports", "Imports"];
+
+    // Field weights for search scoring. Values from the 2026-09-02
+    // search-scoring design; tuning is a constants-only change.
+    // `W_HEADING` is deliberately below `W_SUMMARY`: at 1.5 an incidental
+    // heading word on a large page outranked the page named for the query.
     const W_NAME: f64 = 3.0;
     const W_ALIAS: f64 = 2.0;
     const W_SUMMARY: f64 = 1.5;
+    const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
-    const W_OCCURRENCE: f64 = 0.1;
-    const OCCURRENCE_CAP: usize = 20;
+    /// BM25 term-frequency saturation (`K1`) and length-normalisation
+    /// strength (`B`). Textbook values, untuned: nineteen eval cases cannot
+    /// tell `B = 0.5` from `0.75`.
+    const K1: f64 = 1.2;
+    const B: f64 = 0.75;
 
-    /// The searchable *content* of a rendered page: every parsed section
-    /// except the generated chrome (`CHROME_SECTIONS`). Subtractive on
-    /// purpose — a doc body's own `## ` subheadings become sections of their
-    /// own in `parse_sections`, and their text must stay searchable.
+    /// The searchable *content* of a parsed page: every section body except
+    /// the generated chrome (`CHROME_SECTIONS`). Subtractive on purpose — a
+    /// doc body's own `## ` subheadings become sections of their own in
+    /// `parse_sections`, and their text must stay searchable. The heading
+    /// names themselves are scored separately (see `search`).
     ///
     /// Known residual limits (accepted by the 2026-07-14 search-quality
     /// design): content under an embedded heading named exactly like a
-    /// chrome section stays unsearchable; duplicate heading names overwrite
-    /// each other in the map; `parse_sections` also matches `## ` inside
-    /// fenced code blocks (the text is still kept, under the example
-    /// heading's name). Section order is BTreeMap (alphabetical), not
-    /// document, order.
-    fn content_text(page: &str) -> String {
-        let sections = crate::rewrite::parse_sections(page);
+    /// chrome section stays unsearchable, and duplicate heading names
+    /// overwrite each other in the map. Section order is BTreeMap
+    /// (alphabetical), not document, order.
+    fn content_text(sections: &BTreeMap<String, String>) -> String {
         sections
             .iter()
             .filter(|(k, _)| !Self::CHROME_SECTIONS.contains(&k.as_str()))
@@ -203,18 +225,38 @@ impl Wiki {
         Some(s)
     }
 
-    /// Case-insensitive tokenized search over name/alias/summary/body.
-    /// AND semantics: every query token must match at least one field.
-    /// Deterministic: per-token field weights + a capped occurrence bonus
-    /// + pagerank tiebreak, sorted desc by score then asc by id, truncated
-    ///   to `limit`. Empty/punctuation-only queries return no hits.
+    /// Case-insensitive tokenized search over name/alias/summary/section
+    /// headings/body. Partial matching: a page is a hit if any token matches
+    /// any field.
+    ///
+    /// Two passes. Pass 1 collects per-page facts and corpus statistics;
+    /// pass 2 scores. Per token `t`:
+    ///
+    /// ```text
+    /// idf(t) = ln(1 + (N − df(t) + 0.5) / (df(t) + 0.5))        > 0 always
+    /// tf'    = tf·(K1+1) / (tf + K1·(1 − B + B·len/avglen))      ≤ K1+1
+    /// score  = Σ_t idf(t) · (field weights hit by t + W_BODY·tf')
+    /// ```
+    ///
+    /// `N`, `df`, `avglen` are taken over the pages that pass `kind`, so a
+    /// page's `score` differs between filtered and unfiltered calls: it is a
+    /// ranking key, not a stable property. Field weights are not length-
+    /// normalised, and `tf'` saturates below `W_NAME`, so a title hit beats
+    /// any volume of body text on the same token. Sorted by score desc,
+    /// then pagerank desc, then id asc; truncated to `limit`.
+    /// Empty/punctuation-only queries return no hits.
     pub fn search(&self, q: &str, kind: Option<SourceKind>, limit: usize) -> Vec<Hit> {
         let tokens = Self::tokenize(q);
         if tokens.is_empty() {
             return Vec::new();
         }
         let kind_label = kind.map(|k| k.label());
-        let mut hits: Vec<Hit> = Vec::new();
+
+        // Pass 1: facts per page, statistics over every filtered page.
+        let mut n = 0usize;
+        let mut total_len = 0usize;
+        let mut df = vec![0usize; tokens.len()];
+        let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
             if let Some(k) = &kind_label {
                 if &e.kind != k {
@@ -224,58 +266,118 @@ impl Wiki {
             let title = e.title.to_lowercase();
             let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
             let summary = e.summary.as_deref().map(str::to_lowercase);
-            let content = self
-                .page(&e.id)
-                .map(|p| Self::content_text(&p))
-                .unwrap_or_default();
+            let page = self.page(&e.id).unwrap_or_default();
+            let sections = crate::rewrite::parse_sections(&page);
+            let headings: Vec<String> = sections
+                .keys()
+                .filter(|k| {
+                    !Self::CHROME_SECTIONS.contains(&k.as_str())
+                        && !Self::GENERATED_HEADINGS.contains(&k.as_str())
+                })
+                .map(|k| k.to_lowercase())
+                .collect();
+            let content = Self::content_text(&sections);
             let content_lower = content.to_lowercase();
+            let len = content.split_whitespace().count();
+            // Statistics count every filtered page, hits or not — `avglen`
+            // over hits alone would change with the query.
+            n += 1;
+            total_len += len;
 
-            let mut score = 0.0;
-            let mut occurrences = 0usize;
-            let mut all_match = true;
+            let mut per_token = Vec::with_capacity(tokens.len());
+            let mut matched = false;
             let mut any_body = false;
-            for t in &tokens {
-                let name_hit = title.contains(t.as_str());
-                let alias_hit = aliases.iter().any(|a| a.contains(t.as_str()));
-                let summary_hit = summary
-                    .as_deref()
-                    .map(|s| s.contains(t.as_str()))
-                    .unwrap_or(false);
-                let token_occurrences = content_lower.match_indices(t.as_str()).count();
-                let body_hit = token_occurrences > 0;
-                any_body |= body_hit;
-                if !(name_hit || alias_hit || summary_hit || body_hit) {
-                    all_match = false;
-                    break;
+            for (i, t) in tokens.iter().enumerate() {
+                let t = t.as_str();
+                let mut weight = 0.0;
+                if title.contains(t) {
+                    weight += Self::W_NAME;
                 }
-                score += (name_hit as u8 as f64) * Self::W_NAME
-                    + (alias_hit as u8 as f64) * Self::W_ALIAS
-                    + (summary_hit as u8 as f64) * Self::W_SUMMARY
-                    + (body_hit as u8 as f64) * Self::W_BODY;
+                if aliases.iter().any(|a| a.contains(t)) {
+                    weight += Self::W_ALIAS;
+                }
+                if summary.as_deref().is_some_and(|s| s.contains(t)) {
+                    weight += Self::W_SUMMARY;
+                }
+                if headings.iter().any(|h| h.contains(t)) {
+                    weight += Self::W_HEADING;
+                }
                 // match_indices is non-overlapping — the spec'd counting rule.
-                occurrences += token_occurrences;
+                // `tf` may exceed `len` for short tokens ("on" in "one",
+                // "long"); `tf'` saturates, so that is harmless.
+                let tf = content_lower.match_indices(t).count();
+                any_body |= tf > 0;
+                if weight > 0.0 || tf > 0 {
+                    matched = true;
+                    df[i] += 1;
+                }
+                per_token.push((weight, tf));
             }
-            if !all_match {
+            if !matched {
                 continue;
             }
-            score += Self::W_OCCURRENCE * occurrences.min(Self::OCCURRENCE_CAP) as f64;
-            score += e.pagerank;
             let snippet = if any_body {
                 Self::snippet(&content, &content_lower, &tokens)
             } else {
                 None
             };
-            hits.push(Hit {
-                id: e.id.clone(),
-                title: e.title.clone(),
-                summary: e.summary.clone(),
-                score,
+            candidates.push(Candidate {
+                entry: e,
+                per_token,
+                len,
                 snippet,
             });
         }
-        hits.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
-        hits.truncate(limit);
-        hits
+        if candidates.is_empty() {
+            return Vec::new();
+        }
+
+        // Pass 2: score. `n > 0` here because a candidate was counted.
+        let n_f = n as f64;
+        let avglen = total_len as f64 / n_f;
+        let idf: Vec<f64> = df
+            .iter()
+            .map(|&d| (1.0 + (n_f - d as f64 + 0.5) / (d as f64 + 0.5)).ln())
+            .collect();
+        let mut ranked: Vec<(Hit, f64)> = candidates
+            .into_iter()
+            .map(|c| {
+                // `avglen == 0` needs every filtered page's body to be
+                // missing on disk; guard it rather than divide by zero.
+                let norm = if avglen > 0.0 {
+                    c.len as f64 / avglen
+                } else {
+                    1.0
+                };
+                let score = c
+                    .per_token
+                    .iter()
+                    .zip(&idf)
+                    .map(|(&(weight, tf), &idf_t)| {
+                        let tf = tf as f64;
+                        let tf_norm = tf * (Self::K1 + 1.0)
+                            / (tf + Self::K1 * (1.0 - Self::B + Self::B * norm));
+                        idf_t * (weight + Self::W_BODY * tf_norm)
+                    })
+                    .sum();
+                let hit = Hit {
+                    id: c.entry.id.clone(),
+                    title: c.entry.title.clone(),
+                    summary: c.entry.summary.clone(),
+                    score,
+                    snippet: c.snippet,
+                };
+                (hit, c.entry.pagerank)
+            })
+            .collect();
+        ranked.sort_by(|(a, a_pr), (b, b_pr)| {
+            b.score
+                .total_cmp(&a.score)
+                .then_with(|| b_pr.total_cmp(a_pr))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        ranked.truncate(limit);
+        ranked.into_iter().map(|(hit, _)| hit).collect()
     }
 
     /// Ids within `depth` hops of `id` along either edge direction,
