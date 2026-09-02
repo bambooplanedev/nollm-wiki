@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
@@ -342,4 +343,183 @@ fn a_unique_filename_keeps_its_short_page_id() {
 
     compile(&input, &output, &CompileOptions::default()).unwrap();
     assert!(output.join("walker.md").exists());
+}
+
+/// alpha -> beta, plus gamma so the manifest has more than the two pages
+/// under test. Returns the tempdir; input is `<dir>/raw`, output `<dir>/out`.
+fn write_incremental_corpus() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(&input).unwrap();
+    write(&input, "alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n");
+    write(&input, "beta.txt", "# Beta\n\nBeta stands alone.\n");
+    write(&input, "gamma.txt", "# Gamma\n\nGamma stands alone.\n");
+    dir
+}
+
+#[test]
+fn incremental_edit_rewrites_only_that_page() {
+    let dir = write_incremental_corpus();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let opts = CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+    let alpha_before = fs::read(output.join("alpha.md")).unwrap();
+    let beta_before = fs::read(output.join("beta.md")).unwrap();
+
+    // Extend beta's body past its first sentence so its summary (which
+    // alpha's Related section repeats) stays the same and only beta's own
+    // render changes.
+    write(
+        &input,
+        "beta.txt",
+        "# Beta\n\nBeta stands alone. Beta gained a second sentence.\n",
+    );
+    let r = compile(&input, &output, &opts).unwrap();
+    assert_eq!(r.pages_written, 1, "expected only beta.md to be rewritten");
+    assert_eq!(
+        fs::read(output.join("alpha.md")).unwrap(),
+        alpha_before,
+        "alpha.md must be byte-identical after an unrelated edit"
+    );
+    assert_ne!(
+        fs::read(output.join("beta.md")).unwrap(),
+        beta_before,
+        "beta.md must reflect the edited source"
+    );
+}
+
+#[test]
+fn incremental_delete_prunes_page_and_cache() {
+    let dir = write_incremental_corpus();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let opts = CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+    assert!(output.join("beta.md").exists());
+    let alpha = fs::read_to_string(output.join("alpha.md")).unwrap();
+    assert!(alpha.contains("[[beta|Beta]]"), "fixture invalid:\n{alpha}");
+
+    fs::remove_file(input.join("beta.txt")).unwrap();
+    compile(&input, &output, &opts).unwrap();
+
+    assert!(
+        !output.join("beta.md").exists(),
+        "deleted source's page must be pruned from disk"
+    );
+    // `.wiki/cache.json` is `cache::Cache`: `pages` is a map id -> fingerprint.
+    let cache: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join(".wiki/cache.json")).unwrap())
+            .unwrap();
+    let cached = cache["pages"].as_object().unwrap();
+    assert!(
+        !cached.contains_key("beta"),
+        "deleted page must leave the cache, got keys {:?}",
+        cached.keys().collect::<Vec<_>>()
+    );
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    assert!(
+        !index["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == "beta"),
+        "deleted page must leave index.json"
+    );
+    // alpha linked to beta, so its render changed and it must be rewritten
+    // without the now-dangling wikilink.
+    let alpha = fs::read_to_string(output.join("alpha.md")).unwrap();
+    assert!(
+        !alpha.contains("[[beta"),
+        "alpha.md still links the deleted page:\n{alpha}"
+    );
+}
+
+#[test]
+fn emit_json_writes_a_parsable_graph() {
+    let dir = write_incremental_corpus();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let opts = CompileOptions {
+        emit_json: true,
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+
+    // `manifest::render_graph_json`: {"nodes": [{id, title, kind, pagerank}],
+    // "edges": [{source, target}]}.
+    let graph: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("graph.json")).unwrap()).unwrap();
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    let ids = |v: &serde_json::Value| -> BTreeSet<String> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|n| n["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    let node_ids = ids(&graph["nodes"]);
+    assert_eq!(node_ids, ids(&index["entries"]));
+    assert_eq!(node_ids.len(), 3);
+    let edges = graph["edges"].as_array().unwrap();
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["source"] == "alpha" && e["target"] == "beta"),
+        "alpha -> beta edge missing: {edges:?}"
+    );
+}
+
+#[test]
+fn js_ts_go_extract_exported_signatures() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    write(
+        &input,
+        "mod.js",
+        "export function foo(a) {\n  return a;\n}\nexport const K = 1;\nexport default foo(1);\nfunction hidden() {}\n",
+    );
+    write(
+        &input,
+        "svc.ts",
+        "export class Svc {\n  run(): void {}\n}\nexport interface Shape {}\nconst x = 1;\n",
+    );
+    write(
+        &input,
+        "thing.go",
+        "package thing\n\nfunc Exported() {}\nfunc unexported() {}\ntype Thing struct{}\nfunc (t Thing) Method() {}\n",
+    );
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let page = |id: &str| fs::read_to_string(output.join(format!("{id}.md"))).unwrap();
+
+    // JS (`extract_simple::js_spec`): only function/class declarations wrapped
+    // in an `export_statement`. `export const`, `export default <expr>` and
+    // the bare `function hidden` are deliberately not captured.
+    let js = exports(&page("mod"));
+    assert_eq!(js, vec!["export function foo(a)"], "js exports: {js:?}");
+
+    // TS (`ts_spec`): same gate; `export interface` is not a class/function
+    // declaration, so it is deliberately not captured either.
+    let ts = exports(&page("svc"));
+    assert_eq!(ts, vec!["export class Svc"], "ts exports: {ts:?}");
+
+    // Go (`go_spec`): every func/type declaration, filtered to a leading
+    // uppercase rune. Methods with receivers are `method_declaration`, not
+    // `function_declaration`, so `Method` is deliberately not captured.
+    let go = exports(&page("thing"));
+    assert_eq!(
+        go,
+        vec!["func Exported()", "type Thing struct{}"],
+        "go exports: {go:?}"
+    );
 }
