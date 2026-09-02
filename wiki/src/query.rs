@@ -21,6 +21,11 @@ struct Entry {
     token_estimate: usize,
     neighbors_out: Vec<String>,
     neighbors_in: Vec<String>,
+    /// Top-level definition names (`ManifestEntry::defined`). Defaulted so
+    /// an `index.json` written by a compiler older than this field still
+    /// loads: `serve` reads wikis it did not compile.
+    #[serde(default)]
+    defined: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -34,8 +39,8 @@ pub struct Hit {
     pub summary: Option<String>,
     pub score: f64,
     /// Deterministic excerpt around the earliest body match (`None` for
-    /// hits that matched only title, alias, summary, or a section heading —
-    /// the summary explains those).
+    /// hits that matched only title, alias, defined name, summary, or a
+    /// section heading — the summary explains those).
     pub snippet: Option<String>,
 }
 
@@ -128,6 +133,12 @@ impl Wiki {
     // heading word on a large page outranked the page named for the query.
     const W_NAME: f64 = 3.0;
     const W_ALIAS: f64 = 2.0;
+    // `W_DEFINED` (2026-09-02 defined-names design): equal to `W_ALIAS`,
+    // above `W_SUMMARY`, below `W_NAME`, so a page whose title is the query
+    // still beats a page that merely defines a same-named item. Measured on
+    // the 547-query live set: own-title hits unchanged at 35/37, 26 flips
+    // better / 6 worse; 1.5 moved fewer definer queries, 2.5 added a worse row.
+    const W_DEFINED: f64 = 2.0;
     const W_SUMMARY: f64 = 1.5;
     const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
@@ -169,6 +180,65 @@ impl Wiki {
             }
         }
         tokens
+    }
+
+    /// The words of an identifier, lowercased: split on `_`/`-`, at a
+    /// lower→Upper boundary, and at an Upper→Upper-lower boundary so an
+    /// acronym run stays one word (`HTTPServer` → `http`, `server`;
+    /// `PackBudget` → `pack`, `budget`; `CACHE_VERSION` → `cache`,
+    /// `version`). Must run on the ORIGINAL-case name: lowercasing first
+    /// erases every CamelCase boundary (the 2026-09-02 V7 prototype's dead
+    /// rule).
+    fn name_words(name: &str) -> Vec<String> {
+        let mut words = Vec::new();
+        let mut cur = String::new();
+        let chars: Vec<char> = name.chars().collect();
+        for (i, &c) in chars.iter().enumerate() {
+            if c == '_' || c == '-' {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+                continue;
+            }
+            let boundary = c.is_uppercase()
+                && i > 0
+                && (chars[i - 1].is_lowercase()
+                    || (chars[i - 1].is_uppercase()
+                        && chars.get(i + 1).is_some_and(|n| n.is_lowercase())));
+            if boundary && !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            cur.extend(c.to_lowercase());
+        }
+        if !cur.is_empty() {
+            words.push(cur);
+        }
+        words
+    }
+
+    /// The search terms a page earns from its `defined` names: each
+    /// lowercased full name plus each of its words, minus the self-name
+    /// skip. The skip is word-level: a word equal to a title word is
+    /// dropped (the title already scores it at `W_NAME`; crediting it again
+    /// let `Cache` on page `cache` outrank `code`), the other words stay,
+    /// and the full name stays unless it is itself a title word — the title
+    /// never matches the full-name token, so dropping the whole name would
+    /// leave the definer with no credit (`codeextractor` on `code`).
+    fn defined_terms(title_lower: &str, defined: &[String]) -> BTreeSet<String> {
+        let title_words: Vec<&str> = title_lower.split_whitespace().collect();
+        let mut terms = BTreeSet::new();
+        for name in defined {
+            let full = name.to_lowercase();
+            if !title_words.contains(&full.as_str()) {
+                terms.insert(full);
+            }
+            terms.extend(
+                Self::name_words(name)
+                    .into_iter()
+                    .filter(|w| !title_words.contains(&w.as_str())),
+            );
+        }
+        terms
     }
 
     const SNIPPET_CONTEXT_CHARS: usize = 60;
@@ -231,9 +301,10 @@ impl Wiki {
         Some(s)
     }
 
-    /// Case-insensitive tokenized search over name/alias/summary/section
-    /// headings/body. Partial matching: a page is a hit if any token matches
+    /// Case-insensitive tokenized search over name/alias/defined names/summary/section headings/body.
+    /// Partial matching: a page is a hit if any token matches
     /// any field.
+    /// Name, alias, summary, heading and body match by substring; defined names by whole term (the lowercased name or one of its words, see `defined_terms`).
     ///
     /// Two passes. Pass 1 collects per-page facts and corpus statistics;
     /// pass 2 scores. Per token `t`:
@@ -272,6 +343,7 @@ impl Wiki {
             let title = e.title.to_lowercase();
             let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
             let summary = e.summary.as_deref().map(str::to_lowercase);
+            let defined_terms = Self::defined_terms(&title, &e.defined);
             let page = self.page(&e.id).unwrap_or_default();
             let sections = crate::rewrite::parse_sections(&page);
             let headings: Vec<String> = sections
@@ -301,6 +373,11 @@ impl Wiki {
                 }
                 if aliases.iter().any(|a| a.contains(t)) {
                     weight += Self::W_ALIAS;
+                }
+                // Whole-term equality, never `contains`: `to` must not hit
+                // `token_estimate`, `wiki` must not hit `WikiError`.
+                if defined_terms.contains(t) {
+                    weight += Self::W_DEFINED;
                 }
                 if summary.as_deref().is_some_and(|s| s.contains(t)) {
                     weight += Self::W_SUMMARY;
@@ -529,6 +606,11 @@ impl Wiki {
 #[cfg(test)]
 mod tests {
     use super::Wiki;
+    use std::collections::BTreeSet;
+
+    fn set(items: &[&str]) -> BTreeSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
 
     #[test]
     fn tokenize_lowercases_splits_and_trims_punctuation_edges() {
@@ -544,5 +626,36 @@ mod tests {
         assert_eq!(Wiki::tokenize("beta BETA beta"), vec!["beta"]);
         assert!(Wiki::tokenize("").is_empty());
         assert!(Wiki::tokenize("  ,, !! ").is_empty());
+    }
+
+    #[test]
+    fn name_words_splits_snake_camel_and_acronym_runs() {
+        assert_eq!(Wiki::name_words("PackBudget"), vec!["pack", "budget"]);
+        assert_eq!(Wiki::name_words("CACHE_VERSION"), vec!["cache", "version"]);
+        assert_eq!(Wiki::name_words("HTTPServer"), vec!["http", "server"]);
+        assert_eq!(Wiki::name_words("has_page"), vec!["has", "page"]);
+        assert_eq!(Wiki::name_words("walk"), vec!["walk"]);
+    }
+
+    #[test]
+    fn defined_terms_keep_full_name_and_words_minus_title_words() {
+        // Word-level self-name skip: the title word `code` goes, the full
+        // name stays (the title never matches the full-name token), the
+        // other word stays.
+        assert_eq!(
+            Wiki::defined_terms("code", &["CodeExtractor".into(), "load".into()]),
+            set(&["codeextractor", "extractor", "load"])
+        );
+        // A name that IS the title word contributes nothing.
+        assert_eq!(Wiki::defined_terms("cache", &["Cache".into()]), set(&[]));
+        // Multi-word title: every title word is skipped.
+        assert_eq!(
+            Wiki::defined_terms("graph page", &["build_graph".into(), "page_ids".into()]),
+            set(&["build", "build_graph", "ids", "page_ids"])
+        );
+        assert_eq!(
+            Wiki::defined_terms("hash", &["hash_bytes".into()]),
+            set(&["bytes", "hash_bytes"])
+        );
     }
 }
