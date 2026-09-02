@@ -288,14 +288,18 @@ matching:
   empties dropped, duplicates removed. Empty or punctuation-only queries
   return no hits.
 - A page is a hit if any token is a substring of any field — name, alias,
-  summary, a section heading, or the body. Fuller matches are not forced
+  summary, a section heading, or the body — or equals one of the page's
+  defined-name terms (a top-level definition name from `index.json`,
+  lowercased, or one of its snake/CamelCase words; words equal to a title
+  word are skipped). Defined names match by whole term, never substring,
+  so `to` does not hit `token_estimate`. Fuller matches are not forced
   above partial ones by a sort key; IDF does that where it matters, by
   making a rare missing token expensive and a common one nearly free.
 - Score is BM25-shaped, computed in two passes over the pages that pass
   the `kind` filter. Per token: `idf = ln(1 + (N − df + 0.5)/(df + 0.5))`
   over those pages; body term frequency saturates as
   `tf·(k1+1)/(tf + k1·(1 − b + b·len/avglen))` with `k1 = 1.2`,
-  `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 +
+  `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 + defined 2.0 +
   summary 1.5 + heading 1.0 + body 1.0 × tf')`. Field weights are not
   length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,

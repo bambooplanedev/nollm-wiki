@@ -257,7 +257,8 @@ source tree. Three artifacts drive that:
 - **`index.json`** — the machine catalog. Top level is `{ project, entries: [...] }`;
   each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`,
   `degree_in`, `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`,
-  `neighbors_in`.
+  `neighbors_in`, `defined` (the page's top-level definition names —
+  functions, types, constants — in original case; empty for non-code pages).
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under
