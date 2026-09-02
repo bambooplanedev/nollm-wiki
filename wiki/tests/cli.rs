@@ -25,6 +25,22 @@ fn compile_then_search_cli() {
         .assert()
         .success()
         .stdout(contains("beta"));
+
+    // An unknown --kind must fail, not silently search unfiltered: the score
+    // depends on the kind filter, so a typo would change numbers quietly.
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args([
+            "search",
+            "beta",
+            "--dir",
+            output.to_str().unwrap(),
+            "--kind",
+            "bogus",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("unknown kind \"bogus\""));
 }
 
 #[test]

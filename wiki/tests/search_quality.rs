@@ -112,10 +112,11 @@ fn more_occurrences_score_higher() {
     let a = hits.iter().find(|h| h.id == "flood_a").expect("flood_a");
     let b = hits.iter().find(|h| h.id == "flood_b").expect("flood_b");
     // 25 vs 40 occurrences on otherwise identical, unlinked pages. Each
-    // page's searchable body is only its `quokka` run, so len == tf and
-    // tf' = 2.2 / ((1 + 0.9/avglen) + 0.3/tf) is strictly increasing in
-    // tf: more mentions score strictly higher. (The old scorer capped at
-    // 20 and forced an exact tie; that concept is gone.)
+    // page's searchable body is its H1 line plus its `quokka` run, so
+    // len = tf + 3 and tf' = tf·2.2 / (tf + 1.2·(0.25 + 0.75·len/avglen))
+    // is strictly increasing in tf: more mentions score strictly higher.
+    // (The old scorer capped at 20 and forced an exact tie; that concept
+    // is gone.)
     assert!(
         b.score > a.score,
         "40 occurrences must score above 25: {} vs {}",

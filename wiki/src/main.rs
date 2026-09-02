@@ -133,7 +133,12 @@ fn main() -> Result<()> {
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
-            let kind = kind.as_deref().and_then(SourceKind::parse);
+            let kind = match kind.as_deref() {
+                None => None,
+                Some(s) => Some(SourceKind::parse(s).with_context(|| {
+                    format!("unknown kind {s:?}; expected text, markdown, pdf, image, audio, or code:<lang>")
+                })?),
+            };
             for hit in w.search(&query, kind, limit) {
                 println!(
                     "{}\t{}\t{}",
