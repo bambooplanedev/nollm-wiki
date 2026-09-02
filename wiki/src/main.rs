@@ -173,6 +173,12 @@ fn main() -> Result<()> {
             for id in &r.orphans {
                 println!("  orphan: {id}");
             }
+            // Broken links fail the process so `lint` can gate a build (the
+            // self-host script does). Orphans are advice, not a defect: a
+            // README nothing links to is normal.
+            if !r.broken_links.is_empty() {
+                std::process::exit(1);
+            }
         }
         Command::Serve { dir } => {
             wiki::serve::run(&dir)?;

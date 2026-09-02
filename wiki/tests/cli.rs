@@ -176,11 +176,32 @@ fn lint_cli_reports_a_real_broken_link() {
         .unwrap()
         .args(["lint", "--dir", output.to_str().unwrap()])
         .assert()
-        // Lint reports but does not fail the process today; a later change
-        // may make broken links non-zero — update this pin then.
-        .code(0)
+        // Broken links fail the process so lint can gate a build; orphans
+        // alone (see `lint_cli_exits_zero_with_only_orphans`) do not.
+        .code(1)
         .stdout(contains("Linted 2 pages: 1 broken links"))
         .stdout(contains("  broken: alpha -> \"Ghost\"\n"));
+}
+
+#[test]
+fn lint_cli_exits_zero_with_only_orphans() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("alpha.txt"), "# Alpha\n\nNobody links here.\n").unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), output.to_str().unwrap()])
+        .assert()
+        .success();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["lint", "--dir", output.to_str().unwrap()])
+        .assert()
+        .code(0)
+        .stdout(contains("0 broken links, 1 orphans"))
+        .stdout(contains("  orphan: alpha\n"));
 }
 
 #[test]

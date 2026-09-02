@@ -12,4 +12,6 @@ BIN="$REPO_ROOT/wiki/target/release/wiki"
 cargo build --release --manifest-path "$REPO_ROOT/wiki/Cargo.toml"
 
 cd "$REPO_ROOT"
-exec "$BIN" compile . .wiki --incremental --emit-json
+"$BIN" compile . .wiki --incremental --emit-json
+# Gate: a broken wikilink in the self-hosted wiki fails the script (exit 1).
+"$BIN" lint --dir .wiki
