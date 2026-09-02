@@ -9,8 +9,8 @@ use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResult, Resource, ResourceContents, ServerCapabilities,
-    ServerInfo,
+    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, ServerCapabilities, ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
@@ -248,7 +248,7 @@ impl ServerHandler for WikiServer {
         &self,
         request: ReadResourceRequestParams,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResult, McpError> {
+    ) -> Result<ReadResourceResponse, McpError> {
         let uri = request.uri.as_str();
         let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
         let (text, mime_type) = match uri {
@@ -277,10 +277,10 @@ impl ServerHandler for WikiServer {
                 (page.ok_or_else(not_found)?, "text/markdown")
             }
         };
-        Ok(ReadResourceResult::new(vec![ResourceContents::text(
-            text, uri,
-        )
-        .with_mime_type(mime_type)]))
+        Ok(ReadResourceResult::new(vec![
+            ResourceContents::text(text, uri).with_mime_type(mime_type)
+        ])
+        .into())
     }
 }
 
