@@ -265,29 +265,42 @@ renamed.
 `Wiki::load` (`src/query.rs`) reads only `index.json` — metadata plus
 adjacency; page bodies are read on demand from `<id>.md`.
 
-**Search** (`Wiki::search`) is case-insensitive, tokenized, with AND
-semantics:
+**Search** (`Wiki::search`) is case-insensitive, tokenized, with partial
+matching:
 
 - The query is lowercased, split on whitespace, each piece's edge
   punctuation trimmed (interior characters like `_` and `:` survive),
   empties dropped, duplicates removed. Empty or punctuation-only queries
   return no hits.
-- Every token must match at least one field — name, alias, summary, or
-  body; a page missing any token is excluded entirely.
-- Score = per-token field weights (name 3.0, alias 2.0, summary 1.5,
-  body 1.0) + a graded occurrence bonus (0.1 per body occurrence across
-  all tokens, capped at 20 occurrences) + the page's PageRank as a
-  tiebreak. Hits sort descending by score (`total_cmp`), then ascending
-  by id.
+- A page is a hit if any token is a substring of any field — name, alias,
+  summary, a section heading, or the body. Fuller matches are not forced
+  above partial ones by a sort key; IDF does that where it matters, by
+  making a rare missing token expensive and a common one nearly free.
+- Score is BM25-shaped, computed in two passes over the pages that pass
+  the `kind` filter. Per token: `idf = ln(1 + (N − df + 0.5)/(df + 0.5))`
+  over those pages; body term frequency saturates as
+  `tf·(k1+1)/(tf + k1·(1 − b + b·len/avglen))` with `k1 = 1.2`,
+  `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 +
+  summary 1.5 + heading 1.0 + body 1.0 × tf')`. Field weights are not
+  length-normalised, and `tf'` stays below the name weight, so a title
+  hit beats any volume of body text on the same token. Because `N`,
+  `df`, and `avglen` come from the filtered set, `score` is a ranking
+  key, not a stable property of a page.
+- Hits sort descending by score (`total_cmp`), then descending by
+  PageRank as the tiebreak, then ascending by id.
 - The searched body text is the rendered page's parsed sections minus
   generated chrome (`Metadata`, `Related`, `Referenced By`, `Notes`) —
   subtractive on purpose, so text under a doc's own embedded `## `
-  subheadings stays searchable. Occurrence counting and snippet
-  extraction share one lowercased scan of that content.
+  subheadings stays searchable. The heading names of those sections are
+  the `heading` field, minus the chrome and the generated content
+  headings (`Body`, `Exports`, `Imports`), which sit on nearly every page.
+  Occurrence counting and snippet extraction share one lowercased scan
+  of the content.
 - Hits whose body matched carry a `snippet`: a deterministic excerpt
   around the earliest token occurrence (60 chars of context per side,
   whitespace runs collapsed, `…` on truncated edges). Title/alias/
-  summary-only hits have `snippet: None` — the summary explains those.
+  summary/heading-only hits have `snippet: None` — the summary explains
+  those.
 
 **Neighbors** (`Wiki::neighbors`) BFS-collects ids to `depth` hops over
 both edge directions, then builds a budgeted context pack:
@@ -426,10 +439,10 @@ still not stripped.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
   - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
-  - `tests/search_quality.rs` — regression tests for the 2026-07-14
-    search-quality cycle: the dogfood checklist queries that failed
-    pre-fix, AND semantics, and occurrence-graded ranking, over in-test
-    fixtures.
+  - `tests/search_quality.rs` — behavioural pins for search ranking over
+    in-test fixtures: the 2026-07-14 dogfood checklist queries, and the
+    2026-09-02 scoring cycle's partial matching, occurrence monotonicity,
+    heading field, and IDF-over-volume cases.
   - `tests/query_list_pages.rs` — `Wiki::list_pages` id/title ordering
     (backs the MCP server's `resources/list`).
   - `tests/mcp_serve.rs` — end-to-end MCP: spawns `wiki serve` and speaks
