@@ -2,6 +2,7 @@
 name = "wiki"
 version = "0.3.0"
 edition = "2021"
+rust-version = "1.88"
 description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license = "MIT"
 publish = false
@@ -44,3 +45,6 @@ criterion = "0.5"
 [[bench]]
 name = "pipeline"
 harness = false
+
+[profile.release]
+strip = true
