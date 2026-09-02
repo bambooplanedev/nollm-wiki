@@ -42,13 +42,22 @@ fn first_real_sentence(text: &str) -> Option<String> {
     None
 }
 
-/// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else whole line.
+/// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else
+/// whole line. A terminator counts only when followed by whitespace or the
+/// end of the line, so `index.json` or `v1.2` inside a sentence does not end
+/// it.
 fn first_sentence(line: &str) -> String {
     let line = line.trim();
-    if let Some(idx) = line.find(['.', '!', '?']) {
-        line[..=idx].trim().to_string()
-    } else {
-        line.to_string()
+    let end = line
+        .char_indices()
+        .find(|&(i, c)| {
+            matches!(c, '.' | '!' | '?')
+                && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
+        })
+        .map(|(i, _)| i);
+    match end {
+        Some(idx) => line[..=idx].trim().to_string(),
+        None => line.to_string(),
     }
 }
 
@@ -67,6 +76,22 @@ mod tests {
         let body = "# Title\nThis document describes stuff.\nGradient descent optimizes loss.";
         let s = summarize(None, None, body, None);
         assert_eq!(s.as_deref(), Some("Gradient descent optimizes loss."));
+    }
+
+    #[test]
+    fn a_dot_inside_a_word_does_not_end_the_sentence() {
+        let s = summarize(
+            None,
+            Some("Renders index.json and llms.txt for agents. Second sentence."),
+            "",
+            None,
+        );
+        assert_eq!(
+            s.as_deref(),
+            Some("Renders index.json and llms.txt for agents.")
+        );
+        assert_eq!(first_sentence("Bump to v1.2"), "Bump to v1.2");
+        assert_eq!(first_sentence("Done!Next"), "Done!Next");
     }
 
     #[test]
