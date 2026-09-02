@@ -287,7 +287,7 @@ matching:
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
 - Hits sort descending by score (`total_cmp`), then descending by
-  PageRank as the tiebreak, then ascending by id.
+  PageRank as the second sort key, then ascending by id.
 - The searched body text is the rendered page's parsed sections minus
   generated chrome (`Metadata`, `Related`, `Referenced By`, `Notes`) —
   subtractive on purpose, so text under a doc's own embedded `## `

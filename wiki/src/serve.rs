@@ -92,8 +92,8 @@ impl WikiState {
 #[schemars(crate = "rmcp::schemars")]
 pub struct SearchParams {
     /// Search query, matched case-insensitively against title, aliases,
-    /// summary, section headings, and body. Partial matches rank below
-    /// fuller ones.
+    /// summary, section headings, and body. A page matching any one token
+    /// is a hit; rare tokens weigh far more than common ones.
     pub query: String,
     /// Filter by source kind: text, markdown, pdf, image, audio, or
     /// code:<lang> (e.g. code:rust).

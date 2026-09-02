@@ -125,9 +125,9 @@ impl Wiki {
     const W_SUMMARY: f64 = 1.5;
     const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
-    /// BM25 term-frequency saturation (`K1`) and length-normalisation
-    /// strength (`B`). Textbook values, untuned: nineteen eval cases cannot
-    /// tell `B = 0.5` from `0.75`.
+    // BM25 term-frequency saturation (`K1`) and length-normalisation
+    // strength (`B`). Textbook values, untuned: nineteen eval cases cannot
+    // tell `B = 0.5` from `0.75`.
     const K1: f64 = 1.2;
     const B: f64 = 0.75;
 
@@ -335,6 +335,9 @@ impl Wiki {
         // Pass 2: score. `n > 0` here because a candidate was counted.
         let n_f = n as f64;
         let avglen = total_len as f64 / n_f;
+        // `avglen == 0` needs every filtered page's body to be missing on
+        // disk; guard once here rather than divide by zero per page.
+        let avglen = if avglen > 0.0 { avglen } else { 1.0 };
         let idf: Vec<f64> = df
             .iter()
             .map(|&d| (1.0 + (n_f - d as f64 + 0.5) / (d as f64 + 0.5)).ln())
@@ -342,13 +345,7 @@ impl Wiki {
         let mut ranked: Vec<(Hit, f64)> = candidates
             .into_iter()
             .map(|c| {
-                // `avglen == 0` needs every filtered page's body to be
-                // missing on disk; guard it rather than divide by zero.
-                let norm = if avglen > 0.0 {
-                    c.len as f64 / avglen
-                } else {
-                    1.0
-                };
+                let norm = c.len as f64 / avglen;
                 let score = c
                     .per_token
                     .iter()

@@ -54,7 +54,7 @@ fn build_corpus() -> (tempfile::TempDir, std::path::PathBuf) {
     )
     .unwrap();
     // monotonicity pair: 25 vs 40 occurrences, both unlinked (equal
-    // pagerank) — the higher count must never score lower.
+    // pagerank) — the higher count must score higher.
     fs::write(
         input.join("flood_a.md"),
         format!("# Flood A\n\n{}\n", "quokka ".repeat(25).trim()),
@@ -105,19 +105,20 @@ fn partial_match_returns_every_page_with_a_token() {
 }
 
 #[test]
-fn more_occurrences_never_score_lower() {
+fn more_occurrences_score_higher() {
     let (_dir, out) = build_corpus();
     let w = Wiki::load(&out).unwrap();
     let hits = w.search("quokka", None, 10);
     let a = hits.iter().find(|h| h.id == "flood_a").expect("flood_a");
     let b = hits.iter().find(|h| h.id == "flood_b").expect("flood_b");
-    // 25 vs 40 occurrences on otherwise identical, unlinked pages. BM25
-    // term frequency saturates but is monotonic: more mentions never
-    // score lower. (The old scorer capped at 20 and forced an exact tie;
-    // that concept is gone.)
+    // 25 vs 40 occurrences on otherwise identical, unlinked pages. Each
+    // page's searchable body is only its `quokka` run, so len == tf and
+    // tf' = 2.2 / ((1 + 0.9/avglen) + 0.3/tf) is strictly increasing in
+    // tf: more mentions score strictly higher. (The old scorer capped at
+    // 20 and forced an exact tie; that concept is gone.)
     assert!(
-        b.score >= a.score,
-        "40 occurrences must not score below 25: {} vs {}",
+        b.score > a.score,
+        "40 occurrences must score above 25: {} vs {}",
         b.score,
         a.score
     );

@@ -310,7 +310,7 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 
 // Floors, written as exact fractions. **Never transcribe these from the
 // snapshot table**: it formats with `{:.4}`, which rounds half-up, so `top1`
-// prints 0.4211 against a true 0.42105… — a floor copied from the printed
+// prints 0.9474 against a true 0.947368… — a floor copied from the printed
 // value sits *above* the baseline and fails on day one.
 //
 // These floors are static, so they only catch a drop below the *original*
@@ -324,12 +324,12 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 const MIN_TOP1: f64 = 18.0 / 19.0; // 0.9473684…
 const MIN_MRR10: f64 = 37.0 / 38.0; // 0.9736842…
 
-/// Slack on the floor comparisons. Not defensive padding — without it the
-/// harness fails on its own baseline: `mrr@10` is accumulated as
-/// `Σ(1.0/rank) / 19.0`, which is 0.48245614035087714, while `55.0 / 114.0`
-/// evaluates to 0.48245614035087719. Same rational, different double, one ULP
-/// apart. One case is worth 1/19 ≈ 5.3 percentage points, so 1e-9 cannot hide
-/// a real move.
+/// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
+/// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
+/// from the same rational written as a fraction (the original baseline,
+/// 55/114, did exactly that). The current floors happen to be bit-identical
+/// to their accumulations, but a future re-cut may not be. One case is worth
+/// 1/19 ≈ 5.3 percentage points, so 1e-9 cannot hide a real move.
 const FLOOR_EPS: f64 = 1e-9;
 
 /// The function name is load-bearing: `insta` derives the snapshot file name
