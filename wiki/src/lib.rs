@@ -26,6 +26,8 @@ pub enum WikiError {
     Io(#[from] std::io::Error),
     #[error("rayon pool build failed: {0}")]
     Pool(String),
+    #[error("watch failed: {0}")]
+    Watch(String),
 }
 
 pub struct CompileOptions {

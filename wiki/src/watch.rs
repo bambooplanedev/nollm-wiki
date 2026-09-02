@@ -22,10 +22,10 @@ pub fn watch(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), W
     let mut watcher = notify::recommended_watcher(move |res| {
         let _ = tx.send(res);
     })
-    .map_err(|e| WikiError::Pool(e.to_string()))?;
+    .map_err(|e| WikiError::Watch(e.to_string()))?;
     watcher
         .watch(input, RecursiveMode::Recursive)
-        .map_err(|e| WikiError::Pool(e.to_string()))?;
+        .map_err(|e| WikiError::Watch(e.to_string()))?;
 
     eprintln!("watching {} … (Ctrl-C to stop)", input.display());
     while let Ok(res) = rx.recv() {

@@ -1,6 +1,6 @@
 //! Plain-text extractor: `# Title` or an ALL-CAPS first line, `created:`/`aliases:` header fields, then the body.
 
-use crate::formats::{summarize, Extractor};
+use crate::formats::{derive_name_from_path, summarize, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -76,12 +76,6 @@ impl Extractor for TextExtractor {
     }
 }
 
-fn derive_name_from_path(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
-    let stem = base.strip_suffix(".txt").unwrap_or(base);
-    title_case(&stem.replace('_', " "))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +103,8 @@ mod tests {
     fn missing_header_falls_back_to_filename() {
         let e = TextExtractor.extract("fallback_name.txt", "just some prose, no header\n");
         assert_eq!(e.name, "Fallback Name");
+        let e = TextExtractor.extract("notes/my-notes.txt", "just some prose, no header\n");
+        assert_eq!(e.name, "My Notes");
     }
 
     #[test]

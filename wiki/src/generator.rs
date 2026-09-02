@@ -83,7 +83,7 @@ pub fn generate_corpus(
         .collect();
 
     let mut written = Vec::new();
-    for (i, topic) in all_topics.iter().enumerate() {
+    for topic in all_topics.iter() {
         let slug = slugify(topic);
         let mut lines: Vec<String> = Vec::new();
 
@@ -120,7 +120,6 @@ pub fn generate_corpus(
         let path = output_dir.join(format!("{slug}.txt"));
         std::fs::write(&path, content)?;
         written.push(path);
-        let _ = i;
     }
     Ok(written)
 }
