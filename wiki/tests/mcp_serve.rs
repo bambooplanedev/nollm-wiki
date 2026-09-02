@@ -271,3 +271,83 @@ fn search_hits_include_snippet_field() {
     }
     child.kill().ok();
 }
+
+/// Bad-parameter paths and the over-budget neighbors block, then a final
+/// `tools/list` to prove none of them took the server down.
+#[test]
+fn serve_reports_bad_params_and_survives() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
+    initialize(&mut stdin, &mut stdout);
+
+    // (a) An unknown kind is rejected inside the handler with
+    // `McpError::invalid_params`, which rmcp surfaces as a JSON-RPC error
+    // (not an `isError` result).
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "search", "arguments": {"kind": "bogus", "query": "x"}
+        }}),
+    );
+    let resp = read_response(&mut stdout, 2);
+    assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
+    let msg = resp["error"]["message"].as_str().unwrap();
+    assert!(
+        msg.contains("expected text, markdown, or code:<lang>"),
+        "message: {msg}"
+    );
+    assert!(resp.get("result").is_none(), "got: {resp}");
+
+    // (b) A missing required field fails parameter deserialization, which
+    // rmcp reports as a tool error result naming the field.
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+            "name": "search", "arguments": {}
+        }}),
+    );
+    let resp = read_response(&mut stdout, 3);
+    assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("query"), "text: {text}");
+
+    // (c) Unknown tool name -> JSON-RPC invalid params.
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+            "name": "nope", "arguments": {}
+        }}),
+    );
+    let resp = read_response(&mut stdout, 4);
+    assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
+
+    // (d) A budget the target's own page cannot fit degrades the target
+    // block instead of failing.
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+            "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 1}
+        }}),
+    );
+    let resp = read_response(&mut stdout, 5);
+    assert_eq!(resp["result"]["isError"], json!(false), "got: {resp}");
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("exceeds the budget"), "pack: {text}");
+    assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
+
+    // (e) Still answering after every error above.
+    send(
+        &mut stdin,
+        json!({"jsonrpc": "2.0", "id": 6, "method": "tools/list"}),
+    );
+    let resp = read_response(&mut stdout, 6);
+    assert!(
+        resp["result"]["tools"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty()),
+        "server did not survive the error sequence: {resp}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
