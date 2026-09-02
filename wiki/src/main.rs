@@ -138,7 +138,7 @@ fn main() -> Result<()> {
             let kind = match kind.as_deref() {
                 None => None,
                 Some(s) => Some(SourceKind::parse(s).with_context(|| {
-                    format!("unknown kind {s:?}; expected text, markdown, pdf, image, audio, or code:<lang>")
+                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED)
                 })?),
             };
             for hit in w.search(&query, kind, limit) {

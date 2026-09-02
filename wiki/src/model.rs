@@ -13,6 +13,9 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
+    /// The kinds `parse` accepts, for user-facing error text.
+    pub const EXPECTED: &'static str = "text, markdown, or code:<lang>";
+
     pub fn label(&self) -> String {
         match self {
             SourceKind::Text => "text".into(),

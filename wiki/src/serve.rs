@@ -95,8 +95,8 @@ pub struct SearchParams {
     /// summary, section headings, and body. A page matching any one token
     /// is a hit; rare tokens weigh far more than common ones.
     pub query: String,
-    /// Filter by source kind: text, markdown, pdf, image, audio, or
-    /// code:<lang> (e.g. code:rust).
+    /// Filter by source kind: `text`, `markdown`, or `code:<lang>`
+    /// (e.g. `code:rust`).
     pub kind: Option<String>,
     /// Maximum number of hits (default 10).
     pub limit: Option<usize>,
@@ -140,7 +140,7 @@ impl WikiServer {
             None => None,
             Some(s) => Some(SourceKind::parse(s).ok_or_else(|| {
                 McpError::invalid_params(
-                    format!("unknown kind {s:?}; expected text, markdown, pdf, image, audio, or code:<lang>"),
+                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED),
                     None,
                 )
             })?),
