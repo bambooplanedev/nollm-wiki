@@ -288,3 +288,36 @@ fn snippet_never_splits_multibyte_chars() {
         "both edges truncated: {s:?}"
     );
 }
+
+#[test]
+fn author_heading_differing_only_in_case_from_chrome_stays_searchable() {
+    // `## Notes` (exact case) is generated chrome and is skipped; an
+    // author's `## NOTES` is not chrome. The exclusion is exact-case on
+    // purpose so the author's section keeps both its heading and its body.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("page.md"),
+        "# Page\n\nIntro.\n\n## NOTES\n\nThe pangolin lives here.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+
+    let body = w.search("pangolin", None, 10);
+    assert_eq!(
+        body.len(),
+        1,
+        "body under an author `## NOTES` is searchable"
+    );
+    assert!(body[0].snippet.is_some(), "body hit carries a snippet");
+
+    let heading = w.search("notes", None, 10);
+    assert_eq!(heading.len(), 1, "author `## NOTES` heading is scored");
+    assert!(
+        heading[0].snippet.is_none(),
+        "heading-only hit has no snippet"
+    );
+}

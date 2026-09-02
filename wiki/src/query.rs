@@ -109,6 +109,12 @@ impl Wiki {
 
     /// Sections excluded from search: generated chrome, so a query like
     /// "related" or "metadata" does not false-positive on every page.
+    ///
+    /// Both this list and `GENERATED_HEADINGS` are compared exact-case, on
+    /// purpose: `rewrite.rs` emits the chrome with this exact casing, so the
+    /// exact match excludes the generated sections and nothing else. A
+    /// case-insensitive match would also hide an author's own `## notes` or
+    /// `## NOTES` section (2026-09-02 audit, findings-log item 37).
     const CHROME_SECTIONS: [&'static str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
 
     /// Generated content headings excluded from the `heading` field: they
