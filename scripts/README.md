@@ -72,8 +72,8 @@ left as documented follow-ups. Both fail loud (a build error or a
 visibly wrong mode), never silent corruption:
 
 - A `--title` value ending in a backslash can break the generated
-  string in `quartz.config.ts` — the title sanitizer strips `"` but
-  not `\`.
+  string in `quartz.config.ts` — the title sanitizer replaces `"` with
+  `'` but leaves `\` alone.
 - `--title --serve` consumes `--serve` as the title value; there is no
   guard against flag-shaped values following `--title`.
 

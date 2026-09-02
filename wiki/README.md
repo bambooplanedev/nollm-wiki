@@ -86,11 +86,13 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 
 $ ./target/release/wiki lint --dir demo_wiki
 Linted 12 pages: 0 broken links, 1 orphans
+  orphan: embedding_layer
 ```
 
 `demo_wiki/` after compiling contains:
 
 ```
+.wiki/cache.json
 AGENTS.md
 attention_mechanism.md
 backpropagation.md
@@ -136,9 +138,16 @@ Page ids (and filenames) are slugs matching `[a-z0-9_]+`, derived from each
 source name by folding punctuation, whitespace, and non-ASCII characters
 down to `_`/ASCII in a single pass. Two names that differ only by
 punctuation or whitespace (e.g. "Fetch (v2)" vs "Fetch v2", both → `fetch_v2`)
-can slugify to the same id; the compiler resolves this deterministically by
-keeping the entity with the lexicographically-first source path and
-skipping the rest, printing a warning for each skip. A name that is
+can slugify to the same id, as can two files with the same stem in
+different directories. The compiler first qualifies the colliding names with
+their parent-directory segments, one per round until the clash clears
+(`app/api/models.py` + `app/db/models.py` → `api_models`, `db_models`, both
+kept). Whatever still collides — files at the input root with no segment
+left to take, or identical paths — is resolved by keeping the entity with
+the lexicographically-first source path and skipping the rest, printing a
+warning for each skip. A `mod.rs` or `__init__.py` page is named after its
+directory (`tests/common/mod.rs` → `common`), since that is the name every
+importer uses. A name that is
 **entirely** non-ASCII (no `[a-zA-Z0-9]` survives the fold) has no
 meaningful ASCII slug to derive, so it becomes an anonymous `page_<hash>`
 file instead — transliteration (e.g. Cyrillic → Latin) is not performed.
@@ -154,7 +163,7 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 ```
 
 - `--incremental` (off) — reuse `.wiki/cache.json` render fingerprints and skip unchanged pages.
-- `--no-ignore` (off) — do not respect `.gitignore` while walking `<INPUT>`.
+- `--no-ignore` (off) — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
 - `--emit-json` (off) — also write `graph.json` (node/edge graph).
 - `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change.
 
@@ -250,8 +259,11 @@ source tree. Three artifacts drive that:
 
 1. BFS outward from `<id>` up to `--depth` hops.
 2. `--max-tokens` is a hard ceiling on the pack's estimated size; `--max-nodes`
-   caps the node count. Neighbors that don't fit are dropped lowest-centrality
-   first.
+   caps the node count, dropping the lowest-centrality neighbors first. Under
+   `--max-tokens`, neighbors are admitted in descending centrality,
+   skip-not-break: one that doesn't fit the remaining budget is skipped and
+   the walk continues, so the kept set favors high-centrality neighbors over
+   maximum cardinality.
 3. Neighbors are ordered by centrality (PageRank), **highest last**, so the
    most important context sits closest to the end of the pack.
 4. The target page (`<id>`) comes first — in full when it fits the budget,
@@ -291,7 +303,7 @@ out to the CLI. Client configuration:
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score, snippet}]` (`snippet` is `null` for title/alias/summary-only hits) |
+| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score, snippet}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?`, `max_nodes?`, `full?` | The context-pack text |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |
 
@@ -348,14 +360,18 @@ oversights:
 
 - **Linking is lexical.** No LLM, embeddings, or semantic matching at
   generation time — two pages link only when a name or alias of one
-  appears in the other. This is the core design trade-off, not a bug.
+  appears in the other, or when a code page's import resolves to the
+  other's id. This is the core design trade-off, not a bug.
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
   imports + exported signatures only, with Rust signatures owner-qualified
   (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`) and Python
   signatures owner-qualified through the full class chain and carrying
   their decorators (`def Article.Inner.deep(self) -> None`,
-  `@dataclass(frozen=True) class Article`). `#[cfg(test)]`
+  `@dataclass(frozen=True) class Article`). A Rust `const`/`static` or a
+  Python assignment keeps its value up to 48 chars (`pub const LIMIT: u32 =
+  5`, `MAX_IDS = 2000`); beyond that a typed binding drops the value and an
+  unannotated Python assignment truncates it with `…`. `#[cfg(test)]`
   modules are omitted from `## Body` and replaced with a
   `// [tests omitted: …]` marker.
 - **Text, markdown, and code are the only formats.** There is no PDF,

@@ -237,9 +237,11 @@ full re-render rather than trusting a cache written by an incompatible
 compiler version or hash scheme.
 
 For each entity, the render stage computes a fingerprint
-(`rewrite::render_fingerprint`) that mixes the entity's content, its edges,
-the full entity map (so a neighbor's change can affect a page that links to
-it), and any preserved `## Notes` text, via the order-sensitive
+(`rewrite::render_fingerprint`) that mixes the entity's content (name,
+body, aliases, symbols, imports, summary), the *names* of its linked
+neighbors looked up through the entity map (so a neighbor being renamed
+re-renders the pages that link to it, while a change to its body does not),
+and any preserved `## Notes` text, via the order-sensitive
 `hash::combine`. A page is only rewritten to disk
 (`rewrite::write_atomic` — temp file + rename, so an interrupted run can't
 leave a half-written page) if `cache.needs_render(id, fingerprint)` is true,
@@ -371,8 +373,9 @@ items reachable from the file root through module and type scopes are
 captured; an `impl` written inside a function body is not module surface. A
 trait impl is gated on neither its own visibility (rustc forbids a modifier
 there) nor its target type's, so an `impl Trait for PrivateType` does reach
-`## Exports` — resolving that needs name resolution across files (dogfood
-finding 16).
+`## Exports` — the impl patterns capture no visibility and nothing checks
+whether the target type is declared `pub`, and resolving that needs name
+resolution across files.
 
 **Python signatures are owner-qualified through the full class chain**
 (`extract_python.rs`): a nested method renders as `def Article.Inner.deep(self)
@@ -394,12 +397,15 @@ and **the underscore convention, always applied inside a class**, since
 `__all__` says nothing about what is public *within* a class it lists — even
 one it lists by name, a private member stays private. Module
 constants and class fields share one query pattern
-(`assignment left: (identifier)`), with value handling that depends on
-whether a type annotation is present: an annotated assignment
-(`SUMMARY_LIMIT: int = 300`) is cut at its value, since the annotation is the
-contract; an unannotated one (`MAX_IDS = 2000`) keeps its whole value,
-truncated to 48 `chars()` (never bytes, to avoid splitting a multi-byte
-character) plus `…` when longer. Decorators are kept **with their
+(`assignment left: (identifier)`) and keep their value up to a 48-`chars()`
+budget (`VALUE_BUDGET`; chars, never bytes, to avoid splitting a multi-byte
+character): `SUMMARY_LIMIT: int = 300` and `MAX_IDS = 2000` both render
+whole. Over budget, an annotated assignment drops the value, since the
+annotation still carries the contract; an unannotated one keeps the first 48
+chars plus `…`, since it would otherwise say nothing at all. A Rust
+`const`/`static` re-appends its value under the same rule as an annotated
+assignment: it always has a type, so an over-budget value is omitted, never
+truncated. Decorators are kept **with their
 arguments** — `@dataclass(frozen=True) class Article` — because a field is
 only interpretable through the decorator that governs it.
 
@@ -416,7 +422,8 @@ cleaned up. This is deliberate; the pass and its limits are documented on
 run above it — from the Rust source shown in `## Body`, replacing it with
 a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. Stripping runs
 *before* extraction, so `body`, `symbols`, and `imports` all describe the same
-source (dogfood finding 13). The marker is terminated at a line boundary: it
+source — an earlier body-only strip left test-only imports such as
+`super::Wiki` in `## Imports`. The marker is terminated at a line boundary: it
 is a line comment, so code following the module's closing brace on the same
 line would otherwise be commented out. `#[cfg(test)]` on a non-`mod` item is
 still not stripped.
@@ -433,9 +440,11 @@ still not stripped.
   - `tests/end_to_end.rs` — full `compile()` runs against small in-memory
     corpora: artifact presence, cross-linking, reserved-name remapping,
     and `output_is_deterministic_across_jobs`, which compiles the same
-    20-entity corpus with `jobs: Some(1)` and `jobs: Some(8)` and asserts
-    the resulting `index.json` bytes are identical — the concrete
-    regression test for the determinism rules above.
+    22-entity corpus (20 `.txt` nodes plus `deep.rs` and `deep_py.py`, so
+    the code path is exercised too) with `jobs: Some(1)` and `jobs: Some(8)`
+    and asserts the resulting `index.json` bytes and the two code pages are
+    identical — the concrete regression test for the determinism rules
+    above.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
   - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
