@@ -29,7 +29,6 @@ struct Entry {
     /// Method names (`ManifestEntry::methods`). Defaulted for the same
     /// reason as `defined`: an older `index.json` has no such key.
     #[serde(default)]
-    #[allow(dead_code)] // read by Task 4 of the 2026-09-03 plan
     methods: Vec<String>,
 }
 
@@ -255,15 +254,20 @@ impl Wiki {
             .all(|p| words.iter().any(|w| w.starts_with(p)))
     }
 
-    /// The search terms a page earns from its `defined` names: each
-    /// lowercased full name plus each of its words, minus the self-name
-    /// skip. The skip is word-level: a word equal to a title word is
-    /// dropped (the title already scores it at `W_NAME`; crediting it again
-    /// let `Cache` on page `cache` outrank `code`), the other words stay,
-    /// and the full name stays unless it is itself a title word — the title
-    /// never matches the full-name token, so dropping the whole name would
-    /// leave the definer with no credit (`codeextractor` on `code`).
-    fn defined_terms(title_lower: &str, defined: &[String]) -> BTreeSet<String> {
+    /// The search terms a page earns from its `defined` names, plus every
+    /// `methods` name lowercased whole, minus names equal to a title word:
+    /// each lowercased full name plus each of its words, minus the
+    /// self-name skip. The skip is word-level: a word equal to a title word
+    /// is dropped (the title already scores it at `W_NAME`; crediting it
+    /// again let `Cache` on page `cache` outrank `code`), the other words
+    /// stay, and the full name stays unless it is itself a title word — the
+    /// title never matches the full-name token, so dropping the whole name
+    /// would leave the definer with no credit (`codeextractor` on `code`).
+    fn defined_terms(
+        title_lower: &str,
+        defined: &[String],
+        methods: &[String],
+    ) -> BTreeSet<String> {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
         let mut terms = BTreeSet::new();
         for name in defined {
@@ -276,6 +280,14 @@ impl Wiki {
                     .into_iter()
                     .filter(|w| !title_words.contains(&w.as_str())),
             );
+        }
+        // Method names whole, never through `name_words`: splitting them
+        // re-creates the V7 failure (`needs_render` credits `render`).
+        for name in methods {
+            let full = name.to_lowercase();
+            if !title_words.contains(&full.as_str()) {
+                terms.insert(full);
+            }
         }
         terms
     }
@@ -361,7 +373,7 @@ impl Wiki {
             .summary
             .as_deref()
             .map(|s| Self::field_words(&s.to_lowercase()));
-        let defined_terms = Self::defined_terms(&title, &e.defined);
+        let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
         let page = self.page(&e.id).unwrap_or_default();
         let sections = crate::rewrite::parse_sections(&page);
         let headings: Vec<String> = sections
@@ -744,19 +756,42 @@ mod tests {
         // name stays (the title never matches the full-name token), the
         // other word stays.
         assert_eq!(
-            Wiki::defined_terms("code", &["CodeExtractor".into(), "load".into()]),
+            Wiki::defined_terms("code", &["CodeExtractor".into(), "load".into()], &[]),
             set(&["codeextractor", "extractor", "load"])
         );
         // A name that IS the title word contributes nothing.
-        assert_eq!(Wiki::defined_terms("cache", &["Cache".into()]), set(&[]));
+        assert_eq!(
+            Wiki::defined_terms("cache", &["Cache".into()], &[]),
+            set(&[])
+        );
         // Multi-word title: every title word is skipped.
         assert_eq!(
-            Wiki::defined_terms("graph page", &["build_graph".into(), "page_ids".into()]),
+            Wiki::defined_terms(
+                "graph page",
+                &["build_graph".into(), "page_ids".into()],
+                &[]
+            ),
             set(&["build", "build_graph", "ids", "page_ids"])
         );
         assert_eq!(
-            Wiki::defined_terms("hash", &["hash_bytes".into()]),
+            Wiki::defined_terms("hash", &["hash_bytes".into()], &[]),
             set(&["bytes", "hash_bytes"])
+        );
+    }
+
+    #[test]
+    fn method_names_enter_the_term_set_whole_and_never_word_split() {
+        // `needs_render` must not hand the page the word `render` (the
+        // 2026-09-03 spike measured `render fingerprint` leaving `rewrite`
+        // for `cache` when it did); a name equal to a title word is dropped
+        // like a defined full name.
+        assert_eq!(
+            Wiki::defined_terms(
+                "src query",
+                &[],
+                &["has_page".into(), "needs_render".into(), "query".into()]
+            ),
+            set(&["has_page", "needs_render"])
         );
     }
 }
