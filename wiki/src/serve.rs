@@ -5,6 +5,7 @@ use crate::lint::{lint, load_compiled_pages};
 use crate::model::SourceKind;
 use crate::query::PackBudget;
 use crate::query::Wiki;
+use crate::WikiError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -251,17 +252,21 @@ impl ServerHandler for WikiServer {
     ) -> Result<ReadResourceResponse, McpError> {
         let uri = request.uri.as_str();
         let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
+        // Only a missing file is "no such resource"; a permission or read
+        // error on a file that exists is the server's problem, not the
+        // client's.
+        let read_file = |name: &str| {
+            std::fs::read_to_string(self.state.dir().join(name)).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    not_found()
+                } else {
+                    McpError::internal_error(format!("read {name}: {e}"), None)
+                }
+            })
+        };
         let (text, mime_type) = match uri {
-            "wiki://index" => (
-                std::fs::read_to_string(self.state.dir().join("index.json"))
-                    .map_err(|_| not_found())?,
-                "application/json",
-            ),
-            "wiki://llms.txt" => (
-                std::fs::read_to_string(self.state.dir().join("llms.txt"))
-                    .map_err(|_| not_found())?,
-                "text/plain",
-            ),
+            "wiki://index" => (read_file("index.json")?, "application/json"),
+            "wiki://llms.txt" => (read_file("llms.txt")?, "text/plain"),
             _ => {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
                 let page = self.state.with_wiki(|w| {
@@ -285,21 +290,27 @@ impl ServerHandler for WikiServer {
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.
-pub fn run(dir: &Path) -> anyhow::Result<()> {
+pub fn run(dir: &Path) -> Result<(), WikiError> {
     let state = WikiState::load(dir).map_err(|e| {
-        anyhow::anyhow!(
+        WikiError::Serve(format!(
             "{} is not a compiled wiki ({e}) — run `wiki compile <input> {}` first",
             dir.display(),
             dir.display()
-        )
+        ))
     })?;
     let server = WikiServer::new(Arc::new(state));
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
         .block_on(async move {
-            let service = server.serve(stdio()).await?;
-            service.waiting().await?;
+            let service = server
+                .serve(stdio())
+                .await
+                .map_err(|e| WikiError::Serve(e.to_string()))?;
+            service
+                .waiting()
+                .await
+                .map_err(|e| WikiError::Serve(e.to_string()))?;
             Ok(())
         })
 }

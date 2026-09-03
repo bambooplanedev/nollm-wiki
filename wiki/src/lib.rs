@@ -28,6 +28,8 @@ pub enum WikiError {
     Pool(String),
     #[error("watch failed: {0}")]
     Watch(String),
+    #[error("serve failed: {0}")]
+    Serve(String),
 }
 
 pub struct CompileOptions {
@@ -191,7 +193,15 @@ fn compile_inner(
             .cloned()
             .collect::<Vec<_>>()
         {
-            let _ = std::fs::remove_file(output.join(format!("{stale}.md")));
+            // A page that cannot be removed would still be counted by
+            // `lint` and served by `serve`, so say so instead of reporting
+            // a clean compile. Already-gone is the normal case after a
+            // manual delete and needs no warning.
+            if let Err(e) = std::fs::remove_file(output.join(format!("{stale}.md"))) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("warning: could not remove stale page {stale}.md: {e}");
+                }
+            }
         }
     }
     cache.retain_ids(&live);
