@@ -261,7 +261,10 @@ current entity set is pruned: the corresponding page file is deleted from
 `output`, and `cache.retain_ids()` drops it from the cache before it is
 saved back to `.wiki/cache.json`. This keeps stale pages from a deleted or
 renamed source from lingering in the output directory across incremental
-runs. Pages the prune cannot account for — ids recorded in a cache written
+runs. A page file the prune cannot delete (permissions, I/O) is reported as
+`warning: could not remove stale page <id>.md: …` on stderr rather than
+silently left behind, since `lint` and `serve` would otherwise keep counting
+it. Pages the prune cannot account for — ids recorded in a cache written
 by an earlier compiler version (`cache::prior_page_ids` reads them past the
 version guard) that no current entity produces — are only reported:
 `warning: N page(s) from a previous id scheme remain in …` on stderr, never
