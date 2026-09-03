@@ -301,6 +301,85 @@ impl Wiki {
         Some(s)
     }
 
+    /// Pass 1 of `search` for one page: its searchable word count (always,
+    /// for `avglen`) and, when at least one token hits any field, the
+    /// per-token facts scored in pass 2. Bumps `df[i]` for every token `i`
+    /// that hits.
+    fn candidate<'a>(
+        &self,
+        e: &'a Entry,
+        tokens: &[String],
+        df: &mut [usize],
+    ) -> (usize, Option<Candidate<'a>>) {
+        let title = e.title.to_lowercase();
+        let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
+        let summary = e.summary.as_deref().map(str::to_lowercase);
+        let defined_terms = Self::defined_terms(&title, &e.defined);
+        let page = self.page(&e.id).unwrap_or_default();
+        let sections = crate::rewrite::parse_sections(&page);
+        let headings: Vec<String> = sections
+            .keys()
+            .filter(|k| {
+                !Self::CHROME_SECTIONS.contains(&k.as_str())
+                    && !Self::GENERATED_HEADINGS.contains(&k.as_str())
+            })
+            .map(|k| k.to_lowercase())
+            .collect();
+        let content = Self::content_text(&sections);
+        let content_lower = content.to_lowercase();
+        let len = content.split_whitespace().count();
+
+        let mut per_token = Vec::with_capacity(tokens.len());
+        let mut matched = false;
+        let mut any_body = false;
+        for (i, t) in tokens.iter().enumerate() {
+            let t = t.as_str();
+            let mut weight = 0.0;
+            if title.contains(t) {
+                weight += Self::W_NAME;
+            }
+            if aliases.iter().any(|a| a.contains(t)) {
+                weight += Self::W_ALIAS;
+            }
+            // Whole-term equality, never `contains`: `to` must not hit
+            // `token_estimate`, `wiki` must not hit `WikiError`.
+            if defined_terms.contains(t) {
+                weight += Self::W_DEFINED;
+            }
+            if summary.as_deref().is_some_and(|s| s.contains(t)) {
+                weight += Self::W_SUMMARY;
+            }
+            if headings.iter().any(|h| h.contains(t)) {
+                weight += Self::W_HEADING;
+            }
+            // match_indices is non-overlapping — the spec'd counting rule.
+            // `tf` may exceed `len` for short tokens ("on" in "one",
+            // "long"); `tf'` saturates, so that is harmless.
+            let tf = content_lower.match_indices(t).count();
+            any_body |= tf > 0;
+            if weight > 0.0 || tf > 0 {
+                matched = true;
+                df[i] += 1;
+            }
+            per_token.push((weight, tf));
+        }
+        if !matched {
+            return (len, None);
+        }
+        let snippet = if any_body {
+            Self::snippet(&content, &content_lower, tokens)
+        } else {
+            None
+        };
+        let candidate = Candidate {
+            entry: e,
+            per_token,
+            len,
+            snippet,
+        };
+        (len, Some(candidate))
+    }
+
     /// Case-insensitive tokenized search over name/alias/defined names/summary/section headings/body.
     /// Partial matching: a page is a hit if any token matches
     /// any field.
@@ -340,76 +419,12 @@ impl Wiki {
                     continue;
                 }
             }
-            let title = e.title.to_lowercase();
-            let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
-            let summary = e.summary.as_deref().map(str::to_lowercase);
-            let defined_terms = Self::defined_terms(&title, &e.defined);
-            let page = self.page(&e.id).unwrap_or_default();
-            let sections = crate::rewrite::parse_sections(&page);
-            let headings: Vec<String> = sections
-                .keys()
-                .filter(|k| {
-                    !Self::CHROME_SECTIONS.contains(&k.as_str())
-                        && !Self::GENERATED_HEADINGS.contains(&k.as_str())
-                })
-                .map(|k| k.to_lowercase())
-                .collect();
-            let content = Self::content_text(&sections);
-            let content_lower = content.to_lowercase();
-            let len = content.split_whitespace().count();
+            let (len, candidate) = self.candidate(e, &tokens, &mut df);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             n += 1;
             total_len += len;
-
-            let mut per_token = Vec::with_capacity(tokens.len());
-            let mut matched = false;
-            let mut any_body = false;
-            for (i, t) in tokens.iter().enumerate() {
-                let t = t.as_str();
-                let mut weight = 0.0;
-                if title.contains(t) {
-                    weight += Self::W_NAME;
-                }
-                if aliases.iter().any(|a| a.contains(t)) {
-                    weight += Self::W_ALIAS;
-                }
-                // Whole-term equality, never `contains`: `to` must not hit
-                // `token_estimate`, `wiki` must not hit `WikiError`.
-                if defined_terms.contains(t) {
-                    weight += Self::W_DEFINED;
-                }
-                if summary.as_deref().is_some_and(|s| s.contains(t)) {
-                    weight += Self::W_SUMMARY;
-                }
-                if headings.iter().any(|h| h.contains(t)) {
-                    weight += Self::W_HEADING;
-                }
-                // match_indices is non-overlapping — the spec'd counting rule.
-                // `tf` may exceed `len` for short tokens ("on" in "one",
-                // "long"); `tf'` saturates, so that is harmless.
-                let tf = content_lower.match_indices(t).count();
-                any_body |= tf > 0;
-                if weight > 0.0 || tf > 0 {
-                    matched = true;
-                    df[i] += 1;
-                }
-                per_token.push((weight, tf));
-            }
-            if !matched {
-                continue;
-            }
-            let snippet = if any_body {
-                Self::snippet(&content, &content_lower, &tokens)
-            } else {
-                None
-            };
-            candidates.push(Candidate {
-                entry: e,
-                per_token,
-                len,
-                snippet,
-            });
+            candidates.extend(candidate);
         }
         if candidates.is_empty() {
             return Vec::new();

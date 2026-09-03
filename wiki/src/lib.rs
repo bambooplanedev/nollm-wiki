@@ -81,6 +81,21 @@ pub fn compile(
     }
 }
 
+/// Delete the `<id>.md` of every cached page whose id is no longer live.
+/// A page that cannot be removed would still be counted by `lint` and
+/// served by `serve`, so that is warned about instead of reported as a
+/// clean compile. Already-gone is the normal case after a manual delete and
+/// needs no warning.
+fn prune_stale(cache: &cache::Cache, live: &BTreeSet<String>, output: &Path) {
+    for stale in cache.pages.keys().filter(|k| !live.contains(*k)) {
+        if let Err(e) = std::fs::remove_file(output.join(format!("{stale}.md"))) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("warning: could not remove stale page {stale}.md: {e}");
+            }
+        }
+    }
+}
+
 fn compile_inner(
     input: &Path,
     output: &Path,
@@ -186,23 +201,7 @@ fn compile_inner(
     // 5. Prune deleted pages from cache + disk.
     let live: BTreeSet<String> = entities.keys().cloned().collect();
     if opts.incremental {
-        for stale in cache
-            .pages
-            .keys()
-            .filter(|k| !live.contains(*k))
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            // A page that cannot be removed would still be counted by
-            // `lint` and served by `serve`, so say so instead of reporting
-            // a clean compile. Already-gone is the normal case after a
-            // manual delete and needs no warning.
-            if let Err(e) = std::fs::remove_file(output.join(format!("{stale}.md"))) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("warning: could not remove stale page {stale}.md: {e}");
-                }
-            }
-        }
+        prune_stale(&cache, &live, output);
     }
     cache.retain_ids(&live);
     if opts.incremental {
