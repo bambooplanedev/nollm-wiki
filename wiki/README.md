@@ -261,7 +261,9 @@ source tree. Three artifacts drive that:
   each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`,
   `degree_in`, `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`,
   `neighbors_in`, `defined` (the page's top-level definition names —
-  functions, types, constants — in original case; empty for non-code pages).
+  functions, types, constants — in original case; empty for non-code pages),
+  `methods` (the page's inherent-impl and trait-declaration method names, in
+  original case; trait-impl methods are excluded; empty for non-code pages).
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under

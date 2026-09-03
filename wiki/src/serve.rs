@@ -95,9 +95,10 @@ impl WikiState {
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct SearchParams {
-    /// Search query, matched case-insensitively against title, aliases,
-    /// summary, section headings, and body. A page matching any one token
-    /// is a hit; rare tokens weigh far more than common ones.
+    /// Search query, matched case-insensitively: title, aliases, summary and
+    /// section headings by word prefix (every part of the token), defined
+    /// and method names by whole term, body by substring. A page matching
+    /// any one token is a hit; rare tokens weigh far more than common ones.
     pub query: String,
     /// Filter by source kind: `text`, `markdown`, or `code:<lang>`
     /// (e.g. `code:rust`).
