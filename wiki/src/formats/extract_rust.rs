@@ -4,7 +4,7 @@ use super::code::{
     default_shape, keep_all, no_export_set, sig_start_identity, LangSpec, Placement, Rank, Shape,
 };
 use std::sync::LazyLock;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
+use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 /// The `#[cfg(test)]` module scan's query, compiled once per process rather
 /// than once per Rust file. See `code::QUERIES` for why.
@@ -313,8 +313,8 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
 
     // (start, end, mod name) per cfg(test) module, at any nesting depth.
     let mut spans: Vec<(usize, usize, String)> = Vec::new();
-    let matches = cursor.matches(query, tree.root_node(), text.as_bytes());
-    for m in matches {
+    let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
+    while let Some(m) = matches.next() {
         for cap in m.captures {
             let node = cap.node;
             // The whole attribute run above the mod is spliced when any of

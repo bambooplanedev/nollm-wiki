@@ -4,7 +4,9 @@ use crate::formats::{summarize, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
-use tree_sitter::{Language, Node, Parser, Query, QueryCursor, QueryMatch, Tree};
+use tree_sitter::{
+    Language, Node, Parser, Query, QueryCursor, QueryMatch, StreamingIterator, Tree,
+};
 
 pub struct CodeExtractor;
 
@@ -580,9 +582,9 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     let mut methods: Vec<String> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
-    let matches = cursor.matches(query, tree.root_node(), text.as_bytes());
-    for m in matches {
-        let parts = split_captures(&m, &idx, text, &mut imports);
+    let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
+    while let Some(m) = matches.next() {
+        let parts = split_captures(m, &idx, text, &mut imports);
         if let Some(def) = parts.def {
             let Placement::Scoped(chain) = (spec.placement)(def, text) else {
                 continue;

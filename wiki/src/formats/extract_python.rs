@@ -4,7 +4,7 @@
 use super::code::{default_shape, keep_any_vis, no_header_group, LangSpec, Placement, Rank, Shape};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
-use tree_sitter::{Language, Node, Query, QueryCursor, Tree};
+use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
 
 /// The `__all__` scan's query, compiled once per process rather than once per
 /// Python file. See `code::QUERIES` for why.
@@ -222,7 +222,8 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     // assignment must clear it, which is why this is reset on every match
     // rather than only updated when a new literal is found.
     let mut last_literal_rhs: Option<Node> = None;
-    for m in cursor.matches(query, tree.root_node(), text.as_bytes()) {
+    let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
+    while let Some(m) = matches.next() {
         let mut lhs = None;
         let mut rhs = None;
         let mut method = None;

@@ -192,7 +192,7 @@ breaking any of them reintroduces nondeterminism.
   tree-sitter field names (`trait:`, `type:`, `value:`, `body:`) and node kinds
   (`declaration_list`, `const_item`, `static_item`, `type_item`,
   `function_signature_item`). `Cargo.toml` carets
-  `tree-sitter-rust = "0.23"`, so `Cargo.lock` is what guarantees byte-identical
+  `tree-sitter-rust = "0.24"`, so `Cargo.lock` is what guarantees byte-identical
   output across machines; a grammar bump is an output-affecting change and must
   be reviewed as one.
 - **Rust and Python guard module level with opposite conventions, on
