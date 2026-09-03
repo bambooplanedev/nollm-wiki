@@ -1,8 +1,8 @@
-//! `defined` names in search: serde compatibility with an older `index.json`
-//! and the whole-term match rule. The extractor always renders a defined
-//! name into `## Exports`, so a "defined-only" hit can only be built by
-//! hand — which is also what an index written by an older compiler looks
-//! like.
+//! `defined` and `methods` names in search: serde compatibility with an
+//! older `index.json` and the whole-term match rule. The extractor always
+//! renders a defined name into `## Exports`, so a "defined-only" hit can
+//! only be built by hand — which is also what an index written by an older
+//! compiler looks like.
 
 use std::fs;
 use tempfile::tempdir;
@@ -51,6 +51,8 @@ fn build() -> tempfile::TempDir {
     dir
 }
 
+// Also proves an index without `methods` loads: the `manifest` entry above
+// has `defined` but no `methods` key.
 #[test]
 fn an_index_without_defined_still_loads() {
     let dir = build();

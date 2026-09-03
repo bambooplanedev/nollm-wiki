@@ -65,7 +65,11 @@ pub struct Entity {
     /// trait-declaration methods are in; trait-impl methods
     /// (`Default::default`, `Extractor::extract` on the implementing page)
     /// are out by owner, never by text (see the 2026-09-03 prefix-match and
-    /// methods design). Search matches these whole, never word-split.
+    /// methods design). Python class methods are included
+    /// (`function_definition`). JS/TS/Go pages always carry an empty list:
+    /// their method node kinds aren't in the checked set, a scope limit,
+    /// not a fact about the file. Search matches these whole, never
+    /// word-split.
     pub methods: Vec<String>,
 }
 

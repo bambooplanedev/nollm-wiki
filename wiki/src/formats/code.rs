@@ -1092,12 +1092,21 @@ mod tests {
         // declaration: kept (`function_signature_item`, the trait page
         // defines the API). A field and an associated const are `Member`
         // but not functions. `defined` is unchanged by the new field.
-        let src = "pub struct S { pub f: u8 }\nimpl S {\n    pub fn new() -> S { S { f: 0 } }\n    pub fn get(&self) -> u8 { self.f }\n}\nimpl T for S {\n    fn m(&self) {}\n}\npub trait T {\n    const K: u32;\n    fn m(&self);\n}\n";
+        // `m` collides between the trait impl and the trait declaration, so
+        // its presence alone wouldn't pin the trait-impl exclusion; a second
+        // trait impl with a uniquely named method (`only_in_impl`) does that
+        // instead, via its absence from `e.methods`.
+        let src = "pub struct S { pub f: u8 }\nimpl S {\n    pub fn new() -> S { S { f: 0 } }\n    pub fn get(&self) -> u8 { self.f }\n}\nimpl T for S {\n    fn m(&self) {}\n}\nimpl U for S {\n    fn only_in_impl(&self) {}\n}\npub trait T {\n    const K: u32;\n    fn m(&self);\n}\n";
         let e = CodeExtractor.extract("s.rs", src);
         assert_eq!(
             e.methods,
             vec!["get", "m", "new"],
             "methods: {:?}",
+            e.methods
+        );
+        assert!(
+            !e.methods.contains(&"only_in_impl".to_string()),
+            "trait-impl methods must be excluded: {:?}",
             e.methods
         );
         assert_eq!(e.defined, vec!["S", "T"], "defined: {:?}", e.defined);

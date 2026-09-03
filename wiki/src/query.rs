@@ -254,15 +254,16 @@ impl Wiki {
             .all(|p| words.iter().any(|w| w.starts_with(p)))
     }
 
-    /// The search terms a page earns from its `defined` names, plus every
-    /// `methods` name lowercased whole, minus names equal to a title word:
-    /// each lowercased full name plus each of its words, minus the
-    /// self-name skip. The skip is word-level: a word equal to a title word
-    /// is dropped (the title already scores it at `W_NAME`; crediting it
-    /// again let `Cache` on page `cache` outrank `code`), the other words
-    /// stay, and the full name stays unless it is itself a title word — the
-    /// title never matches the full-name token, so dropping the whole name
-    /// would leave the definer with no credit (`codeextractor` on `code`).
+    /// The search terms a page earns from its `defined` names — each
+    /// lowercased full name plus each of its words, minus the self-name
+    /// skip — plus every `methods` name lowercased whole, minus names equal
+    /// to a title word. The skip is word-level: a word equal to a title
+    /// word is dropped (the title already scores it at `W_NAME`; crediting
+    /// it again let `Cache` on page `cache` outrank `code`), the other
+    /// words stay, and the full name stays unless it is itself a title
+    /// word — the title never matches the full-name token, so dropping the
+    /// whole name would leave the definer with no credit (`codeextractor`
+    /// on `code`).
     fn defined_terms(
         title_lower: &str,
         defined: &[String],

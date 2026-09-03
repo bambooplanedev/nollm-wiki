@@ -210,9 +210,11 @@ fn covers_majority_ignores_short_tokens_and_needs_half() {
 /// ranking. They were kept deliberately, and the 2026-09-02 scoring cycle
 /// (partial matching, IDF, length normalisation, section-heading field)
 /// made all eight reachable. The set still contains one deliberate miss
-/// (`sorted` → `walk`, rank 2 since the 2026-09-03 prefix-match cycle; before
-/// it `extractor` → `formats`, and before that `slugify title case`) for the
-/// same reason: a set of only passing cases is blind to the next defect.
+/// (`sorted` → `walk`, rank 2 under both the substring and the prefix
+/// scorer, which became the set's deliberate miss in the 2026-09-03
+/// prefix-match cycle; before it `extractor` → `formats`, and before that
+/// `slugify title case`) for the same reason: a set of only passing cases
+/// is blind to the next defect.
 const CASES: &[(&str, &str)] = &[
     ("determinism rules", "architecture"),
     ("incremental cache", "cache"),
