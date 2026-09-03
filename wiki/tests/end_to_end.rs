@@ -515,3 +515,30 @@ fn js_ts_go_extract_exported_signatures() {
         "go exports: {go:?}"
     );
 }
+
+#[test]
+fn index_json_carries_methods_for_code_pages_and_empty_for_text() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    write(
+        &input,
+        "store.rs",
+        "pub struct Store;\nimpl Store {\n    pub fn open() -> Store {\n        Store\n    }\n}\n",
+    );
+    write(&input, "notes.txt", "Plain notes.\n");
+    let output = dir.path().join("out");
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    let entry = |id: &str| {
+        v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap_or_else(|| panic!("no entry {id}"))
+            .clone()
+    };
+    assert_eq!(entry("store")["methods"], serde_json::json!(["open"]));
+    assert_eq!(entry("notes")["methods"], serde_json::json!([]));
+}

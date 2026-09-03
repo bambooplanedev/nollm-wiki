@@ -20,8 +20,11 @@ pub struct ManifestEntry {
     pub neighbors_out: Vec<String>,
     pub neighbors_in: Vec<String>,
     /// Top-level definition names of the page (see `Entity::defined`).
-    /// Declared last so it is the last key of every `index.json` entry.
     pub defined: Vec<String>,
+    /// Method names of the page (see `Entity::methods`). Declared last so
+    /// it is the last key of every `index.json` entry: serde emits fields
+    /// in declaration order.
+    pub methods: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -64,6 +67,7 @@ pub fn build_manifest(
                 neighbors_out: out,
                 neighbors_in: inc,
                 defined: e.defined.clone(),
+                methods: e.methods.clone(),
             }
         })
         .collect();
@@ -223,9 +227,12 @@ mod tests {
     }
 
     #[test]
-    fn index_json_carries_defined_names_as_the_last_entry_key() {
+    #[allow(clippy::many_single_char_names)] // brief's exact local var names (ents, g, m, v, n, d)
+    fn index_json_carries_defined_and_methods_as_the_last_entry_keys() {
         let (mut ents, g) = setup();
-        ents.get_mut("alpha").unwrap().defined = vec!["Alpha".into(), "build_alpha".into()];
+        let alpha_e = ents.get_mut("alpha").unwrap();
+        alpha_e.defined = vec!["Alpha".into(), "build_alpha".into()];
+        alpha_e.methods = vec!["build".into()];
         let m = build_manifest("My Project", &ents, &g);
         let json = render_index_json(&m);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -235,12 +242,18 @@ mod tests {
             alpha["defined"],
             serde_json::json!(["Alpha", "build_alpha"])
         );
+        assert_eq!(alpha["methods"], serde_json::json!(["build"]));
         assert_eq!(v["entries"][1]["defined"], serde_json::json!([]));
-        // Last key: `neighbors_in` precedes it in the pretty output.
+        assert_eq!(v["entries"][1]["methods"], serde_json::json!([]));
+        // Key order in the pretty output: neighbors_in < defined < methods,
+        // so `methods` is the last key of every entry.
         let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
+        let n = a_text.find("\"neighbors_in\"").unwrap();
+        let d = a_text.find("\"defined\"").unwrap();
+        let me = a_text.find("\"methods\"").unwrap();
         assert!(
-            a_text.find("\"neighbors_in\"").unwrap() < a_text.find("\"defined\"").unwrap(),
-            "defined must be serialised after neighbors_in:\n{json}"
+            n < d && d < me,
+            "expected neighbors_in < defined < methods:\n{json}"
         );
     }
 }

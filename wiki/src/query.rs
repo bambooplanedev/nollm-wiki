@@ -26,6 +26,11 @@ struct Entry {
     /// loads: `serve` reads wikis it did not compile.
     #[serde(default)]
     defined: Vec<String>,
+    /// Method names (`ManifestEntry::methods`). Defaulted for the same
+    /// reason as `defined`: an older `index.json` has no such key.
+    #[serde(default)]
+    #[allow(dead_code)] // read by Task 4 of the 2026-09-03 plan
+    methods: Vec<String>,
 }
 
 #[derive(Deserialize)]
