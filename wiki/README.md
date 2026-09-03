@@ -17,6 +17,9 @@ The binary is written to `target/release/wiki`. For local runs without a
 separate build step, use `cargo run --release -- <args>` in place of the
 binary path.
 
+Tagged releases carry prebuilt binaries for Linux x86_64 and macOS
+(Apple silicon and Intel) on the GitHub Releases page.
+
 ## Quickstart
 
 Run from `wiki/`:

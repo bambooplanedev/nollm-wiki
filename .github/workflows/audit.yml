@@ -1,0 +1,30 @@
+name: Audit
+
+# RustSec advisories against Cargo.lock: on every change to the lockfile,
+# and weekly so an advisory published against an unchanged lockfile is
+# still caught.
+on:
+  push:
+    paths:
+      - wiki/Cargo.lock
+      - .github/workflows/audit.yml
+  pull_request:
+    paths:
+      - wiki/Cargo.lock
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+  checks: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: wiki

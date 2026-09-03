@@ -532,4 +532,12 @@ still not stripped.
   ```
   `.github/workflows/rust.yml` runs the same on every push and pull request
   to `main`, in four steps: `cargo fmt --check`, `cargo clippy --all-targets
-  -- -D warnings`, `cargo build`, `cargo test`.
+  -- -D warnings`, `cargo test`, `cargo doc` with warnings denied. Clippy's
+  `pedantic` group is on through `[lints.clippy]` in `Cargo.toml`, with the
+  lints that fight this codebase allowed there, each with its reason; `-D
+  warnings` turns the rest into failures. Two more workflows: `audit.yml`
+  checks `Cargo.lock` against the RustSec database on every lockfile change
+  and weekly, and `release.yml` builds Linux and macOS binaries for a `v*`
+  tag and attaches them to a GitHub Release with generated notes.
+  `.github/dependabot.yml` opens weekly dependency PRs, minor and patch
+  bumps grouped into one.
