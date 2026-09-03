@@ -227,7 +227,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::many_single_char_names)] // brief's exact local var names (ents, g, m, v, n, d)
     fn index_json_carries_defined_and_methods_as_the_last_entry_keys() {
         let (mut ents, g) = setup();
         let alpha_e = ents.get_mut("alpha").unwrap();
@@ -248,11 +247,11 @@ mod tests {
         // Key order in the pretty output: neighbors_in < defined < methods,
         // so `methods` is the last key of every entry.
         let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
-        let n = a_text.find("\"neighbors_in\"").unwrap();
-        let d = a_text.find("\"defined\"").unwrap();
-        let me = a_text.find("\"methods\"").unwrap();
+        let pos_neighbors_in = a_text.find("\"neighbors_in\"").unwrap();
+        let pos_defined = a_text.find("\"defined\"").unwrap();
+        let pos_methods = a_text.find("\"methods\"").unwrap();
         assert!(
-            n < d && d < me,
+            pos_neighbors_in < pos_defined && pos_defined < pos_methods,
             "expected neighbors_in < defined < methods:\n{json}"
         );
     }
