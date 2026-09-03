@@ -189,11 +189,12 @@ impl Extractor for CodeExtractor {
             None => (text.to_string(), None),
         };
 
-        let (lang_name, symbols, imports, defined, docstring, summary_fallback) =
+        let (lang_name, symbols, imports, defined, methods, docstring, summary_fallback) =
             match extract_code(ext, &source, pre_parsed) {
                 Some(v) => v,
                 None => (
                     ext.to_string(),
+                    Vec::new(),
                     Vec::new(),
                     Vec::new(),
                     Vec::new(),
@@ -223,16 +224,18 @@ impl Extractor for CodeExtractor {
             symbols,
             imports,
             defined,
+            methods,
         }
     }
 }
 
-/// `(language, symbols, imports, defined, docstring, summary_fallback)`. The
-/// fallback is chosen here rather than by the caller: freeness is known only
-/// while the captures are in hand, and `symbols` alone cannot be
-/// reinterpreted after sorting.
+/// `(language, symbols, imports, defined, methods, docstring,
+/// summary_fallback)`. The fallback is chosen here rather than by the
+/// caller: freeness is known only while the captures are in hand, and
+/// `symbols` alone cannot be reinterpreted after sorting.
 type CodeInfo = (
     String,
+    Vec<String>,
     Vec<String>,
     Vec<String>,
     Vec<String>,
@@ -568,6 +571,13 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
     // stays a plain `Vec<String>`.
     let mut collected: Vec<Collected> = Vec::new();
+    // Method names for `Entity::methods`. Gathered here, not as a second
+    // projection over `collected`: that tuple carries no node kind, and a
+    // `fn`, a field and an associated `const` of one impl are all `Member`,
+    // told apart only by signature text, which is never parsed. The three
+    // node kinds are the seam's one concession: they name "a function" in
+    // the grammars this file already dispatches on.
+    let mut methods: Vec<String> = Vec::new();
     let mut imports = Vec::new();
     let mut cursor = QueryCursor::new();
     let matches = cursor.matches(query, tree.root_node(), text.as_bytes());
@@ -588,6 +598,18 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 if !sig.is_empty() {
                     let kind = classify(parts.name, owner.as_deref(), shape.rank);
                     let group = group_key(owner.as_deref(), name_text, def, text, &spec);
+                    let is_function = matches!(
+                        def.kind(),
+                        "function_item" | "function_signature_item" | "function_definition"
+                    );
+                    let trait_impl = owner
+                        .as_deref()
+                        .is_some_and(super::extract_rust::is_trait_impl);
+                    if kind == ItemKind::Member && is_function && !trait_impl {
+                        if let Some(n) = name_text {
+                            methods.push(n.to_string());
+                        }
+                    }
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
@@ -621,6 +643,8 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         .collect();
     defined.sort();
     defined.dedup();
+    methods.sort();
+    methods.dedup();
 
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
@@ -635,6 +659,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         symbols,
         imports,
         defined,
+        methods,
         docstring,
         summary_fallback,
     ))
@@ -1059,6 +1084,39 @@ mod tests {
         let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> u8 { 0 }\n}\n";
         let e = CodeExtractor.extract("text.rs", src);
         assert_eq!(e.defined, vec!["TextExtractor"], "defined: {:?}", e.defined);
+    }
+
+    #[test]
+    fn methods_keep_inherent_and_trait_declaration_functions_only() {
+        // Inherent impl: kept. Trait impl: dropped (owner `<S as T>`). Trait
+        // declaration: kept (`function_signature_item`, the trait page
+        // defines the API). A field and an associated const are `Member`
+        // but not functions. `defined` is unchanged by the new field.
+        let src = "pub struct S { pub f: u8 }\nimpl S {\n    pub fn new() -> S { S { f: 0 } }\n    pub fn get(&self) -> u8 { self.f }\n}\nimpl T for S {\n    fn m(&self) {}\n}\npub trait T {\n    const K: u32;\n    fn m(&self);\n}\n";
+        let e = CodeExtractor.extract("s.rs", src);
+        assert_eq!(
+            e.methods,
+            vec!["get", "m", "new"],
+            "methods: {:?}",
+            e.methods
+        );
+        assert_eq!(e.defined, vec!["S", "T"], "defined: {:?}", e.defined);
+    }
+
+    #[test]
+    fn methods_capture_python_class_methods_and_drop_private_ones() {
+        // `should_keep` already applies `keep_python_public` to members, so
+        // `_private` and `__repr__` never reach `collected`; pinned here so
+        // a change there shows up as a `methods` change.
+        let py = "class Registry:\n    def register(self, x):\n        pass\n    def _private(self):\n        pass\n    def __repr__(self):\n        return \"\"\n\ndef free():\n    pass\n";
+        let e = CodeExtractor.extract("t.py", py);
+        assert_eq!(e.methods, vec!["register"], "methods: {:?}", e.methods);
+        assert_eq!(
+            e.defined,
+            vec!["Registry", "free"],
+            "defined: {:?}",
+            e.defined
+        );
     }
 
     #[test]

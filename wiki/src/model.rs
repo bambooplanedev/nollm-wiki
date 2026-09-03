@@ -57,6 +57,16 @@ pub struct Entity {
     /// impl headers are excluded by kind, never by text (see the 2026-09-02
     /// defined-names design).
     pub defined: Vec<String>,
+    /// Names of the page's methods: `ItemKind::Member` items whose node is a
+    /// function (`function_item`, `function_signature_item`,
+    /// `function_definition`) and whose owner is not a trait impl, exactly
+    /// as the `@name` capture reads them — original case, no owner. Sorted,
+    /// deduplicated. Empty for non-code pages. Inherent-impl and
+    /// trait-declaration methods are in; trait-impl methods
+    /// (`Default::default`, `Extractor::extract` on the implementing page)
+    /// are out by owner, never by text (see the 2026-09-03 prefix-match and
+    /// methods design). Search matches these whole, never word-split.
+    pub methods: Vec<String>,
 }
 
 #[derive(Default, Clone, Debug)]

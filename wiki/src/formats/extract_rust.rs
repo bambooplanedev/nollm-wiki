@@ -159,6 +159,15 @@ fn trait_impl_owner(impl_item: Node, text: &str) -> Option<String> {
     Some(format!("<{} as {}>", ty, text.get(tr.byte_range())?))
 }
 
+/// Whether an owner string rendered by `trait_impl_owner` names a trait
+/// impl. Owner forms: `<Type as Trait>` for trait impls, the bare type for
+/// inherent impls, the bare trait name for declarations, `Class.Inner` for
+/// Python — only trait impls start with `<`. The one place that contract is
+/// read; keep it next to the one place it is written.
+pub(crate) fn is_trait_impl(owner: &str) -> bool {
+    owner.starts_with('<')
+}
+
 /// The group a trait-impl header shares with its own methods.
 pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
     if def.kind() != "impl_item" {

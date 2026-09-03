@@ -40,6 +40,7 @@ impl Extractor for MarkdownExtractor {
             symbols: Vec::new(),
             imports: Vec::new(),
             defined: Vec::new(),
+            methods: Vec::new(),
         }
     }
 }

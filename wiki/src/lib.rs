@@ -444,6 +444,7 @@ mod tests {
             symbols: vec![],
             imports: vec![],
             defined: vec![],
+            methods: vec![],
         }
     }
 
