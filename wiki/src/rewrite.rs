@@ -3,7 +3,7 @@
 use crate::hash::{combine, to_hex};
 use crate::model::{Edges, Entity, SourceKind};
 use regex::Regex;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -149,7 +149,7 @@ pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
     sections
 }
 
-pub fn read_preserved_notes(path: &Path) -> String {
+pub(crate) fn read_preserved_notes(path: &Path) -> String {
     match std::fs::read_to_string(path) {
         Ok(text) => {
             let notes = parse_sections(&text)
@@ -281,22 +281,19 @@ pub fn render_page(
     out
 }
 
-pub fn render_fingerprint(
+pub(crate) fn render_fingerprint(
     entity: &Entity,
     edges: &Edges,
     entities: &BTreeMap<String, Entity>,
     preserved_notes: &str,
 ) -> [u8; 32] {
-    let out_names: Vec<String> = edges
-        .outgoing
-        .iter()
-        .filter_map(|id| entities.get(id).map(|e| e.name.clone()))
-        .collect();
-    let in_names: Vec<String> = edges
-        .incoming
-        .iter()
-        .filter_map(|id| entities.get(id).map(|e| e.name.clone()))
-        .collect();
+    let names_of = |ids: &BTreeSet<String>| -> Vec<String> {
+        ids.iter()
+            .filter_map(|id| entities.get(id).map(|e| e.name.clone()))
+            .collect()
+    };
+    let out_names = names_of(&edges.outgoing);
+    let in_names = names_of(&edges.incoming);
     combine(&[
         entity.name.as_bytes(),
         entity.created.as_bytes(),
@@ -314,7 +311,7 @@ pub fn render_fingerprint(
 }
 
 /// Write via a temp file + rename so an interrupted run can't leave a half-written page.
-pub fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

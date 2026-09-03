@@ -502,6 +502,11 @@ impl Wiki {
     /// centrality neighbor beats several lighter lower-centrality ones; see
     /// `full_neighbors_max_tokens_prefers_centrality_over_packing`.
     /// Neighbors get summary blocks unless `full_neighbors` is set.
+    /// Pagerank of `id`, or 0 for an id the index does not know.
+    fn pagerank_of(&self, id: &str) -> f64 {
+        self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
@@ -512,9 +517,9 @@ impl Wiki {
         // first.
         let mut candidates: Vec<String> = seen.iter().filter(|n| *n != id).cloned().collect();
         candidates.sort_by(|a, b| {
-            let pa = self.entries.get(a).map(|e| e.pagerank).unwrap_or(0.0);
-            let pb = self.entries.get(b).map(|e| e.pagerank).unwrap_or(0.0);
-            pb.total_cmp(&pa).then_with(|| a.cmp(b))
+            self.pagerank_of(b)
+                .total_cmp(&self.pagerank_of(a))
+                .then_with(|| a.cmp(b))
         });
 
         // Apply max_nodes: keep target + the highest-centrality neighbors
@@ -585,9 +590,9 @@ impl Wiki {
         // Emit ascending by pagerank so the highest-centrality neighbor
         // lands last ("lost in the middle" placement).
         kept.sort_by(|(a, _), (b, _)| {
-            let pa = self.entries.get(a).map(|e| e.pagerank).unwrap_or(0.0);
-            let pb = self.entries.get(b).map(|e| e.pagerank).unwrap_or(0.0);
-            pa.total_cmp(&pb).then_with(|| a.cmp(b))
+            self.pagerank_of(a)
+                .total_cmp(&self.pagerank_of(b))
+                .then_with(|| a.cmp(b))
         });
 
         let mut text = String::new();

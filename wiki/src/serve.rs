@@ -50,7 +50,7 @@ struct Loaded {
 /// reloads on change. A failed reload (mid-compile write, malformed index,
 /// deleted file) keeps serving the previous snapshot; the reload is retried
 /// on the next access.
-pub struct WikiState {
+pub(crate) struct WikiState {
     dir: PathBuf,
     inner: Mutex<Loaded>,
 }
@@ -91,7 +91,7 @@ impl WikiState {
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
-pub struct SearchParams {
+pub(crate) struct SearchParams {
     /// Search query, matched case-insensitively against title, aliases,
     /// summary, section headings, and body. A page matching any one token
     /// is a hit; rare tokens weigh far more than common ones.
@@ -105,7 +105,7 @@ pub struct SearchParams {
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
-pub struct NeighborsParams {
+pub(crate) struct NeighborsParams {
     /// Page id (slug) to build the context pack around.
     pub id: String,
     /// BFS hop count from the target page (default 1).
@@ -119,7 +119,7 @@ pub struct NeighborsParams {
 }
 
 #[derive(Clone)]
-pub struct WikiServer {
+pub(crate) struct WikiServer {
     state: Arc<WikiState>,
     tool_router: ToolRouter<Self>,
 }

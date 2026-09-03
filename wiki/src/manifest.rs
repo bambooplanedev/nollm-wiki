@@ -102,23 +102,21 @@ pub fn render_llms_txt(m: &Manifest) -> String {
     ranks.sort_by(|a, b| a.total_cmp(b));
     let median = ranks.get(ranks.len() / 2).copied().unwrap_or(0.0);
 
-    out.push_str("## Docs\n\n");
-    for e in m.entries.iter().filter(|e| e.pagerank >= median) {
-        out.push_str(&format!(
+    let line = |e: &ManifestEntry| {
+        format!(
             "- [{}]({}): {}\n",
             e.title,
             e.page,
             e.summary.as_deref().unwrap_or("")
-        ));
+        )
+    };
+    out.push_str("## Docs\n\n");
+    for e in m.entries.iter().filter(|e| e.pagerank >= median) {
+        out.push_str(&line(e));
     }
     out.push_str("\n## Optional\n\n");
     for e in m.entries.iter().filter(|e| e.pagerank < median) {
-        out.push_str(&format!(
-            "- [{}]({}): {}\n",
-            e.title,
-            e.page,
-            e.summary.as_deref().unwrap_or("")
-        ));
+        out.push_str(&line(e));
     }
     out
 }

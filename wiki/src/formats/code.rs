@@ -158,7 +158,7 @@ static QUERIES: LazyLock<BTreeMap<&'static str, Query>> = LazyLock::new(|| {
 /// deterministically *before* any page is written. Without this the first
 /// failure would surface lazily inside a rayon worker, partway through a
 /// parallel run, with output already committed for other files.
-pub fn validate_queries() {
+pub(crate) fn validate_queries() {
     LazyLock::force(&QUERIES);
     super::extract_python::validate_queries();
     super::extract_rust::validate_queries();
