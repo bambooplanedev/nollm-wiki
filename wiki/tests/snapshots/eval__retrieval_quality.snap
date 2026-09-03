@@ -24,7 +24,8 @@ obsidian wikilink slug format          wiki             1    10  wiki
 token estimate chars                   manifest         1     8  manifest
 cache version hash algo mismatch       cache            1    10  cache
 extractor trait                        formats          1     6  formats
-extractor                              formats          3     6  text
+extractor                              formats          1     6  formats
+sorted                                 walk             2     3  architecture
 
-top1         0.9524
-mrr@10       0.9683
+top1         0.9545
+mrr@10       0.9773

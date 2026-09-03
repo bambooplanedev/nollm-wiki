@@ -225,6 +225,36 @@ impl Wiki {
         words
     }
 
+    /// The words of a lowercased field: maximal runs of alphanumeric
+    /// characters (`char::is_alphanumeric`, so digits count and `_`, `-`,
+    /// `:` and punctuation split). Computed once per page per field.
+    fn field_words(field: &str) -> Vec<String> {
+        field
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether query token `t` hits a field given its `field_words`: every
+    /// alphanumeric part of `t` is a prefix of some word of the field
+    /// (prefix includes equality; parts may match non-adjacent words).
+    /// Replaces substring matching, under which `write` hit the title
+    /// `Rewrite` and `id` hit `process-wide`; a prefix still catches the
+    /// derived forms substring caught (`wikilink` → `wikilinks`, `dir` →
+    /// `directory`). `tokenize` trims edges and drops empties with this
+    /// same predicate, so a part-less token cannot arrive and the vacuous
+    /// `all` is safe.
+    fn field_hit(words: &[String], t: &str) -> bool {
+        debug_assert!(
+            t.chars().any(char::is_alphanumeric),
+            "tokenize never yields a token without an alphanumeric part"
+        );
+        t.split(|c: char| !c.is_alphanumeric())
+            .filter(|p| !p.is_empty())
+            .all(|p| words.iter().any(|w| w.starts_with(p)))
+    }
+
     /// The search terms a page earns from its `defined` names: each
     /// lowercased full name plus each of its words, minus the self-name
     /// skip. The skip is word-level: a word equal to a title word is
@@ -321,8 +351,16 @@ impl Wiki {
         df: &mut [usize],
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
-        let aliases: Vec<String> = e.aliases.iter().map(|a| a.to_lowercase()).collect();
-        let summary = e.summary.as_deref().map(str::to_lowercase);
+        let title_words = Self::field_words(&title);
+        let alias_words: Vec<Vec<String>> = e
+            .aliases
+            .iter()
+            .map(|a| Self::field_words(&a.to_lowercase()))
+            .collect();
+        let summary_words: Option<Vec<String>> = e
+            .summary
+            .as_deref()
+            .map(|s| Self::field_words(&s.to_lowercase()));
         let defined_terms = Self::defined_terms(&title, &e.defined);
         let page = self.page(&e.id).unwrap_or_default();
         let sections = crate::rewrite::parse_sections(&page);
@@ -334,6 +372,8 @@ impl Wiki {
             })
             .map(|k| k.to_lowercase())
             .collect();
+        let heading_words: Vec<Vec<String>> =
+            headings.iter().map(|h| Self::field_words(h)).collect();
         let content = Self::content_text(&sections);
         let content_lower = content.to_lowercase();
         let len = content.split_whitespace().count();
@@ -344,10 +384,10 @@ impl Wiki {
         for (i, t) in tokens.iter().enumerate() {
             let t = t.as_str();
             let mut weight = 0.0;
-            if title.contains(t) {
+            if Self::field_hit(&title_words, t) {
                 weight += Self::W_NAME;
             }
-            if aliases.iter().any(|a| a.contains(t)) {
+            if alias_words.iter().any(|w| Self::field_hit(w, t)) {
                 weight += Self::W_ALIAS;
             }
             // Whole-term equality, never `contains`: `to` must not hit
@@ -355,10 +395,13 @@ impl Wiki {
             if defined_terms.contains(t) {
                 weight += Self::W_DEFINED;
             }
-            if summary.as_deref().is_some_and(|s| s.contains(t)) {
+            if summary_words
+                .as_deref()
+                .is_some_and(|w| Self::field_hit(w, t))
+            {
                 weight += Self::W_SUMMARY;
             }
-            if headings.iter().any(|h| h.contains(t)) {
+            if heading_words.iter().any(|w| Self::field_hit(w, t)) {
                 weight += Self::W_HEADING;
             }
             // match_indices is non-overlapping — the spec'd counting rule.
@@ -392,7 +435,7 @@ impl Wiki {
     /// Case-insensitive tokenized search over name/alias/defined names/summary/section headings/body.
     /// Partial matching: a page is a hit if any token matches
     /// any field.
-    /// Name, alias, summary, heading and body match by substring; defined names by whole term (the lowercased name or one of its words, see `defined_terms`).
+    /// Name, alias, summary and heading match when every alphanumeric part of the token is a prefix of one of the field's words (`field_hit`); body by substring; defined names by whole term (the lowercased name or one of its words, see `defined_terms`).
     ///
     /// Two passes. Pass 1 collects per-page facts and corpus statistics;
     /// pass 2 scores. Per token `t`:
@@ -656,6 +699,34 @@ mod tests {
         assert_eq!(Wiki::tokenize("beta BETA beta"), vec!["beta"]);
         assert!(Wiki::tokenize("").is_empty());
         assert!(Wiki::tokenize("  ,, !! ").is_empty());
+    }
+
+    #[test]
+    fn field_hit_needs_every_token_part_as_a_word_prefix() {
+        let w = Wiki::field_words;
+        // Words are maximal alphanumeric runs; digits count, `_ - :` split.
+        assert_eq!(
+            w("wiki::search 2026-09 a_b"),
+            vec!["wiki", "search", "2026", "09", "a", "b"]
+        );
+        // No longer a substring hit inside a word.
+        assert!(!Wiki::field_hit(&w("rewrite"), "write"));
+        assert!(!Wiki::field_hit(&w("process-wide query cache"), "id"));
+        // A prefix of a word still hits (derived forms survive).
+        assert!(Wiki::field_hit(&w("atomic writes"), "write"));
+        assert!(Wiki::field_hit(&w("directory walk"), "dir"));
+        // Every part of a punctuated token must hit; parts may match
+        // non-adjacent words.
+        assert!(Wiki::field_hit(
+            &w("process wide query cache"),
+            "process-wide"
+        ));
+        assert!(Wiki::field_hit(&w("search the whole wiki"), "wiki::search"));
+        assert!(!Wiki::field_hit(&w("process query"), "process-wide"));
+        // Unicode alphanumerics are words too.
+        assert!(Wiki::field_hit(&w("naïve bayes"), "na"));
+        // Longer than the word: not a prefix.
+        assert!(!Wiki::field_hit(&w("ab"), "abc"));
     }
 
     #[test]
