@@ -5,22 +5,19 @@ use super::code::{
     always_free, keep_all, keep_any_vis, no_export_set, no_header_group, sig_start_identity,
     LangSpec,
 };
+use tree_sitter::Language;
 
 fn keep_go_exported(name: &str) -> bool {
     name.chars().next().is_some_and(|c| c.is_uppercase())
 }
 
-pub(crate) fn js_spec() -> LangSpec {
+/// The JS and TS specs differ only in grammar and in the node kind a class
+/// name carries; everything else is shared here.
+fn ecma_spec(lang_name: &'static str, language: Language, query_src: &'static str) -> LangSpec {
     LangSpec {
-        lang_name: "javascript",
-        language: tree_sitter_javascript::LANGUAGE.into(),
-        // Only symbols wrapped in an `export_statement` are captured at
-        // all, so a bare `function helper() {}` never matches.
-        query_src: r#"
-                (export_statement declaration: (function_declaration name: (identifier) @name)) @def
-                (export_statement declaration: (class_declaration name: (identifier) @name)) @def
-                (import_statement source: (string) @import)
-            "#,
+        lang_name,
+        language,
+        query_src,
         name_filter: keep_all,
         vis_filter: keep_any_vis,
         strip_trailing: &[],
@@ -33,25 +30,30 @@ pub(crate) fn js_spec() -> LangSpec {
     }
 }
 
+pub(crate) fn js_spec() -> LangSpec {
+    ecma_spec(
+        "javascript",
+        tree_sitter_javascript::LANGUAGE.into(),
+        // Only symbols wrapped in an `export_statement` are captured at
+        // all, so a bare `function helper() {}` never matches.
+        r#"
+                (export_statement declaration: (function_declaration name: (identifier) @name)) @def
+                (export_statement declaration: (class_declaration name: (identifier) @name)) @def
+                (import_statement source: (string) @import)
+            "#,
+    )
+}
+
 pub(crate) fn ts_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "typescript",
-        language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        query_src: r#"
+    ecma_spec(
+        "typescript",
+        tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        r#"
                 (export_statement declaration: (function_declaration name: (identifier) @name)) @def
                 (export_statement declaration: (class_declaration name: (type_identifier) @name)) @def
                 (import_statement source: (string) @import)
             "#,
-        name_filter: keep_all,
-        vis_filter: keep_any_vis,
-        strip_trailing: &[],
-        placement: always_free,
-        owner_sep: "",
-        export_set: no_export_set,
-        join_continuations: false,
-        sig_start: sig_start_identity,
-        header_group: no_header_group,
-    }
+    )
 }
 
 pub(crate) fn go_spec() -> LangSpec {
