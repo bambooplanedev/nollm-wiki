@@ -3,11 +3,7 @@ use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
 
 mod common;
-use common::{exports, imports};
-
-fn write(dir: &std::path::Path, name: &str, body: &str) {
-    fs::write(dir.join(name), body).unwrap();
-}
+use common::{exports, imports, write};
 
 /// A reduced stand-in for the audit corpora: a dataclass module, a module with
 /// a constant and a private helper class, and a consumer that imports both

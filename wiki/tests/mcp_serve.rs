@@ -3,7 +3,13 @@
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+
+/// How long a single response may take before the test fails instead of
+/// hanging the whole `cargo test` run on a server that never answers.
+const RESPONSE_DEADLINE: Duration = Duration::from_secs(10);
 
 fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     let tmp = tempfile::tempdir().unwrap();
@@ -14,7 +20,11 @@ fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     (tmp, out)
 }
 
-fn spawn_server(dir: &std::path::Path) -> (Child, ChildStdin, BufReader<ChildStdout>) {
+/// Spawn `wiki serve` and hand back its stdin plus a channel of stdout
+/// lines. A pipe has no read timeout, so a thread does the blocking read
+/// and `read_response` waits on the channel with a deadline. The channel
+/// closes when the server closes stdout.
+fn spawn_server(dir: &std::path::Path) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
         .args(["serve", "--dir"])
         .arg(dir)
@@ -25,7 +35,16 @@ fn spawn_server(dir: &std::path::Path) -> (Child, ChildStdin, BufReader<ChildStd
         .unwrap();
     let stdin = child.stdin.take().unwrap();
     let stdout = BufReader::new(child.stdout.take().unwrap());
-    (child, stdin, stdout)
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in stdout.lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    (child, stdin, rx)
 }
 
 fn send(stdin: &mut ChildStdin, msg: Value) {
@@ -37,11 +56,17 @@ fn send(stdin: &mut ChildStdin, msg: Value) {
 
 /// Read lines until the response with the given id arrives (skips
 /// notifications and unrelated messages).
-fn read_response(stdout: &mut BufReader<ChildStdout>, id: u64) -> Value {
+fn read_response(stdout: &Receiver<String>, id: u64) -> Value {
     loop {
-        let mut line = String::new();
-        let n = stdout.read_line(&mut line).unwrap();
-        assert!(n > 0, "server closed stdout before responding to id {id}");
+        let line = match stdout.recv_timeout(RESPONSE_DEADLINE) {
+            Ok(line) => line,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                panic!("no response to id {id} within {RESPONSE_DEADLINE:?}")
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("server closed stdout before responding to id {id}")
+            }
+        };
         let v: Value = match serde_json::from_str(line.trim()) {
             Ok(v) => v,
             Err(_) => continue,
@@ -52,7 +77,7 @@ fn read_response(stdout: &mut BufReader<ChildStdout>, id: u64) -> Value {
     }
 }
 
-fn initialize(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>) {
+fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     send(
         stdin,
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
@@ -72,15 +97,15 @@ fn initialize(stdin: &mut ChildStdin, stdout: &mut BufReader<ChildStdout>) {
 #[test]
 fn serve_lists_and_calls_tools() {
     let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
-    initialize(&mut stdin, &mut stdout);
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
 
     // tools/list
     send(
         &mut stdin,
         json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
     );
-    let resp = read_response(&mut stdout, 2);
+    let resp = read_response(&stdout, 2);
     let names: Vec<&str> = resp["result"]["tools"]
         .as_array()
         .unwrap()
@@ -98,7 +123,7 @@ fn serve_lists_and_calls_tools() {
             "name": "search", "arguments": {"query": "gradient"}
         }}),
     );
-    let resp = read_response(&mut stdout, 3);
+    let resp = read_response(&stdout, 3);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("gradient_descent"), "search result: {text}");
 
@@ -109,7 +134,7 @@ fn serve_lists_and_calls_tools() {
             "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 800}
         }}),
     );
-    let resp = read_response(&mut stdout, 4);
+    let resp = read_response(&stdout, 4);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
 
@@ -120,7 +145,7 @@ fn serve_lists_and_calls_tools() {
             "name": "neighbors", "arguments": {"id": "no_such_page"}
         }}),
     );
-    let resp = read_response(&mut stdout, 5);
+    let resp = read_response(&stdout, 5);
     assert_eq!(resp["result"]["isError"], json!(true));
 
     // tools/call lint
@@ -130,7 +155,7 @@ fn serve_lists_and_calls_tools() {
             "name": "lint", "arguments": {}
         }}),
     );
-    let resp = read_response(&mut stdout, 6);
+    let resp = read_response(&stdout, 6);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
@@ -142,15 +167,15 @@ fn serve_lists_and_calls_tools() {
 #[test]
 fn serve_lists_and_reads_resources() {
     let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
-    initialize(&mut stdin, &mut stdout);
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
 
     // resources/list: 12 pages + index + llms.txt
     send(
         &mut stdin,
         json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
     );
-    let resp = read_response(&mut stdout, 2);
+    let resp = read_response(&stdout, 2);
     let resources = resp["result"]["resources"].as_array().unwrap();
     let uris: Vec<&str> = resources
         .iter()
@@ -180,7 +205,7 @@ fn serve_lists_and_reads_resources() {
             "uri": "wiki://page/gradient_descent"
         }}),
     );
-    let resp = read_response(&mut stdout, 3);
+    let resp = read_response(&stdout, 3);
     let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
     assert!(text.starts_with("# Gradient Descent"));
     assert_eq!(
@@ -195,7 +220,7 @@ fn serve_lists_and_reads_resources() {
             "uri": "wiki://index"
         }}),
     );
-    let resp = read_response(&mut stdout, 4);
+    let resp = read_response(&stdout, 4);
     let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
     assert!(
         serde_json::from_str::<Value>(text).is_ok(),
@@ -209,7 +234,7 @@ fn serve_lists_and_reads_resources() {
             "uri": "wiki://page/no_such_page"
         }}),
     );
-    let resp = read_response(&mut stdout, 5);
+    let resp = read_response(&stdout, 5);
     assert!(resp["error"].is_object(), "expected error, got: {resp}");
 
     drop(stdin);
@@ -222,8 +247,8 @@ fn serve_refuses_path_traversal_outside_index() {
     // Plant a decoy file outside the served directory.
     std::fs::write(out.parent().unwrap().join("secret.md"), "# Secret").unwrap();
 
-    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
-    initialize(&mut stdin, &mut stdout);
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
 
     send(
         &mut stdin,
@@ -231,7 +256,7 @@ fn serve_refuses_path_traversal_outside_index() {
             "uri": "wiki://page/../secret"
         }}),
     );
-    let resp = read_response(&mut stdout, 2);
+    let resp = read_response(&stdout, 2);
     assert!(resp["error"].is_object(), "expected error, got: {resp}");
 
     drop(stdin);
@@ -254,14 +279,14 @@ fn serve_refuses_non_wiki_dir() {
 #[test]
 fn search_hits_include_snippet_field() {
     let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
-    initialize(&mut stdin, &mut stdout);
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
     send(
         &mut stdin,
         json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
             "name": "search", "arguments": {"query": "gradient"}}}),
     );
-    let resp = read_response(&mut stdout, 7);
+    let resp = read_response(&stdout, 7);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     let hits: Value = serde_json::from_str(text).unwrap();
     let arr = hits.as_array().expect("hits array");
@@ -277,8 +302,8 @@ fn search_hits_include_snippet_field() {
 #[test]
 fn serve_reports_bad_params_and_survives() {
     let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, mut stdout) = spawn_server(&out);
-    initialize(&mut stdin, &mut stdout);
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
 
     // (a) An unknown kind is rejected inside the handler with
     // `McpError::invalid_params`, which rmcp surfaces as a JSON-RPC error
@@ -289,7 +314,7 @@ fn serve_reports_bad_params_and_survives() {
             "name": "search", "arguments": {"kind": "bogus", "query": "x"}
         }}),
     );
-    let resp = read_response(&mut stdout, 2);
+    let resp = read_response(&stdout, 2);
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
     let msg = resp["error"]["message"].as_str().unwrap();
     assert!(
@@ -306,7 +331,7 @@ fn serve_reports_bad_params_and_survives() {
             "name": "search", "arguments": {}
         }}),
     );
-    let resp = read_response(&mut stdout, 3);
+    let resp = read_response(&stdout, 3);
     assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("query"), "text: {text}");
@@ -318,7 +343,7 @@ fn serve_reports_bad_params_and_survives() {
             "name": "nope", "arguments": {}
         }}),
     );
-    let resp = read_response(&mut stdout, 4);
+    let resp = read_response(&stdout, 4);
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
 
     // (d) A budget the target's own page cannot fit degrades the target
@@ -329,10 +354,10 @@ fn serve_reports_bad_params_and_survives() {
             "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 1}
         }}),
     );
-    let resp = read_response(&mut stdout, 5);
+    let resp = read_response(&stdout, 5);
     assert_eq!(resp["result"]["isError"], json!(false), "got: {resp}");
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(text.contains("exceeds the budget"), "pack: {text}");
+    assert!(text.contains(wiki::query::OVER_BUDGET_NOTE), "pack: {text}");
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
 
     // (e) Still answering after every error above.
@@ -340,7 +365,7 @@ fn serve_reports_bad_params_and_survives() {
         &mut stdin,
         json!({"jsonrpc": "2.0", "id": 6, "method": "tools/list"}),
     );
-    let resp = read_response(&mut stdout, 6);
+    let resp = read_response(&stdout, 6);
     assert!(
         resp["result"]["tools"]
             .as_array()

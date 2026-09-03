@@ -29,10 +29,10 @@ use wiki::{compile, CompileOptions};
 /// Every page the corpus must compile to, **ascending by id** — the order
 /// `Wiki::list_pages` returns, which is not the source-path order the spec's
 /// table uses. An `assert_eq!` on the full list rather than a count: it also
-/// catches a lost extractor, an eighteenth file, a naming-rule change that
-/// moves an id, and a developer's global gitignore silently eating a corpus
-/// file (the harness compiles with `CompileOptions::default()`, which honours
-/// `git_global` and `git_exclude`).
+/// catches a lost extractor, an eighteenth file, and a naming-rule change
+/// that moves an id. (The harness compiles with `respect_ignore: false`, as
+/// `corpus_hash` walks, so a developer's global gitignore cannot eat a
+/// corpus file in the first place.)
 const EXPECTED_IDS: &[&str] = &[
     "architecture",
     "cache",
@@ -104,7 +104,11 @@ fn load_corpus() -> (TempDir, Wiki) {
     );
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("out");
-    compile(&corpus, &output, &CompileOptions::default()).unwrap();
+    let opts = CompileOptions {
+        respect_ignore: false,
+        ..CompileOptions::default()
+    };
+    compile(&corpus, &output, &opts).unwrap();
     let wiki = Wiki::load(&output).unwrap();
     (dir, wiki)
 }
@@ -424,7 +428,8 @@ fn pack_ceiling_holds_on_a_real_graph() {
             // today that always coincides with the degraded block alone
             // exceeding the budget, but that coincidence is what this checks
             // for, not the condition itself.
-            let is_floor = pack.included.len() == 1 && pack.text.contains("exceeds the budget");
+            let is_floor =
+                pack.included.len() == 1 && pack.text.contains(wiki::query::OVER_BUDGET_NOTE);
             if is_floor {
                 floor_fires += 1;
             }

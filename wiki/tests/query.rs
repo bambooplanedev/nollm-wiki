@@ -303,7 +303,8 @@ fn max_tokens_is_a_hard_ceiling_on_pack_size() {
             ..Default::default()
         };
         let pack = w.neighbors("hub", 1, &budget).unwrap();
-        let is_floor = pack.included.len() == 1 && pack.text.contains("exceeds the budget");
+        let is_floor =
+            pack.included.len() == 1 && pack.text.contains(wiki::query::OVER_BUDGET_NOTE);
         assert!(
             tok(&pack.text) <= b || is_floor,
             "budget {b}: pack is {} tokens, included {:?}",
@@ -340,7 +341,7 @@ fn oversized_target_degrades_to_summary_and_keeps_neighborhood() {
         )
         .unwrap();
     assert!(
-        pack.text.contains("exceeds the budget"),
+        pack.text.contains(wiki::query::OVER_BUDGET_NOTE),
         "pack: {}",
         pack.text
     );
@@ -378,7 +379,7 @@ fn tiny_budget_still_returns_the_degraded_target_block() {
         )
         .unwrap();
     assert_eq!(pack.included, vec!["hub".to_string()]);
-    assert!(pack.text.contains("exceeds the budget"));
+    assert!(pack.text.contains(wiki::query::OVER_BUDGET_NOTE));
     assert!(pack.text.contains("# Hub"));
 }
 
@@ -390,7 +391,7 @@ fn no_max_tokens_keeps_full_target_and_all_neighbors() {
     let w = Wiki::load(&dir.path().join("out")).unwrap();
     let pack = w.neighbors("hub", 1, &PackBudget::default()).unwrap();
     assert!(
-        !pack.text.contains("exceeds the budget"),
+        !pack.text.contains(wiki::query::OVER_BUDGET_NOTE),
         "must not degrade without a budget"
     );
     assert!(

@@ -4,15 +4,7 @@ use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
 
 mod common;
-use common::{exports, imports};
-
-fn write(root: &std::path::Path, name: &str, body: &str) {
-    let p = root.join(name);
-    if let Some(parent) = p.parent() {
-        fs::create_dir_all(parent).unwrap();
-    }
-    fs::write(p, body).unwrap();
-}
+use common::{exports, imports, write};
 
 #[test]
 fn compiles_a_small_corpus_and_emits_artifacts() {

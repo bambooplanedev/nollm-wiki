@@ -59,6 +59,10 @@ pub struct ContextPack {
 /// What `Wiki::search` learns about one page in its first pass. Scores
 /// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
 /// held until every page has been seen; the page text itself is not.
+/// The phrase a degraded target block carries when a page's body does not
+/// fit the pack's token budget. Tests assert on it; keep it in one place.
+pub const OVER_BUDGET_NOTE: &str = "exceeds the budget";
+
 struct Candidate<'a> {
     entry: &'a Entry,
     /// Per query token, in query order: (summed field weights, body
@@ -567,7 +571,7 @@ impl Wiki {
             full_target
         } else {
             format!(
-                "# {} ({id})\n\n{}\n\n_body (~{} tokens) exceeds the budget; read wiki://page/{id} for the full page_\n",
+                "# {} ({id})\n\n{}\n\n_body (~{} tokens) {OVER_BUDGET_NOTE}; read wiki://page/{id} for the full page_\n",
                 target.title,
                 target.summary.as_deref().unwrap_or("(no summary)"),
                 target.token_estimate,

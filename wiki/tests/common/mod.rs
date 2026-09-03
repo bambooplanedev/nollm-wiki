@@ -38,3 +38,13 @@ pub fn exports(page: &str) -> Vec<String> {
 pub fn imports(page: &str) -> Vec<String> {
     section(page, "Imports")
 }
+
+/// Write `body` to `root/name`, creating any missing parent directories, so a
+/// fixture can lay out a nested source tree in one call per file.
+pub fn write(root: &std::path::Path, name: &str, body: &str) {
+    let p = root.join(name);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).unwrap();
+    }
+    std::fs::write(p, body).unwrap();
+}
