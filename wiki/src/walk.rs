@@ -47,18 +47,14 @@ pub fn walk(
 
     let mut files = Vec::new();
     for result in builder.build() {
-        let entry = match result {
-            Ok(e) => e,
-            Err(_) => continue, // skip unreadable entries, never abort the walk
-        };
+        // Skip unreadable entries, never abort the walk.
+        let Ok(entry) = result else { continue };
         let is_file = match entry.file_type() {
             Some(ft) => ft.is_file(),
             // Type unknown from the walk's own stat: take a fresh stat rather
             // than silently dropping a possibly-regular file. This does not
             // change the deliberate no-follow policy for known symlinks.
-            None => std::fs::metadata(entry.path())
-                .map(|m| m.is_file())
-                .unwrap_or(false),
+            None => std::fs::metadata(entry.path()).is_ok_and(|m| m.is_file()),
         };
         if !is_file {
             continue;
@@ -74,9 +70,8 @@ pub fn walk(
         if !keep(&rel_path) {
             continue;
         }
-        let bytes = match std::fs::read(&abs_path) {
-            Ok(b) => b,
-            Err(_) => continue,
+        let Ok(bytes) = std::fs::read(&abs_path) else {
+            continue;
         };
         files.push(SourceFile {
             abs_path,
@@ -166,7 +161,10 @@ mod tests {
         // Stands in for the video: big enough that holding it would show up.
         fs::write(root.join("footage.mov"), vec![0u8; 8 * 1024 * 1024]).unwrap();
 
-        let files = walk(root, true, &|p| p.ends_with(".txt")).unwrap();
+        let files = walk(root, true, &|p| {
+            Path::new(p).extension() == Some("txt".as_ref())
+        })
+        .unwrap();
 
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["notes.txt"]);

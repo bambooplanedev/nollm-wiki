@@ -1,4 +1,4 @@
-//! Link graph: wikilink and import edges between pages, orphan detection, and PageRank centrality with damping.
+//! Link graph: wikilink and import edges between pages, orphan detection, and `PageRank` centrality with damping.
 
 use crate::model::{Edges, Entity, Graph};
 use regex::Regex;
@@ -13,7 +13,7 @@ fn tokens(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// first-word -> [(word-tuple, target_id)], longest tuple first.
+/// first-word -> [(word-tuple, `target_id`)], longest tuple first.
 fn build_phrase_index(
     entities: &BTreeMap<String, Entity>,
 ) -> BTreeMap<String, Vec<(Vec<String>, String)>> {
@@ -121,7 +121,7 @@ pub fn orphan_ids(graph: &Graph) -> Vec<String> {
         .collect()
 }
 
-/// Deterministic PageRank: fixed 40 iterations, damping 0.85, BTree node order.
+/// Deterministic `PageRank`: fixed 40 iterations, damping 0.85, `BTree` node order.
 fn pagerank(edges: &BTreeMap<String, Edges>) -> BTreeMap<String, f64> {
     let n = edges.len();
     if n == 0 {

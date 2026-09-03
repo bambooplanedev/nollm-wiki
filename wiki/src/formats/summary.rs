@@ -17,7 +17,7 @@ pub fn summarize(
     if let Some(s) = first_real_sentence(body) {
         return Some(s);
     }
-    non_empty(first_signature).map(|s| s.to_string())
+    non_empty(first_signature).map(std::string::ToString::to_string)
 }
 
 fn non_empty(s: Option<&str>) -> Option<&str> {

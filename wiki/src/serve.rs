@@ -73,7 +73,10 @@ impl WikiState {
     }
 
     pub fn with_wiki<T>(&self, f: impl FnOnce(&Wiki) -> T) -> T {
-        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Ok(current) = fingerprint(&self.dir) {
             if current != guard.fingerprint {
                 if let Ok(wiki) = Wiki::load(&self.dir) {
@@ -168,10 +171,7 @@ impl WikiServer {
     #[tool(
         description = "Build a budgeted context pack around a page: the page in full, then its graph neighbors ordered by centrality (most important last). Prefer this over reading pages one by one."
     )]
-    fn neighbors(
-        &self,
-        Parameters(p): Parameters<NeighborsParams>,
-    ) -> Result<CallToolResult, McpError> {
+    fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
         let budget = PackBudget {
             max_tokens: p.max_tokens,
             max_nodes: p.max_nodes,
@@ -181,11 +181,11 @@ impl WikiServer {
             .state
             .with_wiki(|w| w.neighbors(&p.id, p.depth.unwrap_or(1), &budget));
         match pack {
-            Some(pack) => Ok(CallToolResult::success(vec![ContentBlock::text(pack.text)])),
-            None => Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+            Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
+            None => CallToolResult::error(vec![ContentBlock::text(format!(
                 "unknown page id {:?} — use the search tool to find valid ids",
                 p.id
-            ))])),
+            ))]),
         }
     }
 

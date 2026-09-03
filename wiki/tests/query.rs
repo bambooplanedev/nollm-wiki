@@ -160,7 +160,7 @@ fn neighbors_pack_max_tokens_keeps_highest_centrality_neighbor() {
     );
 }
 
-/// full_neighbors + max_tokens must keep the highest-centrality neighbor even
+/// `full_neighbors` + `max_tokens` must keep the highest-centrality neighbor even
 /// when several lighter, lower-centrality neighbors would pack more nodes into
 /// the same budget. Fixture: hub -> big, sa, sb. `big` gets three extra
 /// incoming links (fillers) so its pagerank beats sa/sb, and a long body so
@@ -197,10 +197,10 @@ centrality versus packing distinction this test pins down. "
     compile(&input, &output, &CompileOptions::default()).unwrap();
 
     let page = |id: &str| fs::read_to_string(output.join(format!("{id}.md"))).unwrap();
-    let (big_p, sa_p, sb_p) = (tok(&page("big")), tok(&page("sa")), tok(&page("sb")));
+    let (big, small_a, small_b) = (tok(&page("big")), tok(&page("sa")), tok(&page("sb")));
     assert!(
-        sa_p + sb_p < big_p,
-        "fixture invalid: need sa({sa_p}) + sb({sb_p}) < big({big_p}) in page tokens"
+        small_a + small_b < big,
+        "fixture invalid: need sa({small_a}) + sb({small_b}) < big({big}) in page tokens"
     );
 
     let w = Wiki::load(&output).unwrap();
@@ -290,7 +290,7 @@ fn build_oversized_hub_corpus() -> tempfile::TempDir {
     dir
 }
 
-/// Spec §2: max_tokens is a hard ceiling on token_estimate(pack.text) —
+/// Spec §2: `max_tokens` is a hard ceiling on `token_estimate(pack.text)` —
 /// at every budget, with the single documented floor exception (a target-
 /// only pack whose degraded block is itself over budget).
 #[test]
@@ -383,7 +383,7 @@ fn tiny_budget_still_returns_the_degraded_target_block() {
     assert!(pack.text.contains("# Hub"));
 }
 
-/// Spec §2: no max_tokens → unbudgeted behavior, full target, all
+/// Spec §2: no `max_tokens` → unbudgeted behavior, full target, all
 /// neighbors admitted.
 #[test]
 fn no_max_tokens_keeps_full_target_and_all_neighbors() {

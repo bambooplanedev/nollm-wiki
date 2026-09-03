@@ -8,7 +8,7 @@ use super::code::{
 use tree_sitter::Language;
 
 fn keep_go_exported(name: &str) -> bool {
-    name.chars().next().is_some_and(|c| c.is_uppercase())
+    name.chars().next().is_some_and(char::is_uppercase)
 }
 
 /// The JS and TS specs differ only in grammar and in the node kind a class
@@ -36,11 +36,11 @@ pub(crate) fn js_spec() -> LangSpec {
         tree_sitter_javascript::LANGUAGE.into(),
         // Only symbols wrapped in an `export_statement` are captured at
         // all, so a bare `function helper() {}` never matches.
-        r#"
+        r"
                 (export_statement declaration: (function_declaration name: (identifier) @name)) @def
                 (export_statement declaration: (class_declaration name: (identifier) @name)) @def
                 (import_statement source: (string) @import)
-            "#,
+            ",
     )
 }
 
@@ -48,11 +48,11 @@ pub(crate) fn ts_spec() -> LangSpec {
     ecma_spec(
         "typescript",
         tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
-        r#"
+        r"
                 (export_statement declaration: (function_declaration name: (identifier) @name)) @def
                 (export_statement declaration: (class_declaration name: (type_identifier) @name)) @def
                 (import_statement source: (string) @import)
-            "#,
+            ",
     )
 }
 
@@ -63,11 +63,11 @@ pub(crate) fn go_spec() -> LangSpec {
         // Go has no `export` keyword; "exported" means the identifier's
         // first rune is uppercase. The query can't express that, so it
         // captures every func/type and name_filter drops the unexported ones.
-        query_src: r#"
+        query_src: r"
                 (function_declaration name: (identifier) @name) @def
                 (type_declaration (type_spec name: (type_identifier) @name)) @def
                 (import_spec path: (interpreted_string_literal) @import)
-            "#,
+            ",
         name_filter: keep_go_exported,
         vis_filter: keep_any_vis,
         strip_trailing: &[],

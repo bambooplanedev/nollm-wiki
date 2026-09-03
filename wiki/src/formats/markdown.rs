@@ -16,7 +16,9 @@ impl Extractor for MarkdownExtractor {
         let mut title = fm_get(&fm, "title");
         let created = fm_get(&fm, "created").unwrap_or_default();
         let description = fm_get(&fm, "description");
-        let aliases = fm_get(&fm, "aliases").map(parse_list).unwrap_or_default();
+        let aliases = fm_get(&fm, "aliases")
+            .map(|v| parse_list(&v))
+            .unwrap_or_default();
 
         if title.is_none() {
             title = first_h1(body_text);
@@ -48,9 +50,8 @@ impl Extractor for MarkdownExtractor {
 /// slice lands on a true byte boundary for both `\n` and `\r\n` files.
 fn split_frontmatter(text: &str) -> (Vec<String>, &str) {
     let mut segments = text.split_inclusive('\n');
-    let first = match segments.next() {
-        Some(s) => s,
-        None => return (Vec::new(), text),
+    let Some(first) = segments.next() else {
+        return (Vec::new(), text);
     };
     if first.trim() != "---" {
         return (Vec::new(), text);
@@ -75,7 +76,7 @@ fn fm_get(fm: &[String], key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
-fn parse_list(v: String) -> Vec<String> {
+fn parse_list(v: &str) -> Vec<String> {
     let v = v.trim().trim_start_matches('[').trim_end_matches(']');
     v.split(',')
         .map(|s| s.trim().trim_matches('"').to_string())

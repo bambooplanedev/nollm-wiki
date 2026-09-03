@@ -107,7 +107,7 @@ impl Wiki {
         self.entries.contains_key(id)
     }
 
-    /// All pages as `(id, title)` pairs, ascending by id (BTreeMap order).
+    /// All pages as `(id, title)` pairs, ascending by id (`BTreeMap` order).
     /// Used by the MCP server's `resources/list`.
     pub fn list_pages(&self) -> Vec<(String, String)> {
         self.entries
@@ -161,7 +161,7 @@ impl Wiki {
     /// Known residual limits (accepted by the 2026-07-14 search-quality
     /// design): content under an embedded heading named exactly like a
     /// chrome section stays unsearchable, and duplicate heading names
-    /// overwrite each other in the map. Section order is BTreeMap
+    /// overwrite each other in the map. Section order is `BTreeMap`
     /// (alphabetical), not document, order.
     fn content_text(sections: &BTreeMap<String, String>) -> String {
         sections
@@ -501,7 +501,7 @@ impl Wiki {
         seen
     }
 
-    /// BFS to `depth` over neighbors_out+neighbors_in, then build a budgeted
+    /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
     /// context pack: target first, neighbors ordered ascending by pagerank
     /// (highest-centrality lands last — "lost in the middle").
     ///
@@ -521,6 +521,9 @@ impl Wiki {
     /// centrality neighbor beats several lighter lower-centrality ones; see
     /// `full_neighbors_max_tokens_prefers_centrality_over_packing`.
     /// Neighbors get summary blocks unless `full_neighbors` is set.
+    /// Between the blocks of a context pack.
+    const SEPARATOR: &str = "\n\n---\n\n";
+
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {
         self.entries.get(id).map_or(0.0, |e| e.pagerank)
@@ -549,7 +552,6 @@ impl Wiki {
             candidates.truncate(keep);
         }
 
-        const SEPARATOR: &str = "\n\n---\n\n";
         // Budget math tracks emitted *chars* and converts with the same
         // chars/4 rule as `manifest::token_estimate` — summing per-block
         // token estimates would under-count the concatenation by up to one
@@ -566,7 +568,7 @@ impl Wiki {
         let full_target = self
             .page(id)
             .unwrap_or_else(|| format!("# {}\n", target.title));
-        let sep_chars = SEPARATOR.chars().count();
+        let sep_chars = Self::SEPARATOR.chars().count();
         let target_block = if fits(full_target.chars().count() + sep_chars) {
             full_target
         } else {
@@ -584,9 +586,8 @@ impl Wiki {
         // size of the block actually emitted (summary line or full page).
         let mut kept: Vec<(String, String)> = Vec::new();
         for nid in candidates {
-            let e = match self.entries.get(&nid) {
-                Some(e) => e,
-                None => continue,
+            let Some(e) = self.entries.get(&nid) else {
+                continue;
             };
             let block = if budget.full_neighbors {
                 self.page(&nid).unwrap_or_default()
@@ -617,7 +618,7 @@ impl Wiki {
         let mut text = String::new();
         let mut included = vec![id.to_string()];
         text.push_str(&target_block);
-        text.push_str(SEPARATOR);
+        text.push_str(Self::SEPARATOR);
         for (nid, block) in kept {
             text.push_str(&block);
             included.push(nid);
@@ -633,7 +634,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
-        items.iter().map(|s| s.to_string()).collect()
+        items.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

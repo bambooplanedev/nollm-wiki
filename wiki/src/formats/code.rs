@@ -427,7 +427,7 @@ fn should_keep(
     vis: Option<&str>,
     chain: &[String],
     name_text: Option<&str>,
-    exports: &Option<BTreeSet<String>>,
+    exports: Option<&BTreeSet<String>>,
     spec: &LangSpec,
 ) -> bool {
     let gate_root = chain.first().map(String::as_str).or(name_text);
@@ -439,12 +439,12 @@ fn should_keep(
     let own_name_ok = if exports.is_some() && chain.is_empty() {
         true
     } else {
-        name_text.map(|n| (spec.name_filter)(n)).unwrap_or(true)
+        name_text.is_none_or(|n| (spec.name_filter)(n))
     };
     root_ok
         && own_name_ok
         && chain.iter().skip(1).all(|c| (spec.name_filter)(c))
-        && vis.map(|v| (spec.vis_filter)(v)).unwrap_or(true)
+        && vis.is_none_or(|v| (spec.vis_filter)(v))
 }
 
 /// The shape of a kept definition, decided from the two `Option`s already in
@@ -546,13 +546,12 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
     let query = QUERIES.get(ext)?;
-    let tree = match pre_parsed {
-        Some(tree) => tree,
-        None => {
-            let mut parser = Parser::new();
-            parser.set_language(&spec.language).ok()?;
-            parser.parse(text, None)?
-        }
+    let tree = if let Some(tree) = pre_parsed {
+        tree
+    } else {
+        let mut parser = Parser::new();
+        parser.set_language(&spec.language).ok()?;
+        parser.parse(text, None)?
     };
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),
@@ -579,7 +578,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 continue;
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-            if should_keep(parts.vis, &chain, name_text, &exports, &spec) {
+            if should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec) {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
                 // then used for both the signature and the classification —
@@ -771,22 +770,19 @@ fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec
             (None, Some(l)) => Some((*l, false)),
             (None, None) => None,
         };
-        match next {
-            Some(((a, b), is_comment)) => {
-                push_plain(&mut out, pos, a.max(pos));
-                if !is_comment {
-                    // Collapsed so a multi-line literal cannot break the
-                    // one-line invariant, but never tidied.
-                    if let Some(s) = text.get(a.max(pos)..b) {
-                        out.push_str(&collapse_runs(s));
-                    }
+        if let Some(((a, b), is_comment)) = next {
+            push_plain(&mut out, pos, a.max(pos));
+            if !is_comment {
+                // Collapsed so a multi-line literal cannot break the
+                // one-line invariant, but never tidied.
+                if let Some(s) = text.get(a.max(pos)..b) {
+                    out.push_str(&collapse_runs(s));
                 }
-                pos = b.max(pos + 1);
             }
-            None => {
-                push_plain(&mut out, pos, end);
-                break;
-            }
+            pos = b.max(pos + 1);
+        } else {
+            push_plain(&mut out, pos, end);
+            break;
         }
     }
     // Dropping a comment leaves the whitespace on either side of it in two
@@ -816,8 +812,7 @@ fn build_signature(
     let start = root.start_byte();
     let end = shape
         .cut
-        .map(|b| b.start_byte())
-        .unwrap_or_else(|| def.end_byte())
+        .map_or_else(|| def.end_byte(), |b| b.start_byte())
         .max(start)
         .min(text.len());
     // Each fragment is rendered from source with the tree in hand, then the

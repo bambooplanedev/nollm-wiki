@@ -56,7 +56,7 @@ fn mask_fenced_code(text: &str) -> String {
             (Some((c, n)), Some((dc, dn)))
                 if dc == c && dn >= n && trimmed.trim_end().chars().all(|x| x == c) =>
             {
-                open = None
+                open = None;
             }
             _ => {}
         }

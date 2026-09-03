@@ -51,17 +51,19 @@ impl Registry {
         }
     }
 
-    pub fn register(&mut self, extractor: Arc<dyn Extractor>) {
+    pub fn register(&mut self, extractor: impl Extractor + 'static) {
+        let extractor: Arc<dyn Extractor> = Arc::new(extractor);
         for ext in extractor.extensions() {
-            self.by_ext.insert((*ext).to_string(), extractor.clone());
+            self.by_ext
+                .insert((*ext).to_string(), Arc::clone(&extractor));
         }
     }
 
     pub fn with_defaults() -> Self {
         let mut reg = Registry::new();
-        reg.register(Arc::new(TextExtractor));
-        reg.register(Arc::new(MarkdownExtractor));
-        reg.register(Arc::new(CodeExtractor));
+        reg.register(TextExtractor);
+        reg.register(MarkdownExtractor);
+        reg.register(CodeExtractor);
         reg
     }
 
@@ -70,7 +72,7 @@ impl Registry {
             .rsplit('.')
             .next()
             .filter(|e| *e != rel_path)
-            .map(|e| e.to_lowercase())
+            .map(str::to_lowercase)
     }
 
     /// Whether any registered extractor claims this path's extension.
@@ -82,7 +84,7 @@ impl Registry {
         Self::ext_of(rel_path).is_some_and(|e| self.by_ext.contains_key(&e))
     }
 
-    /// Decode bytes lossily, dispatch by extension, fill source_path + content_hash.
+    /// Decode bytes lossily, dispatch by extension, fill `source_path` + `content_hash`.
     pub fn extract(&self, rel_path: &str, bytes: &[u8]) -> Option<Entity> {
         let ext = Self::ext_of(rel_path)?;
         let extractor = self.by_ext.get(&ext)?;

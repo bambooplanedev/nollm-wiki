@@ -110,8 +110,7 @@ fn compile_inner(
     let project = opts.project.clone().unwrap_or_else(|| {
         input
             .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "wiki".into())
+            .map_or_else(|| "wiki".into(), |s| s.to_string_lossy().to_string())
     });
 
     // 1. Walk + parallel extract (ordered — collecting into a Vec preserves
@@ -420,7 +419,7 @@ fn remap_reserved_names(entities: BTreeMap<String, Entity>) -> BTreeMap<String, 
         );
 
         used.insert(candidate.clone());
-        e.id = candidate.clone();
+        e.id.clone_from(&candidate);
         result.insert(candidate, e);
     }
     result
@@ -578,9 +577,12 @@ mod tests {
         std::fs::write(out.join("kept.md"), "x").unwrap();
         let prior: BTreeSet<String> = ["old_slug", "kept", "never_written"]
             .iter()
-            .map(|s| s.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
-        let live: BTreeSet<String> = ["kept", "new_slug"].iter().map(|s| s.to_string()).collect();
+        let live: BTreeSet<String> = ["kept", "new_slug"]
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect();
         // old_slug: prior, not live, on disk → listed.
         // kept: live → excluded. never_written: not on disk → excluded.
         assert_eq!(

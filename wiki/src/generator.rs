@@ -47,14 +47,14 @@ const FILLER: &[&str] = &[
     "Numbers here are approximate and were not re-verified.",
 ];
 
-/// Deterministic SplitMix64 — stable across platforms and Rust versions.
+/// Deterministic `SplitMix64` — stable across platforms and Rust versions.
 struct Rng(u64);
 impl Rng {
     fn next_u64(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9E3779B97F4A7C15);
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
         let mut z = self.0;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
     }
     fn below(&mut self, n: usize) -> usize {
@@ -83,7 +83,7 @@ pub fn generate_corpus(
         .collect();
 
     let mut written = Vec::new();
-    for topic in all_topics.iter() {
+    for topic in &all_topics {
         let slug = slugify(topic);
         let mut lines: Vec<String> = Vec::new();
 

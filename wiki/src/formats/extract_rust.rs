@@ -53,22 +53,17 @@ fn rust_owner(def: Node, text: &str) -> Option<String> {
         // qualifiable only through both the enum and the variant, and the
         // query never captures them (it requires the field list to be a
         // `struct_item`/`union_item` body) — this arm would be unreachable.
-        "struct_item" | "union_item" | "enum_item" => text
+        // A trait's owner is likewise the trait's own name.
+        "struct_item" | "union_item" | "enum_item" | "trait_item" => text
             .get(holder.child_by_field_name("name")?.byte_range())
             .map(str::to_string),
-        "impl_item" => match trait_impl_owner(holder, text) {
-            Some(owner) => Some(owner),
-            // An inherent impl: the type name with generic arguments stripped,
-            // so `impl<T> Holder<T>` yields `Holder::get` — valid Rust that
-            // sorts beside the type's other methods.
-            None => {
-                let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
-                Some(ty.split('<').next().unwrap_or(ty).trim().to_string())
-            }
-        },
-        "trait_item" => text
-            .get(holder.child_by_field_name("name")?.byte_range())
-            .map(str::to_string),
+        // An inherent impl: the type name with generic arguments stripped,
+        // so `impl<T> Holder<T>` yields `Holder::get` — valid Rust that
+        // sorts beside the type's other methods.
+        "impl_item" => trait_impl_owner(holder, text).or_else(|| {
+            let ty = text.get(holder.child_by_field_name("type")?.byte_range())?;
+            Some(ty.split('<').next().unwrap_or(ty).trim().to_string())
+        }),
         _ => None,
     }
 }
@@ -243,7 +238,7 @@ pub(crate) fn rust_spec() -> LangSpec {
         // rejects a visibility modifier there, and those items are public
         // through the trait. The trait-declaration patterns gate on the
         // trait's own visibility instead of the method's.
-        query_src: r#"
+        query_src: r"
                 (function_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (enum_item (visibility_modifier) @vis name: (type_identifier) @name) @def
@@ -266,7 +261,7 @@ pub(crate) fn rust_spec() -> LangSpec {
                 (trait_item (visibility_modifier) @vis body: (declaration_list (function_signature_item name: (identifier) @name) @def))
                 (trait_item (visibility_modifier) @vis body: (declaration_list (function_item name: (identifier) @name) @def))
                 (use_declaration argument: (_) @import)
-            "#,
+            ",
         name_filter: keep_all,
         vis_filter: keep_bare_pub,
         strip_trailing: &[';', '=', '{'],
@@ -320,8 +315,7 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
             }
             let start = attribute_run(node)
                 .last()
-                .map(|a| a.start_byte())
-                .unwrap_or_else(|| node.start_byte());
+                .map_or_else(|| node.start_byte(), tree_sitter::Node::start_byte);
             let name = node
                 .child_by_field_name("name")
                 .and_then(|n| text.get(n.byte_range()))

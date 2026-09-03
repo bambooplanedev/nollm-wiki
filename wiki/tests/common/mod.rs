@@ -22,7 +22,7 @@ pub fn section(page: &str, name: &str) -> Vec<String> {
     assert!(found, "page has no `{header}` section:\n{page}");
     lines
         .take_while(|l| !l.starts_with("## "))
-        .filter_map(|l| l.strip_prefix("- ").map(|s| s.to_string()))
+        .filter_map(|l| l.strip_prefix("- ").map(std::string::ToString::to_string))
         .collect()
 }
 

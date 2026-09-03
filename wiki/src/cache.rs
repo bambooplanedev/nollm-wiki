@@ -29,10 +29,7 @@ impl Cache {
     }
 
     pub fn needs_render(&self, id: &str, fingerprint_hex: &str) -> bool {
-        self.pages
-            .get(id)
-            .map(|f| f != fingerprint_hex)
-            .unwrap_or(true)
+        self.pages.get(id).is_none_or(|f| f != fingerprint_hex)
     }
 
     pub fn set(&mut self, id: &str, fingerprint_hex: &str) {

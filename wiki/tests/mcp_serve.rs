@@ -47,7 +47,7 @@ fn spawn_server(dir: &std::path::Path) -> (Child, ChildStdin, Receiver<String>) 
     (child, stdin, rx)
 }
 
-fn send(stdin: &mut ChildStdin, msg: Value) {
+fn send(stdin: &mut ChildStdin, msg: &Value) {
     let mut line = msg.to_string();
     line.push('\n');
     stdin.write_all(line.as_bytes()).unwrap();
@@ -80,7 +80,7 @@ fn read_response(stdout: &Receiver<String>, id: u64) -> Value {
 fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     send(
         stdin,
-        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "protocolVersion": "2025-03-26",
             "capabilities": {},
             "clientInfo": {"name": "test-client", "version": "0.0.0"}
@@ -90,7 +90,7 @@ fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     assert_eq!(resp["result"]["serverInfo"]["name"], "wiki");
     send(
         stdin,
-        json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
     );
 }
 
@@ -103,7 +103,7 @@ fn serve_lists_and_calls_tools() {
     // tools/list
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
     );
     let resp = read_response(&stdout, 2);
     let names: Vec<&str> = resp["result"]["tools"]
@@ -119,7 +119,7 @@ fn serve_lists_and_calls_tools() {
     // tools/call search — seed-42 corpus contains gradient_descent
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
             "name": "search", "arguments": {"query": "gradient"}
         }}),
     );
@@ -130,7 +130,7 @@ fn serve_lists_and_calls_tools() {
     // tools/call neighbors
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
             "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 800}
         }}),
     );
@@ -141,7 +141,7 @@ fn serve_lists_and_calls_tools() {
     // tools/call neighbors with unknown id -> tool error result
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
             "name": "neighbors", "arguments": {"id": "no_such_page"}
         }}),
     );
@@ -151,7 +151,7 @@ fn serve_lists_and_calls_tools() {
     // tools/call lint
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {
             "name": "lint", "arguments": {}
         }}),
     );
@@ -173,7 +173,7 @@ fn serve_lists_and_reads_resources() {
     // resources/list: 12 pages + index + llms.txt
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
     );
     let resp = read_response(&stdout, 2);
     let resources = resp["result"]["resources"].as_array().unwrap();
@@ -201,7 +201,7 @@ fn serve_lists_and_reads_resources() {
     // resources/read a page
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {
             "uri": "wiki://page/gradient_descent"
         }}),
     );
@@ -216,7 +216,7 @@ fn serve_lists_and_reads_resources() {
     // resources/read the index
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {
+        &json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {
             "uri": "wiki://index"
         }}),
     );
@@ -230,7 +230,7 @@ fn serve_lists_and_reads_resources() {
     // unknown resource -> JSON-RPC error
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {
+        &json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {
             "uri": "wiki://page/no_such_page"
         }}),
     );
@@ -252,7 +252,7 @@ fn serve_refuses_path_traversal_outside_index() {
 
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {
             "uri": "wiki://page/../secret"
         }}),
     );
@@ -283,7 +283,7 @@ fn search_hits_include_snippet_field() {
     initialize(&mut stdin, &stdout);
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
             "name": "search", "arguments": {"query": "gradient"}}}),
     );
     let resp = read_response(&stdout, 7);
@@ -310,7 +310,7 @@ fn serve_reports_bad_params_and_survives() {
     // (not an `isError` result).
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
             "name": "search", "arguments": {"kind": "bogus", "query": "x"}
         }}),
     );
@@ -327,7 +327,7 @@ fn serve_reports_bad_params_and_survives() {
     // rmcp reports as a tool error result naming the field.
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
             "name": "search", "arguments": {}
         }}),
     );
@@ -339,7 +339,7 @@ fn serve_reports_bad_params_and_survives() {
     // (c) Unknown tool name -> JSON-RPC invalid params.
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
             "name": "nope", "arguments": {}
         }}),
     );
@@ -350,7 +350,7 @@ fn serve_reports_bad_params_and_survives() {
     // block instead of failing.
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
             "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 1}
         }}),
     );
@@ -363,7 +363,7 @@ fn serve_reports_bad_params_and_survives() {
     // (e) Still answering after every error above.
     send(
         &mut stdin,
-        json!({"jsonrpc": "2.0", "id": 6, "method": "tools/list"}),
+        &json!({"jsonrpc": "2.0", "id": 6, "method": "tools/list"}),
     );
     let resp = read_response(&stdout, 6);
     assert!(

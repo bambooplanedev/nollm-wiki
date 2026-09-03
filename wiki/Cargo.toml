@@ -48,3 +48,29 @@ harness = false
 
 [profile.release]
 strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Pedantic on, with the lints that would fight this codebase switched off:
+# - must_use_candidate: noise on ~30 plain constructors and accessors.
+# - cast_precision_loss / cast_possible_truncation: every cast is a
+#   deliberate usize -> f64 for scoring or PageRank.
+# - too_many_lines: `main` is a flat clap match and stays that way.
+# - missing_errors_doc / missing_panics_doc: `publish = false`, no external
+#   API surface to document for.
+# - format_push_string: `write!` into a String reads worse than
+#   `push_str(&format!(..))` and needs a `Result` nobody checks.
+# - module_name_repetitions: `WikiError`, `WikiState` are the clear names.
+# - unused_async_trait_impl: rmcp's trait signatures are async whether we await or not.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+must_use_candidate = "allow"
+cast_precision_loss = "allow"
+cast_possible_truncation = "allow"
+too_many_lines = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+format_push_string = "allow"
+module_name_repetitions = "allow"
+unused_async_trait_impl = "allow"

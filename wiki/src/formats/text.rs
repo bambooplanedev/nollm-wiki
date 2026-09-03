@@ -33,9 +33,7 @@ impl Extractor for TextExtractor {
                     name = Some(c[1].trim().to_string());
                     continue;
                 }
-                if idx == 0
-                    && line.chars().any(|c| c.is_alphabetic())
-                    && line == line.to_uppercase()
+                if idx == 0 && line.chars().any(char::is_alphabetic) && line == line.to_uppercase()
                 {
                     name = Some(title_case(line));
                     continue;

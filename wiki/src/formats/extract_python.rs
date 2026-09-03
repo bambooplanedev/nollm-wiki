@@ -12,7 +12,7 @@ static ALL_QUERY: LazyLock<Query> = LazyLock::new(|| {
     let language: Language = tree_sitter_python::LANGUAGE.into();
     Query::new(
         &language,
-        r#"
+        r"
             (module
               (expression_statement
                 [
@@ -25,7 +25,7 @@ static ALL_QUERY: LazyLock<Query> = LazyLock::new(|| {
                 ]
               )
             )
-        "#,
+        ",
     )
     .expect("__all__ query must compile")
 });
