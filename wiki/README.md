@@ -388,11 +388,16 @@ Deliberate scope cuts, recorded so they read as decisions rather than
 oversights:
 
 - **Linking is lexical.** No LLM, embeddings, or semantic matching at
-  generation time — two pages link only when a name or alias of one
-  appears in the other, when a code page's import resolves to the
-  other's id, or when a relative markdown link (`[text](../other.md)`)
-  resolves to the other's source path. This is the core design
-  trade-off, not a bug.
+  generation time. A text or markdown page is linked when a name or alias
+  of it appears in another page. A code page is linked only by a
+  code-shaped mention of its module — a `::` path (`text::extract`,
+  `use crate::text::X`), a `mod text;` declaration, or its filename
+  (`src/text.rs`) — by an import whose path names its module or one of
+  its definitions, or by a relative markdown link (`[text](../other.md)`)
+  resolving to its source path. Plain prose and a bare `` `text` `` do not
+  link a code page: a one-word module name would otherwise draw an edge
+  from every English use of the word. This is the core design trade-off,
+  not a bug.
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
   imports + exported signatures only, with Rust signatures owner-qualified

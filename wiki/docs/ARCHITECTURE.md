@@ -52,14 +52,23 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    remapped to `<id>_page`, `<id>_page_2`, ..., with a warning on stderr. Produces
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
-   links by scanning entity bodies for mentions of other entity names (and
-   aliases), by resolving each entity's `imports` to a target id, and by
-   resolving each inline markdown link `[text](target)` lexically against
-   the linking file's directory to another entity's `source_path`
-   (`resolve_link`; external schemes, bare anchors, and targets above the
-   root are ignored) — so a README reaches a page it links to but never
-   names. Then it runs a fixed-iteration PageRank over the link graph.
-   Produces a `Graph { edges, pagerank }`.
+   links three ways. Mention edges: entity bodies are scanned for other
+   entities' names and aliases (the phrase index); a candidate whose target
+   is a **code page** is kept only when the body refers to that module in
+   code shape (`refers_to_module`: a `stem::`/`::stem` path, a `mod stem;`
+   declaration, or the filename `stem.rs`), never by prose or a bare
+   backticked word — a one-word module name such as `Text` would otherwise
+   match every English use of the word. Import edges: every segment of an
+   import string that equals a code page's module stem
+   (`formats::code::module_stem`, the same rule that names the page) or a
+   name in its `defined` list (`ImportResolver`); a `::` path is followed
+   only under `crate`, `super`, `self`, or a local crate root, the
+   directory holding a `src/lib.rs`/`src/main.rs`, so `rmcp::model` never
+   reaches `model`. Link edges: each inline markdown link `[text](target)`
+   resolved lexically against the linking file's directory to another
+   entity's `source_path` (`resolve_link`; external schemes, bare anchors,
+   and targets above the root are ignored). Then it runs a fixed-iteration
+   PageRank over the link graph. Produces a `Graph { edges, pagerank }`.
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the
@@ -94,7 +103,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
-| `src/graph.rs` | `build_graph()` — mention- and import-based edge detection and PageRank; `orphan_ids()`. |
+| `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
@@ -118,20 +127,18 @@ compiler's own `SourceKind` string, and it tokenizes to the adjacent words
 dogfood finding: generic titles match prose through punctuation).
 `extract_rust.rs`/`extract_python.rs`/`extract_simple.rs` avoid both traps.
 
-**A directory-module page takes its directory's name, and inherits the
-one-word cost above.** `mod.rs` and `__init__.py` say nothing about the module
-they open — every importer refers to them by the directory (`mod common;`,
-`from pkg import x`). Naming such a page from its own stem produced `Mod` /
-`Init`, and where several existed they collided and were qualified to
-`common_mod` / `formats_mod`: names appearing in no other page's body, so the
-page was unreachable by the phrase index and by import resolution alike.
-`tests/common/mod.rs` was a permanent orphan for exactly this reason.
-
-Naming it `Common` fixes that and costs the prose-mention noise described
-above — `generator.rs`'s sentence template "A common mistake is tuning …"
-now draws an edge. That trade is deliberate: reachable-with-noise beats
-unreachable, the directory name is not ours to choose, and it is the same
-exposure every one-word page here already carries (`Code`, `Text`, `Hash`).
+**A directory-module page takes its directory's name.** `mod.rs` and
+`__init__.py` say nothing about the module they open — every importer refers
+to them by the directory (`mod common;`, `from pkg import x`). Naming such a
+page from its own stem produced `Mod` / `Init`, and where several existed
+they collided and were qualified to `common_mod` / `formats_mod`: names
+appearing in no other page's body, so the page was unreachable by the
+phrase index and by import resolution alike. `tests/common/mod.rs` was a
+permanent orphan for exactly this reason. Naming it `Common` lets `mod
+common;` and `common::write` link it. The one-word prose cost this used to
+carry ("A common mistake is tuning …" drew an edge) is gone since mention
+edges into code pages must be code-shaped; the `extract_*.rs` naming above
+still matters for search, where a one-word title matches by prefix.
 
 ## Determinism rules
 
@@ -237,6 +244,12 @@ breaking any of them reintroduces nondeterminism.
   (`extract_rust.rs`) — but real for any Rust crate with that shape, and it
   landed in the same commit as the Python symbols overhaul, not the later
   grouping-order commit.
+- **Import resolution tie-breaks on the lexicographically smallest
+  `source_path`.** When two code pages share a module stem
+  (`src/query.rs`, `tests/query.rs`), `ImportResolver` keeps the smaller
+  path; when two pages define the same name, neither resolves. Both are
+  pure functions of the source-path set, so the edge set is the same in any
+  extraction order.
 
 ## Incremental build
 
