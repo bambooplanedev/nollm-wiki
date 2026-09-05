@@ -586,3 +586,44 @@ fn relative_markdown_links_become_edges() {
     let body = page.split("## Body").nth(1).unwrap();
     assert!(!body.to_lowercase().contains("root"), "{body}");
 }
+
+/// A one-word code page is linked by a code-shaped mention (a `use` path,
+/// here) and not by the same word in prose. Pinned through `index.json`
+/// because that is what agents and `neighbors` read.
+#[test]
+fn prose_does_not_link_a_code_page_but_a_use_path_does() {
+    let tmp = tempdir().unwrap();
+    let raw = tmp.path().join("raw");
+    let out = tmp.path().join("out");
+    common::write(
+        &raw,
+        "src/text.rs",
+        "//! Text extractor.\npub fn extract() {}\n",
+    );
+    common::write(
+        &raw,
+        "notes.md",
+        "# Notes\n\nThe text of the page is long.\n",
+    );
+    common::write(
+        &raw,
+        "src/user.rs",
+        "//! Uses the extractor.\nuse crate::text::extract;\npub fn run() { extract() }\n",
+    );
+    compile(&raw, &out, &CompileOptions::default()).unwrap();
+
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    let entry = |id: &str| {
+        index["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(entry("user")["neighbors_out"], serde_json::json!(["text"]));
+    assert_eq!(entry("notes")["neighbors_out"], serde_json::json!([]));
+    assert_eq!(entry("text")["neighbors_in"], serde_json::json!(["user"]));
+}
