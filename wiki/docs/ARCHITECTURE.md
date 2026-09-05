@@ -53,9 +53,13 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links by scanning entity bodies for mentions of other entity names (and
-   aliases) and by resolving each entity's `imports` to a target id, then
-   runs a fixed-iteration PageRank over the link graph. Produces a
-   `Graph { edges, pagerank }`.
+   aliases), by resolving each entity's `imports` to a target id, and by
+   resolving each inline markdown link `[text](target)` lexically against
+   the linking file's directory to another entity's `source_path`
+   (`resolve_link`; external schemes, bare anchors, and targets above the
+   root are ignored) — so a README reaches a page it links to but never
+   names. Then it runs a fixed-iteration PageRank over the link graph.
+   Produces a `Graph { edges, pagerank }`.
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the

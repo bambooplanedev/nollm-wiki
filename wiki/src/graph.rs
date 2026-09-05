@@ -6,6 +6,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
 static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9']+").unwrap());
+/// The target of an inline markdown link, `[text](target)`, up to the closing
+/// paren or a space (which starts an optional title).
+static MD_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\(([^)\s]+)").unwrap());
 
 fn tokens(text: &str) -> Vec<String> {
     WORD.find_iter(text)
@@ -68,6 +71,40 @@ fn phrase_targets(
     targets
 }
 
+/// The project-relative path a markdown link target points at, resolved
+/// lexically against the linking file's directory. `None` for an external
+/// link (any scheme), a bare `#anchor`, or a target that climbs above the
+/// project root. `../README.md#x` from `scripts/README.md` is `README.md`.
+fn resolve_link(source_path: &str, target: &str) -> Option<String> {
+    let target = target.split('#').next().unwrap_or("");
+    if target.is_empty() || target.split('/').next().unwrap_or("").contains(':') {
+        return None;
+    }
+    let mut parts: Vec<&str> = source_path
+        .rsplit_once('/')
+        .map(|(dir, _)| dir.split('/').collect())
+        .unwrap_or_default();
+    for seg in target.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// Ids of the pages whose source path a markdown link in `body` resolves to.
+fn link_targets(body: &str, source_path: &str, by_path: &BTreeMap<&str, &str>) -> BTreeSet<String> {
+    MD_LINK
+        .captures_iter(body)
+        .filter_map(|c| resolve_link(source_path, &c[1]))
+        .filter_map(|p| by_path.get(p.as_str()).map(|id| (*id).to_string()))
+        .collect()
+}
+
 pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
     let mut edges: BTreeMap<String, Edges> = entities
         .keys()
@@ -80,10 +117,22 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         };
     }
     let index = build_phrase_index(entities);
+    let by_path: BTreeMap<&str, &str> = entities
+        .iter()
+        .map(|(id, e)| (e.source_path.as_str(), id.as_str()))
+        .collect();
 
     for (eid, ent) in entities {
         let toks = tokens(&ent.body);
         let mut targets = phrase_targets(&toks, &index, eid);
+        // Markdown link edges: `[text](relative/path.md)` resolving to another
+        // page's source path. A link is a deliberate reference, unlike a
+        // mention, and is the only way a README reaches a page it never names.
+        targets.extend(
+            link_targets(&ent.body, &ent.source_path, &by_path)
+                .into_iter()
+                .filter(|tid| tid != eid),
+        );
         // Import edges: resolve each import string to an entity id if it matches a
         // known id or the stem of a known source path.
         for imp in &ent.imports {
@@ -219,6 +268,45 @@ mod tests {
         assert!(o.contains(&"c".to_string()));
         assert!(o.contains(&"a".to_string()));
         assert!(!o.contains(&"b".to_string()));
+    }
+
+    #[test]
+    fn resolve_link_walks_relative_paths_and_skips_external_targets() {
+        assert_eq!(
+            resolve_link("scripts/README.md", "../README.md#self-hosting").as_deref(),
+            Some("README.md")
+        );
+        assert_eq!(
+            resolve_link("README.md", "wiki/docs/ARCHITECTURE.md").as_deref(),
+            Some("wiki/docs/ARCHITECTURE.md")
+        );
+        assert_eq!(
+            resolve_link("a/b/c.md", "./../d.md").as_deref(),
+            Some("a/d.md")
+        );
+        assert_eq!(resolve_link("README.md", "../outside.md"), None);
+        assert_eq!(resolve_link("README.md", "#anchor"), None);
+        assert_eq!(resolve_link("README.md", "https://example.org/x.md"), None);
+        assert_eq!(
+            resolve_link("README.md", "mailto:someone@example.org"),
+            None
+        );
+    }
+
+    #[test]
+    fn markdown_link_to_a_source_path_creates_an_edge_without_a_mention() {
+        let mut a = ent(
+            "a",
+            "Alpha",
+            "see [the other page](docs/b.md \"title\") and [x](nope.md)",
+        );
+        a.source_path = "README.md".into();
+        let mut b = ent("b", "Beta", "nothing");
+        b.source_path = "docs/b.md".into();
+        let g = build_graph(&map(vec![a, b]));
+        assert!(g.edges["a"].outgoing.contains("b"));
+        assert!(g.edges["b"].incoming.contains("a"));
+        assert!(g.edges["b"].outgoing.is_empty());
     }
 
     #[test]

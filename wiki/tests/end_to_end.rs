@@ -544,3 +544,45 @@ fn index_json_carries_methods_for_code_pages_and_empty_for_text() {
     assert_eq!(entry("store")["methods"], serde_json::json!(["open"]));
     assert_eq!(entry("notes")["methods"], serde_json::json!([]));
 }
+
+/// A relative markdown link is a reference as deliberate as a wikilink: it
+/// becomes a graph edge when its target, resolved against the linking file's
+/// directory, is another page's source path. External links and links to
+/// nothing in the tree are ignored.
+#[test]
+fn relative_markdown_links_become_edges() {
+    let tmp = tempdir().unwrap();
+    let raw = tmp.path().join("raw");
+    let out = tmp.path().join("out");
+    fs::create_dir_all(raw.join("docs")).unwrap();
+    fs::write(raw.join("README.md"), "# Root\n\nStart here.\n").unwrap();
+    fs::write(
+        raw.join("docs/guide.md"),
+        "# Guide\n\nSee the [top page](../README.md#start), the [site](https://example.org/README.md), and [nothing](missing.md).\n",
+    )
+    .unwrap();
+    let r = compile(&raw, &out, &CompileOptions::default()).unwrap();
+
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    let entry = |id: &str| {
+        index["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(entry("guide")["neighbors_out"], serde_json::json!(["root"]));
+    assert_eq!(entry("root")["neighbors_in"], serde_json::json!(["guide"]));
+    assert!(
+        !r.lint.orphans.contains(&"root".to_string()),
+        "root is linked by guide, orphans: {:?}",
+        r.lint.orphans
+    );
+    // The body never says "root", so only the link can have made the edge.
+    let page = fs::read_to_string(out.join("guide.md")).unwrap();
+    let body = page.split("## Body").nth(1).unwrap();
+    assert!(!body.to_lowercase().contains("root"), "{body}");
+}

@@ -389,8 +389,10 @@ oversights:
 
 - **Linking is lexical.** No LLM, embeddings, or semantic matching at
   generation time — two pages link only when a name or alias of one
-  appears in the other, or when a code page's import resolves to the
-  other's id. This is the core design trade-off, not a bug.
+  appears in the other, when a code page's import resolves to the
+  other's id, or when a relative markdown link (`[text](../other.md)`)
+  resolves to the other's source path. This is the core design
+  trade-off, not a bug.
 - **No call graph.** `find_definition` / `callers`-style queries need
   cross-file name resolution, which is not built. Code extraction is
   imports + exported signatures only, with Rust signatures owner-qualified
