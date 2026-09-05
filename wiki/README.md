@@ -17,8 +17,9 @@ The binary is written to `target/release/wiki`. For local runs without a
 separate build step, use `cargo run --release -- <args>` in place of the
 binary path.
 
-Tagged releases carry prebuilt binaries for Linux x86_64 and macOS
-(Apple silicon and Intel) on the GitHub Releases page.
+Pushing a `v*` tag runs the release workflow, which builds Linux x86_64 and
+macOS (Apple silicon and Intel) binaries and attaches them to the GitHub
+Release for that tag.
 
 ## Quickstart
 
@@ -258,9 +259,12 @@ A compiled wiki is meant to be read by an agent instead of re-crawling the
 source tree. Three artifacts drive that:
 
 - **`index.json`** — the machine catalog. Top level is `{ project, entries: [...] }`;
-  each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`,
-  `degree_in`, `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`,
-  `neighbors_in`, `defined` (the page's top-level definition names —
+  each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`
+  (`null` when none could be derived — a code file with no doc comment and
+  no exported item), `degree_in`, `degree_out`, `pagerank`, `token_estimate`,
+  `neighbors_out`, `neighbors_in` (edge targets and sources; what makes an
+  edge is described under [Limitations & roadmap](#limitations--roadmap)),
+  `defined` (the page's top-level definition names —
   functions, types, constants — in original case; empty for non-code pages),
   `methods` (the page's inherent-impl and trait-declaration method names, in
   original case; trait-impl methods are excluded; empty for non-code pages).
