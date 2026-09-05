@@ -319,12 +319,15 @@ out to the CLI. Client configuration:
 }
 ```
 
-**Tools** (mirroring the CLI subcommands 1:1):
+**Tools** (mirroring the CLI subcommands, with one difference: `neighbors`
+defaults `max_tokens` to 4000 here, where the CLI leaves it unbounded — an
+agent calling with defaults should not receive a 30 KB dump, while a person
+passes the flag on purpose):
 
 | Tool | Parameters | Returns |
 |---|---|---|
 | `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score, snippet}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
-| `neighbors` | `id`, `depth?` (1), `max_tokens?`, `max_nodes?`, `full?` | The context-pack text |
+| `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus

@@ -376,3 +376,42 @@ fn serve_reports_bad_params_and_survives() {
     drop(stdin);
     let _ = child.wait();
 }
+
+/// An agent that omits `max_tokens` must not get an unbounded dump: the
+/// server applies a default ceiling that the CLI, driven by a person passing
+/// flags, deliberately does not.
+#[test]
+fn neighbors_defaults_to_a_token_ceiling() {
+    let tmp = tempfile::tempdir().unwrap();
+    let raw = tmp.path().join("raw");
+    let out = tmp.path().join("out");
+    std::fs::create_dir_all(&raw).unwrap();
+    // ~40k chars, ~10k tokens: far over the default ceiling on its own.
+    let huge = "# Huge\n\nHuge mentions Small. ".to_string() + &"filler text. ".repeat(3000);
+    std::fs::write(raw.join("huge.txt"), huge).unwrap();
+    std::fs::write(raw.join("small.txt"), "# Small\n\nSmall body.\n").unwrap();
+    wiki::compile(&raw, &out, &wiki::CompileOptions::default()).unwrap();
+
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+            "name": "neighbors", "arguments": {"id": "huge"}
+        }}),
+    );
+    let resp = read_response(&stdout, 2);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.chars().count() / 4 <= wiki::serve::DEFAULT_NEIGHBORS_MAX_TOKENS,
+        "defaults-only pack exceeds the default ceiling: {} chars",
+        text.len()
+    );
+    assert!(
+        text.contains("wiki://page/huge"),
+        "target should degrade: {text}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}

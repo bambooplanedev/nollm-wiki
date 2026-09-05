@@ -24,6 +24,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
+/// Token ceiling applied to the `neighbors` tool when the caller omits
+/// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
+/// an agent calling with defaults should not receive a 30 KB dump.
+pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
+
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -114,7 +119,8 @@ pub(crate) struct NeighborsParams {
     pub id: String,
     /// BFS hop count from the target page (default 1).
     pub depth: Option<usize>,
-    /// Token budget for the returned pack (default unbounded).
+    /// Token budget for the returned pack (default 4000). Pass a larger
+    /// value for more context; there is no way to make it unbounded here.
     pub max_tokens: Option<usize>,
     /// Node-count budget for the returned pack (default unbounded).
     pub max_nodes: Option<usize>,
@@ -174,7 +180,7 @@ impl WikiServer {
     )]
     fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
         let budget = PackBudget {
-            max_tokens: p.max_tokens,
+            max_tokens: Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             max_nodes: p.max_nodes,
             full_neighbors: p.full.unwrap_or(false),
         };
