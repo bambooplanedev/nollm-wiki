@@ -34,15 +34,19 @@ fn is_boilerplate(line: &str) -> bool {
 }
 
 /// First non-heading, non-boilerplate sentence from a text block.
+///
+/// The sentence is taken from the whole paragraph that opens with the first
+/// real line — consecutive non-empty lines joined by one space — so a
+/// sentence wrapped at 80 columns (a `//!` block, README prose) is not cut at
+/// the line break.
 fn first_real_sentence(text: &str) -> Option<String> {
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') || is_boilerplate(line) {
-            continue;
-        }
-        return Some(first_sentence(line));
-    }
-    None
+    let mut lines = text.lines().map(str::trim);
+    let first = lines.find(|l| !l.is_empty() && !l.starts_with('#') && !is_boilerplate(l))?;
+    let paragraph = std::iter::once(first)
+        .chain(lines.take_while(|l| !l.is_empty()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(first_sentence(&paragraph))
 }
 
 /// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else
@@ -95,6 +99,22 @@ mod tests {
         );
         assert_eq!(first_sentence("Bump to v1.2"), "Bump to v1.2");
         assert_eq!(first_sentence("Done!Next"), "Done!Next");
+    }
+
+    #[test]
+    fn a_sentence_wrapped_across_lines_is_joined_before_the_cut() {
+        let doc = "Rust extraction: bare-`pub` gating, owner qualification through\nimpl scopes. Second sentence\nwraps too.";
+        assert_eq!(
+            summarize(None, Some(doc), "", None).as_deref(),
+            Some("Rust extraction: bare-`pub` gating, owner qualification through impl scopes.")
+        );
+        // The paragraph ends at a blank line: a following paragraph is never
+        // glued on when the first has no terminator.
+        let body = "first paragraph without a stop\n\nSecond paragraph.";
+        assert_eq!(
+            summarize(None, None, body, None).as_deref(),
+            Some("first paragraph without a stop")
+        );
     }
 
     #[test]
