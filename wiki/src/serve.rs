@@ -1,5 +1,5 @@
-//! MCP server for a compiled wiki (`wiki serve`): exposes search/neighbors/
-//! lint as tools and pages as resources over stdio.
+//! MCP server for a compiled wiki (`wiki serve`): exposes
+//! search/neighbors/lint as tools and pages as resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::model::SourceKind;

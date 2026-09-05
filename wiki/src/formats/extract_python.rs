@@ -274,8 +274,8 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
 }
 
 /// A Python module-level docstring: the first non-comment top-level
-/// statement, if it is a bare string expression, with its first non-empty
-/// inner line returned. Handles both single-line (`"""Doc."""`) and
+/// statement, if it is a bare string expression, with its opening paragraph
+/// returned. Handles both single-line (`"""Doc."""`) and
 /// multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
 /// `string_content` node rather than assuming the doc text is on line 1.
 pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
@@ -294,10 +294,15 @@ pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
         .children(&mut content_cursor)
         .find(|n| n.kind() == "string_content")?;
     let raw = text.get(content_node.byte_range())?;
-    raw.lines()
+    // The opening paragraph, so a sentence wrapped across lines survives
+    // `summarize`'s sentence cut.
+    let paragraph: Vec<&str> = raw
+        .lines()
         .map(str::trim)
-        .find(|l| !l.is_empty())
-        .map(str::to_string)
+        .skip_while(|l| l.is_empty())
+        .take_while(|l| !l.is_empty())
+        .collect();
+    (!paragraph.is_empty()).then(|| paragraph.join("\n"))
 }
 
 #[cfg(test)]
@@ -327,6 +332,16 @@ mod tests {
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert!(e.imports.iter().any(|i| i.contains("os")));
         assert_eq!(e.summary.as_deref(), Some("Top docstring."));
+    }
+
+    #[test]
+    fn a_docstring_sentence_wrapped_across_lines_summarizes_whole() {
+        let src = "\"\"\"\nFetch feeds over HTTP with retries and a\nbounded cache. Second sentence.\n\nMore.\n\"\"\"\n";
+        let e = CodeExtractor.extract("fetch.py", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("Fetch feeds over HTTP with retries and a bounded cache.")
+        );
     }
 
     #[test]

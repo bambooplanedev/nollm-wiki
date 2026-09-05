@@ -753,6 +753,16 @@ mod tests {
     }
 
     #[test]
+    fn a_module_doc_sentence_wrapped_across_lines_summarizes_whole() {
+        let src = "//! Rust extraction: bare-`pub` gating, owner qualification through\n//! impl scopes. Second sentence.\n//!\n//! Next paragraph.\n\npub fn f() {}\n";
+        let e = CodeExtractor.extract("t.rs", src);
+        assert_eq!(
+            e.summary.as_deref(),
+            Some("Rust extraction: bare-`pub` gating, owner qualification through impl scopes.")
+        );
+    }
+
+    #[test]
     fn summary_fallback_uses_the_impl_header_when_no_free_item_exists() {
         let src = "impl Extractor for Foo {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
         let e = CodeExtractor.extract("t.rs", src);

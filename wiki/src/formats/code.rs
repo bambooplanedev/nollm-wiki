@@ -969,11 +969,7 @@ fn collapse_runs(s: &str) -> String {
 /// languages without an AST-verified docstring convention (everything but
 /// Python, where `python_docstring` is used instead).
 fn leading_doc(text: &str, ext: &str) -> Option<String> {
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() {
-            continue;
-        }
+    let strip = |line: &str| -> Option<String> {
         let doc = match ext {
             "rs" => line
                 .strip_prefix("//!")
@@ -984,9 +980,19 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "js" | "ts" | "go" => line.strip_prefix("//").or_else(|| line.strip_prefix("/*")),
             _ => None,
         };
-        return doc.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
-    }
-    None
+        doc.map(|d| d.trim().to_string())
+    };
+    let mut lines = text.lines().map(str::trim).skip_while(|l| l.is_empty());
+    let first = strip(lines.next()?).filter(|d| !d.is_empty())?;
+    // The whole opening paragraph, not just its first line: `summarize` cuts
+    // the sentence, and a `//!` sentence is routinely wrapped at 80 columns.
+    let rest = lines.map_while(|l| strip(l).filter(|d| !d.is_empty()));
+    Some(
+        std::iter::once(first)
+            .chain(rest)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
 }
 
 /// Filenames that say nothing about the module's own identity: the language
