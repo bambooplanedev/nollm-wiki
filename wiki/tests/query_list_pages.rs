@@ -1,3 +1,5 @@
+//! `Wiki::list_pages` id and title ordering, backing the MCP server's `resources/list`.
+
 use wiki::query::Wiki;
 use wiki::{compile, CompileOptions};
 

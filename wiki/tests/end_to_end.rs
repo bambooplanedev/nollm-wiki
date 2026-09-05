@@ -1,3 +1,5 @@
+//! Full `compile()` runs on small in-memory corpora: artifacts, cross-links, reserved-name remapping, incremental edit and delete, and byte-identical output across `--jobs`.
+
 use std::collections::BTreeSet;
 use std::fs;
 use tempfile::tempdir;

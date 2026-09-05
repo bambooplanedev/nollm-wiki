@@ -85,13 +85,26 @@ pub fn render_index_md(m: &Manifest) -> String {
     let mut out = format!("# {} — Index\n\n", m.project);
     out.push_str(&format!("{} pages.\n\n", m.entries.len()));
     for e in &m.entries {
-        let summary = e.summary.as_deref().unwrap_or("");
         out.push_str(&format!(
-            "- [{}]({}) — `{}` (in {}, out {}): {}\n",
-            e.title, e.page, e.kind, e.degree_in, e.degree_out, summary
+            "- [{}]({}) — `{}` (in {}, out {}){}\n",
+            e.title,
+            e.page,
+            e.kind,
+            e.degree_in,
+            e.degree_out,
+            summary_suffix(e)
         ));
     }
     out
+}
+
+/// `: <summary>` when the entry has one, nothing when it does not — so a
+/// page without a summary never ends its index line in a dangling colon.
+fn summary_suffix(e: &ManifestEntry) -> String {
+    e.summary
+        .as_deref()
+        .map(|s| format!(": {s}"))
+        .unwrap_or_default()
 }
 
 pub fn render_llms_txt(m: &Manifest) -> String {
@@ -106,14 +119,7 @@ pub fn render_llms_txt(m: &Manifest) -> String {
     ranks.sort_by(f64::total_cmp);
     let median = ranks.get(ranks.len() / 2).copied().unwrap_or(0.0);
 
-    let line = |e: &ManifestEntry| {
-        format!(
-            "- [{}]({}): {}\n",
-            e.title,
-            e.page,
-            e.summary.as_deref().unwrap_or("")
-        )
-    };
+    let line = |e: &ManifestEntry| format!("- [{}]({}){}\n", e.title, e.page, summary_suffix(e));
     out.push_str("## Docs\n\n");
     for e in m.entries.iter().filter(|e| e.pagerank >= median) {
         out.push_str(&line(e));
@@ -206,6 +212,21 @@ mod tests {
         let _v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(render_llms_txt(&m).starts_with("# My Project"));
         assert!(render_agents_md("My Project").contains("index.json"));
+    }
+
+    #[test]
+    fn a_page_without_a_summary_ends_its_index_lines_cleanly() {
+        let (ents, g) = setup();
+        let m = build_manifest("proj", &ents, &g);
+        let llms = render_llms_txt(&m);
+        let md = render_index_md(&m);
+        assert!(
+            llms.contains("- [Alpha](alpha.md): Alpha summary.\n"),
+            "{llms}"
+        );
+        assert!(llms.contains("- [Beta](beta.md)\n"), "{llms}");
+        assert!(md.contains("(in 1, out 0)\n"), "{md}");
+        assert!(!llms.contains(": \n") && !md.contains(": \n"));
     }
 
     #[test]

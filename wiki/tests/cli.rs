@@ -1,3 +1,5 @@
+//! The `wiki` binary's subcommands end to end through `assert_cmd`: compile, search, neighbors, lint, generate, and `--watch`.
+
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;

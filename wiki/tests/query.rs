@@ -1,3 +1,5 @@
+//! `Wiki::load`, `search`, and `neighbors` against a compiled output directory, including the pack budget.
+
 use std::fs;
 use tempfile::tempdir;
 use wiki::model::SourceKind;

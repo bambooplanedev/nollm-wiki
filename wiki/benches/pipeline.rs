@@ -1,3 +1,5 @@
+//! Criterion benchmark: a full `compile()` of a generated 100- and 1000-file corpus.
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use tempfile::tempdir;
 use wiki::generator::generate_corpus;

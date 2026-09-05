@@ -1,3 +1,5 @@
+//! Pins the exact rendered Markdown of one page from a seeded corpus with `insta`.
+
 use std::fs;
 use tempfile::tempdir;
 use wiki::generator::generate_corpus;

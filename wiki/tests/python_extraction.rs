@@ -1,3 +1,5 @@
+//! Python extraction through `compile()`: `## Exports` and `## Imports` on a reduced stand-in for the audit corpora.
+
 use std::fs;
 use tempfile::tempdir;
 use wiki::{compile, CompileOptions};
