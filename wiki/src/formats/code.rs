@@ -1002,17 +1002,13 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
 /// those languages are unfinished rather than added blind.
 const DIRECTORY_MODULES: &[(&str, &str)] = &[("rs", "mod"), ("py", "__init__")];
 
-/// A code page's name: the file's own stem, except for a directory-module
-/// file, which borrows its parent directory's name.
-///
-/// `tests/common/mod.rs` named "Mod" was unreachable. Every importer refers to
-/// it as `common` — `mod common;`, `use common::helper` — so the page's own
-/// name appeared in no other page's body, and neither the phrase index nor
-/// import resolution could link it. With several such files present they also
-/// collided on the id `mod` and were qualified to `common_mod` / `formats_mod`,
-/// which matched nothing either. Naming it "Common" makes the ordinary phrase
-/// index find it, with no change to `resolve_import`.
-fn derive_code_name(rel_path: &str) -> String {
+/// The identifier a code file's module is known by, before any casing: the
+/// base name up to its first `.`, or the parent directory's name for a
+/// directory-module file (`mod.rs`, `__init__.py`) that has a parent. Shared
+/// by page naming (`derive_code_name`) and by `graph.rs` (import resolution
+/// and the code-shaped mention filter), so there is exactly one definition
+/// of how a code page is named.
+pub(crate) fn module_stem(rel_path: &str) -> &str {
     let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
     let ext = rel_path.rsplit('.').next().unwrap_or("");
@@ -1023,10 +1019,24 @@ fn derive_code_name(rel_path: &str) -> String {
         // At the corpus root there is no directory to borrow from, so the
         // stem stands.
         if let Some(parent) = rel_path.rsplit('/').nth(1) {
-            return title_case(&parent.replace(['_', '-'], " "));
+            return parent;
         }
     }
-    super::derive_name_from_path(rel_path)
+    stem
+}
+
+/// A code page's name: the title-cased `module_stem`.
+///
+/// `tests/common/mod.rs` named "Mod" was unreachable. Every importer refers to
+/// it as `common` — `mod common;`, `use common::helper` — so the page's own
+/// name appeared in no other page's body, and neither the phrase index nor
+/// import resolution could link it. With several such files present they also
+/// collided on the id `mod` and were qualified to `common_mod` / `formats_mod`,
+/// which matched nothing either. Naming it "Common" lets a `mod common;`
+/// declaration or a `common::` path link it, and `graph::resolve_import`
+/// reaches it through the same stem.
+fn derive_code_name(rel_path: &str) -> String {
+    title_case(&module_stem(rel_path).replace(['_', '-'], " "))
 }
 
 /// Assertions shared by every language's extraction tests.
@@ -1301,6 +1311,20 @@ mod tests {
         let e = CodeExtractor.extract("m.ts", ts);
         assert_eq!(e.symbols, vec!["export class Widget".to_string()]);
         assert_eq!(e.summary.as_deref(), Some("export class Widget"));
+    }
+
+    #[test]
+    fn module_stem_is_the_name_importers_use() {
+        assert_eq!(module_stem("text.rs"), "text");
+        assert_eq!(module_stem("src/formats/extract_rust.rs"), "extract_rust");
+        assert_eq!(module_stem("foo.test.rs"), "foo");
+        assert_eq!(module_stem("tests/common/mod.rs"), "common");
+        assert_eq!(module_stem("pkg/__init__.py"), "pkg");
+        // A directory module at the corpus root has no directory to borrow.
+        assert_eq!(module_stem("mod.rs"), "mod");
+        // The name every page derives from it is the title-cased stem.
+        assert_eq!(derive_code_name("tests/common/mod.rs"), "Common");
+        assert_eq!(derive_code_name("src/extract_rust.rs"), "Extract Rust");
     }
 
     #[test]
