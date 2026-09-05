@@ -56,18 +56,21 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    entities' names and aliases (the phrase index); a candidate whose target
    is a **code page** is kept only when the body refers to that module in
    code shape (`refers_to_module`: a `stem::`/`::stem` path, a `mod stem;`
-   declaration, or the filename `stem.rs`), never by prose or a bare
+   declaration, or the filename `stem.<ext>`, the target's own extension; a
+   directory module's stem is its directory, so `formats::` matches and a
+   written-out `src/formats/mod.rs` does not), never by prose or a bare
    backticked word — a one-word module name such as `Text` would otherwise
    match every English use of the word. Import edges: every segment of an
    import string that equals a code page's module stem
    (`formats::code::module_stem`, the same rule that names the page) or a
    name in its `defined` list (`ImportResolver`); a `::` path is followed
    only under `crate`, `super`, `self`, or a local crate root, the
-   directory holding a `src/lib.rs`/`src/main.rs`, so `rmcp::model` never
-   reaches `model`. Link edges: each inline markdown link `[text](target)`
-   resolved lexically against the linking file's directory to another
-   entity's `source_path` (`resolve_link`; external schemes, bare anchors,
-   and targets above the root are ignored). Then it runs a fixed-iteration
+   directory holding a `src/lib.rs`/`src/main.rs`, so an import of
+   `rmcp::model` never reaches `model`. Link edges: each inline markdown
+   link `[text](target)` resolved lexically against the linking file's
+   directory to another entity's `source_path` (`resolve_link`; external
+   schemes, bare anchors, and targets above the root are ignored). Then it
+   runs a fixed-iteration
    PageRank over the link graph. Produces a `Graph { edges, pagerank }`.
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
@@ -124,9 +127,12 @@ files for `Rust`, 2 for `Python`, 1 for `Simple`, on this repo alone — and
 `code_rust.rs` failed too, because the compiler's own `SourceKind` string
 `code:rust` tokenizes to the adjacent words `code` and `rust`. That graph
 cost is gone: a mention links a code page only in code shape (stage 4
-above). The names stay two words for search, where a title matches a query
-by word prefix, so a page titled `Rust` or `Python` would rank for every
-query that names the language rather than the extractor.
+above). The names stay two words for search. Field weights are not
+length-normalised, so a bare `rust` scores the same on `Rust` as on `Extract
+Rust`; what the second word buys is the compound query — `extract rust`
+collects the name weight on both words for `Extract Rust` and on one for
+`Rust` — and a title that says what the page is about (extraction) rather than
+only what it is about something (Rust).
 
 **A directory-module page takes its directory's name.** `mod.rs` and
 `__init__.py` say nothing about the module they open — every importer refers
@@ -139,7 +145,8 @@ permanent orphan for exactly this reason. Naming it `Common` lets `mod
 common;` and `common::write` link it. The one-word prose cost this used to
 carry ("A common mistake is tuning …" drew an edge) is gone since mention
 edges into code pages must be code-shaped; the `extract_*.rs` naming above
-still matters for search, where a one-word title matches by prefix.
+still matters for search, where a compound query such as `extract rust`
+scores the name field on both words.
 
 ## Determinism rules
 
@@ -249,8 +256,8 @@ breaking any of them reintroduces nondeterminism.
   `source_path`.** When two code pages share a module stem
   (`src/query.rs`, `tests/query.rs`), `ImportResolver` keeps the smaller
   path; when two pages define the same name, neither resolves. Both are
-  pure functions of the source-path set, so the edge set is the same in any
-  extraction order.
+  pure functions of the source-path and defined-name sets, so the edge set
+  is the same in any extraction order.
 
 ## Incremental build
 

@@ -1,4 +1,4 @@
-//! Link graph: wikilink and import edges between pages, orphan detection, and `PageRank` centrality with damping.
+//! Link graph: mention edges (code-shaped when the target is a code page), import edges, markdown-link edges, orphan detection, and `PageRank` centrality with damping.
 
 use crate::formats::code::module_stem;
 use crate::model::{Edges, Entity, Graph, SourceKind};

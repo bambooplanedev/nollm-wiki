@@ -95,8 +95,8 @@ pub(crate) fn python_spec() -> LangSpec {
         // `from .models import X` and `from . import X` need separate
         // patterns. In the second, `relative_import` is just an
         // `import_prefix`, so its text is a lone `.` and
-        // `graph::resolve_import` — which takes the last *non-empty*
-        // segment of a split on `.` — extracts nothing. The anchor `.`
+        // `graph::ImportResolver` — which resolves every non-empty segment
+        // of a split on `.` — finds no segment to resolve. The anchor `.`
         // after `(import_prefix)` constrains it to be the last named
         // child, which is exactly what separates the two families; without
         // it, `from .models import Article, FeedSource` would also emit
@@ -104,8 +104,9 @@ pub(crate) fn python_spec() -> LangSpec {
         //
         // Known gap: the bare-prefix family loses its level, so
         // `from . import x`, `from .. import x`, and `import x` all render
-        // as `x`. The graph is unaffected — `resolve_import` discards the
-        // prefix anyway. `from . import *` and `from __future__ import x`
+        // as `x`. The graph is unaffected — the dropped level is not a
+        // resolvable segment. `from . import *` and
+        // `from __future__ import x`
         // capture nothing; neither resolves to a page.
         query_src: r#"
                 ; One pattern covers module constants AND class fields:

@@ -1033,7 +1033,7 @@ pub(crate) fn module_stem(rel_path: &str) -> &str {
 /// import resolution could link it. With several such files present they also
 /// collided on the id `mod` and were qualified to `common_mod` / `formats_mod`,
 /// which matched nothing either. Naming it "Common" lets a `mod common;`
-/// declaration or a `common::` path link it, and `graph::resolve_import`
+/// declaration or a `common::` path link it, and `graph::ImportResolver`
 /// reaches it through the same stem.
 fn derive_code_name(rel_path: &str) -> String {
     title_case(&module_stem(rel_path).replace(['_', '-'], " "))
