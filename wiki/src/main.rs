@@ -16,8 +16,6 @@ use wiki::{compile, CompileOptions};
 )]
 struct Cli {
     #[arg(long, global = true)]
-    verbose: bool,
-    #[arg(long, global = true)]
     jobs: Option<usize>,
     #[command(subcommand)]
     command: Command,
@@ -36,6 +34,10 @@ enum Command {
         emit_json: bool,
         #[arg(long)]
         watch: bool,
+        /// Project name written to index.json, llms.txt and AGENTS.md
+        /// (default: the input directory's basename).
+        #[arg(long)]
+        project: Option<String>,
     },
     Neighbors {
         id: String,
@@ -86,13 +88,14 @@ fn main() -> Result<()> {
             no_ignore,
             emit_json,
             watch,
+            project,
         } => {
             let opts = CompileOptions {
                 incremental,
                 respect_ignore: !no_ignore,
                 emit_json,
                 jobs: cli.jobs,
-                project: None,
+                project,
             };
             if watch {
                 wiki::watch::watch(&input, &output, &opts).context("watch failed")?;

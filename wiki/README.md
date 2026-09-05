@@ -169,6 +169,7 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 - `--incremental` (off) — reuse `.wiki/cache.json` render fingerprints and skip unchanged pages.
 - `--no-ignore` (off) — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
 - `--emit-json` (off) — also write `graph.json` (node/edge graph).
+- `--project <NAME>` (the input directory's basename) — project name written to `index.json`, `llms.txt`, and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project differently.
 - `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change. Events are debounced for 150 ms and events under `<OUTPUT>` are ignored; each run reports `recompiled: N pages (M written)` on stderr.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an
@@ -238,7 +239,6 @@ Synthetic corpus generator, useful for demos and reproducing bug reports.
 ### Global options
 
 - `--jobs <N>` (none — Rayon default, usually the number of CPUs) — worker thread count for `compile`. Output is byte-identical regardless of the value (see [Determinism](#determinism)).
-- `--verbose` — **reserved, currently a no-op.** It is accepted for forward compatibility but does not change output or logging today.
 
 ## Output artifacts
 
@@ -368,7 +368,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`CompileOptions.project` sets the project name written to `index.json`,
+`CompileOptions.project` (the CLI's `--project`) sets the project name written to `index.json`,
 `llms.txt`, and `AGENTS.md`; it defaults to the input directory's basename.
 Besides `search` and `neighbors`, `Wiki` exposes `page(id)` (a rendered
 page's Markdown), `has_page(id)`, and `list_pages()` (`(id, title)` pairs,

@@ -96,6 +96,43 @@ fn stale_page_from_id_scheme_change_warns_but_does_not_delete() {
     assert!(output.join("alpha_two.md").exists());
 }
 
+/// Without `--project` the name comes from the input path, so `compile .`
+/// and `compile "$PWD"` disagree; the flag pins it.
+#[test]
+fn compile_project_flag_names_the_manifest() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha.\n").unwrap();
+
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args([
+            "compile",
+            input.to_str().unwrap(),
+            output.to_str().unwrap(),
+            "--project",
+            "demo",
+        ])
+        .assert()
+        .success();
+
+    let index = fs::read_to_string(output.join("index.json")).unwrap();
+    assert!(index.contains("\"project\": \"demo\""), "{index}");
+    assert!(fs::read_to_string(output.join("llms.txt"))
+        .unwrap()
+        .starts_with("# demo\n"));
+
+    // --verbose was a documented no-op; it is gone, and clap says so.
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["--verbose", "lint", "--dir", output.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("unexpected argument '--verbose'"));
+}
+
 #[test]
 fn generate_cli_creates_files() {
     let dir = tempdir().unwrap();
