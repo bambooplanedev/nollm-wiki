@@ -116,16 +116,17 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `serve`, `generate`. |
 
 **The `extract_*.rs` names are two words on purpose, not tidiness.** Page
-titles are derived from file stems and are themselves graph inputs: a page
-titled `Rust` (from a hypothetical `rust.rs`) would attract an edge from
-every prose mention of "rust" — measured at 9 files for `Rust`, 2 for
-`Python`, 1 for `Simple`, on this repo alone. A two-word title needs an
-adjacent token pair in the phrase index, which a bare prose mention doesn't
-produce. `code_rust.rs` was tried next and also failed: `code:rust` is the
-compiler's own `SourceKind` string, and it tokenizes to the adjacent words
-`code` and `rust`, which still matched a page titled `Code Rust` (see
-dogfood finding: generic titles match prose through punctuation).
-`extract_rust.rs`/`extract_python.rs`/`extract_simple.rs` avoid both traps.
+titles are derived from file stems and are inputs to both the graph and
+search. When these names were chosen, a mention edge needed only the
+title's words in prose, so a page titled `Rust` (from a hypothetical
+`rust.rs`) drew an edge from every prose mention of "rust" — measured at 9
+files for `Rust`, 2 for `Python`, 1 for `Simple`, on this repo alone — and
+`code_rust.rs` failed too, because the compiler's own `SourceKind` string
+`code:rust` tokenizes to the adjacent words `code` and `rust`. That graph
+cost is gone: a mention links a code page only in code shape (stage 4
+above). The names stay two words for search, where a title matches a query
+by word prefix, so a page titled `Rust` or `Python` would rank for every
+query that names the language rather than the extractor.
 
 **A directory-module page takes its directory's name.** `mod.rs` and
 `__init__.py` say nothing about the module they open — every importer refers
