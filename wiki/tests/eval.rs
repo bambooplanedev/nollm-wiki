@@ -452,9 +452,12 @@ fn pack_ceiling_holds_on_a_real_graph() {
 
     assert_eq!(checked, 102, "17 pages x 6 budgets");
     // Pinned so a change that stops degrading targets — which would make the
-    // ceiling trivially satisfiable — is visible rather than silent.
+    // ceiling trivially satisfiable — is visible rather than silent. 8 since
+    // mention edges into code pages must be code-shaped (2026-09-05): one
+    // more target has no admissible neighbours, so its degraded block stands
+    // alone.
     assert_eq!(
-        floor_fires, 7,
+        floor_fires, 8,
         "floor exception fired an unexpected number of times"
     );
 }

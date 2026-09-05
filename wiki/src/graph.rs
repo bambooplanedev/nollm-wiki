@@ -1,6 +1,7 @@
 //! Link graph: wikilink and import edges between pages, orphan detection, and `PageRank` centrality with damping.
 
-use crate::model::{Edges, Entity, Graph};
+use crate::formats::code::module_stem;
+use crate::model::{Edges, Entity, Graph, SourceKind};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -105,6 +106,56 @@ fn link_targets(body: &str, source_path: &str, by_path: &BTreeMap<&str, &str>) -
         .collect()
 }
 
+fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Does `body` refer to the module `stem`, compiled from `<stem>.<ext>`, in
+/// code shape? One of: a `stem::` or `::stem` path (the latter not a method
+/// call, `::stem(`), a `mod stem;` / `mod stem {` declaration, or the
+/// filename `stem.ext`. Every occurrence must sit on identifier boundaries,
+/// so `body_text` never matches `text`; matching is case-sensitive, so
+/// `SourceKind::Text` does not either. Plain prose and a bare `` `stem` `` do
+/// not count: the 2026-09-05 code-reference-edges design measured backticks
+/// alone as the precision leak (22 kept edges, 16 noise).
+fn refers_to_module(body: &str, stem: &str, ext: &str) -> bool {
+    let bytes = body.as_bytes();
+    body.match_indices(stem).any(|(start, _)| {
+        let end = start + stem.len();
+        let left_free = start == 0 || !is_ident_byte(bytes[start - 1]);
+        let after = bytes.get(end).copied();
+        let right_free = after.is_none_or(|b| !is_ident_byte(b));
+        let path_out = left_free && bytes[end..].starts_with(b"::");
+        let path_in = right_free && bytes[..start].ends_with(b"::") && after != Some(b'(');
+        let declaration = right_free && is_mod_declaration(body, start, end);
+        let filename = left_free
+            && after == Some(b'.')
+            && body[end + 1..].starts_with(ext)
+            && bytes
+                .get(end + 1 + ext.len())
+                .is_none_or(|b| !is_ident_byte(*b));
+        path_out || path_in || declaration || filename
+    })
+}
+
+/// `mod <stem>;` or `mod <stem> {` with the stem at `body[start..end]`; any
+/// visibility before `mod` is fine, `method <stem>` is not.
+fn is_mod_declaration(body: &str, start: usize, end: usize) -> bool {
+    let head = body[..start].trim_end_matches(' ');
+    if head.len() == start || !head.ends_with("mod") {
+        return false;
+    }
+    if head[..head.len() - 3]
+        .bytes()
+        .next_back()
+        .is_some_and(is_ident_byte)
+    {
+        return false;
+    }
+    let tail = body[end..].trim_start_matches(' ');
+    tail.starts_with(';') || tail.starts_with('{')
+}
+
 pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
     let mut edges: BTreeMap<String, Edges> = entities
         .keys()
@@ -121,10 +172,29 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         .iter()
         .map(|(id, e)| (e.source_path.as_str(), id.as_str()))
         .collect();
+    // Code pages by id: (module stem, extension), for the mention filter.
+    let code_pages: BTreeMap<&str, (&str, &str)> = entities
+        .iter()
+        .filter(|(_, e)| matches!(e.kind, SourceKind::Code { .. }))
+        .map(|(id, e)| {
+            let ext = e.source_path.rsplit('.').next().unwrap_or("");
+            (id.as_str(), (module_stem(&e.source_path), ext))
+        })
+        .collect();
 
     for (eid, ent) in entities {
         let toks = tokens(&ent.body);
-        let mut targets = phrase_targets(&toks, &index, eid);
+        // A mention links a code page only when it is code-shaped: a one-word
+        // title such as `Text` or `Hash` otherwise draws an edge from every
+        // prose use of the word (see `refers_to_module`).
+        let mut targets: BTreeSet<String> = phrase_targets(&toks, &index, eid)
+            .into_iter()
+            .filter(|tid| {
+                code_pages
+                    .get(tid.as_str())
+                    .is_none_or(|(stem, ext)| refers_to_module(&ent.body, stem, ext))
+            })
+            .collect();
         // Markdown link edges: `[text](relative/path.md)` resolving to another
         // page's source path. A link is a deliberate reference, unlike a
         // mention, and is the only way a README reaches a page it never names.
@@ -231,6 +301,95 @@ mod tests {
 
     fn map(v: Vec<Entity>) -> BTreeMap<String, Entity> {
         v.into_iter().map(|e| (e.id.clone(), e)).collect()
+    }
+
+    fn code(id: &str, name: &str, path: &str, body: &str) -> Entity {
+        let mut e = ent(id, name, body);
+        e.source_path = path.into();
+        e.kind = SourceKind::Code {
+            lang: "rust".into(),
+        };
+        e
+    }
+
+    #[test]
+    fn refers_to_module_accepts_paths_declarations_and_filenames_only() {
+        for yes in [
+            "text::extract(x)",
+            "use crate::text::Extract;",
+            "see ::text for details",
+            "mod text;",
+            "pub mod text {",
+            "pub(crate) mod   text;",
+            "lives in src/text.rs",
+            "text.rs",
+        ] {
+            assert!(refers_to_module(yes, "text", "rs"), "should match: {yes}");
+        }
+        for no in [
+            "the text of the page",
+            "body_text::x",
+            "text_extractor::run()",
+            "in context::here",
+            "`text`",
+            "SourceKind::Text",
+            "ContentBlock::text(\"x\")",
+            "text.rsx",
+            "text.json",
+            "method text;",
+            "",
+        ] {
+            assert!(
+                !refers_to_module(no, "text", "rs"),
+                "should not match: {no}"
+            );
+        }
+        // The extension is the target's own, not a fixed list.
+        assert!(refers_to_module("from models.py", "models", "py"));
+        assert!(!refers_to_module("from models.py", "models", "rs"));
+    }
+
+    #[test]
+    fn a_prose_mention_of_a_code_page_is_not_an_edge_but_a_path_is() {
+        let text = code("text", "Text", "src/text.rs", "");
+        let notes = ent("notes", "Notes", "the text of the page is long");
+        let mut user = code("user", "User", "src/user.rs", "use crate::text::Extract;");
+        user.imports = vec![]; // pin the filter, not the resolver
+        let g = build_graph(&map(vec![text, notes, user]));
+        assert!(
+            !g.edges["notes"].outgoing.contains("text"),
+            "{:?}",
+            g.edges["notes"]
+        );
+        assert!(
+            g.edges["user"].outgoing.contains("text"),
+            "{:?}",
+            g.edges["user"]
+        );
+        assert!(g.edges["text"].incoming.contains("user"));
+    }
+
+    #[test]
+    fn multi_word_code_titles_are_filtered_too() {
+        let er = code(
+            "extract_rust",
+            "Extract Rust",
+            "src/formats/extract_rust.rs",
+            "",
+        );
+        let prose = ent("a", "Alpha", "Extract Rust handles pub gating");
+        let file = ent("b", "Beta", "gating lives in extract_rust.rs today");
+        let g = build_graph(&map(vec![er, prose, file]));
+        assert!(!g.edges["a"].outgoing.contains("extract_rust"));
+        assert!(g.edges["b"].outgoing.contains("extract_rust"));
+    }
+
+    #[test]
+    fn text_and_markdown_targets_keep_prose_mentions() {
+        let target = ent("text", "Text", "a note titled Text");
+        let src = ent("a", "Alpha", "the text of this note");
+        let g = build_graph(&map(vec![target, src]));
+        assert!(g.edges["a"].outgoing.contains("text"));
     }
 
     #[test]
