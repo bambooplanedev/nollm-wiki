@@ -181,6 +181,7 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
             (id.as_str(), (module_stem(&e.source_path), ext))
         })
         .collect();
+    let resolver = ImportResolver::new(entities);
 
     for (eid, ent) in entities {
         let toks = tokens(&ent.body);
@@ -203,14 +204,10 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
                 .into_iter()
                 .filter(|tid| tid != eid),
         );
-        // Import edges: resolve each import string to an entity id if it matches a
-        // known id or the stem of a known source path.
+        // Import edges: every segment of an import string that names a code
+        // page's module stem or one of its defined items (see `ImportResolver`).
         for imp in &ent.imports {
-            if let Some(tid) = resolve_import(imp, entities) {
-                if tid != *eid {
-                    targets.insert(tid);
-                }
-            }
+            targets.extend(resolver.resolve(imp).into_iter().filter(|tid| tid != eid));
         }
         for tid in targets {
             edges.get_mut(eid).unwrap().outgoing.insert(tid.clone());
@@ -222,13 +219,98 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
     Graph { edges, pagerank }
 }
 
-fn resolve_import(imp: &str, entities: &BTreeMap<String, Entity>) -> Option<String> {
-    let last = imp.rsplit(['.', '/', ':']).find(|s| !s.is_empty())?;
-    let slug = crate::model::slugify(last);
-    if entities.contains_key(&slug) {
-        return Some(slug);
+/// Import-string resolution, precomputed once per `build_graph`.
+///
+/// Segment matching, not module resolution: a `::` path is followed only
+/// under a local root, and each remaining segment is looked up as a module
+/// stem or a defined name. Two local crates that each own a `query.rs` both
+/// resolve to the lexicographically smaller path.
+struct ImportResolver<'a> {
+    /// First segments a `::` path may start with and still be followed:
+    /// `crate`, `super`, `self`, plus every local crate — the directory
+    /// holding a `src/lib.rs` or `src/main.rs` page (`wiki` on this repo).
+    local_roots: BTreeSet<&'a str>,
+    /// Module stem → (`source_path`, page id); the smallest path wins.
+    by_stem: BTreeMap<&'a str, (&'a str, &'a str)>,
+    /// Defined name → page id when exactly one code page defines it,
+    /// `None` once a second page does.
+    by_defined: BTreeMap<&'a str, Option<&'a str>>,
+}
+
+impl<'a> ImportResolver<'a> {
+    fn new(entities: &'a BTreeMap<String, Entity>) -> Self {
+        let mut local_roots: BTreeSet<&str> = ["crate", "super", "self"].into_iter().collect();
+        let mut by_stem: BTreeMap<&str, (&str, &str)> = BTreeMap::new();
+        let mut by_defined: BTreeMap<&str, Option<&str>> = BTreeMap::new();
+        for (id, e) in entities {
+            if !matches!(e.kind, SourceKind::Code { .. }) {
+                continue;
+            }
+            let path = e.source_path.as_str();
+            if let Some(root) = local_crate_root(path) {
+                local_roots.insert(root);
+            }
+            let stem = module_stem(path);
+            match by_stem.get(stem) {
+                Some((kept, _)) if *kept <= path => {}
+                _ => {
+                    by_stem.insert(stem, (path, id.as_str()));
+                }
+            }
+            for name in &e.defined {
+                by_defined
+                    .entry(name.as_str())
+                    .and_modify(|owner| {
+                        if *owner != Some(id.as_str()) {
+                            *owner = None;
+                        }
+                    })
+                    .or_insert(Some(id.as_str()));
+            }
+        }
+        Self {
+            local_roots,
+            by_stem,
+            by_defined,
+        }
     }
-    None
+
+    /// Every code page one import string refers to.
+    fn resolve(&self, imp: &str) -> BTreeSet<String> {
+        let mut segments = imp
+            .split(|c: char| matches!(c, '.' | '/' | ':' | '{' | '}' | ',') || c.is_whitespace())
+            .filter(|s| !s.is_empty());
+        if imp.contains("::") {
+            // The first segment of a Rust path is a crate root, never a
+            // module of this tree, and only local roots are followed.
+            match segments.next() {
+                Some(root) if self.local_roots.contains(root) => {}
+                _ => return BTreeSet::new(),
+            }
+        }
+        segments
+            .filter_map(|seg| self.resolve_segment(seg))
+            .map(str::to_string)
+            .collect()
+    }
+
+    fn resolve_segment(&self, seg: &str) -> Option<&'a str> {
+        if let Some((_, id)) = self.by_stem.get(seg) {
+            return Some(id);
+        }
+        self.by_defined.get(seg).copied().flatten()
+    }
+}
+
+/// `wiki` for `wiki/src/lib.rs`; `None` for a crate at the corpus root (no
+/// directory to name it) or for any file that is not a crate root.
+fn local_crate_root(source_path: &str) -> Option<&str> {
+    let mut parts = source_path.rsplit('/');
+    let file = parts.next()?;
+    if !matches!(file, "lib.rs" | "main.rs") || parts.next()? != "src" {
+        return None;
+    }
+    parts.next()
 }
 
 pub fn orphan_ids(graph: &Graph) -> Vec<String> {
@@ -476,5 +558,85 @@ mod tests {
         ]));
         let sum: f64 = g.pagerank.values().sum();
         assert!((sum - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn local_crate_root_is_the_directory_holding_src_lib_or_main() {
+        assert_eq!(local_crate_root("wiki/src/lib.rs"), Some("wiki"));
+        assert_eq!(local_crate_root("tools/cli/src/main.rs"), Some("cli"));
+        assert_eq!(local_crate_root("src/lib.rs"), None);
+        assert_eq!(local_crate_root("wiki/src/graph.rs"), None);
+        assert_eq!(local_crate_root("wiki/lib.rs"), None);
+    }
+
+    #[test]
+    fn imports_resolve_every_segment_by_stem_and_defined_name() {
+        let mut model = code("model", "Model", "wiki/src/model.rs", "");
+        model.defined = vec!["Entity".into(), "Graph".into()];
+        let formats = code("formats", "Formats", "wiki/src/formats/mod.rs", "");
+        let codepage = code("code", "Code", "wiki/src/formats/code.rs", "");
+        let mut summary = code("summary", "Summary", "wiki/src/formats/summary.rs", "");
+        summary.defined = vec!["summarize".into()];
+        let mut src_query = code("src_query", "Src Query", "wiki/src/query.rs", "");
+        src_query.defined = vec!["Wiki".into(), "PackBudget".into()];
+        let tests_query = code("tests_query", "Tests Query", "wiki/tests/query.rs", "");
+        let mut lib = code("lib", "Lib", "wiki/src/lib.rs", "");
+        lib.defined = vec!["compile".into(), "CompileOptions".into()];
+        let readme = ent("wiki", "wiki", "the wiki README");
+        let mut user = code("user", "User", "wiki/src/user.rs", "");
+        user.imports = vec![
+            "crate::model::{Entity, Graph}".into(),
+            "crate::formats::code::CodeExtractor".into(),
+            "crate::formats::{summarize, Extractor}".into(),
+            "wiki::query::Wiki".into(),
+            "wiki::{compile, CompileOptions}".into(),
+            "rmcp::model::CallToolResult".into(),
+            "std::collections::BTreeMap".into(),
+            "serde::Serialize".into(),
+        ];
+        let g = build_graph(&map(vec![
+            model,
+            formats,
+            codepage,
+            summary,
+            src_query,
+            tests_query,
+            lib,
+            readme,
+            user,
+        ]));
+        let out: Vec<&str> = g.edges["user"]
+            .outgoing
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            out,
+            ["code", "formats", "lib", "model", "src_query", "summary"],
+            "src/ path wins the shared stem `query`; struct names resolve through `defined`; \
+             rmcp/std/serde roots resolve nothing; the README is never an import target"
+        );
+    }
+
+    #[test]
+    fn dotted_and_relative_imports_resolve_every_segment() {
+        let text = code("text", "Text", "pkg/text.py", "");
+        let mut consumer = code("consumer", "Consumer", "pkg/consumer.py", "");
+        consumer.imports = vec![".text".into(), "os.path".into()];
+        let g = build_graph(&map(vec![text, consumer]));
+        assert!(g.edges["consumer"].outgoing.contains("text"));
+        assert_eq!(g.edges["consumer"].outgoing.len(), 1);
+    }
+
+    #[test]
+    fn a_defined_name_shared_by_two_pages_resolves_nothing() {
+        let mut a = code("a", "Alpha", "src/a.rs", "");
+        a.defined = vec!["Thing".into()];
+        let mut b = code("b", "Beta", "src/b.rs", "");
+        b.defined = vec!["Thing".into()];
+        let mut user = code("user", "User", "src/user.rs", "");
+        user.imports = vec!["crate::Thing".into()];
+        let g = build_graph(&map(vec![a, b, user]));
+        assert!(g.edges["user"].outgoing.is_empty());
     }
 }
