@@ -639,4 +639,22 @@ mod tests {
         let g = build_graph(&map(vec![a, b, user]));
         assert!(g.edges["user"].outgoing.is_empty());
     }
+
+    #[test]
+    fn a_ts_index_import_reaches_the_module_not_a_test_of_the_same_name() {
+        // `backends` is the directory module; a test file named after it must
+        // not take the stem and collect the importer's edge.
+        let module = code("src_backends", "Backends", "src/backends/index.ts", "");
+        let test = code(
+            "tests_backends",
+            "Tests Backends",
+            "tests/backends.test.ts",
+            "",
+        );
+        let mut app = code("app", "App", "src/app.ts", "");
+        app.imports = vec!["./backends/index.js".into()];
+        let g = build_graph(&map(vec![module, test, app]));
+        let out: Vec<&str> = g.edges["app"].outgoing.iter().map(String::as_str).collect();
+        assert_eq!(out, ["src_backends"]);
+    }
 }

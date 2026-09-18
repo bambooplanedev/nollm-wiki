@@ -998,9 +998,22 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
 /// Filenames that say nothing about the module's own identity: the language
 /// names such a module after its DIRECTORY.
 ///
-/// `index.js` / `index.ts` is the same shape for JS and TS. Left out while
-/// those languages are unfinished rather than added blind.
-const DIRECTORY_MODULES: &[(&str, &str)] = &[("rs", "mod"), ("py", "__init__")];
+/// `index.js` / `index.ts` is the same shape for JS and TS. It was left out
+/// while those languages were unfinished, but leaving it out is not neutral:
+/// the stem falls through to `index`, so the module page is named after a file
+/// no importer mentions, and the bare directory name stays free for a
+/// like-named test (`tests/backends.test.ts`) to claim — which then collects
+/// the importer's edge. On a 49-page TypeScript corpus that was 15 edges into
+/// tests and 22 real module imports resolving nowhere.
+///
+/// `.mjs`/`.cjs`/`.tsx`/`.jsx` want the same entry but are not compiled at
+/// all yet, so they would be dead rows here.
+const DIRECTORY_MODULES: &[(&str, &str)] = &[
+    ("rs", "mod"),
+    ("py", "__init__"),
+    ("ts", "index"),
+    ("js", "index"),
+];
 
 /// The identifier a code file's module is known by, before any casing: the
 /// base name up to its first `.`, or the parent directory's name for a
@@ -1325,6 +1338,17 @@ mod tests {
         // The name every page derives from it is the title-cased stem.
         assert_eq!(derive_code_name("tests/common/mod.rs"), "Common");
         assert_eq!(derive_code_name("src/extract_rust.rs"), "Extract Rust");
+    }
+
+    #[test]
+    fn index_is_a_directory_module_the_way_mod_and_dunder_init_are() {
+        // `import './backends/index.js'` names the module `backends`, exactly
+        // as `mod common;` names `tests/common/mod.rs`.
+        assert_eq!(module_stem("src/backends/index.ts"), "backends");
+        assert_eq!(module_stem("web/src/api/index.js"), "api");
+        assert_eq!(derive_code_name("src/backends/index.ts"), "Backends");
+        // A directory module at the corpus root has no directory to borrow.
+        assert_eq!(module_stem("index.ts"), "index");
     }
 
     #[test]
