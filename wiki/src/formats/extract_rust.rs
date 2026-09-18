@@ -315,7 +315,7 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
     let mut spans: Vec<(usize, usize, String)> = Vec::new();
     let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     while let Some(m) = matches.next() {
-        for cap in m.captures {
+        for cap in m.captures() {
             let node = cap.node;
             // The whole attribute run above the mod is spliced when any of
             // them is cfg(test), so `#[cfg(test)]` itself goes with it.
