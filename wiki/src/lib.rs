@@ -86,9 +86,23 @@ pub fn compile(
 /// served by `serve`, so that is warned about instead of reported as a
 /// clean compile. Already-gone is the normal case after a manual delete and
 /// needs no warning.
+///
+/// A page carrying hand-written `## Notes` is kept and warned about instead.
+/// Everything else in the output is regenerated from source, so `## Notes` is
+/// the only content a prune can destroy that nothing can bring back — and an
+/// id-scheme change makes every page stale at once, which is precisely when
+/// that happens silently. The non-incremental path already warns and never
+/// deletes (see `stale_page_files`); this is the same rule for the other mode.
 fn prune_stale(cache: &cache::Cache, live: &BTreeSet<String>, output: &Path) {
     for stale in cache.pages.keys().filter(|k| !live.contains(*k)) {
-        if let Err(e) = std::fs::remove_file(output.join(format!("{stale}.md"))) {
+        let path = output.join(format!("{stale}.md"));
+        if !rewrite::read_preserved_notes(&path).is_empty() {
+            eprintln!(
+                "warning: keeping {stale}.md — no longer generated, but it has hand-written ## Notes; move them out and delete it"
+            );
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&path) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 eprintln!("warning: could not remove stale page {stale}.md: {e}");
             }
@@ -589,6 +603,37 @@ mod tests {
         assert_eq!(
             super::stale_page_files(&prior, &live, out),
             vec!["old_slug.md".to_string()]
+        );
+    }
+
+    #[test]
+    fn prune_stale_never_deletes_hand_written_notes() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path();
+        std::fs::write(
+            out.join("noted.md"),
+            "# Noted\n\n## Body\nx\n\n## Notes\nwhy this module is odd\n",
+        )
+        .unwrap();
+        std::fs::write(
+            out.join("plain.md"),
+            "# Plain\n\n## Body\nx\n\n## Notes\n_(add your own notes here — preserved on recompile)_\n",
+        )
+        .unwrap();
+        let mut cache = crate::cache::Cache::fresh();
+        cache.set("noted", "fp");
+        cache.set("plain", "fp");
+        // Both ids are gone from the corpus — an id-scheme change renames every
+        // page at once, which is exactly when notes are easiest to lose.
+        super::prune_stale(&cache, &BTreeSet::new(), out);
+        assert!(
+            out.join("noted.md").exists(),
+            "the only human-owned section in the output must survive a prune"
+        );
+        assert!(
+            !out.join("plain.md").exists(),
+            "an untouched placeholder is not notes; that page is still pruned"
         );
     }
 
