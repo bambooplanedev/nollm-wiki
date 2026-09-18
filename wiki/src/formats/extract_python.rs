@@ -228,7 +228,7 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
         let mut lhs = None;
         let mut rhs = None;
         let mut method = None;
-        for cap in m.captures {
+        for cap in m.captures() {
             if Some(cap.index) == lhs_idx {
                 lhs = text.get(cap.node.byte_range());
             } else if Some(cap.index) == rhs_idx {

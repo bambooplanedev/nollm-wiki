@@ -384,7 +384,7 @@ fn split_captures<'a>(
         name: None,
         vis: None,
     };
-    for cap in m.captures {
+    for cap in m.captures() {
         if Some(cap.index) == idx.def {
             parts.def = Some(cap.node);
         } else if Some(cap.index) == idx.name {
