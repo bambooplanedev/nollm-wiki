@@ -876,17 +876,21 @@ mod tests {
 
     #[test]
     fn items_after_a_mid_file_test_module_keep_their_original_lines() {
-        let src = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n";
+        let src = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    pub fn helper() {}\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n";
         let e = CodeExtractor.extract("m.rs", src);
+        // `helper` is bare `pub`, but its module is stripped from `## Exports`,
+        // so it must not read as public either.
         assert_eq!(
             item_lines(&e.items),
             vec![
                 "1-1 fn a pub",
-                "2-6 module tests priv",
-                "4-5 fn t priv",
-                "7-7 fn b pub",
+                "2-7 module tests priv",
+                "4-4 fn helper priv",
+                "5-6 fn t priv",
+                "8-8 fn b pub",
             ]
         );
+        assert_lacks(&e.symbols, "helper");
         assert!(e.body.contains("[tests omitted: mod tests"));
         assert_lacks(&e.symbols, "fn t");
     }

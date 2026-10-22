@@ -18,8 +18,9 @@ pub(crate) struct LangSpec {
     ///   @name   - the definition's name (used for post-hoc export/visibility filtering)
     ///   @import - a module path node
     ///   @vis    - the visibility-modifier text that `vis_filter` gates on
-    ///   @item   - a definition that is an item but never an export (with
-    ///             its @name); a match carries @def or @item, never both
+    ///   @item   - a definition to list as an item (with its @name); an
+    ///             @item match never contributes to exports, and a match
+    ///             carries @def or @item, never both
     pub(crate) query_src: &'static str,
     /// Keep a captured definition only if its @name text passes this filter.
     /// Used where the grammar can't express the gate structurally (Python's
@@ -309,10 +310,25 @@ impl Extractor for CodeExtractor {
             lang: ext.to_string(),
             ..CodeInfo::default()
         });
+        // The original pass gates `public` on the unstripped tree, where a
+        // bare `pub fn` inside the test module passes too. Exports come from
+        // the stripped text, so an item is public only if the stripped pass
+        // has the same item as public.
         let items = match original {
-            Some(tree) => extract_code(ext, text, Some(tree))
-                .map(|i| i.items)
-                .unwrap_or_default(),
+            Some(tree) => {
+                let mut items = extract_code(ext, text, Some(tree))
+                    .map(|i| i.items)
+                    .unwrap_or_default();
+                for item in &mut items {
+                    item.public &= info.items.iter().any(|s| {
+                        s.public
+                            && s.name == item.name
+                            && s.owner == item.owner
+                            && s.signature == item.signature
+                    });
+                }
+                items
+            }
             None => info.items,
         };
         let mut lang_name = info.lang;

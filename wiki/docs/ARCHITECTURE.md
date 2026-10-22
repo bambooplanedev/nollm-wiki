@@ -698,7 +698,9 @@ blank line or anything else, so a stray doc comment never stretches it.
 Items of a Rust file with a test module come from a second pass over the
 **unstripped** text and its tree (`Stripped::Rewritten` carries it), so
 their lines are the file's and test functions are items too, while
-`## Exports` and the body still come from the stripped text. A private
+`## Exports` and the body still come from the stripped text. Such an item
+stays `public` only if the stripped pass has it as public too, so a bare
+`pub fn` inside the test module reads private, as `## Exports` has it. A private
 `macro_rules!` is not an item: `rust_placement` rejects it before
 visibility is known.
 
