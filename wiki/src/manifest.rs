@@ -1,6 +1,6 @@
 //! Manifest and index rendering: the page index (JSON and markdown), the llms-txt and AGENTS files, the graph export, and the per-page token estimate.
 
-use crate::model::{Entity, Graph};
+use crate::model::{CodeItem, Entity, Graph};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -21,10 +21,14 @@ pub struct ManifestEntry {
     pub neighbors_in: Vec<String>,
     /// Top-level definition names of the page (see `Entity::defined`).
     pub defined: Vec<String>,
-    /// Method names of the page (see `Entity::methods`). Declared last so
-    /// it is the last key of every `index.json` entry: serde emits fields
-    /// in declaration order.
+    /// Method names of the page (see `Entity::methods`). The last key of
+    /// every entry without items: serde emits fields in declaration order.
     pub methods: Vec<String>,
+    /// Every definition of the page with its lines (see `Entity::items`).
+    /// Declared last and skipped when empty, so a page with no items keeps
+    /// exactly the keys it had before items existed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub items: Vec<CodeItem>,
 }
 
 #[derive(Serialize)]
@@ -68,6 +72,7 @@ pub fn build_manifest(
                 neighbors_in: inc,
                 defined: e.defined.clone(),
                 methods: e.methods.clone(),
+                items: e.items.clone(),
             }
         })
         .collect();
@@ -163,7 +168,7 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
 mod tests {
     use super::*;
     use crate::graph::build_graph;
-    use crate::model::SourceKind;
+    use crate::model::{CodeItem, CodeItemKind, SourceKind};
 
     fn ent(id: &str, name: &str, body: &str, summary: Option<&str>) -> Entity {
         Entity {
@@ -180,6 +185,7 @@ mod tests {
             imports: vec![],
             defined: vec![],
             methods: vec![],
+            items: vec![],
         }
     }
 
@@ -248,11 +254,35 @@ mod tests {
     }
 
     #[test]
-    fn index_json_carries_defined_and_methods_as_the_last_entry_keys() {
+    fn index_json_carries_defined_methods_and_items_as_the_last_entry_keys() {
         let (mut ents, g) = setup();
         let alpha_e = ents.get_mut("alpha").unwrap();
         alpha_e.defined = vec!["Alpha".into(), "build_alpha".into()];
         alpha_e.methods = vec!["build".into()];
+        alpha_e.items = vec![
+            CodeItem {
+                kind: CodeItemKind::Fn,
+                name: "build_alpha".into(),
+                owner: None,
+                signature: "pub fn build_alpha()".into(),
+                start_line: 1,
+                end_line: 1,
+                doc: None,
+                public: true,
+                twin: None,
+            },
+            CodeItem {
+                kind: CodeItemKind::Method,
+                name: "build".into(),
+                owner: Some("Alpha".into()),
+                signature: "fn build()".into(),
+                start_line: 3,
+                end_line: 5,
+                doc: Some("Builds.".into()),
+                public: false,
+                twin: None,
+            },
+        ];
         let m = build_manifest("My Project", &ents, &g);
         let json = render_index_json(&m);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -266,7 +296,7 @@ mod tests {
         assert_eq!(v["entries"][1]["defined"], serde_json::json!([]));
         assert_eq!(v["entries"][1]["methods"], serde_json::json!([]));
         // Key order in the pretty output: neighbors_in < defined < methods,
-        // so `methods` is the last key of every entry.
+        // so `methods` is the last key of every entry without items.
         let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
         let pos_neighbors_in = a_text.find("\"neighbors_in\"").unwrap();
         let pos_defined = a_text.find("\"defined\"").unwrap();
@@ -275,5 +305,20 @@ mod tests {
             pos_neighbors_in < pos_defined && pos_defined < pos_methods,
             "expected neighbors_in < defined < methods:\n{json}"
         );
+        // A code entry with items ends with `items`, each item's keys in
+        // declaration order with the `None` ones skipped; an entry without
+        // items has no `items` key, so `methods` stays its last key.
+        let alpha_compact = serde_json::to_string(&m.entries[0]).unwrap();
+        assert!(
+            alpha_compact.ends_with(concat!(
+                r#""methods":["build"],"items":["#,
+                r#"{"kind":"fn","name":"build_alpha","signature":"pub fn build_alpha()","start_line":1,"end_line":1,"public":true},"#,
+                r#"{"kind":"method","name":"build","owner":"Alpha","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false}]}"#
+            )),
+            "{alpha_compact}"
+        );
+        let beta_compact = serde_json::to_string(&m.entries[1]).unwrap();
+        assert!(beta_compact.ends_with(r#""methods":[]}"#), "{beta_compact}");
+        assert!(!beta_compact.contains("\"items\""), "{beta_compact}");
     }
 }

@@ -494,6 +494,7 @@ mod tests {
             imports: vec![],
             defined: vec![],
             methods: vec![],
+            items: vec![],
         }
     }
 

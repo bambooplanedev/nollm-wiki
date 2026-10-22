@@ -92,7 +92,15 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    [Incremental build](#incremental-build)).
 6. **Manifest** (`manifest::build_manifest`) — builds `index.json`,
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
-   `graph.json` from the final entity map and graph.
+   `graph.json` from the final entity map and graph. A code entry of
+   `index.json` ends with `items` (omitted when empty): one object per
+   definition, keys in this order — `kind` (`fn`, `method`, `type`,
+   `value`, `module`), `name`, `owner` (omitted when free), `signature` (as
+   the source reads it, no owner spliced in), `start_line`, `end_line`
+   (1-based, inclusive, in the original file, from the first attached doc
+   or attribute line), `doc` (the doc comment's first sentence, at most 120
+   chars; omitted when none), `public` (whether it is in `## Exports`), and
+   `twin` (omitted when none).
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
    broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
@@ -675,6 +683,24 @@ source — an earlier body-only strip left test-only imports such as
 is a line comment, so code following the module's closing brace on the same
 line would otherwise be commented out. `#[cfg(test)]` on a non-`mod` item is
 still not stripped.
+
+**Items are every definition, not the export surface.** A language's query
+marks definitions that may be private with `@item` beside its `@def`
+patterns; a match yields an item from either, deduplicated on the `@name`
+node so a `pub fn` matched by both is one item. `public` is the `@def`
+match's `should_keep` result, so it agrees with `## Exports` exactly; an
+`@item`-only match is private where the `@def` patterns already gate
+visibility (Rust), and runs `should_keep` itself elsewhere. Fields,
+variants, associated consts and impl headers are not items. An item's range
+climbs from its signature node over the contiguous leads directly above it
+(`LangSpec::item_lead`: Rust attributes and `///` lines), stopping at a
+blank line or anything else, so a stray doc comment never stretches it.
+Items of a Rust file with a test module come from a second pass over the
+**unstripped** text and its tree (`Stripped::Rewritten` carries it), so
+their lines are the file's and test functions are items too, while
+`## Exports` and the body still come from the stripped text. A private
+`macro_rules!` is not an item: `rust_placement` rejects it before
+visibility is known.
 
 ## Testing
 

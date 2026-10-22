@@ -72,6 +72,7 @@ impl Extractor for TextExtractor {
             imports: Vec::new(),
             defined: Vec::new(),
             methods: Vec::new(),
+            items: Vec::new(),
         }
     }
 }

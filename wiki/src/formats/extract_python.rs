@@ -2,8 +2,8 @@
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
 use super::code::{
-    default_shape, keep_any_vis, no_header_group, owner_anchor_identity, LangSpec, Placement, Rank,
-    Shape,
+    default_shape, keep_any_vis, no_body_doc, no_header_group, no_lead, owner_anchor_identity,
+    LangSpec, Placement, Rank, Shape,
 };
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -142,6 +142,9 @@ pub(crate) fn python_spec() -> LangSpec {
         sig_start: python_sig_start,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
+        item_lead: no_lead,
+        body_doc: no_body_doc,
+        query_gates_visibility: false,
     }
 }
 

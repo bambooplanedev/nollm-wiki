@@ -71,6 +71,60 @@ pub struct Entity {
     /// not a fact about the file. Search matches these whole, never
     /// word-split.
     pub methods: Vec<String>,
+    /// Every definition of a code page, private ones and tests included,
+    /// with the lines it spans in the original source file, so an agent can
+    /// read just those lines. Sorted by `(start_line, end_line, name)`.
+    /// Empty for non-code pages. Unlike `symbols`, this is not the export
+    /// surface: `public` records whether the item is in `## Exports`.
+    ///
+    /// Known gap: a Rust `macro_rules!` without `#[macro_export]` is not an
+    /// item, because `rust_placement` rejects it before visibility is known.
+    pub items: Vec<CodeItem>,
+}
+
+/// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodeItemKind {
+    /// A free function.
+    Fn,
+    /// A function with an owner: an `impl` or class method, a trait method.
+    Method,
+    /// A struct, class, enum, trait, interface, union, or exported macro.
+    Type,
+    /// A constant, static, type alias, or module-level variable.
+    Value,
+    /// A module declaration.
+    Module,
+}
+
+/// One definition of a code page and where it lives. Field order is the
+/// `index.json` key order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CodeItem {
+    pub kind: CodeItemKind,
+    /// The name as the source writes it.
+    pub name: String,
+    /// The enclosing scopes, joined the way the language's signatures join
+    /// them (`Wiki`, `<T as Display>`, `Outer.Inner`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// The one-line signature as the source reads it, with no owner spliced
+    /// in, so it can be searched for in the file.
+    pub signature: String,
+    /// 1-based, inclusive, in the original file: from the first attached doc
+    /// comment or attribute line to the item's last line.
+    pub start_line: usize,
+    pub end_line: usize,
+    /// The first sentence of the item's own doc comment, capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// Whether the item is part of the page's export surface (`symbols`).
+    pub public: bool,
+    /// The `path` of the file holding this item's other half, when one is
+    /// known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twin: Option<String>,
 }
 
 #[derive(Default, Clone, Debug)]

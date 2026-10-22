@@ -2,8 +2,8 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    always_free, keep_all, keep_any_vis, no_export_set, no_header_group, owner_anchor_identity,
-    sig_start_identity, LangSpec,
+    always_free, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, no_lead,
+    owner_anchor_identity, sig_start_identity, LangSpec,
 };
 use tree_sitter::Language;
 
@@ -28,6 +28,9 @@ fn ecma_spec(lang_name: &'static str, language: Language, query_src: &'static st
         sig_start: sig_start_identity,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
+        item_lead: no_lead,
+        body_doc: no_body_doc,
+        query_gates_visibility: false,
     }
 }
 
@@ -79,6 +82,9 @@ pub(crate) fn go_spec() -> LangSpec {
         sig_start: sig_start_identity,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
+        item_lead: no_lead,
+        body_doc: no_body_doc,
+        query_gates_visibility: false,
     }
 }
 

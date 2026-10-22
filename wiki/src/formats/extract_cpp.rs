@@ -1,8 +1,8 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    default_cut, keep_all, keep_any_vis, no_export_set, no_header_group, LangSpec, Placement, Rank,
-    Shape,
+    default_cut, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, no_lead,
+    LangSpec, Placement, Rank, Shape,
 };
 use tree_sitter::Node;
 
@@ -151,6 +151,9 @@ pub(crate) fn cpp_spec() -> LangSpec {
         sig_start: cpp_sig_start,
         owner_anchor: cpp_owner_anchor,
         header_group: no_header_group,
+        item_lead: no_lead,
+        body_doc: no_body_doc,
+        query_gates_visibility: false,
     }
 }
 

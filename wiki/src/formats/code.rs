@@ -1,7 +1,7 @@
 //! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
 
 use crate::formats::{summarize, Extractor};
-use crate::model::{slugify, title_case, Entity, SourceKind};
+use crate::model::{slugify, title_case, CodeItem, CodeItemKind, Entity, SourceKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 use tree_sitter::{
@@ -18,6 +18,8 @@ pub(crate) struct LangSpec {
     ///   @name   - the definition's name (used for post-hoc export/visibility filtering)
     ///   @import - a module path node
     ///   @vis    - the visibility-modifier text that `vis_filter` gates on
+    ///   @item   - a definition that is an item but never an export (with
+    ///             its @name); a match carries @def or @item, never both
     pub(crate) query_src: &'static str,
     /// Keep a captured definition only if its @name text passes this filter.
     /// Used where the grammar can't express the gate structurally (Python's
@@ -69,6 +71,40 @@ pub(crate) struct LangSpec {
     /// Rust's trait-impl header pattern needs this; every other language
     /// resolves a group from `owner` or `@name` and never reaches it.
     pub(crate) header_group: fn(Node, &str) -> Option<String>,
+    /// What a named sibling directly above an item is to that item: its doc
+    /// comment, an attribute that belongs to it, or neither. Only the
+    /// language's own doc convention counts, so a plain comment stops the
+    /// walk instead of being read as documentation.
+    pub(crate) item_lead: fn(Node, &str) -> Lead,
+    /// An item's doc when it lives inside the definition (Python's
+    /// docstring) rather than above it. Consulted only when no `Doc` lead
+    /// was attached.
+    pub(crate) body_doc: fn(Node, &str) -> Option<String>,
+    /// True when the query's @def patterns already gate visibility, so an
+    /// @item-only match is private by construction (Rust: a public item
+    /// also matches a @def pattern, and that match's flag wins). False
+    /// makes an @item-only match run `should_keep` itself.
+    pub(crate) query_gates_visibility: bool,
+}
+
+/// See `LangSpec::item_lead`.
+pub(crate) enum Lead {
+    /// A doc-comment line, its marker stripped.
+    Doc(String),
+    /// An attribute or decorator: part of the item's range, not its doc.
+    Attr,
+    /// Not part of the item; the walk ends here.
+    Stop,
+}
+
+/// `item_lead` for a language whose items attach nothing from above.
+pub(crate) fn no_lead(_: Node, _: &str) -> Lead {
+    Lead::Stop
+}
+
+/// `body_doc` for a language with no in-body doc convention.
+pub(crate) fn no_body_doc(_: Node, _: &str) -> Option<String> {
+    None
 }
 
 pub(crate) fn sig_start_identity(def: Node) -> Node {
@@ -242,13 +278,18 @@ impl Extractor for CodeExtractor {
         // When stripping finds nothing it hands back the tree it already
         // parsed, and extraction reuses it rather than parsing the same bytes
         // again. A file that IS stripped must reparse: the text changed.
-        let (source, pre_parsed) = match (ext == "rs")
+        // Items are the exception to "extract the stripped text": their lines
+        // must be the original file's, and a test module is code an agent
+        // reads too, so they come from the original text and its tree.
+        let (source, pre_parsed, original) = match (ext == "rs")
             .then(|| super::extract_rust::strip_rust_test_modules(text))
             .flatten()
         {
-            Some(super::extract_rust::Stripped::Unchanged(tree)) => (text.to_string(), Some(tree)),
-            Some(super::extract_rust::Stripped::Rewritten(out)) => (out, None),
-            None => (text.to_string(), None),
+            Some(super::extract_rust::Stripped::Unchanged(tree)) => {
+                (text.to_string(), Some(tree), None)
+            }
+            Some(super::extract_rust::Stripped::Rewritten(out, tree)) => (out, None, Some(tree)),
+            None => (text.to_string(), None, None),
         };
 
         // A single-file component is markup around code: only its `<script>`
@@ -264,19 +305,17 @@ impl Extractor for CodeExtractor {
             .as_ref()
             .map_or((ext, source.as_str()), |v| (v.ext, v.text.as_str()));
 
-        let (mut lang_name, symbols, imports, defined, methods, docstring, summary_fallback) =
-            match extract_code(code_ext, code, pre_parsed) {
-                Some(v) => v,
-                None => (
-                    ext.to_string(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    Vec::new(),
-                    None,
-                    None,
-                ),
-            };
+        let info = extract_code(code_ext, code, pre_parsed).unwrap_or_else(|| CodeInfo {
+            lang: ext.to_string(),
+            ..CodeInfo::default()
+        });
+        let items = match original {
+            Some(tree) => extract_code(ext, text, Some(tree))
+                .map(|i| i.items)
+                .unwrap_or_default(),
+            None => info.items,
+        };
+        let mut lang_name = info.lang;
 
         // A component is reported as its own format, whichever language its
         // script is written in.
@@ -286,12 +325,17 @@ impl Extractor for CodeExtractor {
             }
         }
 
-        let docstring = docstring.or_else(|| leading_doc(code, code_ext));
+        let docstring = info.docstring.or_else(|| leading_doc(code, code_ext));
         // `body` is deliberately NOT scanned for a summary: source code is not
         // prose, so letting summarize() hunt line-by-line for a "real
         // sentence" produces garbage. Only a real docstring, or (failing
         // that) an exported signature, is an acceptable summary.
-        let summary = summarize(None, docstring.as_deref(), "", summary_fallback.as_deref());
+        let summary = summarize(
+            None,
+            docstring.as_deref(),
+            "",
+            info.summary_fallback.as_deref(),
+        );
         let name = derive_code_name(rel_path);
 
         Entity {
@@ -304,27 +348,29 @@ impl Extractor for CodeExtractor {
             kind: SourceKind::Code { lang: lang_name },
             content_hash: [0u8; 32],
             summary,
-            symbols,
-            imports,
-            defined,
-            methods,
+            symbols: info.symbols,
+            imports: info.imports,
+            defined: info.defined,
+            methods: info.methods,
+            items,
         }
     }
 }
 
-/// `(language, symbols, imports, defined, methods, docstring,
-/// summary_fallback)`. The fallback is chosen here rather than by the
-/// caller: freeness is known only while the captures are in hand, and
-/// `symbols` alone cannot be reinterpreted after sorting.
-type CodeInfo = (
-    String,
-    Vec<String>,
-    Vec<String>,
-    Vec<String>,
-    Vec<String>,
-    Option<String>,
-    Option<String>,
-);
+/// What one `extract_code` pass yields. The summary fallback is chosen here
+/// rather than by the caller: freeness is known only while the captures are
+/// in hand, and `symbols` alone cannot be reinterpreted after sorting.
+#[derive(Default)]
+struct CodeInfo {
+    lang: String,
+    symbols: Vec<String>,
+    imports: Vec<String>,
+    defined: Vec<String>,
+    methods: Vec<String>,
+    items: Vec<CodeItem>,
+    docstring: Option<String>,
+    summary_fallback: Option<String>,
+}
 
 /// The shape a captured definition has, recorded at the point of capture
 /// rather than recovered later from its rendered signature text. The summary
@@ -440,16 +486,18 @@ struct CaptureIdx {
     name: Option<u32>,
     vis: Option<u32>,
     imp: Option<u32>,
+    item: Option<u32>,
 }
 
-/// The three single-valued captures one query match can contribute: the
-/// definition and name nodes, plus the visibility keyword's text. Imports are
-/// deliberately absent: a single match may carry several, so they go straight
-/// into the caller's list rather than through this struct.
+/// The single-valued captures one query match can contribute: the
+/// definition (or item) and name nodes, plus the visibility keyword's text.
+/// Imports are deliberately absent: a single match may carry several, so they
+/// go straight into the caller's list rather than through this struct.
 struct MatchParts<'a> {
     def: Option<Node<'a>>,
     name: Option<Node<'a>>,
     vis: Option<&'a str>,
+    item: Option<Node<'a>>,
 }
 
 /// Sort one match's captures into the def/name/vis slots, appending any
@@ -464,6 +512,7 @@ fn split_captures<'a>(
         def: None,
         name: None,
         vis: None,
+        item: None,
     };
     for cap in m.captures() {
         if Some(cap.index) == idx.def {
@@ -472,6 +521,8 @@ fn split_captures<'a>(
             parts.name = Some(cap.node);
         } else if Some(cap.index) == idx.vis {
             parts.vis = text.get(cap.node.byte_range());
+        } else if Some(cap.index) == idx.item {
+            parts.item = Some(cap.node);
         } else if Some(cap.index) == idx.imp {
             if let Some(raw) = text.get(cap.node.byte_range()) {
                 imports.push(raw.trim().trim_matches(['"', '\'']).to_string());
@@ -644,6 +695,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         name: query.capture_index_for_name("name"),
         vis: query.capture_index_for_name("vis"),
         imp: query.capture_index_for_name("import"),
+        item: query.capture_index_for_name("item"),
     };
     let exports = (spec.export_set)(&tree, text);
     let shape_of = shape_for(ext);
@@ -657,11 +709,15 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // Method names for `Entity::methods`. Gathered here, not as a second
     // projection over `collected`: that tuple carries no node kind, and a
     // `fn`, a field and an associated `const` of one impl are all `Member`,
-    // told apart only by signature text, which is never parsed. The three
-    // node kinds are the seam's one concession: they name "a function" in
-    // the grammars this file already dispatches on.
+    // told apart only by signature text, which is never parsed.
+    // `is_function`'s node kinds are the seam's one concession: they name
+    // "a function" in the grammars this file already dispatches on.
     let mut methods: Vec<String> = Vec::new();
     let mut imports = Vec::new();
+    // Keyed by the `@name` node's start byte: a `pub fn` matches both a @def
+    // and an @item pattern, and a JS @def (the `export_statement`) and its
+    // @item (the declaration) share one name node.
+    let mut items: BTreeMap<usize, CodeItem> = BTreeMap::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     while let Some(m) = matches.next() {
@@ -671,7 +727,8 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 continue;
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-            if should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec) {
+            let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
+            if keep {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
                 // then used for both the signature and the classification —
@@ -681,26 +738,10 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 if !sig.is_empty() {
                     let kind = classify(parts.name, owner.as_deref(), shape.rank);
                     let group = group_key(owner.as_deref(), name_text, def, text, &spec);
-                    // A method is a function definition, or a declaration whose
-                    // declarator is a function declarator — which is how a C++
-                    // header states its members: `void apply(const Order&);` is
-                    // a `field_declaration`, not a `function_definition`. The
-                    // declarator test goes through
-                    // `extract_cpp::is_function_declarator`, which also accepts
-                    // the pointer/reference wrapper a member returning `Level*`
-                    // or `Level&` puts in the way.
-                    let is_function =
-                        matches!(
-                            def.kind(),
-                            "function_item" | "function_signature_item" | "function_definition"
-                        ) || (matches!(def.kind(), "field_declaration" | "declaration")
-                            && def
-                                .child_by_field_name("declarator")
-                                .is_some_and(super::extract_cpp::is_function_declarator));
                     let trait_impl = owner
                         .as_deref()
                         .is_some_and(super::extract_rust::is_trait_impl);
-                    if kind == ItemKind::Member && is_function && !trait_impl {
+                    if kind == ItemKind::Member && is_function(def) && !trait_impl {
                         if let Some(n) = name_text {
                             methods.push(n.to_string());
                         }
@@ -708,8 +749,29 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
+            let shape = shape_of(def);
+            merge_item(
+                &mut items,
+                code_item(def, parts.name, &chain, keep, text, &spec, &shape),
+            );
+        } else if let Some(def) = parts.item {
+            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
+                continue;
+            };
+            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+            let public = !spec.query_gates_visibility
+                && should_keep(None, &chain, name_text, exports.as_ref(), &spec);
+            let shape = shape_of(def);
+            merge_item(
+                &mut items,
+                code_item(def, parts.name, &chain, public, text, &spec, &shape),
+            );
         }
     }
+    let mut items: Vec<CodeItem> = items.into_values().collect();
+    items.sort_by(|a, b| {
+        (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
+    });
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
     // plain lexicographic order on the rendered signature, and within a group
@@ -749,15 +811,156 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         None
     };
 
-    Some((
-        spec.lang_name.to_string(),
+    Some(CodeInfo {
+        lang: spec.lang_name.to_string(),
         symbols,
         imports,
         defined,
         methods,
+        items,
         docstring,
         summary_fallback,
-    ))
+    })
+}
+
+/// Whether a definition node is a function, in any grammar this file
+/// dispatches on. A C++ header states its members as declarations whose
+/// declarator is a function declarator — `void apply(const Order&);` is a
+/// `field_declaration`, not a `function_definition`; the declarator test goes
+/// through `extract_cpp::is_function_declarator`, which also accepts the
+/// pointer/reference wrapper a member returning `Level*` or `Level&` puts in
+/// the way. A JS/TS `const f = () => …` is a function through its value.
+///
+/// Shared by `methods` and item kinds. The JS/TS/Go kinds never arrive as a
+/// kept member `@def`, so they leave `methods` as it was.
+fn is_function(def: Node) -> bool {
+    match def.kind() {
+        "function_item"
+        | "function_signature_item"
+        | "function_definition"
+        | "function_declaration"
+        | "generator_function_declaration"
+        | "method_definition"
+        | "method_declaration" => true,
+        "field_declaration" | "declaration" => def
+            .child_by_field_name("declarator")
+            .is_some_and(super::extract_cpp::is_function_declarator),
+        "variable_declarator" => def
+            .child_by_field_name("value")
+            .is_some_and(|v| matches!(v.kind(), "arrow_function" | "function_expression")),
+        _ => false,
+    }
+}
+
+/// An item's doc is one line in `index.json`, so it is cut to this many
+/// chars, the trailing `…` included.
+const ITEM_DOC_MAX_CHARS: usize = 120;
+
+/// The first sentence of an item's raw doc text, capped at
+/// `ITEM_DOC_MAX_CHARS`. Counts `chars()`, never bytes, so a multi-byte doc
+/// is never split mid-scalar.
+fn item_doc_line(raw: &str) -> Option<String> {
+    let line = summarize(None, Some(raw), "", None)?;
+    if line.chars().count() <= ITEM_DOC_MAX_CHARS {
+        return Some(line);
+    }
+    let mut cut: String = line.chars().take(ITEM_DOC_MAX_CHARS - 1).collect();
+    cut.push('…');
+    Some(cut)
+}
+
+/// The 0-based row a node's text really ends on. A node that ends with its
+/// line's newline (a Rust `line_comment`) reports the start of the next row.
+fn last_row(node: Node) -> usize {
+    let end = node.end_position();
+    if end.column == 0 && end.row > node.start_position().row {
+        end.row - 1
+    } else {
+        end.row
+    }
+}
+
+/// One definition as an item, keyed by its `@name` node's start byte, or
+/// `None` when it is not an item: no `@name` (an impl header), rejected by
+/// kind (a field, a variant, an associated const), or an empty signature.
+///
+/// The range climbs from the signature's start node over the contiguous
+/// leads above it; a blank line or a `Stop` lead (a plain comment, other
+/// code) ends the climb, so a stray doc comment never stretches the range.
+fn code_item(
+    def: Node,
+    name: Option<Node>,
+    chain: &[String],
+    public: bool,
+    text: &str,
+    spec: &LangSpec,
+    shape: &Shape,
+) -> Option<(usize, CodeItem)> {
+    let name = name?;
+    let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
+    let kind = match (
+        classify(Some(name), owner.as_deref(), shape.rank),
+        is_function(def),
+    ) {
+        (ItemKind::Member, true) => CodeItemKind::Method,
+        (ItemKind::FreeDef, true) => CodeItemKind::Fn,
+        (ItemKind::FreeDef, false) => CodeItemKind::Type,
+        (ItemKind::FreeValue, _) => CodeItemKind::Value,
+        (ItemKind::Module, _) => CodeItemKind::Module,
+        (ItemKind::Header | ItemKind::Member, _) => return None,
+    };
+    // No owner splice: the signature reads as the source does.
+    let signature = build_signature(text, def, Some(name), None, spec, shape);
+    if signature.is_empty() {
+        return None;
+    }
+
+    let top = (spec.sig_start)(def);
+    let mut first = top;
+    let mut docs = Vec::new();
+    while let Some(lead) = first.prev_named_sibling() {
+        if last_row(lead) + 1 < first.start_position().row {
+            break;
+        }
+        match (spec.item_lead)(lead, text) {
+            Lead::Doc(d) => docs.push(d),
+            Lead::Attr => {}
+            Lead::Stop => break,
+        }
+        first = lead;
+    }
+    docs.reverse();
+    let raw_doc = if docs.is_empty() {
+        (spec.body_doc)(def, text)
+    } else {
+        Some(docs.join("\n"))
+    };
+
+    let item = CodeItem {
+        kind,
+        name: text.get(name.byte_range())?.to_string(),
+        owner,
+        signature,
+        start_line: first.start_position().row + 1,
+        end_line: last_row(top) + 1,
+        doc: raw_doc.as_deref().and_then(item_doc_line),
+        public,
+        twin: None,
+    };
+    Some((name.start_byte(), item))
+}
+
+/// Keep the first item seen for a name node. A later match of the same node
+/// only ORs in its `public` flag: of a `pub fn`'s two matches, the @item one
+/// alone says private.
+fn merge_item(items: &mut BTreeMap<usize, CodeItem>, found: Option<(usize, CodeItem)>) {
+    if let Some((key, item)) = found {
+        let public = item.public;
+        items
+            .entry(key)
+            .and_modify(|kept| kept.public |= public)
+            .or_insert(item);
+    }
 }
 
 /// The shared text pipeline for one fragment of a signature: Python's explicit
@@ -1280,6 +1483,8 @@ fn derive_code_name(rel_path: &str) -> String {
 /// test with several assertions extracts once.
 #[cfg(test)]
 pub(crate) mod testutil {
+    use crate::model::CodeItem;
+
     /// The exact signature `want` must be among `symbols`.
     pub(crate) fn assert_has(symbols: &[String], want: &str) {
         assert!(
@@ -1294,6 +1499,28 @@ pub(crate) mod testutil {
             !symbols.iter().any(|s| s.contains(unwanted)),
             "{unwanted:?} must not appear in {symbols:?}"
         );
+    }
+
+    /// One `"{start}-{end} {kind} {owner::}name {pub|priv}"` line per item,
+    /// so a test pins every item's range, kind and flag in one comparison.
+    pub(crate) fn item_lines(items: &[CodeItem]) -> Vec<String> {
+        items
+            .iter()
+            .map(|i| {
+                let kind = serde_json::to_value(i.kind).expect("a unit variant serializes");
+                let name = match &i.owner {
+                    Some(owner) => format!("{owner}::{}", i.name),
+                    None => i.name.clone(),
+                };
+                let vis = if i.public { "pub" } else { "priv" };
+                format!(
+                    "{}-{} {} {name} {vis}",
+                    i.start_line,
+                    i.end_line,
+                    kind.as_str().unwrap_or_default()
+                )
+            })
+            .collect()
     }
 }
 

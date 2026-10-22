@@ -281,16 +281,22 @@ fn name_words(name: &str) -> Vec<String> {
     words
 }
 
+/// Matches a Rust definition of `symbol`: the check that a label's symbol
+/// really is defined in its file, and the line an item must cover.
+fn definition_re(symbol: &str) -> Regex {
+    Regex::new(&format!(
+        r"\b(fn|struct|enum|trait|type|const|static|mod)\s+{}\b",
+        regex::escape(symbol)
+    ))
+    .unwrap()
+}
+
 #[test]
 fn every_label_names_a_symbol_defined_in_its_file() {
     assert!(!CASES.is_empty(), "no cases");
     for c in CASES {
         let text = read_corpus_file(c.path);
-        let re = Regex::new(&format!(
-            r"\b(fn|struct|enum|trait|type|const|static|mod)\s+{}\b",
-            regex::escape(c.symbol)
-        ))
-        .unwrap();
+        let re = definition_re(c.symbol);
         assert!(
             re.is_match(&text),
             "label `{}` expects `{}` defined in `{}`, but no definition found",
@@ -535,4 +541,69 @@ fn symbol_retrieval() {
     );
 
     insta::assert_snapshot!(table);
+}
+
+/// An item's lines are what an agent reads instead of the whole file, so a
+/// range that misses its own item sends the agent to the wrong code.
+#[test]
+fn items_on_the_frozen_corpus_are_line_true() {
+    let (_dir, out, _wiki) = corpus::compile_frozen("tests/.symbol_corpus", SYMBOL_CORPUS_HASH);
+    let index: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    let entries = index["entries"].as_array().unwrap();
+    let line_of =
+        |item: &serde_json::Value, key: &str| usize::try_from(item[key].as_u64().unwrap()).unwrap();
+
+    let mut checked = 0;
+    for entry in entries {
+        let Some(items) = entry["items"].as_array() else {
+            continue;
+        };
+        let path = entry["path"].as_str().unwrap();
+        let text = read_corpus_file(path);
+        let lines: Vec<&str> = text.lines().collect();
+        for item in items {
+            let name = item["name"].as_str().unwrap();
+            let (start, end) = (line_of(item, "start_line"), line_of(item, "end_line"));
+            assert!(
+                1 <= start && start <= end && end <= lines.len(),
+                "{path}: {item} is outside the file's {} lines",
+                lines.len()
+            );
+            assert!(
+                lines[start - 1..end].iter().any(|l| l.contains(name)),
+                "{path}: lines {start}-{end} do not contain `{name}`"
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no items on the frozen corpus");
+
+    for c in CASES {
+        let entry = entries
+            .iter()
+            .find(|e| e["path"] == c.path)
+            .unwrap_or_else(|| panic!("no page for `{}`", c.path));
+        let text = read_corpus_file(c.path);
+        let at = definition_re(c.symbol).find(&text).unwrap().start();
+        let line = text[..at].matches('\n').count() + 1;
+        let item = entry["items"]
+            .as_array()
+            .unwrap_or_else(|| panic!("`{}` has no items", c.path))
+            .iter()
+            .find(|i| {
+                i["name"] == c.symbol
+                    && line_of(i, "start_line") <= line
+                    && line <= line_of(i, "end_line")
+            })
+            .unwrap_or_else(|| panic!("`{}`: no item `{}` covers line {line}", c.path, c.symbol));
+        if c.class == Class::DocOnly {
+            assert!(
+                item["doc"].is_string(),
+                "DocOnly `{}`: item `{}` has no doc",
+                c.query,
+                c.symbol
+            );
+        }
+    }
 }
