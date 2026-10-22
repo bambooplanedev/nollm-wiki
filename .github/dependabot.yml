@@ -1,0 +1,15 @@
+# Weekly dependency PRs. Minor and patch bumps arrive as one grouped PR;
+# a major bump gets its own, since each one so far needed a code change.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /wiki
+    schedule:
+      interval: weekly
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
