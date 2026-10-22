@@ -755,8 +755,8 @@ still not stripped.
   `Wiki::search`. Until symbol hits exist, a case is scored by the expected
   symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
   tokens, per split), gating on `file_hit@3` floors before snapshotting the
-  table; it also records a `neighbors` pack size and the title-as-query count
-  without asserting them.
+  table; it also records the `neighbors` pack size without asserting it, and
+  the title-as-query count is floored (27/28).
 
   **The corpus is frozen on 2026-10-22 at `a81a332` (the crate's sources as of
   `7209ee2`; the SHAs may dangle after a squash, `SYMBOL_CORPUS_HASH` is the
