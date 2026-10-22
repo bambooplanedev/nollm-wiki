@@ -748,6 +748,21 @@ still not stripped.
     the (directionless) snapshot diff to catch it. Compute the new fractions
     exactly (e.g. `13.0 / 19.0`); never transcribe them from the `{:.4}`
     table, which rounds.
+- **Symbol eval:** `tests/symbol_eval.rs` — the symbol-level retrieval
+  harness. Compiles the frozen corpus in `tests/.symbol_corpus/` (this
+  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 22
+  labelled queries (Name, NameWords, DocOnly, Stopwords) through
+  `Wiki::search`. Until symbol hits exist, a case is scored by the expected
+  symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
+  tokens, per split), gating on `file_hit@3` floors before snapshotting the
+  table; it also records a `neighbors` pack size and the title-as-query count
+  without asserting them.
+
+  **The corpus is frozen at `a81a332` (the crate's sources as of `7209ee2`)
+  and must never be re-synced with the live files**; it is re-cut only by
+  explicit decision, in a commit quoting the old and new tables. **Held-out
+  rule:** every third case per class is `held_out`, pinned by a test, and is
+  never used to choose constants.
 - **Snapshot test:** `tests/snapshot.rs` uses `insta` to pin the exact
   rendered Markdown of one page from a seeded generated corpus
   (`generate_corpus(&input, 12, 42)`), with `source_hash` lines redacted so

@@ -1,0 +1,33 @@
+---
+source: tests/symbol_eval.rs
+expression: table
+---
+query                                         class      split  file_rank  tokens  top1_path
+----------------------------------------------------------------------------------------------------
+lang_for_ext                                  Name       tune           2     179  src/formats/extract_jsx.rs
+strip_rust_test_modules                       Name       tune           1     249  src/formats/extract_rust.rs
+field_hit                                     Name       held           1      67  src/query.rs
+disambiguate_ids                              Name       tune           1     324  src/lib.rs
+module_stem                                   Name       tune           4     334  src/graph.rs
+source_rank                                   Name       held           4     335  src/graph.rs
+snippet built                                 NameWords  tune           2     509  README.md
+split frontmatter                             NameWords  tune           1     793  src/formats/markdown.rs
+first sentence of a summary line              NameWords  held           1     662  src/formats/summary.rs
+name words of an identifier                   NameWords  tune           1     844  src/query.rs
+content text of page sections                 NameWords  tune           2     735  src/rewrite.rs
+attribute value of a tag                      NameWords  held           1     769  src/formats/extract_vue.rs
+excerpt around the earliest occurrence        DocOnly    tune           1     815  src/query.rs
+temp file rename half-written page            DocOnly    tune           1     780  src/rewrite.rs
+html elements that never take a closing tag   DocOnly    held           1     757  src/formats/extract_vue.rs
+ids within hops along either edge direction   DocOnly    tune           2     765  docs/ARCHITECTURE.md
+path outside output real source change        DocOnly    tune           1     799  src/watch.rs
+lazily reloading handle loaded snapshot       DocOnly    held           1     708  src/serve.rs
+where is the snippet built                    Stopwords  tune           3     735  README.md
+how do we write a page atomically             Stopwords  tune           1     654  src/rewrite.rs
+what is the module stem of a path             Stopwords  held           3     719  docs/ARCHITECTURE.md
+where are the test modules stripped           Stopwords  tune           2     801  src/formats/code.rs
+
+tune  file_hit@1=0.5333 file_hit@3=0.9333 mrr@10=0.7389 tokens=621.1
+held  file_hit@1=0.7143 file_hit@3=0.8571 mrr@10=0.7976 tokens=573.9
+neighbors code.rs: tokens=648 target_degraded=true
+title_as_query: 27/28
