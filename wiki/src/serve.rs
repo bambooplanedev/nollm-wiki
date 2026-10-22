@@ -3,8 +3,8 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::model::SourceKind;
-use crate::query::PackBudget;
 use crate::query::Wiki;
+use crate::query::{Hit, PackBudget};
 use crate::WikiError;
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
@@ -156,23 +156,10 @@ impl WikiServer {
                 )
             })?),
         };
-        let hits = self.state.with_wiki(|w| {
-            w.search(&p.query, kind, p.limit.unwrap_or(10))
-                .into_iter()
-                .map(|h| {
-                    serde_json::json!({
-                        "id": h.id,
-                        "title": h.title,
-                        "summary": h.summary,
-                        "score": h.score,
-                        "snippet": h.snippet,
-                    })
-                })
-                .collect::<Vec<_>>()
-        });
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            serde_json::Value::Array(hits).to_string(),
-        )]))
+        let json = self
+            .state
+            .with_wiki(|w| search_json(w.search(&p.query, kind, p.limit.unwrap_or(10))));
+        Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
     }
 
     #[tool(
@@ -294,6 +281,24 @@ impl ServerHandler for WikiServer {
         ])
         .into())
     }
+}
+
+/// Render search hits as the JSON array the `search` tool returns:
+/// `[{id, title, summary, score, snippet}]`.
+pub fn search_json(hits: Vec<Hit>) -> String {
+    let hits = hits
+        .into_iter()
+        .map(|h| {
+            serde_json::json!({
+                "id": h.id,
+                "title": h.title,
+                "summary": h.summary,
+                "score": h.score,
+                "snippet": h.snippet,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(hits).to_string()
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.
