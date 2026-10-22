@@ -150,10 +150,6 @@ pub(crate) enum Placement {
     Scoped(Vec<String>),
 }
 
-pub(crate) fn always_free(_def: Node, _text: &str) -> Placement {
-    Placement::Scoped(Vec::new())
-}
-
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
         "rs" => super::extract_rust::rust_spec(),
@@ -913,6 +909,13 @@ fn code_item(
     shape: &Shape,
 ) -> Option<(usize, CodeItem)> {
     let name = name?;
+    // JS exports match on the `export_statement`, which is no function: the
+    // item is its declaration. `sig_start` climbs back to the statement, so
+    // the range and signature are the declaration's own match's.
+    let def = def
+        .child_by_field_name("declaration")
+        .filter(|_| def.kind() == "export_statement")
+        .unwrap_or(def);
     let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
     let kind = match (
         classify(Some(name), owner.as_deref(), shape.rank),

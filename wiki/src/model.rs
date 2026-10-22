@@ -79,6 +79,8 @@ pub struct Entity {
     ///
     /// Known gap: a Rust `macro_rules!` without `#[macro_export]` is not an
     /// item, because `rust_placement` rejects it before visibility is known.
+    /// Likewise a JS/TS method of an exported class reads `public: false`: the
+    /// query has no per-member visibility.
     pub items: Vec<CodeItem>,
 }
 

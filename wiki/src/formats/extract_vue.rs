@@ -341,7 +341,7 @@ fn attr_value<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -465,5 +465,13 @@ mod tests {
         assert_eq!(a.symbols, b.symbols);
         assert_eq!(a.imports, b.imports);
         assert_eq!(a.summary, b.summary);
+    }
+
+    #[test]
+    fn component_items_count_lines_from_the_top_of_the_file() {
+        let src = "<template>\n  <div/>\n</template>\n<script setup lang=\"ts\">\n/** Counts clicks. */\nfunction count(n: number) {\n  return n + 1;\n}\n</script>\n";
+        let e = CodeExtractor.extract("C.vue", src);
+        assert_eq!(item_lines(&e.items), vec!["5-8 fn count priv"]);
+        assert_eq!(e.items[0].doc.as_deref(), Some("Counts clicks."));
     }
 }

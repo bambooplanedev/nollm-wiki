@@ -2,8 +2,8 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    always_free, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, no_lead,
-    owner_anchor_identity, sig_start_identity, LangSpec, Lead, Placement,
+    keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, owner_anchor_identity,
+    sig_start_identity, LangSpec, Lead, Placement,
 };
 use tree_sitter::{Language, Node};
 
@@ -20,17 +20,20 @@ fn ecma_spec(lang_name: &'static str, language: Language, query_src: &'static st
         query_src,
         name_filter: keep_all,
         vis_filter: keep_any_vis,
-        strip_trailing: &[],
-        placement: always_free,
-        owner_sep: "",
+        // `const twice = …` is cut at its value, which leaves the `=`.
+        strip_trailing: &['='],
+        placement: ecma_placement,
+        owner_sep: ".",
         export_set: no_export_set,
         join_continuations: false,
-        sig_start: sig_start_identity,
+        sig_start: ecma_sig_start,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
-        item_lead: no_lead,
+        item_lead: ecma_lead,
         body_doc: no_body_doc,
-        query_gates_visibility: false,
+        // The query has no per-member visibility, so a method of an exported
+        // class reads private: a known gap. Only an `export` @def is public.
+        query_gates_visibility: true,
     }
 }
 
@@ -43,6 +46,11 @@ pub(crate) fn js_spec() -> LangSpec {
         r"
                 (export_statement declaration: (function_declaration name: (identifier) @name)) @def
                 (export_statement declaration: (class_declaration name: (identifier) @name)) @def
+                (function_declaration name: (identifier) @name) @item
+                (generator_function_declaration name: (identifier) @name) @item
+                (method_definition name: [(property_identifier) (private_property_identifier)] @name) @item
+                (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @item
+                (class_declaration name: (identifier) @name) @item
                 (import_statement source: (string) @import)
             ",
     )
@@ -55,9 +63,81 @@ pub(crate) fn ts_spec() -> LangSpec {
         r"
                 (export_statement declaration: (function_declaration name: (identifier) @name)) @def
                 (export_statement declaration: (class_declaration name: (type_identifier) @name)) @def
+                (function_declaration name: (identifier) @name) @item
+                (generator_function_declaration name: (identifier) @name) @item
+                (method_definition name: [(property_identifier) (private_property_identifier)] @name) @item
+                (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @item
+                (class_declaration name: (type_identifier) @name) @item
+                (abstract_class_declaration name: (type_identifier) @name) @item
+                (interface_declaration name: (type_identifier) @name) @item
+                (type_alias_declaration name: (type_identifier) @name) @item
+                (enum_declaration name: (identifier) @name) @item
                 (import_statement source: (string) @import)
             ",
     )
+}
+
+/// Functions and methods hold no items of their own (a nested helper is not
+/// part of the file's surface), while a class names its methods' owner.
+fn ecma_placement(def: Node, text: &str) -> Placement {
+    let mut chain = Vec::new();
+    let mut up = def.parent();
+    while let Some(n) = up {
+        match n.kind() {
+            "function_declaration"
+            | "generator_function_declaration"
+            | "function_expression"
+            | "function"
+            | "arrow_function"
+            | "method_definition"
+            | "generator_function" => return Placement::Rejected,
+            "class_declaration" | "class" | "abstract_class_declaration" => {
+                if let Some(name) = n
+                    .child_by_field_name("name")
+                    .and_then(|n| text.get(n.byte_range()))
+                {
+                    chain.push(name.to_string());
+                }
+            }
+            _ => {}
+        }
+        up = n.parent();
+    }
+    chain.reverse();
+    Placement::Scoped(chain)
+}
+
+/// A declaration's range and signature start at its `export` or `const`.
+fn ecma_sig_start(def: Node) -> Node {
+    let mut top = def;
+    while let Some(p) = top.parent().filter(|p| {
+        matches!(
+            p.kind(),
+            "lexical_declaration" | "variable_declaration" | "export_statement"
+        )
+    }) {
+        top = p;
+    }
+    top
+}
+
+/// A `JSDoc` block (`/** … */`) above a declaration is its doc.
+fn ecma_lead(node: Node, text: &str) -> Lead {
+    let block = text
+        .get(node.byte_range())
+        .filter(|t| node.kind() == "comment" && t.starts_with("/**") && !t.starts_with("/**/"));
+    match block {
+        Some(t) => {
+            let body = t.trim_start_matches("/**").trim_end_matches("*/");
+            let lines: Vec<&str> = body
+                .lines()
+                .map(|l| l.trim().trim_start_matches('*').trim())
+                .filter(|l| !l.is_empty())
+                .collect();
+            Lead::Doc(lines.join("\n"))
+        }
+        None => Lead::Stop,
+    }
 }
 
 pub(crate) fn go_spec() -> LangSpec {
@@ -122,7 +202,7 @@ fn go_lead(node: Node, text: &str) -> Lead {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::item_lines;
+    use crate::formats::code::testutil::{assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -218,5 +298,27 @@ mod tests {
             item_lines(&e.items),
             vec!["3-3 method Box::A pub", "5-5 method Box::B pub"]
         );
+    }
+
+    #[test]
+    fn ts_items_cover_private_functions_classes_methods_and_arrows() {
+        let src = "/** Adds two. */\nexport function add(a: number, b: number): number {\n  function inner() {}\n  return a + b;\n}\n\nfunction hidden() {}\n\nexport class Box {\n  /** Opens it. */\n  open(): void {}\n}\n\nconst twice = (x: number) => x * 2;\n\ninterface Shape {}\n";
+        let e = CodeExtractor.extract("m.ts", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-5 fn add pub",
+                "7-7 fn hidden priv",
+                "9-12 type Box pub",
+                "10-11 method Box::open priv",
+                "14-14 fn twice priv",
+                "16-16 type Shape priv",
+            ]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("Adds two."));
+        assert_eq!(e.items[3].doc.as_deref(), Some("Opens it."));
+        assert_eq!(e.items[4].signature, "const twice");
+        assert_lacks(&e.symbols, "hidden");
+        assert_lacks(&e.symbols, "twice");
     }
 }
