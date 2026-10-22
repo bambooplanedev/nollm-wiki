@@ -153,10 +153,13 @@ fn overloads_are_left_unpaired() {
         ("book.cpp", "void Book::apply(int o) {}\nvoid Book::apply(double o) {}\n"),
     ]);
     for path in ["book.h", "book.cpp"] {
-        assert!(
-            items_of(&idx, path).iter().all(|i| i.get("twin").is_none()),
+        let items = items_of(&idx, path);
+        assert_eq!(
+            items.iter().filter(|i| i["name"] == "apply").count(),
+            2,
             "{path}"
         );
+        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
     }
     assert!(items_of(&idx, "book.cpp")
         .iter()
@@ -171,9 +174,8 @@ fn two_impl_files_with_one_stem_pair_nothing() {
         ("b/book.cpp", "void run() {}\n"),
     ]);
     for path in ["a/book.h", "a/book.cpp", "b/book.cpp"] {
-        assert!(
-            items_of(&idx, path).iter().all(|i| i.get("twin").is_none()),
-            "{path}"
-        );
+        let items = items_of(&idx, path);
+        assert!(items.iter().any(|i| i["name"] == "run"), "{path}");
+        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
     }
 }
