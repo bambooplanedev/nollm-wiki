@@ -750,7 +750,7 @@ still not stripped.
     table, which rounds.
 - **Symbol eval:** `tests/symbol_eval.rs` — the symbol-level retrieval
   harness. Compiles the frozen corpus in `tests/.symbol_corpus/` (this
-  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 22
+  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 25
   labelled queries (Name, NameWords, DocOnly, Stopwords) through
   `Wiki::search`. Until symbol hits exist, a case is scored by the expected
   symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
@@ -758,8 +758,9 @@ still not stripped.
   table; it also records a `neighbors` pack size and the title-as-query count
   without asserting them.
 
-  **The corpus is frozen at `a81a332` (the crate's sources as of `7209ee2`)
-  and must never be re-synced with the live files**; it is re-cut only by
+  **The corpus is frozen on 2026-10-22 at `a81a332` (the crate's sources as of
+  `7209ee2`; the SHAs may dangle after a squash, `SYMBOL_CORPUS_HASH` is the
+  real pin) and must never be re-synced with the live files**; it is re-cut only by
   explicit decision, in a commit quoting the old and new tables. **Held-out
   rule:** every third case per class is `held_out`, pinned by a test, and is
   never used to choose constants.

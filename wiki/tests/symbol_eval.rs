@@ -4,9 +4,10 @@
 //! Runs against the frozen corpus in `tests/.symbol_corpus/` (`src/`,
 //! `docs/ARCHITECTURE.md`, `README.md`).
 //!
-//! **The corpus is frozen at `a81a332`; its files are this crate's sources as
-//! of `7209ee2`** (identical to `777b30a` except `src/serve.rs`, which already
-//! has `search_json`). It must never be re-synced with the live files it was
+//! **The corpus was frozen on 2026-10-22 at `a81a332`; its files are this
+//! crate's sources as of `7209ee2`** (identical to `777b30a` except
+//! `src/serve.rs`, which already has `search_json`). The SHAs may dangle after
+//! a history squash; `SYMBOL_CORPUS_HASH` is the real pin. It must never be re-synced with the live files it was
 //! copied from: a score change would no longer be attributable to the scorer,
 //! because the corpus could have moved instead. It is re-cut only by explicit
 //! decision, in a commit that quotes both the old and the new table.
@@ -18,6 +19,10 @@
 //!
 //! Until symbol hits exist, a case is scored by the expected symbol's *file*:
 //! `file_rank` is the first hit whose source path equals the case's path.
+//!
+//! The `tokens` column charges the MCP tool's default search response (today
+//! `search_json` at limit 10). The step that changes the default renderer or
+//! limit must swap it here and quote both numbers.
 
 use regex::Regex;
 use std::fmt::Write as _;
@@ -98,6 +103,27 @@ const CASES: &[Case] = &[
         "source_rank",
         "src/formats/code.rs",
         "source_rank",
+        Class::Name,
+        true,
+    ),
+    case(
+        "PackBudget",
+        "src/query.rs",
+        "PackBudget",
+        Class::Name,
+        false,
+    ),
+    case(
+        "CodeExtractor",
+        "src/formats/code.rs",
+        "CodeExtractor",
+        Class::Name,
+        false,
+    ),
+    case(
+        "token_estimate",
+        "src/manifest.rs",
+        "token_estimate",
         Class::Name,
         true,
     ),
@@ -226,6 +252,8 @@ fn read_corpus_file(path: &str) -> String {
 
 /// Split an identifier like `Wiki::name_words`: on `_`/`-` and camel
 /// boundaries, acronym runs kept together.
+/// Deliberate copy of the private `Wiki::name_words`; drift would silently
+/// weaken the `DocOnly` guard.
 fn name_words(name: &str) -> Vec<String> {
     let chars: Vec<char> = name.chars().collect();
     let mut words = Vec::new();
@@ -273,20 +301,26 @@ fn every_label_names_a_symbol_defined_in_its_file() {
     }
 }
 
+/// Words too common to count as a match on a symbol's name.
+const STOPWORDS: &[&str] = &[
+    "the", "a", "an", "of", "to", "in", "on", "is", "are", "and", "or", "for", "by", "with",
+    "that", "it", "its", "we", "do", "how", "what", "where", "which",
+];
+
 #[test]
 fn doc_only_queries_do_not_match_the_symbol_name() {
     let mut seen = 0;
     for c in CASES.iter().filter(|c| c.class == Class::DocOnly) {
         seen += 1;
         let words = name_words(c.symbol);
-        let toks: Vec<String> = c
+        let parts: Vec<String> = c
             .query
             .to_lowercase()
-            .split_whitespace()
-            .filter(|t| t.chars().count() >= 4)
+            .split(|ch: char| !ch.is_alphanumeric())
+            .filter(|t| !t.is_empty())
             .map(str::to_string)
             .collect();
-        for t in &toks {
+        for t in parts.iter().filter(|t| !STOPWORDS.contains(&t.as_str())) {
             assert!(
                 !words.iter().any(|w| w.starts_with(t.as_str())),
                 "DocOnly label `{}`: token `{t}` is a prefix of a word of `{}`",
@@ -294,6 +328,7 @@ fn doc_only_queries_do_not_match_the_symbol_name() {
                 c.symbol
             );
         }
+        let toks: Vec<&String> = parts.iter().filter(|t| t.chars().count() >= 4).collect();
         let text = read_corpus_file(c.path).to_lowercase();
         let hit = toks.iter().filter(|t| text.contains(t.as_str())).count();
         assert!(
@@ -314,6 +349,10 @@ fn held_out_is_every_third_case_per_class() {
         Class::DocOnly,
         Class::Stopwords,
     ] {
+        assert!(
+            CASES.iter().any(|c| c.class == class),
+            "{class:?} has no cases"
+        );
         for (i, c) in CASES.iter().filter(|c| c.class == class).enumerate() {
             assert_eq!(
                 c.held_out,
@@ -334,7 +373,7 @@ fn split(held_out: bool) -> &'static str {
 }
 
 /// Page id -> source path, from the compiled `index.json`.
-fn id_paths(out: &Path) -> std::collections::HashMap<String, String> {
+fn id_paths(out: &Path) -> std::collections::BTreeMap<String, String> {
     let v: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
     v["entries"]
@@ -377,8 +416,12 @@ impl Agg {
 
     fn footer(&self, name: &str) -> String {
         format!(
-            "{name:<5} file_hit@1={:.4} file_hit@3={:.4} mrr@10={:.4} tokens={:.1}\n",
+            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} tokens={:.1}\n",
+            self.h1,
+            self.n,
             self.h1 / self.n,
+            self.h3,
+            self.n,
             self.h3 / self.n,
             self.mrr / self.n,
             self.tokens / self.n,
@@ -386,8 +429,8 @@ impl Agg {
     }
 }
 
-/// Run every case; return `(tune, held, table)`.
-fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, String) {
+/// Run every case; return `(tune, held, (own-title hits, pages), table)`.
+fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     let paths = id_paths(out);
     let mut table = String::new();
     writeln!(
@@ -456,13 +499,14 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, String) {
         })
         .count();
     writeln!(table, "title_as_query: {own}/{}", pages.len()).unwrap();
-    (tune, held, table)
+    (tune, held, (own, pages.len()), table)
 }
 
 // Floors, exact fractions of case counts. Never transcribe from the `{:.4}`
 // table (it rounds). Ratchet them in the commit that accepts an improvement.
-const MIN_FILE_HIT3_TUNE: f64 = 14.0 / 15.0;
-const MIN_FILE_HIT3_HELD: f64 = 6.0 / 7.0;
+const MIN_FILE_HIT3_TUNE: f64 = 16.0 / 17.0;
+const MIN_FILE_HIT3_HELD: f64 = 7.0 / 8.0;
+const MIN_TITLE_AS_QUERY: f64 = 27.0 / 28.0;
 
 /// Slack on the floor comparisons (accumulated-sum ULP noise), as in `eval.rs`.
 const FLOOR_EPS: f64 = 1e-9;
@@ -472,7 +516,7 @@ const FLOOR_EPS: f64 = 1e-9;
 #[test]
 fn symbol_retrieval() {
     let (_dir, out, wiki) = corpus::compile_frozen("tests/.symbol_corpus", SYMBOL_CORPUS_HASH);
-    let (tune, held, table) = score(&out, &wiki);
+    let (tune, held, (own, pages), table) = score(&out, &wiki);
 
     // Floors before the snapshot, with the table in the message: this
     // ordering short-circuits `assert_snapshot!`.
@@ -483,6 +527,11 @@ fn symbol_retrieval() {
     assert!(
         held.h3 / held.n >= MIN_FILE_HIT3_HELD - FLOOR_EPS,
         "held file_hit@3 regressed below {MIN_FILE_HIT3_HELD}\n{table}"
+    );
+
+    assert!(
+        own as f64 / pages as f64 >= MIN_TITLE_AS_QUERY - FLOOR_EPS,
+        "title_as_query regressed: {own}/{pages}\n{table}"
     );
 
     insta::assert_snapshot!(table);

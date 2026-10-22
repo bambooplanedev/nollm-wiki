@@ -10,6 +10,9 @@ field_hit                                     Name       held           1      6
 disambiguate_ids                              Name       tune           1     324  src/lib.rs
 module_stem                                   Name       tune           4     334  src/graph.rs
 source_rank                                   Name       held           4     335  src/graph.rs
+PackBudget                                    Name       tune           1     297  src/query.rs
+CodeExtractor                                 Name       tune           1     307  src/formats/code.rs
+token_estimate                                Name       held           1     380  src/manifest.rs
 snippet built                                 NameWords  tune           2     509  README.md
 split frontmatter                             NameWords  tune           1     793  src/formats/markdown.rs
 first sentence of a summary line              NameWords  held           1     662  src/formats/summary.rs
@@ -27,7 +30,7 @@ how do we write a page atomically             Stopwords  tune           1     65
 what is the module stem of a path             Stopwords  held           3     719  docs/ARCHITECTURE.md
 where are the test modules stripped           Stopwords  tune           2     801  src/formats/code.rs
 
-tune  file_hit@1=0.5333 file_hit@3=0.9333 mrr@10=0.7389 tokens=621.1
-held  file_hit@1=0.7143 file_hit@3=0.8571 mrr@10=0.7976 tokens=573.9
+tune  file_hit@1=10/17 (0.5882) file_hit@3=16/17 (0.9412) mrr@10=0.7696 tokens=583.5
+held  file_hit@1=6/8 (0.7500) file_hit@3=7/8 (0.8750) mrr@10=0.8229 tokens=549.6
 neighbors code.rs: tokens=648 target_degraded=true
 title_as_query: 27/28

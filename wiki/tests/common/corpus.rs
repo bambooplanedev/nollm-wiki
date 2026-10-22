@@ -40,11 +40,11 @@ pub fn compile_frozen(rel: &str, expected_hash: &str) -> (TempDir, PathBuf, Wiki
     assert_eq!(
         corpus_hash(&corpus),
         expected_hash,
-        "the frozen corpus's content changed. The id-set assertion in \
-         `corpus_compiles_to_the_expected_pages` cannot catch this: it only \
-         sees which pages exist, not what they say. If this is a deliberate \
-         re-cut, update CORPUS_HASH in the same commit that quotes the old \
-         and new tables; if it is not, revert the corpus.",
+        "the frozen corpus's content changed. An id-set assertion cannot \
+         catch this: it only sees which pages exist, not what they say. If \
+         this is a deliberate re-cut, update the harness's corpus-hash \
+         constant in the same commit that quotes the old and new tables; if \
+         it is not, revert the corpus.",
     );
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("out");
