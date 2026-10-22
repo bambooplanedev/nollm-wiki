@@ -125,6 +125,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "ts" => super::extract_simple::ts_spec(),
         "jsx" => super::extract_jsx::jsx_spec(),
         "tsx" => super::extract_jsx::tsx_spec(),
+        "vue" => super::extract_vue::vue_spec(),
         "go" => super::extract_simple::go_spec(),
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_spec(),
         _ => return None,
@@ -181,7 +182,7 @@ pub(crate) fn source_rank(source_path: &str) -> u8 {
 /// `QUERIES` so the registry can never miss a language the extractor accepts —
 /// a missing entry would strip that language of all symbols and imports.
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "jsx", "tsx", "go", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "h",
+    "rs", "py", "js", "ts", "jsx", "tsx", "vue", "go", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "h",
 ];
 
 /// Each language's query, compiled once per process instead of once per file.
@@ -248,8 +249,20 @@ impl Extractor for CodeExtractor {
             None => (text.to_string(), None),
         };
 
-        let (lang_name, symbols, imports, defined, methods, docstring, summary_fallback) =
-            match extract_code(ext, &source, pre_parsed) {
+        // A single-file component is markup around code: only its `<script>`
+        // blocks are extracted, under the spec their `lang` names. The view
+        // blanks everything else in place, so every byte offset still points
+        // into `source` and the rest of the pipeline needs no change.
+        let script = match ext {
+            "vue" => Some(super::extract_vue::vue_script(&source)),
+            _ => None,
+        };
+        let (code_ext, code) = script
+            .as_ref()
+            .map_or((ext, source.as_str()), |v| (v.ext, v.text.as_str()));
+
+        let (mut lang_name, symbols, imports, defined, methods, docstring, summary_fallback) =
+            match extract_code(code_ext, code, pre_parsed) {
                 Some(v) => v,
                 None => (
                     ext.to_string(),
@@ -262,7 +275,15 @@ impl Extractor for CodeExtractor {
                 ),
             };
 
-        let docstring = docstring.or_else(|| leading_doc(&source, ext));
+        // A component is reported as its own format, whichever language its
+        // script is written in.
+        if script.is_some() {
+            if let Some(spec) = lang_for_ext(ext) {
+                lang_name = spec.lang_name.to_string();
+            }
+        }
+
+        let docstring = docstring.or_else(|| leading_doc(code, code_ext));
         // `body` is deliberately NOT scanned for a summary: source code is not
         // prose, so letting summarize() hunt line-by-line for a "real
         // sentence" produces garbage. Only a real docstring, or (failing
@@ -1084,7 +1105,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "py" => line
                 .strip_prefix("\"\"\"")
                 .map(|s| s.trim_end_matches("\"\"\"")),
-            "js" | "ts" | "jsx" | "tsx" | "go" => {
+            "js" | "ts" | "jsx" | "tsx" | "vue" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
             "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => {
