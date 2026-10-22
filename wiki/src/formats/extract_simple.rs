@@ -3,9 +3,9 @@
 //! no owner resolution and no scope guard.
 use super::code::{
     always_free, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, no_lead,
-    owner_anchor_identity, sig_start_identity, LangSpec,
+    owner_anchor_identity, sig_start_identity, LangSpec, Lead, Placement,
 };
-use tree_sitter::Language;
+use tree_sitter::{Language, Node};
 
 fn keep_go_exported(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase)
@@ -70,26 +70,59 @@ pub(crate) fn go_spec() -> LangSpec {
         query_src: r"
                 (function_declaration name: (identifier) @name) @def
                 (type_declaration (type_spec name: (type_identifier) @name)) @def
+                (method_declaration name: (field_identifier) @name) @item
                 (import_spec path: (interpreted_string_literal) @import)
             ",
         name_filter: keep_go_exported,
         vis_filter: keep_any_vis,
         strip_trailing: &[],
-        placement: always_free,
+        placement: go_placement,
         owner_sep: "",
         export_set: no_export_set,
         join_continuations: false,
         sig_start: sig_start_identity,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
-        item_lead: no_lead,
+        item_lead: go_lead,
         body_doc: no_body_doc,
         query_gates_visibility: false,
     }
 }
 
+/// A method belongs to its receiver's type: `*Server`, `Server` and
+/// `*Server[T]` all give `Server`. Everything else is a free item.
+fn go_placement(def: Node, text: &str) -> Placement {
+    let receiver = (def.kind() == "method_declaration")
+        .then(|| def.child_by_field_name("receiver"))
+        .flatten()
+        .and_then(|r| r.named_child(0))
+        .and_then(|p| p.child_by_field_name("type"))
+        .and_then(|t| text.get(t.byte_range()));
+    Placement::Scoped(
+        receiver
+            .map(|t| {
+                let t = t.trim_start_matches('*');
+                t.split('[').next().unwrap_or(t).trim().to_string()
+            })
+            .into_iter()
+            .collect(),
+    )
+}
+
+/// Go's doc convention is the `//` comment lines directly above a declaration.
+fn go_lead(node: Node, text: &str) -> Lead {
+    match text
+        .get(node.byte_range())
+        .and_then(|t| t.strip_prefix("//"))
+    {
+        Some(doc) if node.kind() == "comment" => Lead::Doc(doc.trim().to_string()),
+        _ => Lead::Stop,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::formats::code::testutil::item_lines;
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -157,5 +190,33 @@ mod tests {
         );
         assert!(!e.symbols.iter().any(|s| s.contains("bar")));
         assert!(e.imports.iter().any(|i| i.contains("fmt")));
+    }
+
+    #[test]
+    fn go_items_cover_methods_and_unexported_functions() {
+        let src = "package s\n\n// Server serves.\ntype Server struct{}\n\n// Run starts it.\nfunc (s *Server) Run() {}\n\nfunc (s *Server) stop() {}\n\nfunc helper() {}\n";
+        let e = CodeExtractor.extract("s.go", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "3-4 type Server pub",
+                "6-7 method Server::Run pub",
+                "9-9 method Server::stop priv",
+                "11-11 fn helper priv",
+            ]
+        );
+        assert_eq!(e.items[1].doc.as_deref(), Some("Run starts it."));
+        assert!(e.methods.is_empty());
+        assert!(!e.symbols.iter().any(|s| s.contains("Run")));
+    }
+
+    #[test]
+    fn go_receiver_types_lose_pointer_and_type_arguments() {
+        let src = "package s\n\nfunc (b Box) A() {}\n\nfunc (b *Box[T]) B() {}\n";
+        let e = CodeExtractor.extract("s.go", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["3-3 method Box::A pub", "5-5 method Box::B pub"]
+        );
     }
 }

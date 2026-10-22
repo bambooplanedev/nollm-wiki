@@ -1331,11 +1331,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
             "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => {
-                let opens = line.starts_with("/**") || line.starts_with("/*!");
-                let in_block = in_doxygen_block || opens;
-                let result = cpp_doc_line(line, in_block);
-                in_doxygen_block = in_block && !line.contains("*/");
-                return result;
+                return super::extract_cpp::cpp_doc_step(line, &mut in_doxygen_block);
             }
             _ => None,
         };
@@ -1403,7 +1399,7 @@ fn is_banner_shaped(line: &str) -> bool {
 /// e.g. `"All rights reserved.\nMaintains the book."` — since this function
 /// sees one line at a time and cannot otherwise tell which kind of block
 /// opened it.
-fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
+pub(crate) fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
     let body = line
         .strip_prefix("///")
         .or_else(|| line.strip_prefix("//!"))

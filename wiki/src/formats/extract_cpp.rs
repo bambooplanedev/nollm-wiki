@@ -1,8 +1,8 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    default_cut, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, no_lead,
-    LangSpec, Placement, Rank, Shape,
+    cpp_doc_line, default_cut, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group,
+    LangSpec, Lead, Placement, Rank, Shape,
 };
 use tree_sitter::Node;
 
@@ -151,10 +151,48 @@ pub(crate) fn cpp_spec() -> LangSpec {
         sig_start: cpp_sig_start,
         owner_anchor: cpp_owner_anchor,
         header_group: no_header_group,
-        item_lead: no_lead,
+        item_lead: cpp_lead,
         body_doc: no_body_doc,
         query_gates_visibility: false,
     }
+}
+
+/// One line of a C++ comment as doc text, tracking whether `in_block` is inside
+/// a still-open Doxygen block (`/**` or `/*!` not yet closed by `*/`): the only
+/// context where a bare `*` continuation is doc content, since a plain
+/// `/* ... */` license block continues the same way. Shared by the file-summary
+/// scan and by item docs, so there is one copy of the tracking.
+pub(crate) fn cpp_doc_step(line: &str, in_block: &mut bool) -> Option<String> {
+    let opens = line.starts_with("/**") || line.starts_with("/*!");
+    let inside = *in_block || opens;
+    let result = cpp_doc_line(line, inside);
+    *in_block = inside && !line.contains("*/");
+    result
+}
+
+/// The doc text of one C++ comment node, or `None` when it is not a Doxygen
+/// comment or says nothing.
+fn cpp_comment_doc(comment: &str) -> Option<String> {
+    let mut in_block = false;
+    let lines: Vec<String> = comment
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| cpp_doc_step(l, &mut in_block))
+        .filter(|l| !l.is_empty())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// A Doxygen comment directly above an item is its doc; anything else ends the
+/// walk. Every C++ item is `public: true`, because the spec keeps all
+/// visibilities (see `vis_filter`).
+fn cpp_lead(node: Node, text: &str) -> Lead {
+    if node.kind() != "comment" {
+        return Lead::Stop;
+    }
+    text.get(node.byte_range())
+        .and_then(cpp_comment_doc)
+        .map_or(Lead::Stop, Lead::Doc)
 }
 
 /// Climb to the enclosing `template_declaration`, nested ones included, so a
@@ -343,6 +381,7 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use crate::formats::code::testutil::item_lines;
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -729,5 +768,23 @@ mod tests {
             "/* Copyright (c) 2026 Acme.\n * All rights reserved.\n */\n/// Maintains the book.\nclass F {};\n",
         );
         assert_eq!(s.as_deref(), Some("Maintains the book."), "got {s:?}");
+    }
+
+    #[test]
+    fn cpp_items_take_doxygen_docs_and_skip_plain_comments() {
+        let src = "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n  // plain\n  int size() const;\n};\n/** Frees all. */\nvoid reset();\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-7 type Book pub",
+                "3-4 method Book::apply pub",
+                "6-6 method Book::size pub",
+                "8-9 fn reset pub",
+            ]
+        );
+        assert_eq!(e.items[1].doc.as_deref(), Some("Applies an order."));
+        assert_eq!(e.items[2].doc, None);
+        assert_eq!(e.items[3].doc.as_deref(), Some("Frees all."));
     }
 }

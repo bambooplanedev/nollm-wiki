@@ -2,8 +2,8 @@
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
 use super::code::{
-    default_shape, keep_any_vis, no_body_doc, no_header_group, no_lead, owner_anchor_identity,
-    LangSpec, Placement, Rank, Shape,
+    default_shape, keep_any_vis, no_header_group, no_lead, owner_anchor_identity, LangSpec,
+    Placement, Rank, Shape,
 };
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -143,7 +143,7 @@ pub(crate) fn python_spec() -> LangSpec {
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
         item_lead: no_lead,
-        body_doc: no_body_doc,
+        body_doc: python_body_doc,
         query_gates_visibility: false,
     }
 }
@@ -287,9 +287,25 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
 /// multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
 /// `string_content` node rather than assuming the doc text is on line 1.
 pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
-    let root = tree.root_node();
-    let mut cursor = root.walk();
-    let first_stmt = root.children(&mut cursor).find(|n| n.kind() != "comment")?;
+    docstring_paragraph(tree.root_node(), text)
+}
+
+/// A def's or class's docstring: the first non-comment statement of its
+/// `body`, when it is a string.
+pub(crate) fn python_body_doc(def: Node, text: &str) -> Option<String> {
+    if !matches!(def.kind(), "function_definition" | "class_definition") {
+        return None;
+    }
+    docstring_paragraph(def.child_by_field_name("body")?, text)
+}
+
+/// The opening paragraph of `block`'s leading string statement, shared by a
+/// module (its root) and a def (its `body`).
+fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
+    let mut cursor = block.walk();
+    let first_stmt = block
+        .children(&mut cursor)
+        .find(|n| n.kind() != "comment")?;
     if first_stmt.kind() != "expression_statement" {
         return None;
     }
@@ -315,7 +331,7 @@ pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -861,5 +877,22 @@ mod tests {
             !summary.contains('…'),
             "summary must not be a truncated value: {summary}"
         );
+    }
+
+    #[test]
+    fn python_items_cover_classes_private_methods_functions_and_constants() {
+        let src = "@dataclass\nclass Article:\n    \"\"\"A news article.\n\n    More.\"\"\"\n    title: str = \"\"\n\n    def _slug(self):\n        \"\"\"Slug for the url.\"\"\"\n        return 1\n\n\ndef _helper():\n    pass\n\nLIMIT = 5\n";
+        let e = CodeExtractor.extract("a.py", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-10 type Article pub",
+                "8-10 method Article::_slug priv",
+                "13-14 fn _helper priv",
+                "16-16 value LIMIT pub",
+            ]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("A news article."));
+        assert_eq!(e.items[1].doc.as_deref(), Some("Slug for the url."));
     }
 }
