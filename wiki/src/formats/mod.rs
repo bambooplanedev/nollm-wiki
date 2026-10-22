@@ -6,6 +6,7 @@ pub mod extract_jsx;
 pub mod extract_python;
 pub mod extract_rust;
 pub mod extract_simple;
+pub mod extract_svelte;
 pub mod extract_vue;
 pub mod markdown;
 pub mod summary;
