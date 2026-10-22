@@ -1,0 +1,128 @@
+//! Deterministic, no-LLM one-line summaries via a fallback chain.
+
+/// First non-empty of: frontmatter description, docstring, the body's first
+/// sentence, the first signature.
+pub fn summarize(
+    frontmatter_desc: Option<&str>,
+    docstring: Option<&str>,
+    body: &str,
+    first_signature: Option<&str>,
+) -> Option<String> {
+    if let Some(d) = non_empty(frontmatter_desc) {
+        return Some(first_sentence(d));
+    }
+    if let Some(d) = docstring.and_then(first_real_sentence) {
+        return Some(d);
+    }
+    if let Some(s) = first_real_sentence(body) {
+        return Some(s);
+    }
+    non_empty(first_signature).map(std::string::ToString::to_string)
+}
+
+fn non_empty(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn is_boilerplate(line: &str) -> bool {
+    let l = line.trim_start().to_lowercase();
+    l.starts_with("this document")
+        || l.starts_with("this page")
+        || l.starts_with("this module")
+        || l.starts_with("this file")
+        || l.starts_with("this note")
+}
+
+/// First non-heading, non-boilerplate sentence from a text block.
+///
+/// The sentence is taken from the whole paragraph that opens with the first
+/// real line — consecutive non-empty lines joined by one space — so a
+/// sentence wrapped at 80 columns (a `//!` block, README prose) is not cut at
+/// the line break.
+fn first_real_sentence(text: &str) -> Option<String> {
+    let mut lines = text.lines().map(str::trim);
+    let first = lines.find(|l| !l.is_empty() && !l.starts_with('#') && !is_boilerplate(l))?;
+    let paragraph = std::iter::once(first)
+        .chain(lines.take_while(|l| !l.is_empty()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(first_sentence(&paragraph))
+}
+
+/// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else
+/// whole line. A terminator counts only when followed by whitespace or the
+/// end of the line, so `index.json` or `v1.2` inside a sentence does not end
+/// it.
+fn first_sentence(line: &str) -> String {
+    let line = line.trim();
+    let end = line
+        .char_indices()
+        .find(|&(i, c)| {
+            matches!(c, '.' | '!' | '?')
+                && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
+        })
+        .map(|(i, _)| i);
+    match end {
+        Some(idx) => line[..=idx].trim().to_string(),
+        None => line.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_frontmatter_description() {
+        let s = summarize(Some("Short desc."), None, "body sentence.", None);
+        assert_eq!(s.as_deref(), Some("Short desc."));
+    }
+
+    #[test]
+    fn skips_headings_and_boilerplate_first_sentence() {
+        let body = "# Title\nThis document describes stuff.\nGradient descent optimizes loss.";
+        let s = summarize(None, None, body, None);
+        assert_eq!(s.as_deref(), Some("Gradient descent optimizes loss."));
+    }
+
+    #[test]
+    fn a_dot_inside_a_word_does_not_end_the_sentence() {
+        let s = summarize(
+            None,
+            Some("Renders index.json and llms.txt for agents. Second sentence."),
+            "",
+            None,
+        );
+        assert_eq!(
+            s.as_deref(),
+            Some("Renders index.json and llms.txt for agents.")
+        );
+        assert_eq!(first_sentence("Bump to v1.2"), "Bump to v1.2");
+        assert_eq!(first_sentence("Done!Next"), "Done!Next");
+    }
+
+    #[test]
+    fn a_sentence_wrapped_across_lines_is_joined_before_the_cut() {
+        let doc = "Rust extraction: bare-`pub` gating, owner qualification through\nimpl scopes. Second sentence\nwraps too.";
+        assert_eq!(
+            summarize(None, Some(doc), "", None).as_deref(),
+            Some("Rust extraction: bare-`pub` gating, owner qualification through impl scopes.")
+        );
+        // The paragraph ends at a blank line: a following paragraph is never
+        // glued on when the first has no terminator.
+        let body = "first paragraph without a stop\n\nSecond paragraph.";
+        assert_eq!(
+            summarize(None, None, body, None).as_deref(),
+            Some("first paragraph without a stop")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_signature_then_none() {
+        assert_eq!(
+            summarize(None, None, "", Some("fn foo(a: i32)")).as_deref(),
+            Some("fn foo(a: i32)")
+        );
+        assert_eq!(summarize(None, None, "   \n\n", None), None);
+    }
+}
