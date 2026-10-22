@@ -49,7 +49,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    then runs, after disambiguation has produced final, already-unique ids: any
    id that happens to equal a reserved manifest base name (`index`, `llms`,
    `agents`, `graph`) is rewritten to `<id>_page`, `<id>_page_2`, ..., with a
-   warning on stderr. Produces `BTreeMap<String, Entity>`.
+   warning on stderr. Finally `extract_cpp::pair_declarations` pairs each C++
+   header's declarations with the definitions in its one implementation file:
+   the definition inherits the doc and both items' `twin` name the other's
+   lines; overloads and ambiguous groups stay unpaired. Produces
+   `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links three ways. Mention edges: entity bodies are scanned for other
    entities' names and aliases (the phrase index); a candidate whose target

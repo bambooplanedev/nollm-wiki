@@ -266,7 +266,10 @@ source tree. Three artifacts drive that:
   `defined` (the page's top-level definition names —
   functions, types, constants — in original case; empty for non-code pages),
   `methods` (the page's inherent-impl and trait-declaration method names, in
-  original case; trait-impl methods are excluded; empty for non-code pages).
+  original case; trait-impl methods are excluded; empty for non-code pages),
+  `items` (code pages only: each top-level item or method with its `kind`,
+  `name`, `owner`, `signature`, original `start_line`/`end_line`, `doc`,
+  `public` flag and, for a paired C++ declaration or definition, `twin`).
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under

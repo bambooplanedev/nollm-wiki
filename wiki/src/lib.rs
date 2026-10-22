@@ -182,7 +182,9 @@ fn compile_inner(
     // Runs after slug dedup so graph/render/manifest/lint all see the same,
     // final ids. Processes the (already sorted) BTreeMap in key order so the
     // remap is identical across runs/machines/thread counts.
-    let entities = remap_reserved_names(entities);
+    let mut entities = remap_reserved_names(entities);
+    // Needs the final ids and `source_path`s, so it follows the remap.
+    formats::extract_cpp::pair_declarations(&mut entities);
 
     // 3. Graph.
     let graph = graph::build_graph(&entities);

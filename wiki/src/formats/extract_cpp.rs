@@ -1,9 +1,11 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    cpp_doc_line, default_cut, keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group,
-    LangSpec, Lead, Placement, Rank, Shape,
+    cpp_doc_line, default_cut, ext_of, keep_all, keep_any_vis, module_stem, no_body_doc,
+    no_export_set, no_header_group, source_rank, LangSpec, Lead, Placement, Rank, Shape,
 };
+use crate::model::{CodeItem, CodeItemKind, Entity};
+use std::collections::BTreeMap;
 use tree_sitter::Node;
 
 /// Every capture shape a definition's name can take. The general `(_)` form
@@ -377,6 +379,87 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
     // spell both without a field name for the same reason), so scan children.
     d.named_children(&mut d.walk())
         .any(|c| c.kind() == "function_declarator")
+}
+
+/// The `(owner, name)` keys that occur exactly once among `items`, with the
+/// index of their item. Overloads share a key, so they drop out here.
+fn unique_keys(items: &[CodeItem]) -> BTreeMap<(Option<&str>, &str), usize> {
+    let mut seen: BTreeMap<(Option<&str>, &str), Option<usize>> = BTreeMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+            seen.entry((it.owner.as_deref(), it.name.as_str()))
+                .and_modify(|v| *v = None)
+                .or_insert(Some(i));
+        }
+    }
+    seen.into_iter()
+        .filter_map(|(k, v)| v.map(|i| (k, i)))
+        .collect()
+}
+
+/// Pairs a header's declarations with the definitions in the one `.cpp` that
+/// implements it: the doc usually sits on the declaration, so the definition
+/// inherits it, and each side's `twin` names the other's lines. Only a
+/// group with exactly one implementation file and a unique lowest-rank header
+/// pairs, and only keys unique on both sides: a wrong pairing is worse than
+/// none, so overloads and ambiguous groups stay untouched.
+pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (id, e) in entities.iter() {
+        let sp = e.source_path.as_str();
+        if matches!(
+            ext_of(sp).as_str(),
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h"
+        ) {
+            groups.entry(module_stem(sp)).or_default().push(id);
+        }
+    }
+    let mut pairs: Vec<(String, usize, String, usize)> = Vec::new();
+    for ids in groups.values() {
+        let impls: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| source_rank(&entities[*id].source_path) == 2)
+            .collect();
+        let Some(min) = ids
+            .iter()
+            .map(|id| source_rank(&entities[*id].source_path))
+            .min()
+            .filter(|r| *r < 2)
+        else {
+            continue;
+        };
+        let headers: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| source_rank(&entities[*id].source_path) == min)
+            .collect();
+        let ([imp], [hdr]) = (impls.as_slice(), headers.as_slice()) else {
+            continue;
+        };
+        let (h, c) = (&entities[*hdr].items, &entities[*imp].items);
+        let cu = unique_keys(c);
+        for (key, hi) in unique_keys(h) {
+            if let Some(&ci) = cu.get(&key) {
+                pairs.push(((*hdr).to_string(), hi, (*imp).to_string(), ci));
+            }
+        }
+    }
+    for (hid, hi, cid, ci) in pairs {
+        let span = |e: &Entity, i: usize| {
+            let it = &e.items[i];
+            format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
+        };
+        let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
+        let doc = entities[&hid].items[hi].doc.clone();
+        let h_item = &mut entities.get_mut(&hid).unwrap().items[hi];
+        h_item.twin = Some(c_span);
+        let c_item = &mut entities.get_mut(&cid).unwrap().items[ci];
+        c_item.twin = Some(h_span);
+        if c_item.doc.is_none() {
+            c_item.doc = doc;
+        }
+    }
 }
 
 #[cfg(test)]
