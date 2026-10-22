@@ -2,6 +2,7 @@
 
 pub mod code;
 pub mod extract_cpp;
+pub mod extract_jsx;
 pub mod extract_python;
 pub mod extract_rust;
 pub mod extract_simple;

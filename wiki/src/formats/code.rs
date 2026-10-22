@@ -123,6 +123,8 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "py" => super::extract_python::python_spec(),
         "js" => super::extract_simple::js_spec(),
         "ts" => super::extract_simple::ts_spec(),
+        "jsx" => super::extract_jsx::jsx_spec(),
+        "tsx" => super::extract_jsx::tsx_spec(),
         "go" => super::extract_simple::go_spec(),
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_spec(),
         _ => return None,
@@ -179,7 +181,7 @@ pub(crate) fn source_rank(source_path: &str) -> u8 {
 /// `QUERIES` so the registry can never miss a language the extractor accepts —
 /// a missing entry would strip that language of all symbols and imports.
 const CODE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "go", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "h",
+    "rs", "py", "js", "ts", "jsx", "tsx", "go", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "h",
 ];
 
 /// Each language's query, compiled once per process instead of once per file.
@@ -1082,7 +1084,9 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "py" => line
                 .strip_prefix("\"\"\"")
                 .map(|s| s.trim_end_matches("\"\"\"")),
-            "js" | "ts" | "go" => line.strip_prefix("//").or_else(|| line.strip_prefix("/*")),
+            "js" | "ts" | "jsx" | "tsx" | "go" => {
+                line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
+            }
             "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => {
                 let opens = line.starts_with("/**") || line.starts_with("/*!");
                 let in_block = in_doxygen_block || opens;
@@ -1189,13 +1193,16 @@ fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
 /// the importer's edge. On a 49-page TypeScript corpus that was 15 edges into
 /// tests and 22 real module imports resolving nowhere.
 ///
-/// `.mjs`/`.cjs`/`.tsx`/`.jsx` want the same entry but are not compiled at
-/// all yet, so they would be dead rows here.
+/// `index.tsx` / `index.jsx` is the same barrel file in a component tree.
+/// `.mjs`/`.cjs` want the same entry but are not compiled at all yet, so they
+/// would be dead rows here.
 const DIRECTORY_MODULES: &[(&str, &str)] = &[
     ("rs", "mod"),
     ("py", "__init__"),
     ("ts", "index"),
     ("js", "index"),
+    ("tsx", "index"),
+    ("jsx", "index"),
 ];
 
 /// The identifier a code file's module is known by, before any casing: the
