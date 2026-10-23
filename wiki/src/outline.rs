@@ -80,6 +80,49 @@ impl Wiki {
             _ => full,
         })
     }
+
+    /// What `page` shows: the outline, or with `full` the whole page. A full
+    /// page over `max_tokens` becomes its outline when it is a code page with
+    /// items, else a prefix of whole lines; either way a first or last line
+    /// says so and the text fits `max_tokens`.
+    pub fn page_text(&self, id: &str, full: bool, max_tokens: Option<usize>) -> Option<String> {
+        if !full {
+            return self.outline(id, max_tokens);
+        }
+        let page = self.page(id)?;
+        let n = token_estimate(&page);
+        let max = match max_tokens {
+            Some(max) if n > max => max,
+            _ => return Some(page),
+        };
+        if let Some(Outline {
+            body: Body::Items(_),
+            ..
+        }) = parse(self, id)
+        {
+            let first = format!("full page ~{n} tokens exceeds max_tokens; outline follows\n");
+            // Token estimates floor, so two fitting parts can overshoot by one.
+            let mut room = max.saturating_sub(token_estimate(&first));
+            loop {
+                let text = first.clone() + &self.outline(id, Some(room))?;
+                if room == 0 || token_estimate(&text) <= max {
+                    return Some(text);
+                }
+                room -= 1;
+            }
+        }
+        let lines: Vec<&str> = page.split_inclusive('\n').collect();
+        let cut = |k: usize| {
+            let kept = lines[..k].concat();
+            let b = token_estimate(&kept);
+            kept + &format!("… truncated at ~{b} of ~{n} tokens\n")
+        };
+        let k = (0..=lines.len())
+            .rev()
+            .find(|&k| token_estimate(&cut(k)) <= max)
+            .unwrap_or(0);
+        Some(cut(k))
+    }
 }
 
 /// `o` cut down to `max` tokens; `full` is its whole outline, which does not fit.

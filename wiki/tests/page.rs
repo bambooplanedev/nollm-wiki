@@ -279,3 +279,34 @@ fn markdown_ceiling_counts_headings() {
         format!("{header}… 4 more headings — pass max_tokens: {t} for all\n")
     );
 }
+
+#[test]
+fn full_returns_the_rendered_page() {
+    let (_d, w) = fixture();
+    assert_eq!(w.page_text("lib", true, None), w.page("lib"));
+    assert_eq!(w.page_text("lib", true, Some(100_000)), w.page("lib"));
+    assert_eq!(w.page_text("nope", true, None), None);
+}
+
+#[test]
+fn full_over_budget_code_falls_back_to_outline() {
+    let (_d, w) = fixture();
+    for max in [60, 61, 62, 63] {
+        let t = w.page_text("lib", true, Some(max)).unwrap();
+        assert!(t.starts_with("full page ~"), "{t}");
+        assert!(t.contains("# Lib (lib)"), "{t}");
+        assert!(token_estimate(&t) <= max, "{max}: {t}");
+    }
+}
+
+#[test]
+fn full_over_budget_doc_truncates_on_a_line() {
+    let (_d, w) = fixture();
+    let page = w.page("guide").unwrap();
+    let t = w.page_text("guide", true, Some(30)).unwrap();
+    let (kept, marker) = t.trim_end().rsplit_once('\n').unwrap();
+    assert!(marker.starts_with("… truncated at ~"), "{t}");
+    assert!(marker.ends_with(&format!(" of ~{} tokens", token_estimate(&page))));
+    assert!(page.starts_with(&format!("{kept}\n")));
+    assert!(token_estimate(&t) <= 30, "{t}");
+}

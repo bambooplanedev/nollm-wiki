@@ -422,3 +422,35 @@ fn cli_search_prints_the_same_lines_as_mcp() {
         .unwrap()
         .is_array());
 }
+
+#[test]
+fn cli_page_prints_the_same_text_as_page_text() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(input.join("src/lib.rs"), "/// Adds.\npub fn add() {}\n").unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let w = wiki::query::Wiki::load(&output).unwrap();
+    let run = |args: &[&str]| {
+        let o = Command::cargo_bin("wiki")
+            .unwrap()
+            .arg("page")
+            .args(args)
+            .args(["--dir", output.to_str().unwrap()])
+            .assert()
+            .success();
+        String::from_utf8(o.get_output().stdout.clone()).unwrap()
+    };
+    assert_eq!(run(&["lib"]), w.page_text("lib", false, None).unwrap());
+    assert_eq!(
+        run(&["./src/lib.rs", "--full"]),
+        w.page_text("lib", true, None).unwrap()
+    );
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", "nope", "--dir", output.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("unknown page"));
+}
