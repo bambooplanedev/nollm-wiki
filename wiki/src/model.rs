@@ -70,16 +70,32 @@ pub struct Entity {
     /// `@def`s, so none reaches this list — a scope limit, not a fact about
     /// the file. Search matches these whole, never word-split.
     pub methods: Vec<String>,
-    /// Every definition of a code page, private ones and tests included,
-    /// with the lines it spans in the original source file, so an agent can
-    /// read just those lines. Sorted by `(start_line, end_line, name)`.
-    /// Empty for non-code pages. Unlike `symbols`, this is not the export
-    /// surface: `public` records whether the item is in `## Exports`.
+    /// The top-level items and methods of a code page, private ones and
+    /// tests included, with the lines each spans in the original source
+    /// file, so an agent can read just those lines. Sorted by
+    /// `(start_line, end_line, name)`. Empty for non-code pages. Written to
+    /// `items.json`, not `index.json`.
     ///
-    /// Known gap: a Rust `macro_rules!` without `#[macro_export]` is not an
-    /// item, because `rust_placement` rejects it before visibility is known.
-    /// Likewise a JS/TS method of an exported class reads `public: false`: the
-    /// query has no per-member visibility.
+    /// Covered: functions and methods; types (struct, class, enum, trait,
+    /// interface, union, type alias, exported macro); Rust `mod`s; and
+    /// top-level values — Rust `const`/`static`, Python module assignments,
+    /// C++ namespace-scope variables, Go package-level `const`/`var` (one
+    /// item per name, each grouped spec with its own lines), and JS/TS
+    /// top-level variables that hold no function. Not items: fields,
+    /// variants, associated consts and types, impl headers, function-local
+    /// definitions.
+    ///
+    /// `public` applies the gate `## Exports` uses. Where the query itself is
+    /// that gate (Rust, JS/TS), an item no export pattern matches reads
+    /// `false`.
+    ///
+    /// Known gaps: a Rust `macro_rules!` without `#[macro_export]` is not an
+    /// item, because `rust_placement` rejects it before visibility is known;
+    /// nor is a function in a Rust `extern` block. A JS/TS method of an
+    /// exported class, or an exported variable, reads `public: false`: the
+    /// query has no pattern that exports it. An object-literal or
+    /// anonymous-class method is a free `fn`, its owner unknown. The names
+    /// of one multi-declarator statement (`int a = 1, b;`) share its range.
     pub items: Vec<CodeItem>,
 }
 

@@ -2,8 +2,8 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    keep_all, keep_any_vis, no_body_doc, no_export_set, no_header_group, owner_anchor_identity,
-    sig_start_identity, LangSpec, Lead, Placement,
+    default_shape, is_function, keep_all, keep_any_vis, no_body_doc, no_export_set,
+    no_header_group, owner_anchor_identity, LangSpec, Lead, Placement, Rank, Shape,
 };
 use tree_sitter::{Language, Node};
 
@@ -49,7 +49,7 @@ pub(crate) fn js_spec() -> LangSpec {
                 (function_declaration name: (identifier) @name) @item
                 (generator_function_declaration name: (identifier) @name) @item
                 (method_definition name: [(property_identifier) (private_property_identifier)] @name) @item
-                (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @item
+                (variable_declarator name: (identifier) @name) @item
                 (class_declaration name: (identifier) @name) @item
                 (import_statement source: (string) @import)
             ",
@@ -66,7 +66,7 @@ pub(crate) fn ts_spec() -> LangSpec {
                 (function_declaration name: (identifier) @name) @item
                 (generator_function_declaration name: (identifier) @name) @item
                 (method_definition name: [(property_identifier) (private_property_identifier)] @name) @item
-                (variable_declarator name: (identifier) @name value: [(arrow_function) (function_expression)]) @item
+                (variable_declarator name: (identifier) @name) @item
                 (class_declaration name: (type_identifier) @name) @item
                 (abstract_class_declaration name: (type_identifier) @name) @item
                 (interface_declaration name: (type_identifier) @name) @item
@@ -105,6 +105,20 @@ fn ecma_placement(def: Node, text: &str) -> Placement {
     }
     chain.reverse();
     Placement::Scoped(chain)
+}
+
+/// A variable whose value is not a function is a value. It keeps the shared
+/// cut at its value, so `const LIMIT = 5` reads `const LIMIT`.
+pub(crate) fn ecma_shape(def: Node) -> Shape {
+    let rank = if def.kind() == "variable_declarator" && !is_function(def) {
+        Rank::Value
+    } else {
+        Rank::Def
+    };
+    Shape {
+        rank,
+        ..default_shape(def)
+    }
 }
 
 /// A declaration's range and signature start at its `export` or `const`.
@@ -147,10 +161,16 @@ pub(crate) fn go_spec() -> LangSpec {
         // Go has no `export` keyword; "exported" means the identifier's
         // first rune is uppercase. The query can't express that, so it
         // captures every func/type and name_filter drops the unexported ones.
+        // A spec's names are matched without their `name` field: the grammar
+        // puts the field on the commas of `const B, C = 2, 3` too, so the
+        // field form never reaches `C`. A spec's only direct `identifier`
+        // children are its names (a type is a `type_identifier`).
         query_src: r"
                 (function_declaration name: (identifier) @name) @def
                 (type_declaration (type_spec name: (type_identifier) @name)) @def
                 (method_declaration name: (field_identifier) @name) @item
+                (const_spec (identifier) @name) @item
+                (var_spec (identifier) @name) @item
                 (import_spec path: (interpreted_string_literal) @import)
             ",
         name_filter: keep_go_exported,
@@ -160,7 +180,7 @@ pub(crate) fn go_spec() -> LangSpec {
         owner_sep: "",
         export_set: no_export_set,
         join_continuations: false,
-        sig_start: sig_start_identity,
+        sig_start: go_sig_start,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
         item_lead: go_lead,
@@ -170,8 +190,19 @@ pub(crate) fn go_spec() -> LangSpec {
 }
 
 /// A method belongs to its receiver's type: `*Server`, `Server` and
-/// `*Server[T]` all give `Server`. Everything else is a free item.
+/// `*Server[T]` all give `Server`. Everything else is a free item, except a
+/// `const` or `var` inside a function, which is no item at all.
 fn go_placement(def: Node, text: &str) -> Placement {
+    let local = matches!(def.kind(), "const_spec" | "var_spec")
+        && std::iter::successors(def.parent(), Node::parent).any(|n| {
+            matches!(
+                n.kind(),
+                "function_declaration" | "method_declaration" | "func_literal"
+            )
+        });
+    if local {
+        return Placement::Rejected;
+    }
     let receiver = (def.kind() == "method_declaration")
         .then(|| def.child_by_field_name("receiver"))
         .flatten()
@@ -187,6 +218,37 @@ fn go_placement(def: Node, text: &str) -> Placement {
             .into_iter()
             .collect(),
     )
+}
+
+/// An ungrouped `const X = 1` starts at its `const`, where its doc comment
+/// sits; a spec inside `const ( … )` or `var ( … )` starts at itself, so
+/// each spec keeps its own lines and doc.
+fn go_sig_start(def: Node) -> Node {
+    match def.parent() {
+        Some(p)
+            if matches!(p.kind(), "const_declaration" | "var_declaration")
+                && !p.children(&mut p.walk()).any(|c| c.kind() == "(") =>
+        {
+            p
+        }
+        _ => def,
+    }
+}
+
+/// A `const`/`var` spec is a value: it stops at its `=` and re-appends the
+/// value within `VALUE_BUDGET`. Everything else is the shared default.
+pub(crate) fn go_shape(def: Node) -> Shape {
+    if !matches!(def.kind(), "const_spec" | "var_spec") {
+        return default_shape(def);
+    }
+    let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+    let value = def.child_by_field_name("value");
+    Shape {
+        rank: Rank::Value,
+        cut: eq.or(value),
+        value: eq.and(value),
+        has_type: def.child_by_field_name("type").is_some(),
+    }
 }
 
 /// Go's doc convention is the `//` comment lines directly above a declaration.
@@ -334,6 +396,69 @@ mod tests {
         assert_eq!(e.items[0].doc.as_deref(), Some("Gen makes things."));
         assert_eq!(e.items[1].doc, None);
         assert_eq!(e.items[2].doc, None);
+    }
+
+    #[test]
+    fn go_package_level_consts_and_vars_are_items_one_per_name() {
+        let src = "package p\n\n// L is the limit.\nconst L = 5\nvar limit = 5 // the limit\nconst (\n\t// A doc.\n\tA = 1\n\tB, C int = 2, 3\n)\nvar (\n\tx int\n\ty = 2\n)\nfunc f() { const z = 1; var w = 2 }\n";
+        let e = CodeExtractor.extract("p.go", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "3-4 value L pub",
+                "5-5 value limit priv",
+                "7-8 value A pub",
+                "9-9 value B pub",
+                "9-9 value C pub",
+                "12-12 value x priv",
+                "13-13 value y priv",
+                "15-15 fn f priv",
+            ]
+        );
+        let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+        assert_eq!(
+            sigs[..7],
+            [
+                "const L = 5",
+                "var limit = 5",
+                "A = 1",
+                "B, C int = 2, 3",
+                "B, C int = 2, 3",
+                "x int",
+                "y = 2"
+            ]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("L is the limit."));
+        assert_eq!(e.items[1].doc, None);
+        assert_eq!(e.items[2].doc.as_deref(), Some("A doc."));
+        assert!(
+            e.symbols.is_empty() && e.defined.is_empty(),
+            "{:?}",
+            e.symbols
+        );
+    }
+
+    #[test]
+    fn ts_top_level_variables_are_value_items() {
+        let src = "const LIMIT = 5;\nlet counter;\n/** The name. */\nexport const NAME: string = \"x\";\nconst twice = (x: number) => x * 2;\nfunction f() {\n  const local = 1;\n}\n";
+        let e = CodeExtractor.extract("m.ts", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-1 value LIMIT priv",
+                "2-2 value counter priv",
+                "3-4 value NAME priv",
+                "5-5 fn twice priv",
+                "6-8 fn f priv",
+            ]
+        );
+        let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+        assert_eq!(
+            sigs[..3],
+            ["const LIMIT", "let counter", "export const NAME: string"]
+        );
+        assert_eq!(e.items[2].doc.as_deref(), Some("The name."));
+        assert!(e.symbols.is_empty(), "{:?}", e.symbols);
     }
 
     #[test]

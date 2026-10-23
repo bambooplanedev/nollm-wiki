@@ -697,25 +697,42 @@ is a line comment, so code following the module's closing brace on the same
 line would otherwise be commented out. `#[cfg(test)]` on a non-`mod` item is
 still not stripped.
 
-**Items are every definition, not the export surface.** A language's query
-marks definitions that may be private with `@item` beside its `@def`
-patterns; a match yields an item from either, deduplicated on the `@name`
-node so a `pub fn` matched by both is one item. `public` is the `@def`
-match's `should_keep` result, so it agrees with `## Exports` exactly; an
-`@item`-only match is private where the `@def` patterns already gate
-visibility (Rust), and runs `should_keep` itself elsewhere. Fields,
-variants, associated consts and impl headers are not items. An item's range
-climbs from its signature node over the contiguous leads directly above it
-(`LangSpec::item_lead`: Rust attributes and `///` lines), stopping at a
-blank line or anything else, so a stray doc comment never stretches it.
+**Items are every top-level item and method, not the export surface.** A
+language's query marks definitions that may be private with `@item` beside
+its `@def` patterns; a match yields an item from either, deduplicated on
+the `@name` node so a `pub fn` matched by both is one item. `public` is the
+`@def` match's `should_keep` result, so it agrees with `## Exports` exactly;
+an `@item`-only match is private where the `@def` patterns already gate
+visibility (Rust, JS/TS), and runs `should_keep` itself elsewhere. Covered:
+functions and methods, types (`type` aliases included, in every language),
+Rust `mod`s, and top-level values — Rust `const`/`static`, Python module
+assignments, C++ namespace-scope variables, Go package-level `const`/`var`
+(one item per name; a spec in a `const ( … )` group has its own lines and
+doc), and JS/TS top-level variables that hold no function. Values are
+`@item`-only, so `## Exports`, `defined` and `methods` never see them.
+Fields, variants, associated consts and types, impl headers and
+function-local definitions are not items. An item's range climbs from its
+signature node over the contiguous leads directly above it
+(`LangSpec::item_lead`: Rust attributes and `///` lines, Doxygen comments,
+JSDoc blocks, Go `//` lines, with Go directives such as `//go:generate`
+kept in the range but out of the doc), stopping at a blank line, at a lead
+that trails code on its own line (`int n; ///< Count.`), or at anything
+else, so a stray doc comment never stretches it. A C++ member-trailing doc
+(`///<`, `//!<`, `/**<`, `/*!<`) stops the climb even on a line of its own:
+it documents the member before it.
 Items of a Rust file with a test module come from a second pass over the
 **unstripped** text and its tree (`Stripped::Rewritten` carries it), so
 their lines are the file's and test functions are items too, while
 `## Exports` and the body still come from the stripped text. Such an item
 stays `public` only if the stripped pass has it as public too, so a bare
-`pub fn` inside the test module reads private, as `## Exports` has it. A private
-`macro_rules!` is not an item: `rust_placement` rejects it before
-visibility is known.
+`pub fn` inside the test module reads private, as `## Exports` has it.
+
+Known gaps: a private `macro_rules!` is not an item (`rust_placement`
+rejects it before visibility is known), nor is a function in a Rust
+`extern` block; a JS/TS method of an exported class, or an exported
+variable, reads `public: false` because no export pattern matches it; an
+object-literal or anonymous-class method is a free `fn`, its owner
+unknown; and the names of one multi-declarator statement share its range.
 
 ## Testing
 

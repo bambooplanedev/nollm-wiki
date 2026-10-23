@@ -35,7 +35,9 @@ use tree_sitter::Node;
 /// cannot know the name is the class's), destructors and operators.
 ///
 /// Types and functions are indexed; DATA is not — no member variables, no
-/// file-scope globals or constants. `field_declaration.declarator` is
+/// file-scope globals or constants. The one exception is the `@item` pattern
+/// at the end: a namespace- or file-scope variable is an item (kind `value`),
+/// never an export. `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
 /// `default_cut` finds no `body` field: the whole declaration would render
 /// three times over, with the owner spliced at a different offset each time. A
@@ -124,6 +126,17 @@ const QUERY: &str = r"
 (enum_specifier    name: (type_identifier) @name) @def
 (alias_declaration name: (type_identifier) @name) @def
 (type_definition   declarator: (type_identifier) @name) @def
+
+(declaration declarator: [
+  (identifier) @name
+  (pointer_declarator declarator: (identifier) @name)
+  (reference_declarator (identifier) @name)
+  (array_declarator declarator: (identifier) @name)
+  (init_declarator declarator: [
+    (identifier) @name
+    (pointer_declarator declarator: (identifier) @name)
+    (reference_declarator (identifier) @name)
+    (array_declarator declarator: (identifier) @name)])]) @item
 
 (preproc_include path: (_) @import)
 ";
@@ -343,7 +356,30 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// Nothing else is cut. `OrderBook() = default;` is a `function_definition`
 /// whose `default_method_clause` is likewise a plain child, and it must render
 /// WHOLE: `= default` is the declaration's entire content.
+///
+/// A variable declaration (an `@item` only, never an export) is a value: it
+/// stops at its `=` and re-appends the value within `VALUE_BUDGET`, so a
+/// lookup table's initializer never becomes its signature. A brace or paren
+/// initializer has no `=`, so it is cut and not re-appended. `int a = 1, b;`
+/// renders whole: each name's item shares the one node, and a cut at the
+/// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
+    let declarator = def.child_by_field_name("declarator");
+    if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
+        let single = def
+            .children_by_field_name("declarator", &mut def.walk())
+            .count()
+            == 1;
+        let init = declarator.filter(|d| single && d.kind() == "init_declarator");
+        let eq = init.and_then(|d| d.children(&mut d.walk()).find(|c| c.kind() == "="));
+        let value = init.and_then(|d| d.child_by_field_name("value"));
+        return Shape {
+            rank: Rank::Value,
+            cut: eq.or(value),
+            value: eq.and(value),
+            has_type: true,
+        };
+    }
     let mut cursor = def.walk();
     // Bound before the struct literal: the child iterator borrows `cursor`,
     // and inside the literal that borrow would outlive it.
@@ -878,6 +914,52 @@ mod tests {
         assert_eq!(e.items[1].doc.as_deref(), Some("Applies an order."));
         assert_eq!(e.items[2].doc, None);
         assert_eq!(e.items[3].doc.as_deref(), Some("Frees all."));
+    }
+
+    #[test]
+    fn namespace_scope_variables_are_value_items_but_not_exports() {
+        let table = (1..=30)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let src = format!("namespace app {{\n/// The count.\nint g_count;\nstatic const int K = 3;\nconstexpr int N = 4;\ninline constexpr const char* kName = \"x\";\nint table[] = {{{table}}};\n}}\nclass B {{\n  int a;\n  static constexpr int M = 1;\n}};\nvoid f() {{\n  int local = 0;\n}}\n");
+        let e = CodeExtractor.extract("app.h", &src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "2-3 value g_count pub",
+                "4-4 value K pub",
+                "5-5 value N pub",
+                "6-6 value kName pub",
+                "7-7 value table pub",
+                "9-12 type B pub",
+                "13-15 fn f pub",
+            ]
+        );
+        let sigs: Vec<&str> = e.items[..5].iter().map(|i| i.signature.as_str()).collect();
+        assert_eq!(
+            sigs,
+            vec![
+                "int g_count",
+                "static const int K = 3",
+                "constexpr int N = 4",
+                "inline constexpr const char* kName = \"x\"",
+                "int table[]",
+            ]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("The count."));
+        assert_eq!(e.symbols, vec!["class B", "void f()"]);
+        assert_eq!(e.defined, vec!["B", "f"]);
+    }
+
+    #[test]
+    fn a_multi_declarator_variable_renders_whole_for_each_name() {
+        let e = CodeExtractor.extract("app.h", "int a = 1, b = 2;\n");
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-1 value a pub", "1-1 value b pub"]
+        );
+        assert!(e.items.iter().all(|i| i.signature == "int a = 1, b = 2"));
     }
 
     #[test]

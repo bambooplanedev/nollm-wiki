@@ -167,17 +167,18 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
 }
 
 /// The per-language `Shape` hook. Kept beside `lang_for_ext` rather than as a
-/// `LangSpec` field so that adding this seam needed no edit to the three
-/// unfinished JS/TS/Go specs, which spell every field out literally. If those
-/// languages ever grow grammar-specific shapes, this folds into `LangSpec`.
+/// `LangSpec` field so that adding this seam needed no edit to the specs,
+/// which spell every field out literally. Vue and Svelte never reach it: their
+/// script is extracted under its own `js`/`ts`/`jsx`/`tsx` extension.
 ///
-/// Everything this dispatches to lives in the language's own module: no Rust
-/// or Python node kind appears in this file.
+/// Everything this dispatches to lives in the language's own module.
 fn shape_for(ext: &str) -> fn(Node) -> Shape {
     match ext {
         "rs" => super::extract_rust::rust_shape,
         "py" => super::extract_python::python_shape,
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_shape,
+        "go" => super::extract_simple::go_shape,
+        "js" | "ts" | "jsx" | "tsx" => super::extract_simple::ecma_shape,
         _ => default_shape,
     }
 }
@@ -845,7 +846,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 ///
 /// Shared by `methods` and item kinds. The JS/TS/Go kinds never arrive as a
 /// kept member `@def`, so they leave `methods` as it was.
-fn is_function(def: Node) -> bool {
+pub(crate) fn is_function(def: Node) -> bool {
     match def.kind() {
         "function_item"
         | "function_signature_item"
