@@ -5,7 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
-use crate::model::{KindFilter, SourceKind};
+use crate::model::{CodeItem, KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -84,12 +84,16 @@ pub struct Wiki {
     /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`
     /// is a snapshot: later changes to the files on disk do not reach it.
     bodies: BTreeMap<String, String>,
+    /// Code items per page, read once from `items.json`; empty when that file
+    /// is missing or invalid (older wikis).
+    items: BTreeMap<String, Vec<CodeItem>>,
 }
 
 impl Wiki {
     /// Load a compiled output directory: reads `index.json` for metadata +
     /// adjacency and reads every page body from `<id>.md` once; a page whose
-    /// file is missing has no body.
+    /// file is missing has no body. `items.json` is read the same way: missing
+    /// or invalid means no items.
     pub fn load(dir: &Path) -> Result<Wiki, std::io::Error> {
         let text = std::fs::read_to_string(dir.join("index.json"))?;
         let index: IndexFile = serde_json::from_str(&text)
@@ -106,7 +110,20 @@ impl Wiki {
                 Some((id.clone(), body))
             })
             .collect();
-        Ok(Wiki { entries, bodies })
+        let items = std::fs::read_to_string(dir.join("items.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        Ok(Wiki {
+            entries,
+            bodies,
+            items,
+        })
+    }
+
+    /// A page's code items, as compiled; empty when it has none.
+    pub fn items(&self, id: &str) -> &[CodeItem] {
+        self.items.get(id).map_or(&[], Vec::as_slice)
     }
 
     /// A page's rendered Markdown body by id, as it was when loaded.

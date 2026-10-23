@@ -43,7 +43,25 @@ enum Class {
     NameWords,
     DocOnly,
     Stopwords,
+    MethodSplit,
+    V7,
+    TestTarget,
 }
+
+const CLASSES: &[Class] = &[
+    Class::Name,
+    Class::NameWords,
+    Class::DocOnly,
+    Class::Stopwords,
+    Class::MethodSplit,
+    Class::V7,
+    Class::TestTarget,
+];
+
+/// The first classes of `CLASSES` feed the `tune`/`held` aggregates and their
+/// floors; later classes are reported per class only, so the floors keep their
+/// meaning.
+const ORIGINAL_CLASSES: usize = 4;
 
 struct Case {
     query: &'static str,
@@ -239,6 +257,183 @@ const CASES: &[Case] = &[
         Class::Stopwords,
         false,
     ),
+    case(
+        "needs render",
+        "src/cache.rs",
+        "needs_render",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "retain ids",
+        "src/cache.rs",
+        "retain_ids",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "with defaults",
+        "src/formats/mod.rs",
+        "with_defaults",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "resolve segment",
+        "src/graph.rs",
+        "resolve_segment",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "resolve include",
+        "src/graph.rs",
+        "resolve_include",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "has page",
+        "src/query.rs",
+        "has_page",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "list pages",
+        "src/query.rs",
+        "list_pages",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "content text",
+        "src/query.rs",
+        "content_text",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "name words",
+        "src/query.rs",
+        "name_words",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "field words",
+        "src/query.rs",
+        "field_words",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "field hit",
+        "src/query.rs",
+        "field_hit",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "defined terms",
+        "src/query.rs",
+        "defined_terms",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "bfs neighborhood",
+        "src/query.rs",
+        "bfs_neighborhood",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "pagerank of",
+        "src/query.rs",
+        "pagerank_of",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "with wiki",
+        "src/serve.rs",
+        "with_wiki",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "list resources",
+        "src/serve.rs",
+        "list_resources",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "read resource",
+        "src/serve.rs",
+        "read_resource",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "next u64",
+        "src/generator.rs",
+        "next_u64",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "render fingerprint",
+        "src/rewrite.rs",
+        "render_fingerprint",
+        Class::V7,
+        false,
+    ),
+    case(
+        "render page",
+        "src/rewrite.rs",
+        "render_page",
+        Class::V7,
+        false,
+    ),
+    case(
+        "render index json",
+        "src/manifest.rs",
+        "render_index_json",
+        Class::V7,
+        true,
+    ),
+    case(
+        "render span",
+        "src/formats/code.rs",
+        "render_span",
+        Class::V7,
+        false,
+    ),
+    case("resolve", "src/graph.rs", "resolve", Class::V7, false),
+    case("render", "src/rewrite.rs", "render_page", Class::V7, true),
+    case(
+        "a stray backtick does not re pair later lines",
+        "src/rewrite.rs",
+        "a_stray_backtick_does_not_re_pair_later_lines",
+        Class::TestTarget,
+        false,
+    ),
+    case(
+        "pagerank is deterministic and sums",
+        "src/graph.rs",
+        "pagerank_is_deterministic_and_sums_to_about_one",
+        Class::TestTarget,
+        false,
+    ),
+    case(
+        "stale page files lists orphaned on disk only",
+        "src/lib.rs",
+        "stale_page_files_lists_orphaned_on_disk_only",
+        Class::TestTarget,
+        true,
+    ),
 ];
 
 fn corpus_dir() -> std::path::PathBuf {
@@ -349,12 +544,7 @@ fn doc_only_queries_do_not_match_the_symbol_name() {
 
 #[test]
 fn held_out_is_every_third_case_per_class() {
-    for class in [
-        Class::Name,
-        Class::NameWords,
-        Class::DocOnly,
-        Class::Stopwords,
-    ] {
+    for &class in CLASSES {
         assert!(
             CASES.iter().any(|c| c.class == class),
             "{class:?} has no cases"
@@ -448,12 +638,16 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     writeln!(table, "{}", "-".repeat(100)).unwrap();
 
     let (mut tune, mut held) = (Agg::default(), Agg::default());
+    let mut ranks: Vec<(Class, Option<usize>)> = Vec::new();
     for c in CASES {
         let hits = wiki.search(c.query, None, 10);
         let hit_paths: Vec<&str> = hits.iter().map(|h| paths[&h.id].as_str()).collect();
         let rank = hit_paths.iter().position(|p| *p == c.path).map(|i| i + 1);
         let tokens = token_estimate(&search_json(hits));
-        (if c.held_out { &mut held } else { &mut tune }).add(rank, tokens);
+        if CLASSES[..ORIGINAL_CLASSES].contains(&c.class) {
+            (if c.held_out { &mut held } else { &mut tune }).add(rank, tokens);
+        }
+        ranks.push((c.class, rank));
         writeln!(
             table,
             "{:<46}{:<11}{:<6}{:>10}{:>8}  {}",
@@ -470,6 +664,11 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     writeln!(table).unwrap();
     table.push_str(&tune.footer("tune"));
     table.push_str(&held.footer("held"));
+    for class in CLASSES {
+        let of: Vec<_> = ranks.iter().filter(|(c, _)| c == class).collect();
+        let h3 = of.iter().filter(|(_, r)| r.is_some_and(|r| r <= 3)).count();
+        writeln!(table, "class {class:?}: file_hit@3={h3}/{}", of.len()).unwrap();
+    }
 
     let code_id = paths
         .iter()

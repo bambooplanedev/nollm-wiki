@@ -29,8 +29,42 @@ where is the snippet built                    Stopwords  tune           3     73
 how do we write a page atomically             Stopwords  tune           1     654  src/rewrite.rs
 what is the module stem of a path             Stopwords  held           3     719  docs/ARCHITECTURE.md
 where are the test modules stripped           Stopwords  tune           2     801  src/formats/code.rs
+needs render                                  MethodSplittune           1     787  src/cache.rs
+retain ids                                    MethodSplittune           1     769  src/cache.rs
+with defaults                                 MethodSplitheld           1     807  src/formats/mod.rs
+resolve segment                               MethodSplittune           1     751  src/graph.rs
+resolve include                               MethodSplittune           1     813  src/graph.rs
+has page                                      MethodSplitheld           2     755  src/rewrite.rs
+list pages                                    MethodSplittune           6     758  src/serve.rs
+content text                                  MethodSplittune           4     802  src/formats/text.rs
+name words                                    MethodSplitheld           1     867  src/query.rs
+field words                                   MethodSplittune           1     834  src/query.rs
+field hit                                     MethodSplittune           1     795  src/query.rs
+defined terms                                 MethodSplitheld           1     799  src/query.rs
+bfs neighborhood                              MethodSplittune           1     373  src/query.rs
+pagerank of                                   MethodSplittune           3     825  src/graph.rs
+with wiki                                     MethodSplitheld           4     679  README.md
+list resources                                MethodSplittune           1     825  src/serve.rs
+read resource                                 MethodSplittune           1     777  src/serve.rs
+next u64                                      MethodSplitheld           1     788  src/generator.rs
+render fingerprint                            V7         tune           1     760  src/rewrite.rs
+render page                                   V7         tune           1     725  src/rewrite.rs
+render index json                             V7         held           1     698  src/manifest.rs
+render span                                   V7         tune           3     797  src/rewrite.rs
+resolve                                       V7         tune           1     586  src/graph.rs
+render                                        V7         held           2     797  src/manifest.rs
+a stray backtick does not re pair later lines TestTarget tune           1     727  src/rewrite.rs
+pagerank is deterministic and sums            TestTarget tune           1     743  src/graph.rs
+stale page files lists orphaned on disk only  TestTarget held           1     739  src/lib.rs
 
 tune  file_hit@1=10/17 (0.5882) file_hit@3=16/17 (0.9412) mrr@10=0.7696 tokens=583.5
 held  file_hit@1=6/8 (0.7500) file_hit@3=7/8 (0.8750) mrr@10=0.8229 tokens=549.6
+class Name: file_hit@3=7/9
+class NameWords: file_hit@3=6/6
+class DocOnly: file_hit@3=6/6
+class Stopwords: file_hit@3=4/4
+class MethodSplit: file_hit@3=15/18
+class V7: file_hit@3=6/6
+class TestTarget: file_hit@3=3/3
 neighbors code.rs: tokens=648 target_degraded=true
 title_as_query: 27/28

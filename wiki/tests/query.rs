@@ -542,3 +542,25 @@ fn kind_exact_code_rust_still_works() {
     assert_eq!(ids_for(&w, "markdown"), ["c"]);
     assert!(KindFilter::parse("nope").is_none());
 }
+
+#[test]
+fn search_without_items_json_has_no_symbol_lines() {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("lib.rs"), "pub fn alpha_beta() {}\n").unwrap();
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+
+    let wiki = Wiki::load(&out).unwrap();
+    let ids: Vec<String> = wiki.list_pages().into_iter().map(|(id, _)| id).collect();
+    assert!(ids.iter().any(|id| !wiki.items(id).is_empty()));
+
+    for bad in [None, Some("not json")] {
+        match bad {
+            None => fs::remove_file(out.join("items.json")).unwrap(),
+            Some(s) => fs::write(out.join("items.json"), s).unwrap(),
+        }
+        let wiki = Wiki::load(&out).unwrap();
+        assert!(ids.iter().all(|id| wiki.items(id).is_empty()));
+    }
+}
