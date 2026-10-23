@@ -291,6 +291,15 @@ mod tests {
     }
 
     #[test]
+    fn a_trailing_comment_on_the_line_above_is_not_a_go_doc() {
+        let src = "package p\n\nvar limit = 5 // the limit\nfunc helper() {}\n";
+        let e = CodeExtractor.extract("p.go", src);
+        let helper = e.items.iter().find(|i| i.name == "helper").unwrap();
+        assert_eq!((helper.start_line, helper.end_line), (4, 4));
+        assert_eq!(helper.doc, None);
+    }
+
+    #[test]
     fn go_receiver_types_lose_pointer_and_type_arguments() {
         let src = "package s\n\nfunc (b Box) A() {}\n\nfunc (b *Box[T]) B() {}\n";
         let e = CodeExtractor.extract("s.go", src);

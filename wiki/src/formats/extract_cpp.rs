@@ -186,15 +186,24 @@ fn cpp_comment_doc(comment: &str) -> Option<String> {
 }
 
 /// A Doxygen comment directly above an item is its doc; anything else ends the
-/// walk. Every C++ item is `public: true`, because the spec keeps all
-/// visibilities (see `vis_filter`).
+/// walk. A member-trailing doc (`///<`, `//!<`, `/**<`, `/*!<`) documents the
+/// member BEFORE it even on a line of its own, so it ends the walk too. Every
+/// C++ item is `public: true`, because the spec keeps all visibilities (see
+/// `vis_filter`).
 fn cpp_lead(node: Node, text: &str) -> Lead {
-    if node.kind() != "comment" {
+    let Some(comment) = text
+        .get(node.byte_range())
+        .filter(|_| node.kind() == "comment")
+    else {
+        return Lead::Stop;
+    };
+    if ["///<", "//!<", "/**<", "/*!<"]
+        .iter()
+        .any(|m| comment.starts_with(m))
+    {
         return Lead::Stop;
     }
-    text.get(node.byte_range())
-        .and_then(cpp_comment_doc)
-        .map_or(Lead::Stop, Lead::Doc)
+    cpp_comment_doc(comment).map_or(Lead::Stop, Lead::Doc)
 }
 
 /// Climb to the enclosing `template_declaration`, nested ones included, so a
@@ -869,5 +878,23 @@ mod tests {
         assert_eq!(e.items[1].doc.as_deref(), Some("Applies an order."));
         assert_eq!(e.items[2].doc, None);
         assert_eq!(e.items[3].doc.as_deref(), Some("Frees all."));
+    }
+
+    #[test]
+    fn a_trailing_member_doc_never_documents_the_next_item() {
+        let src = "class Book {\n  int size_; ///< Number of orders.\n  void apply(int o);\n  int count; //!< Count.\n  /** Resets everything. */\n  void reset();\n  int x;\n  ///< The x.\n  void clear();\n};\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-10 type Book pub",
+                "3-3 method Book::apply pub",
+                "5-6 method Book::reset pub",
+                "9-9 method Book::clear pub",
+            ]
+        );
+        assert_eq!(e.items[1].doc, None);
+        assert_eq!(e.items[2].doc.as_deref(), Some("Resets everything."));
+        assert_eq!(e.items[3].doc, None);
     }
 }

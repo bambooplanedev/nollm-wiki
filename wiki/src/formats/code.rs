@@ -892,13 +892,24 @@ fn last_row(node: Node) -> usize {
     }
 }
 
+/// Whether nothing but whitespace precedes `node` on its first line. A
+/// comment trailing code (`int n; ///< Count.`, `var n = 5 // the limit`)
+/// belongs to that code, so the lead walk must not read it as the next
+/// item's doc, whatever its marker says.
+fn opens_its_line(node: Node, text: &str) -> bool {
+    let before = text.get(..node.start_byte()).unwrap_or_default();
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    before[line_start..].trim().is_empty()
+}
+
 /// One definition as an item, keyed by its `@name` node's start byte, or
 /// `None` when it is not an item: no `@name` (an impl header), rejected by
 /// kind (a field, a variant, an associated const), or an empty signature.
 ///
 /// The range climbs from the signature's start node over the contiguous
-/// leads above it; a blank line or a `Stop` lead (a plain comment, other
-/// code) ends the climb, so a stray doc comment never stretches the range.
+/// leads above it; a blank line, a lead trailing other code on its line, or
+/// a `Stop` lead (a plain comment, other code) ends the climb, so a stray
+/// doc comment never stretches the range.
 fn code_item(
     def: Node,
     name: Option<Node>,
@@ -938,7 +949,7 @@ fn code_item(
     let mut first = top;
     let mut docs = Vec::new();
     while let Some(lead) = first.prev_named_sibling() {
-        if last_row(lead) + 1 < first.start_position().row {
+        if last_row(lead) + 1 < first.start_position().row || !opens_its_line(lead, text) {
             break;
         }
         match (spec.item_lead)(lead, text) {
