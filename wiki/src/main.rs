@@ -1,4 +1,4 @@
-//! CLI entry point for `wiki`: compile, search, neighbors, lint, serve, and generate subcommands.
+//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, and generate subcommands.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};

@@ -153,7 +153,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound). |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
-| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search` (`--kind`, `--format lines|json`), `lint`, `serve`, `generate`. |
+| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `page` (`--full`, `--max-tokens`), `search` (`--kind`, `--format lines|json`), `lint`, `serve`, `generate`. |
 
 **The `extract_*.rs` names are two words on purpose, not tidiness.** Page
 titles are derived from file stems and are inputs to both the graph and
