@@ -208,7 +208,7 @@ may not appear verbatim in the file. `--format json` prints
 wiki neighbors [OPTIONS] <ID>
 ```
 
-`<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a title, or a source path or unique path suffix (e.g. `query.rs`). If nothing matches, the error lists the closest ids.
+`<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a title, or a source path or unique path suffix (e.g. `query.rs`). It resolves like `page`, so an absolute path under the compiled directory works too. If nothing matches, the error lists the closest ids.
 
 - `--depth <N>` (`1`) — BFS hop count from `<ID>`.
 - `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). If the target page alone exceeds it, the target degrades to a title + summary block pointing at the full page.
@@ -224,7 +224,8 @@ wiki page [OPTIONS] <ID>
 
 Prints a page's outline: for a code page one line per symbol, so you can read
 just those lines of the source instead of the whole file. `<ID>` resolves like
-`neighbors`, and an absolute path under the compiled project works too.
+`neighbors`, and an absolute path under the compiled directory works too: it
+must pass through that directory's name (`root` in `index.json`).
 
 - `--full` (off) — print the whole page instead of the outline.
 - `--max-tokens <N>` (none — unbounded) — ceiling on the output's estimated size (chars/4).
@@ -328,7 +329,8 @@ Synthetic corpus generator, useful for demos and reproducing bug reports.
 A compiled wiki is meant to be read by an agent instead of re-crawling the
 source tree. Four artifacts drive that:
 
-- **`index.json`** — the machine catalog. Top level is `{ project, entries: [...] }`;
+- **`index.json`** — the machine catalog. Top level is `{ project, root, entries: [...] }`,
+  where `root` is the compiled directory's own name (even for `compile .`);
   each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`
   (`null` when none could be derived — a code file with no doc comment and
   no exported item), `degree_in`, `degree_out`, `pagerank`, `token_estimate`,
@@ -519,7 +521,7 @@ oversights:
 - **Graph export is JSON only.** `--emit-json` writes the node-link
   `graph.json`; there is no DOT/GraphML export.
 - **`--watch` covers `compile` only.** The query subcommands (`search`,
-  `neighbors`, `lint`) have no watch mode.
+  `neighbors`, `page`, `lint`) have no watch mode.
 
 ## Links
 

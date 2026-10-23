@@ -486,9 +486,12 @@ CLI and MCP) tries, in order, and takes the first that names exactly one page:
 the exact id; the title (case-insensitive); the slug of the argument; the
 argument normalised (`\` to `/`, one leading `./` stripped) as an exact page
 path; a unique page path ending in `/<argument>` (several are an error listing
-them); for an absolute path, the longest page path that is a `/`-suffix of the
-argument. Otherwise the error lists up to five ids sharing a word with the
-argument.
+them); for an argument longer than a page path, such as an absolute path, the
+longest page path such that the argument ends with `/<root>/<path>`, where
+`<root>` is `index.json`'s `root` (the compiled directory's own name), so a
+path into another project with the same layout is not taken for this one's;
+a wiki without `root` skips this step. Otherwise the error lists up to five
+ids sharing a word with the argument.
 
 **Search** (`Wiki::search`) is case-insensitive, tokenized, with partial
 matching:
