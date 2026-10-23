@@ -956,7 +956,8 @@ fn code_item(
         (ItemKind::Header | ItemKind::Member, _) => return None,
     };
     // No owner splice: the signature reads as the source does.
-    let signature = build_signature(text, def, Some(name), None, spec, shape);
+    let signature = shared_declaration_signature(text, def, name, spec)
+        .unwrap_or_else(|| build_signature(text, def, Some(name), None, spec, shape));
     if signature.is_empty() {
         return None;
     }
@@ -1161,6 +1162,35 @@ fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec
     // boundary split. Idempotent for literals: they were already collapsed,
     // and this adds no tidying.
     collapse_runs(&out)
+}
+
+/// The signature of one name in a declaration with several declarators
+/// (`int a, *b;`): the specifiers before the first declarator plus the
+/// name's own declarator. `None` for any node with at most one declarator.
+fn shared_declaration_signature(
+    text: &str,
+    def: Node,
+    name: Node,
+    spec: &LangSpec,
+) -> Option<String> {
+    let mut cursor = def.walk();
+    let declarators: Vec<Node> = def
+        .children_by_field_name("declarator", &mut cursor)
+        .collect();
+    let own = declarators
+        .iter()
+        .find(|d| d.byte_range().contains(&name.start_byte()))
+        .filter(|_| declarators.len() > 1)?;
+    let root = (spec.sig_start)(def);
+    let head = render_span(
+        text,
+        root,
+        root.start_byte(),
+        declarators[0].start_byte(),
+        spec,
+    );
+    let tail = render_span(text, root, own.start_byte(), own.end_byte(), spec);
+    Some(format!("{head}{tail}").trim().to_string())
 }
 
 /// Build a one-line signature from a definition node: its source text up to
