@@ -95,6 +95,17 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
     },
+    /// Print the code locations for a task text; silent when there is nothing to say.
+    Hint {
+        /// The task text (not used with `--claude-hook`).
+        text: Option<String>,
+        /// Wiki to read (default: `.wiki`, or `$CLAUDE_PROJECT_DIR/.wiki` with `--claude-hook`).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Read a Claude Code `UserPromptSubmit` hook's JSON from stdin.
+        #[arg(long)]
+        claude_hook: bool,
+    },
     Generate {
         dir: PathBuf,
         #[arg(long, default_value_t = 20)]
@@ -247,6 +258,33 @@ fn main() -> Result<()> {
                     .map_or_else(|| "out".into(), |s| s.join(".wiki"))
             });
             wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref())?;
+        }
+        Command::Hint {
+            text,
+            dir,
+            claude_hook,
+        } => {
+            let text = if claude_hook {
+                let mut json = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut json)
+                    .context("read hook input")?;
+                // A hook must never break the prompt: unusable input is silence.
+                match wiki::hint::prompt_from_hook_json(&json) {
+                    Some(t) => t,
+                    None => return Ok(()),
+                }
+            } else {
+                text.context("hint needs TEXT or --claude-hook")?
+            };
+            let dir = dir.unwrap_or_else(|| {
+                match std::env::var_os("CLAUDE_PROJECT_DIR").filter(|_| claude_hook) {
+                    Some(p) => PathBuf::from(p).join(".wiki"),
+                    None => ".wiki".into(),
+                }
+            });
+            if let Ok(w) = Wiki::load(&dir) {
+                print!("{}", wiki::hint::hint_lines(&w, &text));
+            }
         }
         Command::Generate { dir, files, seed } => {
             let paths = generate_corpus(&dir, files, seed).context("generate corpus")?;

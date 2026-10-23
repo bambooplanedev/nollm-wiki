@@ -299,6 +299,24 @@ wiki serve [OPTIONS]
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).
 
+### `hint`
+
+```
+wiki hint [OPTIONS] [TEXT]
+```
+
+Prints the code locations for a task text: the text agents' hooks inject
+before the agent starts reading. A header line, then at most 8
+`path:start-end  name  signature` lines (each cut at 160 characters) from
+the best-matching code pages; docs never appear. Prints nothing and exits 0
+when the wiki is missing or unreadable, or nothing matches, so a hook can
+run it on every prompt.
+
+- `--dir <wiki>` (`.wiki`; with `--claude-hook` and `CLAUDE_PROJECT_DIR` set,
+  `$CLAUDE_PROJECT_DIR/.wiki`) — the compiled wiki directory.
+- `--claude-hook` — read a Claude Code `UserPromptSubmit` hook's JSON from
+  stdin and use its `prompt` instead of `TEXT`. Without it, `TEXT` is required.
+
 ### `generate`
 
 ```
