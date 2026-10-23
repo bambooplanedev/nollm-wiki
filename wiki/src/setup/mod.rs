@@ -35,15 +35,22 @@ pub struct SetupOptions {
     pub remove: bool,
 }
 
+#[cfg(unix)]
+fn executable(m: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    m.permissions().mode() & 0o111 != 0
+}
+
+#[cfg(not(unix))]
+fn executable(_: &std::fs::Metadata) -> bool {
+    true
+}
+
 /// First executable regular file called `name` on `PATH`.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
     std::env::split_paths(&std::env::var_os("PATH")?)
         .map(|d| d.join(name))
-        .find(|p| {
-            p.metadata()
-                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-        })
+        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
 }
 
 struct Report<'a> {
@@ -65,8 +72,16 @@ impl Report<'_> {
         self.line(&format!("skipped {what}: {why}"))
     }
 
-    fn item(&mut self, what: &str, pi: bool, r: std::io::Result<Outcome>) -> Result<(), WikiError> {
-        match (r?, self.remove) {
+    /// Reports one outcome; `true` when the item is in place (written or already there).
+    fn item(
+        &mut self,
+        what: &str,
+        pi: bool,
+        r: std::io::Result<Outcome>,
+    ) -> Result<bool, WikiError> {
+        let r = r?;
+        let present = !matches!(r, Outcome::Foreign(_));
+        match (r, self.remove) {
             (Outcome::Done, false) => {
                 self.wrote_pi |= pi;
                 self.line(&format!("wrote {what}"))
@@ -75,51 +90,64 @@ impl Report<'_> {
             (Outcome::AlreadyThere, false) => self.line(&format!("already set up: {what}")),
             (Outcome::AlreadyThere, true) => self.line(&format!("not present: {what}")),
             (Outcome::Foreign(why), _) => self.skip(what, &why),
-        }
+        }?;
+        Ok(present)
     }
 }
 
-/// Runs `claude` with `args` in `root`; `None` when it did not run or `claude` is missing.
-fn claude(root: &Path, args: &[&str]) -> Option<(bool, String)> {
-    let o = Command::new(find_on_path("claude")?)
+/// Runs `claude` with `args` in `root`; the error is a short reason for the user.
+fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
+    let exe = find_on_path("claude").ok_or("claude is not on PATH")?;
+    let o = Command::new(exe)
         .args(args)
         .current_dir(root)
         .output()
-        .ok()?;
-    Some((
-        o.status.success(),
-        String::from_utf8_lossy(&o.stdout).into_owned(),
+        .map_err(|e| format!("could not run claude: {e}"))?;
+    if o.status.success() || args[1] == "get" {
+        return Ok((
+            o.status.success(),
+            String::from_utf8_lossy(&o.stdout).into_owned(),
+        ));
+    }
+    let err = String::from_utf8_lossy(&o.stderr);
+    Err(format!(
+        "`claude {}` failed: {}",
+        args[..2].join(" "),
+        err.trim().lines().next().unwrap_or("no message")
     ))
 }
 
 /// Claude Code's own local-scope MCP config, through its CLI.
-fn claude_local_mcp(root: &Path, cmd: &str, entry: &Value, remove: bool) -> Option<Outcome> {
-    let (found, text) = claude(root, &["mcp", "get", "wiki"])?;
-    if found {
-        let has = |l: &str| text.lines().any(|t| t.trim() == l);
-        let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
-            && has(&format!("Command: {cmd}"))
-            && has("Args: serve --source .");
-        if !ours {
-            return Some(Outcome::Foreign(
-                "another \"wiki\" server is configured".into(),
-            ));
+fn claude_local_mcp(root: &Path, cmd: &str, entry: &Value, remove: bool) -> Outcome {
+    let run = || -> Result<Outcome, String> {
+        let (found, text) = claude(root, &["mcp", "get", "wiki"])?;
+        if found {
+            let has = |l: &str| text.lines().any(|t| t.trim() == l);
+            let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
+                && has(&format!("Command: {cmd}"))
+                && has("Args: serve --source .");
+            if !ours {
+                return Ok(Outcome::Foreign(
+                    "another \"wiki\" server is configured".into(),
+                ));
+            }
+            if !remove {
+                return Ok(Outcome::AlreadyThere);
+            }
+            claude(root, &["mcp", "remove", "wiki", "--scope", "local"])?;
+            return Ok(Outcome::Done);
         }
-        if !remove {
-            return Some(Outcome::AlreadyThere);
+        if remove {
+            return Ok(Outcome::AlreadyThere);
         }
-        claude(root, &["mcp", "remove", "wiki", "--scope", "local"])?;
-        return Some(Outcome::Done);
-    }
-    if remove {
-        return Some(Outcome::AlreadyThere);
-    }
-    let json = entry.to_string();
-    claude(
-        root,
-        &["mcp", "add-json", "wiki", &json, "--scope", "local"],
-    )?;
-    Some(Outcome::Done)
+        let json = entry.to_string();
+        claude(
+            root,
+            &["mcp", "add-json", "wiki", &json, "--scope", "local"],
+        )?;
+        Ok(Outcome::Done)
+    };
+    run().unwrap_or_else(Outcome::Foreign)
 }
 
 /// Installs (or with `remove`, undoes) what `opts` asks for in `root`.
@@ -210,22 +238,16 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             };
             let path = root.join(file);
             let res = if opts.remove {
-                edit::remove_entry(&path, &["mcpServers"], "wiki", &value)
+                edit::remove_entry(root, &path, &["mcpServers"], "wiki", &value)
             } else {
                 edit::upsert_entry(&path, &["mcpServers"], "wiki", &value)
             };
-            r.item(&format!("{file} wiki server"), pi, res)?;
-            if pi {
+            if r.item(&format!("{file} wiki server"), pi, res)? && pi {
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            match claude_local_mcp(root, &cmd, &entry, opts.remove) {
-                Some(o) => r.item("Claude Code local wiki server", false, Ok(o))?,
-                None => r.skip(
-                    "Claude Code local wiki server",
-                    "the claude CLI is not usable",
-                )?,
-            }
+            let o = claude_local_mcp(root, &cmd, &entry, opts.remove);
+            r.item("Claude Code local wiki server", false, Ok(o))?;
         }
         // Skill
         let file = skill.join("SKILL.md");
@@ -234,8 +256,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         } else {
             edit::write_file(&root.join(&file), SKILL)
         };
-        r.item(&format!("{} skill for {name}", file.display()), pi, res)?;
-        ignore.push(format!("/{}/", skill.display()));
+        if r.item(&format!("{} skill for {name}", file.display()), pi, res)? {
+            ignore.push(format!("/{}/", skill.display()));
+        }
     }
 
     if opts.remove {

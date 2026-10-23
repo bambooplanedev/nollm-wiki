@@ -59,21 +59,27 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
     }
     f.stub("pi", "exit 0");
     if with_claude {
-        let t = f.tmp.path().display();
-        f.stub(
+        claude_stub(&f, "wiki");
+    }
+    f
+}
+
+/// A `claude` that logs its argv and answers `mcp get wiki` as a local server running `cmd`
+/// once `add-json` has been called (the state file).
+fn claude_stub(f: &Fixture, cmd: &str) {
+    let t = f.tmp.path().display();
+    f.stub(
             "claude",
             &format!(
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
 "mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "wiki".'; exit 1; }}
-  printf 'wiki:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n' ;;
+  printf 'wiki:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;
 esac"#
             ),
         );
-    }
-    f
 }
 
 fn read(p: &Path) -> String {
@@ -82,6 +88,20 @@ fn read(p: &Path) -> String {
 
 fn out(a: &assert_cmd::assert::Assert) -> String {
     String::from_utf8(a.get_output().stdout.clone()).unwrap()
+}
+
+fn dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut v = Vec::new();
+    for e in fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        let n = p.file_name().unwrap().to_string_lossy().into_owned();
+        if p.is_dir() && n != ".git" && n != ".wiki" {
+            v.extend(dirs(&p));
+            v.push(p);
+        }
+    }
+    v.sort();
+    v
 }
 
 fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
@@ -116,8 +136,15 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
             ENTRY.replace('\n', "\n    ")
         )
     );
-    let pi = read(&r.join(".pi/mcp.json"));
-    assert!(pi.contains("\"exposure\": \"direct\""), "{pi}");
+    assert_eq!(
+        read(&r.join(".pi/mcp.json")),
+        format!(
+            "{{\n  \"mcpServers\": {{\n    \"wiki\": {}\n  }}\n}}\n",
+            ENTRY
+                .replace("\n}", ",\n  \"exposure\": \"direct\"\n}")
+                .replace('\n', "\n    ")
+        )
+    );
     assert_eq!(
         read(&r.join(".claude/skills/wiki-navigation/SKILL.md")),
         SKILL
@@ -197,6 +224,7 @@ fn setup_remove_restores_the_project() {
         "{\n  \"mcpServers\": {\n    \"other\": {\n      \"command\": \"x\"\n    }\n  }\n}\n";
     fs::write(f.root().join(".mcp.json"), other).unwrap();
     let before = files(&f.root());
+    let dirs_before = dirs(&f.root());
     let args = ["--agent", "claude,pi", "--scope", "repo"];
     f.setup(&args).success();
     let a = f
@@ -206,6 +234,7 @@ fn setup_remove_restores_the_project() {
     want.push((f.root().join(".gitignore"), b".wiki/\n".to_vec()));
     want.sort();
     assert_eq!(files(&f.root()), want);
+    assert_eq!(dirs(&f.root()), dirs_before);
     assert!(f.root().join(".wiki").exists());
     assert!(out(&a).contains("kept the ignore lines and .wiki/"));
 }
@@ -240,4 +269,55 @@ fn setup_local_uses_the_binary_path_when_wiki_is_not_on_path() {
     let v: serde_json::Value = serde_json::from_str(&read(&f.root().join(".pi/mcp.json"))).unwrap();
     let c = v["mcpServers"]["wiki"]["command"].as_str().unwrap();
     assert!(Path::new(c).is_absolute() && c.ends_with("wiki"), "{c}");
+}
+
+#[test]
+fn setup_local_twice_then_remove_goes_through_claude() {
+    let f = fixture(true, true);
+    let args = ["--agent", "claude", "--scope", "local"];
+    f.setup(&args).success();
+    let a = f.setup(&args).success();
+    assert!(out(&a).contains("already set up: Claude Code local wiki server"));
+    assert!(!f.claude_log().contains("mcp remove"));
+    let a = f
+        .setup(&["--remove", "--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(out(&a).contains("removed Claude Code local wiki server"));
+    assert!(f.claude_log().contains("mcp remove wiki --scope local"));
+}
+
+#[test]
+fn setup_local_leaves_a_foreign_claude_server_alone() {
+    let f = fixture(true, true);
+    claude_stub(&f, "other");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local"];
+    let a = f.setup(&args).code(1);
+    assert!(out(&a).contains("skipped Claude Code local wiki server"));
+    f.setup(&["--remove", "--agent", "claude", "--scope", "local"])
+        .code(1);
+    let log = f.claude_log();
+    assert!(
+        !log.contains("mcp add-json") && !log.contains("mcp remove"),
+        "{log}"
+    );
+    // The skipped server leaves no exclude line; the skill does.
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.contains("/.claude/skills/wiki-navigation/"), "{ex}");
+}
+
+#[test]
+fn setup_local_reports_a_failed_claude_add() {
+    let f = fixture(true, false);
+    f.stub(
+        "claude",
+        "[ \"$2\" = get ] && exit 1\necho boom >&2\nexit 2",
+    );
+    let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Claude Code local wiki server: `claude mcp add-json` failed: boom"),
+        "{o}"
+    );
+    assert!(!o.contains("wrote Claude Code"));
 }

@@ -101,15 +101,39 @@ pub fn upsert_entry(path: &Path, parents: &[&str], key: &str, value: &Value) -> 
     })
 }
 
-pub fn remove_entry(path: &Path, parents: &[&str], key: &str, value: &Value) -> Result<Outcome> {
-    edit(path, parents, false, |m| match m.get(key) {
+/// Removes the directories under `root` that `path`'s removal left empty, deepest first.
+fn prune_dirs(root: &Path, path: &Path) {
+    if !path.starts_with(root) {
+        return;
+    }
+    for dir in path.ancestors().skip(1).take_while(|d| *d != root) {
+        // `remove_dir` fails on a non-empty directory, which is the stop condition.
+        if std::fs::remove_dir(dir).is_err() {
+            break;
+        }
+    }
+}
+
+/// Deletes the file too (and the directories it leaves empty, up to `root`) when the entry was its last content.
+pub fn remove_entry(
+    root: &Path,
+    path: &Path,
+    parents: &[&str],
+    key: &str,
+    value: &Value,
+) -> Result<Outcome> {
+    let out = edit(path, parents, false, |m| match m.get(key) {
         None => Outcome::AlreadyThere,
         Some(v) if v == value => {
             m.shift_remove(key);
             Outcome::Done
         }
         Some(_) => Outcome::Foreign(format!("\"{key}\" has another value")),
-    })
+    })?;
+    if out == Outcome::Done && !path.exists() {
+        prune_dirs(root, path);
+    }
+    Ok(out)
 }
 
 /// `parents` ends at the array's key: `["hooks", "UserPromptSubmit"]` is the array `hooks.UserPromptSubmit`.
@@ -151,8 +175,9 @@ pub fn append_item(path: &Path, parents: &[&str], item: &Value) -> Result<Outcom
     })
 }
 
-pub fn remove_item(path: &Path, parents: &[&str], item: &Value) -> Result<Outcome> {
-    item_edit(path, parents, false, |items| {
+/// Like [`remove_entry`], for an array item.
+pub fn remove_item(root: &Path, path: &Path, parents: &[&str], item: &Value) -> Result<Outcome> {
+    let out = item_edit(path, parents, false, |items| {
         match items.iter().position(|v| v == item) {
             Some(i) => {
                 items.remove(i);
@@ -160,7 +185,11 @@ pub fn remove_item(path: &Path, parents: &[&str], item: &Value) -> Result<Outcom
             }
             None => Outcome::AlreadyThere,
         }
-    })
+    })?;
+    if out == Outcome::Done && !path.exists() {
+        prune_dirs(root, path);
+    }
+    Ok(out)
 }
 
 pub fn write_file(path: &Path, content: &str) -> Result<Outcome> {
@@ -183,12 +212,7 @@ pub fn remove_file(root: &Path, path: &Path, content: &str) -> Result<Outcome> {
         Some(_) => {}
     }
     std::fs::remove_file(path)?;
-    for dir in path.ancestors().skip(1).take_while(|d| *d != root) {
-        // `remove_dir` fails on a non-empty directory, which is the stop condition.
-        if std::fs::remove_dir(dir).is_err() {
-            break;
-        }
-    }
+    prune_dirs(root, path);
     Ok(Outcome::Done)
 }
 
@@ -276,16 +300,17 @@ mod tests {
     #[test]
     fn remove_deletes_a_file_left_empty() {
         let d = tempfile::tempdir().unwrap();
-        let p = d.path().join("a.json");
+        let p = d.path().join(".pi/a.json");
         let v = json!({"command": "wiki"});
         upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap();
         assert_eq!(
-            remove_entry(&p, &["mcpServers"], "wiki", &v).unwrap(),
+            remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap(),
             Outcome::Done
         );
         assert!(!p.exists());
+        assert!(!d.path().join(".pi").exists());
         assert_eq!(
-            remove_entry(&p, &["mcpServers"], "wiki", &v).unwrap(),
+            remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap(),
             Outcome::AlreadyThere
         );
     }
@@ -298,7 +323,7 @@ mod tests {
         fs::write(&p, &orig).unwrap();
         let v = json!({"command": "wiki"});
         upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap();
-        remove_entry(&p, &["mcpServers"], "wiki", &v).unwrap();
+        remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), orig);
     }
 
@@ -313,9 +338,9 @@ mod tests {
         let read = || serde_json::from_str::<Value>(&fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([a, b]));
         assert_eq!(append_item(&p, &path, &b).unwrap(), Outcome::AlreadyThere);
-        assert_eq!(remove_item(&p, &path, &b).unwrap(), Outcome::Done);
+        assert_eq!(remove_item(d.path(), &p, &path, &b).unwrap(), Outcome::Done);
         assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([a]));
-        assert_eq!(remove_item(&p, &path, &a).unwrap(), Outcome::Done);
+        assert_eq!(remove_item(d.path(), &p, &path, &a).unwrap(), Outcome::Done);
         assert!(!p.exists());
     }
 
