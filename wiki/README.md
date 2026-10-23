@@ -417,7 +417,7 @@ default):
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (10), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (10 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |

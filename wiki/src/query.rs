@@ -60,9 +60,8 @@ pub fn unknown_page(arg: &str, near: &[String]) -> String {
 /// Normalizes a tag argument as the index stores tags: trimmed, no leading
 /// `#` or trailing `/`, lowercase. `None` when nothing is left.
 pub fn tag_filter(arg: &str) -> Option<String> {
-    let t = arg.trim();
-    let t = t.strip_prefix('#').unwrap_or(t);
-    let t = t.strip_suffix('/').unwrap_or(t).to_lowercase();
+    let t = arg.trim().trim_start_matches('#').trim();
+    let t = t.trim_end_matches('/').to_lowercase();
     (!t.is_empty()).then_some(t)
 }
 

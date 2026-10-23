@@ -151,7 +151,7 @@ pub(crate) struct SearchParams {
     /// Only pages carrying this tag; `a` also matches `a/b`. With an empty
     /// query, lists every such page.
     pub tag: Option<String>,
-    /// Maximum number of hits (default 10).
+    /// Maximum number of hits (default 10 with a query; none for a tag-only listing).
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,

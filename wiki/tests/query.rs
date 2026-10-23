@@ -1032,6 +1032,9 @@ fn tag_filters_a_query_and_combines_with_kind() {
 #[test]
 fn tag_filter_normalizes_and_rejects_empty() {
     assert_eq!(tag_filter(" #Project/ "), Some("project".into()));
+    assert_eq!(tag_filter("##deep"), Some("deep".into()));
+    assert_eq!(tag_filter("# deep"), Some("deep".into()));
+    assert_eq!(tag_filter("deep//"), Some("deep".into()));
     assert_eq!(tag_filter("#"), None);
     assert_eq!(tag_filter(""), None);
 }

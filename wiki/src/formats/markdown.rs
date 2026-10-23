@@ -86,7 +86,7 @@ fn fm_list(fm: &[String], key: &str) -> Vec<String> {
         return Vec::new();
     };
     let v = fm[i][prefix.len()..].trim();
-    if !v.is_empty() {
+    if !v.is_empty() && !v.starts_with('#') {
         return if v == "null" || v == "~" {
             Vec::new()
         } else {
@@ -101,7 +101,12 @@ fn fm_list(fm: &[String], key: &str) -> Vec<String> {
         let Some(item) = l.strip_prefix("- ") else {
             break;
         };
-        let item = item.split(" #").next().unwrap_or(item);
+        let item = item.trim();
+        let item = match item.chars().next().filter(|c| matches!(c, '"' | '\'')) {
+            // A quoted item ends at its closing quote; a ` #` inside is text.
+            Some(q) => item[1..].find(q).map_or(item, |end| &item[..end + 2]),
+            None => item.split(" #").next().unwrap_or(item),
+        };
         let item = unquote(item);
         if !item.is_empty() {
             items.push(item);
@@ -111,7 +116,10 @@ fn fm_list(fm: &[String], key: &str) -> Vec<String> {
 }
 
 fn unquote(s: &str) -> String {
-    s.trim().trim_matches(['"', '\'']).trim().to_string()
+    let s = s.trim();
+    let b = s.as_bytes();
+    let pair = b.len() >= 2 && matches!(b[0], b'"' | b'\'') && b[b.len() - 1] == b[0];
+    if pair { s[1..s.len() - 1].trim() } else { s }.to_string()
 }
 
 fn parse_list(v: &str) -> Vec<String> {
@@ -131,6 +139,22 @@ fn first_h1(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tag_list_comment_and_quote_edge_cases() {
+        let fm = |s: &str| s.lines().map(String::from).collect::<Vec<_>>();
+        let tags = |s: &str| fm_list(&fm(s), "tags");
+        assert_eq!(
+            tags("tags: # my tags\n  - alpha\n  - beta"),
+            vec!["alpha", "beta"]
+        );
+        assert_eq!(tags("tags: # none"), Vec::<String>::new());
+        assert_eq!(
+            tags("tags:\n  - \"Issue #42\" # c\n  - Peoples'"),
+            vec!["Issue #42", "Peoples'"]
+        );
+        assert_eq!(tags("tags: [\"a b\", 'c']"), vec!["a b", "c"]);
+    }
 
     #[test]
     fn markdown_pages_define_no_names() {
