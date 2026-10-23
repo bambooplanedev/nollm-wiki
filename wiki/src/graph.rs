@@ -6,7 +6,8 @@ use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 
-static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z0-9']+").unwrap());
+// Letters and combining marks in any script; digits and `'` stay ASCII on purpose.
+static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\p{L}\p{M}0-9']+").unwrap());
 /// The target of an inline markdown link, `[text](target)`, up to the closing
 /// paren or a space (which starts an optional title).
 static MD_LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\(([^)\s]+)").unwrap());
@@ -613,6 +614,23 @@ mod tests {
         beta.aliases = vec!["Second Letter".into()];
         let g = build_graph(&map(vec![ent("a", "Alpha", "see the second letter"), beta]));
         assert!(g.edges["a"].outgoing.contains("b"));
+    }
+
+    #[test]
+    fn cyrillic_alias_creates_edge() {
+        let mut ai = ent("ai", "Штучний інтелект", "Про навчання.");
+        ai.aliases = vec!["ШІ".into()];
+        let notes = ent("notes", "Нотатки", "Сьогодні говорили про ШІ.");
+        let g = build_graph(&map(vec![ai, notes]));
+        assert!(g.edges["notes"].outgoing.contains("ai"));
+    }
+
+    #[test]
+    fn accented_word_is_not_split_into_a_false_mention() {
+        let ve = ent("ve", "Ve", "Short.");
+        let trip = ent("trip", "Trip", "We saw a naïve painting.");
+        let g = build_graph(&map(vec![ve, trip]));
+        assert!(!g.edges["trip"].outgoing.contains("ve"));
     }
 
     #[test]
