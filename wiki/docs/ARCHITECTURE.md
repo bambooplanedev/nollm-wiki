@@ -98,8 +98,10 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
    `graph.json` from the final entity map and graph. A code entry of
    `index.json` ends with `items` (omitted when empty): one object per
-   definition, keys in this order — `kind` (`fn`, `method`, `type`,
-   `value`, `module`), `name`, `owner` (omitted when free), `signature` (as
+   definition, keys in this order — `kind` (`fn`, `method`, `type` for a
+   struct, class, enum, trait, interface, union, exported macro or type
+   alias in every language, `value` for a constant, static or module-level
+   variable, `module`), `name`, `owner` (omitted when free), `signature` (as
    the source reads it, no owner spliced in), `start_line`, `end_line`
    (1-based, inclusive, in the original file, from the first attached doc
    or attribute line), `doc` (the doc comment's first sentence, at most 120

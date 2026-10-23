@@ -923,6 +923,16 @@ mod tests {
     }
 
     #[test]
+    fn a_type_alias_is_a_type_item_like_in_every_other_language() {
+        let src = "pub type Id = u64;\ntype Local = u8;\npub const N: u8 = 1;\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-1 type Id pub", "2-2 type Local priv", "3-3 value N pub"]
+        );
+    }
+
+    #[test]
     fn the_existing_gate_decides_public_for_restricted_and_trait_impl_items() {
         let src =
             "pub(crate) fn c() {}\nstruct T;\nimpl Display for T {\n    fn fmt(&self) {}\n}\n";

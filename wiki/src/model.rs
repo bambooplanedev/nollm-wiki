@@ -92,9 +92,10 @@ pub enum CodeItemKind {
     Fn,
     /// A function with an owner: an `impl` or class method, a trait method.
     Method,
-    /// A struct, class, enum, trait, interface, union, or exported macro.
+    /// A struct, class, enum, trait, interface, union, type alias, or
+    /// exported macro.
     Type,
-    /// A constant, static, type alias, or module-level variable.
+    /// A constant, static, or module-level variable.
     Value,
     /// A module declaration.
     Module,

@@ -935,6 +935,9 @@ fn code_item(
         (ItemKind::Member, true) => CodeItemKind::Method,
         (ItemKind::FreeDef, true) => CodeItemKind::Fn,
         (ItemKind::FreeDef, false) => CodeItemKind::Type,
+        // A Rust `type` alias ranks as a value in `## Exports`, yet is a
+        // type, as a TS `type` and a C++ `using` are.
+        (ItemKind::FreeValue, _) if def.kind() == "type_item" => CodeItemKind::Type,
         (ItemKind::FreeValue, _) => CodeItemKind::Value,
         (ItemKind::Module, _) => CodeItemKind::Module,
         (ItemKind::Header | ItemKind::Member, _) => return None,
