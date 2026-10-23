@@ -63,11 +63,16 @@ enum Command {
         dir: PathBuf,
     },
     Search {
-        query: String,
+        /// Required unless `--tag` is given.
+        query: Option<String>,
+        /// Only pages carrying this tag; `a` also matches `a/b`. Alone, lists every such page.
+        #[arg(long)]
+        tag: Option<String>,
         #[arg(long)]
         kind: Option<String>,
-        #[arg(long, default_value_t = 10)]
-        limit: usize,
+        /// Maximum hits (default 10 with a query; unbounded for a bare `--tag`).
+        #[arg(long)]
+        limit: Option<usize>,
         /// Output format: `lines` or `json`.
         #[arg(long, value_parser = ["lines", "json"], default_value = "lines")]
         format: String,
@@ -170,11 +175,21 @@ fn main() -> Result<()> {
         }
         Command::Search {
             query,
+            tag,
             kind,
             limit,
             format,
             dir,
         } => {
+            if query.is_none() && tag.is_none() {
+                anyhow::bail!("search needs a query or --tag");
+            }
+            let tag = match tag.as_deref() {
+                None => None,
+                Some(s) => {
+                    Some(wiki::query::tag_filter(s).with_context(|| format!("empty tag {s:?}"))?)
+                }
+            };
             let w = Wiki::load(&dir).context("load wiki")?;
             let kind = match kind.as_deref() {
                 None => None,
@@ -182,7 +197,12 @@ fn main() -> Result<()> {
                     format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
                 })?),
             };
-            let hits = w.search(&query, kind.as_ref(), limit);
+            let hits = w.search_tagged(
+                query.as_deref().unwrap_or(""),
+                kind.as_ref(),
+                tag.as_deref(),
+                limit,
+            );
             if format == "json" {
                 println!("{}", wiki::serve::search_json(hits));
             } else {

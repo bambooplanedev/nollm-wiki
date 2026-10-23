@@ -319,6 +319,31 @@ fn search_text(args: &Value) -> String {
 }
 
 #[test]
+fn mcp_search_tag_only_lists_pages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = tmp.path().join("out");
+    std::fs::write(
+        tmp.path().join("a.md"),
+        "---\ntags: [mem]\n---\n# Tagged\n\nzebra\n",
+    )
+    .unwrap();
+    std::fs::write(tmp.path().join("b.md"), "# Plain\n\nzebra\n").unwrap();
+    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
+            "name": "search", "arguments": {"query": "", "tag": "mem"}}}),
+    );
+    let resp = read_response(&stdout, 9);
+    child.kill().ok();
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("tagged  "), "text: {text}");
+    assert!(!text.contains("plain  "), "text: {text}");
+}
+
+#[test]
 fn mcp_search_defaults_to_lines() {
     let text = search_text(&json!({"query": "add"}));
     let first = text.lines().next().unwrap();
@@ -367,6 +392,18 @@ fn serve_reports_bad_params_and_survives() {
         "message: {msg}"
     );
     assert!(resp.get("result").is_none(), "got: {resp}");
+
+    // An empty tag is rejected the same way.
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
+            "name": "search", "arguments": {"query": "x", "tag": "#"}
+        }}),
+    );
+    let resp = read_response(&stdout, 7);
+    assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
+    let msg = resp["error"]["message"].as_str().unwrap();
+    assert!(msg.contains("empty tag"), "message: {msg}");
 
     // (b) A missing required field fails parameter deserialization, which
     // rmcp reports as a tool error result naming the field.
