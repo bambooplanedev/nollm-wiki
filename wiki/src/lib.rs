@@ -56,6 +56,8 @@ pub struct CompileResult {
     pub pages_written: usize,
     pub pages_total: usize,
     pub lint: LintReport,
+    /// What this compile's walk visited; see [`watch::WatchSet`].
+    pub watch_set: watch::WatchSet,
 }
 
 /// Compile `input` into a deterministic wiki under `output`.
@@ -141,10 +143,17 @@ fn compile_inner(
     // generated pages back in as sources (which would also self-trigger a
     // `--watch` recompile loop).
     let registry = Registry::with_defaults();
-    let files: Vec<_> = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?
+    let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?;
+    let files: Vec<_> = walked
+        .files
         .into_iter()
         .filter(|sf| !is_under(&sf.abs_path, output))
         .collect();
+    let watch_set = watch::WatchSet::new(
+        input,
+        files.iter().map(|sf| sf.abs_path.clone()),
+        walked.dirs.into_iter().filter(|d| !is_under(d, output)),
+    );
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
@@ -322,6 +331,7 @@ fn compile_inner(
         pages_written: written,
         pages_total: entities.len(),
         lint,
+        watch_set,
     })
 }
 

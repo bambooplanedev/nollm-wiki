@@ -14,7 +14,7 @@ use wiki::{compile, CompileOptions};
 /// checked out with CRLF moves no scoring metric, so it must not move this
 /// hash either, or the check would fail spuriously on a Windows checkout.
 pub fn corpus_hash(corpus: &Path) -> String {
-    let mut files = wiki::walk::walk(corpus, false, &|_| true).unwrap();
+    let mut files = wiki::walk::walk(corpus, false, &|_| true).unwrap().files;
     // `walk` already sorts by `rel_path`, but the hash's determinism is the
     // point here, not an incidental property of the walker, so make it
     // explicit rather than relying on that guarantee silently.

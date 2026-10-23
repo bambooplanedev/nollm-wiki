@@ -1,10 +1,56 @@
 //! Watch mode (`wiki compile --watch`): recompile on source change, ignoring events from the output directory.
 
+use crate::formats::Registry;
+use crate::model::normalize_path;
 use crate::{compile, CompileOptions, WikiError};
 use notify::{RecursiveMode, Watcher};
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::time::Duration;
+
+/// What the last compile's walk visited. Lets a filesystem event be judged
+/// against the same ignore rules the compile applied, without re-reading them:
+/// a path under a pruned tree (`target/`, `.git/`, hidden dirs) has no visited
+/// parent and so never counts.
+pub struct WatchSet {
+    root: PathBuf,
+    files: HashSet<PathBuf>,
+    dirs: HashSet<PathBuf>,
+    registry: Registry,
+}
+
+impl WatchSet {
+    pub fn new(
+        root: &Path,
+        files: impl IntoIterator<Item = PathBuf>,
+        dirs: impl IntoIterator<Item = PathBuf>,
+    ) -> WatchSet {
+        WatchSet {
+            root: root.to_path_buf(),
+            files: files.into_iter().collect(),
+            dirs: dirs.into_iter().collect(),
+            registry: Registry::with_defaults(),
+        }
+    }
+
+    /// Would a change at `path` (absolute, canonical) alter what a compile
+    /// produces? Known paths always; new ones only inside a visited directory,
+    /// and only if a handled file, an ignore file, or a visible directory.
+    pub fn relevant(&self, path: &Path) -> bool {
+        if self.files.contains(path) || self.dirs.contains(path) {
+            return true;
+        }
+        if !path.parent().is_some_and(|p| self.dirs.contains(p)) {
+            return false;
+        }
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        self.registry.handles(&normalize_path(&self.root, path))
+            || name == ".gitignore"
+            || name == ".ignore"
+            || (path.is_dir() && !name.starts_with('.'))
+    }
+}
 
 pub fn recompile_once(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), WikiError> {
     let r = compile(input, output, opts)?;
@@ -87,5 +133,74 @@ mod tests {
             notify::Event::new(notify::EventKind::Any).add_path(PathBuf::from("/proj/alpha.txt"));
         assert!(!event_is_relevant(&Ok(generated), output));
         assert!(event_is_relevant(&Ok(source), output));
+    }
+
+    /// Compile a tempdir and return its (canonical root, watch set).
+    fn compiled() -> (tempfile::TempDir, PathBuf, WatchSet) {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let input = root.join("proj");
+        for d in ["src", "docs", "target/debug"] {
+            std::fs::create_dir_all(input.join(d)).unwrap();
+        }
+        std::fs::write(input.join("src/a.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(input.join("docs/n.md"), "# N\n\nbody\n").unwrap();
+        std::fs::write(input.join(".gitignore"), "target/\n").unwrap();
+        std::fs::write(input.join("target/debug/x.rs"), "pub fn x() {}\n").unwrap();
+        let r = compile(&input, &root.join("out"), &CompileOptions::default()).unwrap();
+        (dir, input, r.watch_set)
+    }
+
+    #[test]
+    fn walked_source_file_is_relevant() {
+        let (_d, r, w) = compiled();
+        assert!(w.relevant(&r.join("src/a.rs")));
+    }
+
+    #[test]
+    fn new_handled_file_in_visited_dir_is_relevant() {
+        let (_d, r, w) = compiled();
+        assert!(w.relevant(&r.join("src/b.rs")));
+    }
+
+    #[test]
+    fn unhandled_file_is_not_relevant() {
+        let (_d, r, w) = compiled();
+        assert!(!w.relevant(&r.join("src/a.o")));
+    }
+
+    #[test]
+    fn ignored_tree_events_are_not_relevant() {
+        let (_d, r, w) = compiled();
+        std::fs::create_dir(r.join("target/debug/new_dir")).unwrap();
+        assert!(!w.relevant(&r.join("target/debug/y.rs")));
+        assert!(!w.relevant(&r.join("target/debug/new_dir")));
+    }
+
+    #[test]
+    fn gitignore_change_is_relevant() {
+        let (_d, r, w) = compiled();
+        assert!(w.relevant(&r.join(".gitignore")));
+    }
+
+    #[test]
+    fn new_visible_subdir_is_relevant() {
+        let (_d, r, w) = compiled();
+        std::fs::create_dir(r.join("src/sub")).unwrap();
+        assert!(w.relevant(&r.join("src/sub")));
+    }
+
+    #[test]
+    fn hidden_new_dir_is_not_relevant() {
+        let (_d, r, w) = compiled();
+        std::fs::create_dir(r.join(".cache")).unwrap();
+        assert!(!w.relevant(&r.join(".cache")));
+    }
+
+    #[test]
+    fn deleted_source_file_is_relevant() {
+        let (_d, r, w) = compiled();
+        std::fs::remove_file(r.join("src/a.rs")).unwrap();
+        assert!(w.relevant(&r.join("src/a.rs")));
     }
 }
