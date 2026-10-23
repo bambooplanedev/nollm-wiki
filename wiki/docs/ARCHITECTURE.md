@@ -507,12 +507,13 @@ matching:
   `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 + defined 2.0 +
   summary 1.5 + heading 1.0 + body 1.0 × tf')`. Method names share the
   `defined` weight. Code items add three more page fields: the whole item
-  name (`W_SYMBOL` 3.0, in place of `defined`), the words of item names
-  (`W_SYMBOL_WORD` 2.0, methods `W_METHOD_WORD` 2.0), and the words of item
-  doc sentences (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and
-  module items feed none of them, and a word that is already a title word
-  or defined name is skipped. Field weights are not
-  length-normalised, and `tf'` stays below the name weight, so a title
+  name, also as `owner::name` (`W_SYMBOL` 2.8, in place of `defined` and
+  below the title weight), the words of item names (`W_SYMBOL_WORD` 2.0,
+  methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
+  (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and module items
+  feed none of them, nor the `defined` and method names that only test
+  items carry, and a word that is already a title word or defined name is
+  skipped. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
@@ -534,8 +535,8 @@ matching:
   explains those.
 - **Symbol expansion** (`expand`) runs after the sort and `limit` cut, on
   the surviving code hits only. Each item of a hit page (modules excluded)
-  scores per token `idf × (name + doc)`: whole name 3.5 (`IW_WHOLE`), a
-  name word 2.0, a doc word 1.0; test items are scaled by 0.5
+  scores per token `idf × (name + doc)`: whole name or `owner::name` 3.5
+  (`IW_WHOLE`), a name word 2.0, a doc word 1.0; test items are scaled by 0.5
   (`TEST_ITEM_FACTOR`). A whole-name match outranks any word match even
   with a doc match (a compile-time assert pins it). Per page the top 3
   (`SYMBOLS_PER_PAGE`) distinct items are kept, ties by line; across the
@@ -551,17 +552,19 @@ matching:
   or a file named `test_*`, `*_test.*`, `*_tests.*`), or, for Rust, the item
   sits in a `#[cfg(test)]` module or carries `#[test]` (also
   `#[tokio::test]`). It is stored in `items.json`. Test items stay visible
-  as symbol lines but contribute no page fields, so they cannot lift
-  their page.
+  as symbol lines but contribute no page fields, and a `defined` or method
+  name only test items carry is dropped from the page's defined terms
+  (`Wiki::load`), so their names cannot lift their page; body text still
+  counts.
 - **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `docs`
   (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
   share it and its error text.
 - **Output.** `serve::search_lines` renders the default line format (page
   line `id  path  title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page
-  without symbols); `serve::search_json` renders the JSON form. The MCP
-  `format` parameter and the CLI `--format` choose between them; `lines`
-  is the default for both.
+  without symbols; `no matches` when nothing hit); `serve::search_json`
+  renders the JSON form. The MCP `format` parameter and the CLI
+  `--format` choose between them; `lines` is the default for both.
 
 **Neighbors** (`Wiki::neighbors`) takes a page id; both the CLI and the
 MCP tool first pass what the caller typed through `Wiki::resolve_id`, which

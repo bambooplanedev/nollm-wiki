@@ -24,13 +24,15 @@ struct Entry {
     token_estimate: usize,
     neighbors_out: Vec<String>,
     neighbors_in: Vec<String>,
-    /// Top-level definition names (`ManifestEntry::defined`). Defaulted so
+    /// Top-level definition names (`ManifestEntry::defined`), minus those
+    /// only test items carry (dropped in `Wiki::load`). Defaulted so
     /// an `index.json` written by a compiler older than this field still
     /// loads: `serve` reads wikis it did not compile.
     #[serde(default)]
     defined: Vec<String>,
-    /// Method names (`ManifestEntry::methods`). Defaulted for the same
-    /// reason as `defined`: an older `index.json` has no such key.
+    /// Method names (`ManifestEntry::methods`), minus test-only ones like
+    /// `defined`. Defaulted for the same reason as `defined`: an older
+    /// `index.json` has no such key.
     #[serde(default)]
     methods: Vec<String>,
 }
@@ -102,7 +104,7 @@ pub struct SymbolLine {
 /// built once in `Wiki::load`.
 #[derive(Default)]
 struct SymbolFields {
-    /// Whole item names, lowercased.
+    /// Whole item names, lowercased, each also as `owner::name`.
     whole: BTreeSet<String>,
     /// Words of non-method names, none of them in `whole`.
     words: BTreeSet<String>,
@@ -164,7 +166,7 @@ impl Wiki {
         let text = std::fs::read_to_string(dir.join("index.json"))?;
         let index: IndexFile = serde_json::from_str(&text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let entries: BTreeMap<String, Entry> = index
+        let mut entries: BTreeMap<String, Entry> = index
             .entries
             .into_iter()
             .map(|e| (e.id.clone(), e))
@@ -181,6 +183,20 @@ impl Wiki {
                 .ok()
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or_default();
+        // A `defined` or `methods` name that only test items carry earns its
+        // page nothing: C++ and Go list test fns and mock methods there too.
+        for e in entries.values_mut() {
+            let Some(items) = items.get(&e.id) else {
+                continue;
+            };
+            // `any` first: a name no item carries is kept.
+            let test_only = |n: &String| {
+                items.iter().any(|i| i.name == *n && i.test)
+                    && items.iter().all(|i| i.name != *n || i.test)
+            };
+            e.defined.retain(|n| !test_only(n));
+            e.methods.retain(|n| !test_only(n));
+        }
         let all_title_words: BTreeSet<String> = entries
             .values()
             .flat_map(|e| Self::field_words(&e.title.to_lowercase()))
@@ -251,18 +267,22 @@ impl Wiki {
     const W_ALIAS: f64 = 2.0;
     // `W_DEFINED` (2026-09-02 defined-names design): equal to `W_ALIAS`,
     // above `W_SUMMARY`, below `W_NAME`, so a page whose title is the query
-    // still beats a page that merely defines a same-named item. Measured on
-    // the 547-query live set: own-title hits unchanged at 35/37, 26 flips
-    // better / 6 worse; 1.5 moved fewer definer queries, 2.5 added a worse row.
+    // still beats a page that merely defines a same-named item; `W_SYMBOL`,
+    // which replaces it for an item's whole name, stays below `W_NAME` too.
+    // Measured on the 547-query live set: own-title hits unchanged at 35/37,
+    // 26 flips better / 6 worse; 1.5 moved fewer definer queries, 2.5 added
+    // a worse row.
     const W_DEFINED: f64 = 2.0;
     // Page fields from code items (`symbol_fields`), private and method
     // items included, test and module items never. A whole item name
     // scores `W_SYMBOL` in place of `W_DEFINED`, above every word weight
-    // plus the doc weight (checked at compile time below), so a page naming
-    // the query beats a page whose names merely contain it. Tuned on the
+    // plus the doc weight and below `W_NAME` (both checked at compile time
+    // below), so a page naming the query beats a page whose names merely
+    // contain it, and a page titled by the query beats both. Tuned on the
     // symbol eval's `tune` split (2026-10-23): `W_SYMBOL_DOC` 0.5 → 0.75
-    // moved a doc query to file@1; 1.0 cost a title query.
-    const W_SYMBOL: f64 = 3.0;
+    // moved a doc query to file@1; 1.0 cost a title query. `W_SYMBOL` 3.0 →
+    // 2.8 restored the `W_NAME` rule and moved no eval rank.
+    const W_SYMBOL: f64 = 2.8;
     const W_SYMBOL_WORD: f64 = 2.0;
     const W_METHOD_WORD: f64 = 2.0;
     const W_SYMBOL_DOC: f64 = 0.75;
@@ -413,7 +433,8 @@ impl Wiki {
     }
 
     /// The fields a page earns from its non-test, non-module items. Whole
-    /// names lose the page's own title words. Words also lose terms already
+    /// names lose the page's own title words; an owned item's whole name
+    /// also enters as `owner::name`. Words also lose terms already
     /// in its `defined_terms` and any page's title word (`summary_suffix`
     /// stole the title query `Summary`), and each word lands in one field
     /// only: a whole name, else a free name's word, else a method's word.
@@ -437,6 +458,9 @@ impl Wiki {
             let whole = item.name.to_lowercase();
             if !title_words.contains(&whole.as_str()) {
                 f.whole.insert(whole);
+            }
+            if item.owner.is_some() {
+                f.whole.insert(item.qualified_name().to_lowercase());
             }
             let words = Self::name_words(&item.name).into_iter().filter(keep_word);
             if item.kind == CodeItemKind::Method {
@@ -472,6 +496,7 @@ impl Wiki {
 
     fn item_score(item: &CodeItem, tokens: &[String], idf: &[f64]) -> f64 {
         let whole = item.name.to_lowercase();
+        let qualified = item.qualified_name().to_lowercase();
         let words = Self::name_words(&item.name);
         let w_word = if item.kind == CodeItemKind::Method {
             Self::IW_METHOD_WORD
@@ -487,7 +512,7 @@ impl Wiki {
             .iter()
             .zip(idf)
             .map(|(t, &idf_t)| {
-                let name = if *t == whole {
+                let name = if *t == whole || *t == qualified {
                     Self::IW_WHOLE
                 } else if words.contains(t) {
                     w_word
@@ -837,10 +862,7 @@ impl Wiki {
                     path: hit.path.clone(),
                     start_line: i.start_line,
                     end_line: i.end_line,
-                    name: match &i.owner {
-                        Some(o) => format!("{o}::{}", i.name),
-                        None => i.name.clone(),
-                    },
+                    name: i.qualified_name(),
                     signature: i.signature.clone(),
                     doc: i.doc.clone().filter(|d| docs.insert(d.clone())),
                     test: i.test,
@@ -1051,9 +1073,11 @@ impl Wiki {
 }
 
 // A whole-name match must outrank any word match, on the page and on the
-// line, even when the word's side also matches by doc.
+// line, even when the word's side also matches by doc; a title match must
+// outrank a whole-name match.
 const _: () = assert!(
-    Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
+    Wiki::W_SYMBOL < Wiki::W_NAME
+        && Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC
         && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC

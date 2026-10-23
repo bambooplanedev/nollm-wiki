@@ -157,7 +157,8 @@ pub(crate) struct SearchParams {
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct NeighborsParams {
-    /// Page id (slug) to build the context pack around.
+    /// The page to build the context pack around: its id, its title, or its
+    /// source path (a path suffix works when only one page ends with it).
     pub id: String,
     /// BFS hop count from the target page (default 1).
     pub depth: Option<usize>,
@@ -280,7 +281,9 @@ impl ServerHandler for WikiServer {
             .with_instructions(
                 "Query interface to a compiled wiki. Start with `search` to find \
                  page ids, then `neighbors` to pull a budgeted context pack around \
-                 a page. Pages are also exposed as resources under wiki://page/<id>.",
+                 a page. Pages are also exposed as resources under wiki://page/<id>. \
+                 Paths in results are relative to the compiled project root; line \
+                 ranges are 1-based and inclusive.",
             )
     }
 
@@ -382,7 +385,11 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 /// Render search hits as the default line output: `id  path  title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or the snippet (four-space indent) when the page has no symbols.
+/// No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
+    if hits.is_empty() {
+        return "no matches\n".to_string();
+    }
     // Fields are one-line text; collapse any newline or tab they carry.
     let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();

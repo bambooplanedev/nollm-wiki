@@ -157,7 +157,9 @@ pub struct CodeItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     /// The one-line signature as the source reads it, with no owner spliced
-    /// in, so it can be searched for in the file.
+    /// in, so it can be searched for in the file. Exception: each C++
+    /// declarator of a shared declaration gets its own signature, which may
+    /// not appear verbatim (`int a, *b;` gives `b` the signature `int *b`).
     pub signature: String,
     /// 1-based, inclusive, in the original file: from the first attached doc
     /// comment or attribute line to the item's last line.
@@ -177,6 +179,17 @@ pub struct CodeItem {
     /// shows such items but does not let them lift their page.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub test: bool,
+}
+
+impl CodeItem {
+    /// `owner::name`, or `name` when the item has no owner: how search
+    /// prints the item, and a whole-name match for it.
+    pub fn qualified_name(&self) -> String {
+        match &self.owner {
+            Some(o) => format!("{o}::{}", self.name),
+            None => self.name.clone(),
+        }
+    }
 }
 
 /// Whether `rel_path` is a test file in any language: a path component
