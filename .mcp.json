@@ -2,7 +2,7 @@
   "mcpServers": {
     "nollm-wiki": {
       "command": "./wiki/target/release/wiki",
-      "args": ["serve", "--dir", ".wiki"]
+      "args": ["serve", "--source", "."]
     }
   }
 }

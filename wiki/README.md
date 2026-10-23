@@ -221,7 +221,10 @@ exit 0.
 wiki serve [OPTIONS]
 ```
 
-- `--dir <out>` (`out`) — the compiled wiki directory to serve.
+- `--source <project>` — also compile this project and keep the wiki in step
+  with it (see [MCP server](#mcp-server)).
+- `--dir <out>` (`<project>/.wiki` with `--source`, else `out`) — the
+  compiled wiki directory to serve.
 
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).
@@ -349,8 +352,18 @@ request and reloads if the wiki was recompiled — no restart needed. If a
 reload fails (e.g. mid-compile), the previous snapshot keeps serving and
 the reload is retried on the next request.
 
-The server is read-only: compiling stays a CLI concern (`wiki compile`,
-optionally with `--watch`).
+**With `--source <project>`** the server compiles the project itself. An
+existing wiki is served at once while the compile runs in the background; with
+none, the first compile runs before serving and a failure exits. It then
+watches the project and recompiles incrementally on edits (ignored paths such
+as `target/`, build dirs and `.git` never trigger it). Each tool call waits up
+to 5 s until edits made before it are compiled. If a recompile fails or is
+still running, the last good snapshot keeps serving and tool results and
+resource reads gain a line `wiki may be stale: <reason>`. Short-lived barrier
+files, one per call, live in `<dir>/.serve/`.
+
+Without `--source` the server only reads the wiki. The CLI `search`,
+`neighbors` and `lint` never recompile; they read the wiki as it is.
 
 ## Library usage (Rust)
 
@@ -426,7 +439,8 @@ oversights:
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
 - **MCP server is query-only.** `wiki serve` exposes search/neighbors/lint
   and page resources over stdio (see [MCP server](#mcp-server)); there is
-  deliberately no compile-over-MCP tool and no HTTP transport.
+  deliberately no compile-over-MCP tool (`--source` recompiles on file edits,
+  not on request) and no HTTP transport.
 - **Graph export is JSON only.** `--emit-json` writes the node-link
   `graph.json`; there is no DOT/GraphML export.
 - **`--watch` covers `compile` only.** The query subcommands (`search`,
