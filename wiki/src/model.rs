@@ -100,7 +100,7 @@ pub struct Entity {
 }
 
 /// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CodeItemKind {
     /// A free function.
@@ -118,7 +118,7 @@ pub enum CodeItemKind {
 
 /// One definition of a code page and where it lives. Field order is the
 /// `items.json` key order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeItem {
     pub kind: CodeItemKind,
     /// The name as the source writes it.
@@ -143,6 +143,22 @@ pub struct CodeItem {
     /// known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub twin: Option<String>,
+    /// Whether the item is test code: in a test file (`is_test_path`), inside
+    /// a Rust `#[cfg(test)]` module, or a Rust `#[test]` function. Search
+    /// shows such items but does not let them lift their page.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
+}
+
+/// Whether `rel_path` is a test file in any language: a path component
+/// `tests`, or a file name `test_*`, `*_test.*`, `*_tests.*`.
+pub fn is_test_path(rel_path: &str) -> bool {
+    let mut parts = rel_path.split('/');
+    let name = parts.next_back().unwrap_or("");
+    let stem = name.split('.').next().unwrap_or("");
+    parts.any(|c| c == "tests")
+        || name.starts_with("test_")
+        || (name.contains('.') && (stem.ends_with("_test") || stem.ends_with("_tests")))
 }
 
 #[derive(Default, Clone, Debug)]

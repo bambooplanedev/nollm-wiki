@@ -279,15 +279,17 @@ impl Extractor for CodeExtractor {
         // Items are the exception to "extract the stripped text": their lines
         // must be the original file's, and a test module is code an agent
         // reads too, so they come from the original text and its tree.
-        let (source, pre_parsed, original) = match (ext == "rs")
+        let (source, pre_parsed, original, test_spans) = match (ext == "rs")
             .then(|| super::extract_rust::strip_rust_test_modules(text))
             .flatten()
         {
             Some(super::extract_rust::Stripped::Unchanged(tree)) => {
-                (text.to_string(), Some(tree), None)
+                (text.to_string(), Some(tree), None, Vec::new())
             }
-            Some(super::extract_rust::Stripped::Rewritten(out, tree)) => (out, None, Some(tree)),
-            None => (text.to_string(), None, None),
+            Some(super::extract_rust::Stripped::Rewritten(out, tree, spans)) => {
+                (out, None, Some(tree), spans)
+            }
+            None => (text.to_string(), None, None, Vec::new()),
         };
 
         // A single-file component is markup around code: only its `<script>`
@@ -311,7 +313,7 @@ impl Extractor for CodeExtractor {
         // bare `pub fn` inside the test module passes too. Exports come from
         // the stripped text, so an item is public only if the stripped pass
         // has the same item as public.
-        let items = match original {
+        let mut items = match original {
             Some(tree) => {
                 let mut items = extract_code(ext, text, Some(tree))
                     .map(|i| i.items)
@@ -328,6 +330,16 @@ impl Extractor for CodeExtractor {
             }
             None => info.items,
         };
+        let test_file = crate::model::is_test_path(rel_path);
+        for item in &mut items {
+            item.test = test_file
+                || test_spans
+                    .iter()
+                    .any(|&(s, e)| s <= item.start_line && item.end_line <= e)
+                || (ext == "rs"
+                    && matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method)
+                    && super::extract_rust::has_test_attribute(text, item.start_line));
+        }
         let mut lang_name = info.lang;
 
         // A component is reported as its own format, whichever language its
@@ -980,6 +992,7 @@ fn code_item(
         doc: raw_doc.as_deref().and_then(item_doc_line),
         public,
         twin: None,
+        test: false,
     };
     Some((name.start_byte(), item))
 }
@@ -1979,6 +1992,64 @@ mod tests {
         assert_eq!(
             leading_doc(rs, "rs").as_deref(),
             Some("Summary line.\nElaboration line.")
+        );
+    }
+
+    #[test]
+    fn is_test_path_follows_the_path_rule() {
+        use crate::model::is_test_path;
+        for p in [
+            "tests/a.rs",
+            "src/tests/x.cpp",
+            "test_fsm.cpp",
+            "fsm_test.go",
+            "a/fsm_tests.rs",
+        ] {
+            assert!(is_test_path(p), "{p}");
+        }
+        for p in ["src/attest.rs", "src/testing.rs", "contest/a.rs"] {
+            assert!(!is_test_path(p), "{p}");
+        }
+    }
+
+    fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
+        let e = CodeExtractor.extract(path, src);
+        e.items.into_iter().map(|i| (i.name, i.test)).collect()
+    }
+
+    #[test]
+    fn rust_items_inside_cfg_test_are_tests() {
+        let src = "fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n    fn helper() {}\n}\n";
+        let flags = test_flags("src/a.rs", src);
+        for (name, want) in [("live", false), ("t", true), ("helper", true)] {
+            assert!(
+                flags.contains(&(name.to_string(), want)),
+                "{name}: {flags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rust_test_attribute_marks_a_test_outside_cfg_test() {
+        let flags = test_flags(
+            "src/a.rs",
+            "#[tokio::test]\nasync fn x() {}\n#[test]\nfn y() {}\nfn z() {}\n",
+        );
+        assert_eq!(
+            flags,
+            [("x".into(), true), ("y".into(), true), ("z".into(), false)]
+        );
+    }
+
+    #[test]
+    fn items_of_a_test_file_are_tests_in_every_language() {
+        assert_eq!(
+            test_flags("tests/a.go", "package a\nfunc F() {}\n"),
+            [("F".into(), true)]
+        );
+        assert_eq!(
+            test_flags("src/a.go", "package a\nfunc F() {}\n"),
+            [("F".into(), false)]
         );
     }
 }
