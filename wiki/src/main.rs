@@ -135,7 +135,11 @@ fn main() -> Result<()> {
                 max_tokens,
                 full_neighbors: full,
             };
-            let pack = w.neighbors(&id, depth, &budget).context("unknown id")?;
+            let rid = w
+                .resolve_id(&id)
+                .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
+                .context("unknown id")?;
+            let pack = w.neighbors(&rid, depth, &budget).context("unknown id")?;
             println!("{}", pack.text);
         }
         Command::Search {

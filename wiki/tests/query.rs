@@ -800,3 +800,53 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         ]
     );
 }
+
+/// `(id, title)` of the page whose path is `path`.
+fn id_title(w: &Wiki, path: &str) -> (String, String) {
+    let h = w
+        .search("zebra", None, 50)
+        .into_iter()
+        .find(|h| h.path == path)
+        .unwrap_or_else(|| panic!("no page at {path}"));
+    (h.id, h.title)
+}
+
+fn resolve_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        ("src/manager.cpp", "// zebra\nint zebra() { return 1; }\n"),
+        ("a/mod.rs", "//! zebra\npub fn zebra() {}\n"),
+        ("b/mod.rs", "//! zebra\npub fn zebra_two() {}\n"),
+    ])
+}
+
+#[test]
+fn title_resolves_to_id() {
+    let (_d, w) = resolve_fixture();
+    let (id, title) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id(&title.to_uppercase()), Ok(id.clone()));
+    assert_eq!(w.resolve_id(&id), Ok(id));
+}
+
+#[test]
+fn slug_of_title_resolves() {
+    let (_d, w) = resolve_fixture();
+    let (id, _) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id(&id.replace('_', " ").to_uppercase()), Ok(id));
+}
+
+#[test]
+fn unique_path_suffix_resolves() {
+    let (_d, w) = resolve_fixture();
+    let (id, _) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id("manager.cpp"), Ok(id.clone()));
+    assert_eq!(w.resolve_id("src/manager.cpp"), Ok(id));
+}
+
+#[test]
+fn ambiguous_path_suffix_lists_candidates() {
+    let (_d, w) = resolve_fixture();
+    let (a, _) = id_title(&w, "a/mod.rs");
+    let (b, _) = id_title(&w, "b/mod.rs");
+    let err = w.resolve_id("mod.rs").unwrap_err();
+    assert!(err.contains(&a) && err.contains(&b), "{err:?}");
+}

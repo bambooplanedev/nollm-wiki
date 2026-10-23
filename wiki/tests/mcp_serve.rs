@@ -730,3 +730,27 @@ fn serve_source_fails_when_first_compile_fails_and_no_wiki() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("not_a_dir.txt"), "stderr: {stderr}");
 }
+
+#[test]
+fn mcp_neighbors_unknown_id_names_candidates() {
+    let src = source_project();
+    let out = src.path().join("out");
+    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    let id = wiki::query::Wiki::load(&out)
+        .unwrap()
+        .search("add", None, 1)
+        .remove(0)
+        .id;
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
+            "name": "neighbors", "arguments": {"id": "lib.rs nonsense"}}}),
+    );
+    let resp = read_response(&stdout, 9);
+    child.kill().ok();
+    assert_eq!(resp["result"]["isError"], true);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains(&id), "no candidate {id}: {text}");
+}

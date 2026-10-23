@@ -234,12 +234,16 @@ impl WikiServer {
             full_neighbors: p.full.unwrap_or(false),
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let result = match wiki.neighbors(&p.id, p.depth.unwrap_or(1), &budget) {
-            Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
-            None => CallToolResult::error(vec![ContentBlock::text(format!(
-                "unknown page id {:?} — use the search tool to find valid ids",
-                p.id
-            ))]),
+        let result = match wiki.resolve_id(&p.id) {
+            Ok(id) => match wiki.neighbors(&id, p.depth.unwrap_or(1), &budget) {
+                Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
+                None => CallToolResult::error(vec![ContentBlock::text(
+                    crate::query::unknown_page(&p.id, &[]),
+                )]),
+            },
+            Err(near) => CallToolResult::error(vec![ContentBlock::text(
+                crate::query::unknown_page(&p.id, &near),
+            )]),
         };
         with_stale(result, stale.as_deref())
     }

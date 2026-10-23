@@ -40,6 +40,16 @@ struct IndexFile {
     entries: Vec<Entry>,
 }
 
+/// The error for an id `resolve_id` could not place; `near` are its candidates.
+pub fn unknown_page(arg: &str, near: &[String]) -> String {
+    let closest = if near.is_empty() {
+        String::new()
+    } else {
+        format!("; closest: {}", near.join(", "))
+    };
+    format!("unknown page {arg:?}{closest} — use search to find ids")
+}
+
 pub struct Hit {
     pub id: String,
     pub title: String,
@@ -867,6 +877,58 @@ impl Wiki {
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {
         self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
+    /// Resolves what a caller typed to a page id: an exact id, a title
+    /// (ignoring case), the slug of `arg`, or the one page whose source path
+    /// is `arg` or ends with `/arg`. Otherwise up to 5 candidate ids, sorted: the
+    /// several pages that path matched, else ids sharing a lowercase word with `arg`.
+    pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
+        if self.entries.contains_key(arg) {
+            return Ok(arg.to_string());
+        }
+        let by = |f: &dyn Fn(&Entry) -> bool| {
+            let mut m = self.entries.values().filter(|e| f(e));
+            match (m.next(), m.next()) {
+                (Some(e), None) => Some(e.id.clone()),
+                _ => None,
+            }
+        };
+        if let Some(id) = by(&|e| e.title.eq_ignore_ascii_case(arg)) {
+            return Ok(id);
+        }
+        let slug = crate::model::slugify(arg);
+        if self.entries.contains_key(&slug) {
+            return Ok(slug);
+        }
+        let suffix = format!("/{arg}");
+        let by_path: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| e.path == arg || e.path.ends_with(&suffix))
+            .map(|e| e.id.clone())
+            .collect();
+        if let [id] = by_path.as_slice() {
+            return Ok(id.clone());
+        }
+        if !by_path.is_empty() {
+            return Err(by_path.into_iter().take(5).collect());
+        }
+        let words = |s: &str| -> BTreeSet<String> {
+            s.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(str::to_lowercase)
+                .collect()
+        };
+        let want = words(arg);
+        // BTreeMap iteration is already sorted by id.
+        Err(self
+            .entries
+            .values()
+            .filter(|e| !want.is_disjoint(&words(&e.id)) || !want.is_disjoint(&words(&e.title)))
+            .map(|e| e.id.clone())
+            .take(5)
+            .collect())
     }
 
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
