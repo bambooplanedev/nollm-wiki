@@ -6,6 +6,7 @@ pub mod generator;
 pub mod graph;
 pub mod hash;
 pub mod lint;
+pub(crate) mod live;
 pub mod manifest;
 pub mod model;
 pub mod query;

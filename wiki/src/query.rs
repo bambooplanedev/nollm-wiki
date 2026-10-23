@@ -77,6 +77,8 @@ struct Candidate<'a> {
     snippet: Option<String>,
 }
 
+/// `Default` is the empty wiki: what `serve --source` holds before its first compile.
+#[derive(Default)]
 pub struct Wiki {
     entries: BTreeMap<String, Entry>,
     /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`

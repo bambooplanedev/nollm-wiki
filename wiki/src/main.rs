@@ -66,8 +66,12 @@ enum Command {
         dir: PathBuf,
     },
     Serve {
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        /// Compile this project, watch it, and recompile on every edit.
+        #[arg(long)]
+        source: Option<PathBuf>,
+        /// Wiki to serve (default: `<source>/.wiki` with `--source`, else `out`).
+        #[arg(long)]
+        dir: Option<PathBuf>,
     },
     Generate {
         dir: PathBuf,
@@ -183,8 +187,13 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Command::Serve { dir } => {
-            wiki::serve::run(&dir)?;
+        Command::Serve { source, dir } => {
+            let dir = dir.unwrap_or_else(|| {
+                source
+                    .as_ref()
+                    .map_or_else(|| "out".into(), |s| s.join(".wiki"))
+            });
+            wiki::serve::run(&dir, source.as_deref(), cli.jobs)?;
         }
         Command::Generate { dir, files, seed } => {
             let paths = generate_corpus(&dir, files, seed).context("generate corpus")?;
