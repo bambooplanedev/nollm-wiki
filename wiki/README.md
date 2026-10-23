@@ -308,7 +308,9 @@ wiki hint [OPTIONS] [TEXT]
 Prints the code locations for a task text: the text agents' hooks inject
 before the agent starts reading. A header line, then at most 8
 `path:start-end  name  signature` lines (each cut at 160 characters) from
-the best-matching code pages; docs never appear. Prints nothing and exits 0
+the best-matching code pages, at most 2 per page; docs, test items and a
+line whose range holds another of the page's lines (a class around its
+methods) never appear. Prints nothing and exits 0
 when the wiki is missing or unreadable, or nothing matches, so a hook can
 run it on every prompt.
 
