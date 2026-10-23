@@ -902,9 +902,12 @@ impl Wiki {
     }
 
     /// Resolves what a caller typed to a page id: an exact id, a title
-    /// (ignoring case), the slug of `arg`, or the one page whose source path
-    /// is `arg` or ends with `/arg`. Otherwise up to 5 candidate ids, sorted: the
-    /// several pages that path matched, else ids sharing a lowercase word with `arg`.
+    /// (ignoring case), the slug of `arg`, then `arg` as a path (`\` read as
+    /// `/`, one leading `./` dropped): the page whose source path is it, the
+    /// one page whose path ends with `/arg`, or the page with the longest path
+    /// that `arg` ends with (an absolute path). Otherwise up to 5 candidate
+    /// ids, sorted: the several pages that suffix matched, else ids sharing a
+    /// lowercase word with `arg`.
     pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
         if self.entries.contains_key(arg) {
             return Ok(arg.to_string());
@@ -923,11 +926,16 @@ impl Wiki {
         if self.entries.contains_key(&slug) {
             return Ok(slug);
         }
-        let suffix = format!("/{arg}");
+        let norm = arg.replace('\\', "/");
+        let norm = norm.strip_prefix("./").unwrap_or(&norm);
+        if let Some(id) = by(&|e| e.path == norm) {
+            return Ok(id);
+        }
+        let suffix = format!("/{norm}");
         let by_path: Vec<String> = self
             .entries
             .values()
-            .filter(|e| e.path == arg || e.path.ends_with(&suffix))
+            .filter(|e| e.path.ends_with(&suffix))
             .map(|e| e.id.clone())
             .collect();
         if let [id] = by_path.as_slice() {
@@ -935,6 +943,15 @@ impl Wiki {
         }
         if !by_path.is_empty() {
             return Err(by_path.into_iter().take(5).collect());
+        }
+        // An absolute path: the longest page path that `norm` ends with.
+        if let Some(e) = self
+            .entries
+            .values()
+            .filter(|e| !e.path.is_empty() && norm.ends_with(&format!("/{}", e.path)))
+            .max_by_key(|e| e.path.len())
+        {
+            return Ok(e.id.clone());
         }
         let words = |s: &str| -> BTreeSet<String> {
             s.split(|c: char| !c.is_alphanumeric())
