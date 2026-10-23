@@ -45,11 +45,11 @@ Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans
 
 $ ./target/release/wiki search gradient --dir demo_wiki
-gradient_descent	Gradient Descent	Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
+gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
     Gradient Descent is often paired with Learning Rate Schedule in prod…
-layer_normalization	Layer Normalization	Layer Normalization builds directly on the ideas behind Gradient Descent.
+layer_normalization  layer_normalization.txt  Layer Normalization — Layer Normalization builds directly on the ideas behind Gradient Descent.
     Layer Normalization builds directly on the ideas behind Gradient Descent. When debugging Layer Normalization, engineers trac…
-learning_rate_schedule	Learning Rate Schedule	Learning Rate Schedule builds directly on the ideas behind Backpropagation.
+learning_rate_schedule  learning_rate_schedule.txt  Learning Rate Schedule — Learning Rate Schedule builds directly on the ideas behind Backpropagation.
     …tion Mechanism. Learning Rate Schedule is often paired with Gradient Descent in production pipelines. Numbers here are approxim…
 
 $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --dir demo_wiki
@@ -184,15 +184,31 @@ and leaves them in place — delete them or recompile into a clean directory.
 wiki search [OPTIONS] <QUERY>
 ```
 
-- `--kind <k>` (none — all kinds) — filter by `SourceKind`: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
+- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`).
 - `--limit <N>` (`10`) — maximum number of hits returned.
+- `--format <lines|json>` (`lines`) — output shape, below.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
+
+The default `lines` output is one line per page, `id  path  title — summary`.
+Under a code page, up to 3 indented lines name its matching symbols,
+`  path:start-end  name  signature  — doc` (1-based, inclusive line range;
+`name` is `Owner::name` for methods; `doc` is left out when empty or already
+shown on an earlier line of the page). Only symbols scoring at least 30% of
+the best symbol in the response are shown, and test code ranks at half score.
+A page without symbol lines gets its body snippet on a four-space-indented
+line instead, with comment markers (`//`, `///`, `#`, …) dropped. A C++
+declaration that declares several names shows one signature per name, which
+may not appear verbatim in the file. `--format json` prints
+`[{id, title, summary, score, snippet, path, symbols}]`, where each symbol is
+`{path, start_line, end_line, name, signature, doc}`.
 
 ### `neighbors`
 
 ```
 wiki neighbors [OPTIONS] <ID>
 ```
+
+`<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a title, or a source path or unique path suffix (e.g. `query.rs`). If nothing matches, the error lists the closest ids.
 
 - `--depth <N>` (`1`) — BFS hop count from `<ID>`.
 - `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). If the target page alone exceeds it, the target degrades to a title + summary block pointing at the full page.
@@ -340,8 +356,8 @@ passes the flag on purpose):
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query`, `kind?`, `limit?` (10) | JSON `[{id, title, summary, score, snippet}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
-| `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
+| `search` | `query`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (10), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
+| `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
