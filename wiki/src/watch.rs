@@ -61,17 +61,32 @@ pub fn recompile_once(input: &Path, output: &Path, opts: &CompileOptions) -> Res
     Ok(())
 }
 
+/// How long to let a burst of events settle before acting on it.
+pub const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// Watch each `(path, mode)` and hand every event to `on_event`, which runs on
+/// notify's own thread. The caller must keep the returned watcher alive.
+pub fn start(
+    paths: &[(&Path, RecursiveMode)],
+    on_event: impl FnMut(notify::Result<notify::Event>) + Send + 'static,
+) -> Result<notify::RecommendedWatcher, WikiError> {
+    let mut watcher =
+        notify::recommended_watcher(on_event).map_err(|e| WikiError::Watch(e.to_string()))?;
+    for (path, mode) in paths {
+        watcher
+            .watch(path, *mode)
+            .map_err(|e| WikiError::Watch(e.to_string()))?;
+    }
+    Ok(watcher)
+}
+
 pub fn watch(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), WikiError> {
     recompile_once(input, output, opts)?;
 
     let (tx, rx) = channel();
-    let mut watcher = notify::recommended_watcher(move |res| {
+    let _watcher = start(&[(input, RecursiveMode::Recursive)], move |res| {
         let _ = tx.send(res);
-    })
-    .map_err(|e| WikiError::Watch(e.to_string()))?;
-    watcher
-        .watch(input, RecursiveMode::Recursive)
-        .map_err(|e| WikiError::Watch(e.to_string()))?;
+    })?;
 
     eprintln!("watching {} … (Ctrl-C to stop)", input.display());
     while let Ok(res) = rx.recv() {
@@ -79,7 +94,7 @@ pub fn watch(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), W
         // the output tree so we never trigger ourselves into a busy loop.
         let mut relevant = event_is_relevant(&res, output);
         // Debounce: drain any events that arrived during compilation.
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(DEBOUNCE);
         while let Ok(res) = rx.try_recv() {
             relevant |= event_is_relevant(&res, output);
         }
@@ -107,6 +122,31 @@ fn event_is_relevant(res: &notify::Result<notify::Event>, output: &Path) -> bool
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn start_delivers_events_for_a_write() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _w = start(&[(&root, RecursiveMode::Recursive)], move |e| {
+            let _ = tx.send(e);
+        })
+        .unwrap();
+        let file = root.join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            let ev = rx.recv_timeout(left).expect("no event within 5s").unwrap();
+            if ev
+                .paths
+                .iter()
+                .any(|p| p.canonicalize().ok().as_ref() == Some(&file))
+            {
+                break;
+            }
+        }
+    }
 
     #[test]
     fn recompile_once_writes_pages() {
