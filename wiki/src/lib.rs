@@ -34,6 +34,8 @@ pub enum WikiError {
     Watch(String),
     #[error("serve failed: {0}")]
     Serve(String),
+    #[error("{0}")]
+    Setup(String),
 }
 
 pub struct CompileOptions {
