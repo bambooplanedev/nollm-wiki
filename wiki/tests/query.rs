@@ -699,3 +699,19 @@ fn weak_lines_are_cut_response_wide() {
     let names: Vec<String> = symbol_lines(&hits).into_iter().map(|l| l.3).collect();
     assert_eq!(names, ["zebra_quokka"]);
 }
+
+#[test]
+fn whole_name_outranks_an_earlier_word_match() {
+    // `resolve_link` matches `resolve` by a word and sits first in the file;
+    // the method named exactly `resolve` must still be the first line.
+    let (_d, w) = code_fixture(&[(
+        "src/g.rs",
+        "fn resolve_link() {}\npub struct G;\nimpl G {\n    fn resolve(&self) {}\n}\n",
+    )]);
+    let lines = symbol_lines(&w.search("resolve", None, 10));
+    assert_eq!(
+        lines.first(),
+        Some(&("src/g.rs".to_string(), 4, 4, "G::resolve".to_string())),
+        "{lines:?}"
+    );
+}

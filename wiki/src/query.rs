@@ -74,9 +74,11 @@ pub struct SymbolLine {
 /// built once in `Wiki::load`.
 #[derive(Default)]
 struct SymbolFields {
-    /// Whole item names, plus the words of non-method names.
-    names: BTreeSet<String>,
-    /// Words of method names not already in `names`.
+    /// Whole item names, lowercased.
+    whole: BTreeSet<String>,
+    /// Words of non-method names, none of them in `whole`.
+    words: BTreeSet<String>,
+    /// Words of method names, none of them in `whole` or `words`.
     method_words: BTreeSet<String>,
     /// Words of the items' docs.
     doc_words: Vec<String>,
@@ -226,13 +228,16 @@ impl Wiki {
     // better / 6 worse; 1.5 moved fewer definer queries, 2.5 added a worse row.
     const W_DEFINED: f64 = 2.0;
     // Page fields from code items (`symbol_fields`), private and method
-    // items included, test and module items never. Tuned on the symbol
-    // eval's `tune` split (2026-10-23): method words at 2.0 moved two
-    // method queries to file@1; `W_SYMBOL` sits above them so a method word
-    // stays below a whole name. `W_SYMBOL_DOC` at 1.0 cost a title query.
-    const W_SYMBOL: f64 = 2.5;
+    // items included, test and module items never. A whole item name
+    // scores `W_SYMBOL` in place of `W_DEFINED`, above every word weight
+    // plus the doc weight (checked at compile time below), so a page naming
+    // the query beats a page whose names merely contain it. Tuned on the
+    // symbol eval's `tune` split (2026-10-23): `W_SYMBOL_DOC` 0.5 → 0.75
+    // moved a doc query to file@1; 1.0 cost a title query.
+    const W_SYMBOL: f64 = 3.0;
+    const W_SYMBOL_WORD: f64 = 2.0;
     const W_METHOD_WORD: f64 = 2.0;
-    const W_SYMBOL_DOC: f64 = 0.5;
+    const W_SYMBOL_DOC: f64 = 0.75;
     const W_SUMMARY: f64 = 1.5;
     const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
@@ -379,21 +384,11 @@ impl Wiki {
         terms
     }
 
-    /// An item's whole lowercase name, plus its words unless it is a
-    /// method (method words have their own, lower-weighted field).
-    fn item_name_terms(item: &CodeItem) -> BTreeSet<String> {
-        let mut terms = BTreeSet::from([item.name.to_lowercase()]);
-        if item.kind != CodeItemKind::Method {
-            terms.extend(Self::name_words(&item.name));
-        }
-        terms
-    }
-
-    /// The fields a page earns from its non-test, non-module items. Names
-    /// lose the page's own title words and terms already in its
-    /// `defined_terms`, and a word equal to any page's title word unless it
-    /// is the item's whole name (`summary_suffix` stole the title query
-    /// `Summary`). Method words take the same skips and lose the names.
+    /// The fields a page earns from its non-test, non-module items. Whole
+    /// names lose the page's own title words. Words also lose terms already
+    /// in its `defined_terms` and any page's title word (`summary_suffix`
+    /// stole the title query `Summary`), and each word lands in one field
+    /// only: a whole name, else a free name's word, else a method's word.
     fn symbol_fields(
         title_lower: &str,
         defined_terms: &BTreeSet<String>,
@@ -401,10 +396,10 @@ impl Wiki {
         items: &[CodeItem],
     ) -> SymbolFields {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
-        let keep = |t: &str, whole: &str| {
-            !title_words.contains(&t)
-                && !defined_terms.contains(t)
-                && (t == whole || !all_title_words.contains(t))
+        let keep_word = |w: &String| {
+            !title_words.contains(&w.as_str())
+                && !defined_terms.contains(w)
+                && !all_title_words.contains(w)
         };
         let mut f = SymbolFields::default();
         for item in items
@@ -412,31 +407,32 @@ impl Wiki {
             .filter(|i| !i.test && i.kind != CodeItemKind::Module)
         {
             let whole = item.name.to_lowercase();
-            for t in Self::item_name_terms(item) {
-                if keep(&t, &whole) {
-                    f.names.insert(t);
-                }
+            if !title_words.contains(&whole.as_str()) {
+                f.whole.insert(whole);
             }
+            let words = Self::name_words(&item.name).into_iter().filter(keep_word);
             if item.kind == CodeItemKind::Method {
-                for w in Self::name_words(&item.name) {
-                    if keep(&w, "") {
-                        f.method_words.insert(w);
-                    }
-                }
+                f.method_words.extend(words);
+            } else {
+                f.words.extend(words);
             }
             if let Some(doc) = &item.doc {
                 f.doc_words.extend(Self::field_words(&doc.to_lowercase()));
             }
         }
-        f.method_words.retain(|w| !f.names.contains(w));
+        f.words.retain(|w| !f.whole.contains(w));
+        f.method_words
+            .retain(|w| !f.whole.contains(w) && !f.words.contains(w));
         f
     }
 
     // Item scores for the symbol lines under a hit: per query token,
-    // `idf · (name or method word) + idf · doc`, test items scaled down.
-    // A method word counts like a free name's word (tuned: 1.0 left two
-    // method queries' symbol below the third line).
-    const IW_NAME: f64 = 2.0;
+    // `idf · (whole name or name word) + idf · doc`, test items scaled down.
+    // A whole-name match outranks any word match, even one whose item also
+    // matches by doc (checked at compile time below): at 2.5, graph.rs
+    // `resolve_link`'s word plus its doc put it above the method `resolve`.
+    const IW_WHOLE: f64 = 3.5;
+    const IW_NAME_WORD: f64 = 2.0;
     const IW_METHOD_WORD: f64 = 2.0;
     const IW_DOC: f64 = 1.0;
     const TEST_ITEM_FACTOR: f64 = 0.5;
@@ -447,11 +443,12 @@ impl Wiki {
     const MIN_REL_SYMBOL: f64 = 0.3;
 
     fn item_score(item: &CodeItem, tokens: &[String], idf: &[f64]) -> f64 {
-        let names = Self::item_name_terms(item);
-        let words = if item.kind == CodeItemKind::Method {
-            Self::name_words(&item.name)
+        let whole = item.name.to_lowercase();
+        let words = Self::name_words(&item.name);
+        let w_word = if item.kind == CodeItemKind::Method {
+            Self::IW_METHOD_WORD
         } else {
-            Vec::new()
+            Self::IW_NAME_WORD
         };
         let doc = item
             .doc
@@ -462,10 +459,10 @@ impl Wiki {
             .iter()
             .zip(idf)
             .map(|(t, &idf_t)| {
-                let name = if names.contains(t) {
-                    Self::IW_NAME
+                let name = if *t == whole {
+                    Self::IW_WHOLE
                 } else if words.contains(t) {
-                    Self::IW_METHOD_WORD
+                    w_word
                 } else {
                     0.0
                 };
@@ -623,12 +620,15 @@ impl Wiki {
             }
             // Whole-term equality, never `contains`: `to` must not hit
             // `token_estimate`, `wiki` must not hit `WikiError`.
-            if defined_terms.contains(t) {
+            // A whole item name scores `W_SYMBOL` instead of `W_DEFINED`.
+            if symbols.is_some_and(|f| f.whole.contains(t)) {
+                weight += Self::W_SYMBOL;
+            } else if defined_terms.contains(t) {
                 weight += Self::W_DEFINED;
             }
             if let Some(f) = symbols {
-                if f.names.contains(t) {
-                    weight += Self::W_SYMBOL;
+                if f.words.contains(t) {
+                    weight += Self::W_SYMBOL_WORD;
                 }
                 if f.method_words.contains(t) {
                     weight += Self::W_METHOD_WORD;
@@ -697,7 +697,8 @@ impl Wiki {
     /// Empty/punctuation-only queries return no hits.
     ///
     /// Code pages also score their items' names, method words and docs
-    /// (`symbol_fields`, weights `W_SYMBOL`/`W_METHOD_WORD`/`W_SYMBOL_DOC`),
+    /// (`symbol_fields`, weights `W_SYMBOL`, `W_SYMBOL_WORD`, `W_METHOD_WORD`,
+    /// `W_SYMBOL_DOC`),
     /// and each returned code page carries its best items as `symbols`
     /// (`expand`), with the same `idf`.
     pub fn search(&self, q: &str, kind: Option<&KindFilter>, limit: usize) -> Vec<Hit> {
@@ -968,6 +969,16 @@ impl Wiki {
     }
 }
 
+// A whole-name match must outrank any word match, on the page and on the
+// line, even when the word's side also matches by doc.
+const _: () = assert!(
+    Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
+        && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
+        && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC
+        && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
+        && Wiki::IW_WHOLE > Wiki::IW_METHOD_WORD + Wiki::IW_DOC
+);
+
 #[cfg(test)]
 mod tests {
     use super::Wiki;
@@ -1113,16 +1124,16 @@ mod tests {
             &items,
         );
         assert_eq!(
-            f.names,
+            f.whole,
             set(&[
                 "cache_store",
                 "needs_render",
                 "render",
-                "suffix",
                 "suffix_of",
                 "summary_suffix"
             ])
         );
+        assert_eq!(f.words, set(&["suffix"]));
         assert_eq!(f.method_words, set(&["needs", "of"]));
         assert_eq!(f.doc_words, ["writes", "atomically"]);
     }
