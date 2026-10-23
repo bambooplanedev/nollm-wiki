@@ -338,7 +338,11 @@ Claude Code and pi use the wiki on their own: the MCP server (`wiki serve
   listed in `.git/info/exclude`.
 - Without `--scope`, setup asks on a terminal and fails without one.
 - `--remove` deletes exactly what setup wrote. Ignore lines and `.wiki/` stay.
-- `--hook` is accepted; the hook itself is installed by a later step.
+- `--hook` — also adds the wiki's code lines for each prompt before the model
+  runs. Claude Code gets a `UserPromptSubmit` entry (`wiki hint --claude-hook`)
+  in `.claude/settings.json` (`settings.local.json` with `--scope local`);
+  pi gets `.pi/extensions/wiki-hint/index.ts`. The hook is silent when there
+  is no wiki, it cannot be read or nothing matches, and never blocks a prompt.
 
 Safe to run twice. An entry or file at the same place with other content is
 left alone and reported; setup does the rest and exits 1. pi loads project

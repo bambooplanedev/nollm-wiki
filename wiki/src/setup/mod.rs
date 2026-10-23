@@ -12,6 +12,8 @@ use std::process::Command;
 
 const SKILL: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/wiki-navigation";
+const PI_HOOK: &str = include_str!("wiki-hint.ts");
+const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
@@ -258,6 +260,38 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         };
         if r.item(&format!("{} skill for {name}", file.display()), pi, res)? {
             ignore.push(format!("/{}/", skill.display()));
+        }
+        // Hook
+        if opts.hook {
+            if pi {
+                let content = PI_HOOK.replace("<cmd>", &cmd);
+                let path = root.join(PI_HOOK_FILE);
+                let res = if opts.remove {
+                    edit::remove_file(root, &path, &content)
+                } else {
+                    edit::write_file(&path, &content)
+                };
+                if r.item(&format!("{PI_HOOK_FILE} hook for pi"), true, res)? {
+                    ignore.push("/.pi/extensions/wiki-hint/".into());
+                }
+            } else {
+                let file = if local {
+                    ".claude/settings.local.json"
+                } else {
+                    ".claude/settings.json"
+                };
+                let item = json!({"hooks": [{"type": "command", "command": format!("{cmd} hint --claude-hook")}]});
+                let path = root.join(file);
+                let parents = ["hooks", "UserPromptSubmit"];
+                let res = if opts.remove {
+                    edit::remove_item(root, &path, &parents, &item)
+                } else {
+                    edit::append_item(&path, &parents, &item)
+                };
+                if r.item(&format!("{file} prompt hook"), false, res)? && local {
+                    ignore.push(format!("/{file}"));
+                }
+            }
         }
     }
 

@@ -321,3 +321,71 @@ fn setup_local_reports_a_failed_claude_add() {
     );
     assert!(!o.contains("wrote Claude Code"));
 }
+
+/// Pretty-printed as setup writes JSON, so a round trip is byte-equal.
+const ECHO_HOOK: &str = "{\n  \"hooks\": {\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo hi\"\n          }\n        ]\n      }\n    ]\n  }\n}\n";
+
+fn hook_item() -> serde_json::Value {
+    serde_json::json!({"hooks": [{"type": "command", "command": "wiki hint --claude-hook"}]})
+}
+
+fn prompt_hooks(p: &Path) -> serde_json::Value {
+    let v: serde_json::Value = serde_json::from_str(&read(p)).unwrap();
+    v["hooks"]["UserPromptSubmit"].clone()
+}
+
+#[test]
+fn setup_hook_repo_adds_claude_hook_and_pi_extension() {
+    let f = fixture(true, true);
+    let r = f.root();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
+    f.setup(&["--agent", "claude,pi", "--scope", "repo", "--hook"])
+        .success();
+    let echo = serde_json::json!({"type": "command", "command": "echo hi"});
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([{"hooks": [echo]}, hook_item()])
+    );
+    let ext = read(&r.join(".pi/extensions/wiki-hint/index.ts"));
+    assert!(ext.contains("\"hint\"") && ext.contains("before_agent_start"));
+    assert!(ext.contains("execFileSync(\"wiki\""));
+}
+
+#[test]
+fn setup_hook_local_uses_settings_local() {
+    let f = fixture(true, true);
+    let r = f.root();
+    f.setup(&["--agent", "claude,pi", "--scope", "local", "--hook"])
+        .success();
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.local.json")),
+        serde_json::json!([hook_item()])
+    );
+    assert!(!r.join(".claude/settings.json").exists());
+    let ex = read(&r.join(".git/info/exclude"));
+    for l in ["/.pi/extensions/wiki-hint/", "/.claude/settings.local.json"] {
+        assert!(ex.lines().any(|x| x == l), "{l} missing in {ex}");
+    }
+}
+
+#[test]
+fn setup_hook_remove_keeps_other_hooks() {
+    let f = fixture(true, true);
+    let r = f.root();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
+    let args = ["--agent", "claude,pi", "--scope", "repo", "--hook"];
+    f.setup(&args).success();
+    f.setup(&[
+        "--remove",
+        "--agent",
+        "claude,pi",
+        "--scope",
+        "repo",
+        "--hook",
+    ])
+    .success();
+    assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
+    assert!(!r.join(".pi/extensions").exists());
+}
