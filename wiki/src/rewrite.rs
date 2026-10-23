@@ -42,7 +42,7 @@ fn blank_into(out: &mut String, line: &str) {
 /// shows an example wiki page puts `## Body` and `[[slug|Name]]` inside a
 /// fence; scanned raw, those examples masquerade as a real heading or link.
 /// Callers scan the mask and slice the original.
-fn mask_fenced_code(text: &str) -> String {
+pub(crate) fn mask_fenced_code(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut open: Option<(char, usize)> = None;
     for line in text.split_inclusive('\n') {

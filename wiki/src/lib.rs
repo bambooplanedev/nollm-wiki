@@ -9,6 +9,7 @@ pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
 pub mod model;
+pub mod outline;
 pub mod query;
 pub mod rewrite;
 pub mod serve;

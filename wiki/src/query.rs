@@ -11,30 +11,30 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Deserialize)]
-struct Entry {
-    id: String,
-    title: String,
-    kind: String,
-    aliases: Vec<String>,
+pub(crate) struct Entry {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) aliases: Vec<String>,
     /// Source path relative to the compile input.
     #[serde(default)]
-    path: String,
-    summary: Option<String>,
-    pagerank: f64,
-    token_estimate: usize,
-    neighbors_out: Vec<String>,
-    neighbors_in: Vec<String>,
+    pub(crate) path: String,
+    pub(crate) summary: Option<String>,
+    pub(crate) pagerank: f64,
+    pub(crate) token_estimate: usize,
+    pub(crate) neighbors_out: Vec<String>,
+    pub(crate) neighbors_in: Vec<String>,
     /// Top-level definition names (`ManifestEntry::defined`), minus those
     /// only test items carry (dropped in `Wiki::load`). Defaulted so
     /// an `index.json` written by a compiler older than this field still
     /// loads: `serve` reads wikis it did not compile.
     #[serde(default)]
-    defined: Vec<String>,
+    pub(crate) defined: Vec<String>,
     /// Method names (`ManifestEntry::methods`), minus test-only ones like
     /// `defined`. Defaulted for the same reason as `defined`: an older
     /// `index.json` has no such key.
     #[serde(default)]
-    methods: Vec<String>,
+    pub(crate) methods: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +227,11 @@ impl Wiki {
     /// A page's rendered Markdown body by id, as it was when loaded.
     pub fn page(&self, id: &str) -> Option<String> {
         self.bodies.get(id).cloned()
+    }
+
+    /// A page's index entry by exact id.
+    pub(crate) fn entry(&self, id: &str) -> Option<&Entry> {
+        self.entries.get(id)
     }
 
     /// Whether `id` is a page in the loaded index. Used by the MCP server to
