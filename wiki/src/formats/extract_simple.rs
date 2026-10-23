@@ -316,6 +316,14 @@ mod tests {
     }
 
     #[test]
+    fn consecutive_go_doc_lines_join_into_one_doc() {
+        let src = "package p\n\n// Run starts the\n// server. Then more.\nfunc Run() {}\n";
+        let e = CodeExtractor.extract("p.go", src);
+        assert_eq!(item_lines(&e.items), vec!["3-5 fn Run pub"]);
+        assert_eq!(e.items[0].doc.as_deref(), Some("Run starts the server."));
+    }
+
+    #[test]
     fn go_directives_stay_in_the_range_but_out_of_the_doc() {
         let src = "package p\n\n// Gen makes things.\n//go:generate stringer -type=X\n//nolint\nfunc Gen() {}\n\n//go:noinline\n//lint:ignore U1000 kept\nfunc fast() {}\n\n//export Hook\n//line hook.go:1\nfunc Hook() {}\n";
         let e = CodeExtractor.extract("p.go", src);

@@ -881,6 +881,21 @@ mod tests {
     }
 
     #[test]
+    fn a_multi_line_doxygen_block_attaches_and_a_plain_block_does_not() {
+        let src = "/**\n * Applies an order\n * to the book. More text.\n */\nvoid apply(int o);\n/* plain block */\nvoid reset();\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-5 fn apply pub", "7-7 fn reset pub"]
+        );
+        assert_eq!(
+            e.items[0].doc.as_deref(),
+            Some("Applies an order to the book.")
+        );
+        assert_eq!(e.items[1].doc, None);
+    }
+
+    #[test]
     fn a_trailing_member_doc_never_documents_the_next_item() {
         let src = "class Book {\n  int size_; ///< Number of orders.\n  void apply(int o);\n  int count; //!< Count.\n  /** Resets everything. */\n  void reset();\n  int x;\n  ///< The x.\n  void clear();\n};\n";
         let e = CodeExtractor.extract("book.h", src);
