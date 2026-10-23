@@ -310,3 +310,36 @@ fn full_over_budget_doc_truncates_on_a_line() {
     assert!(page.starts_with(&format!("{kept}\n")));
     assert!(token_estimate(&t) <= 30, "{t}");
 }
+
+#[test]
+fn truncating_a_huge_doc_is_the_longest_whole_line_prefix() {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    fs::create_dir_all(&input).unwrap();
+    let lines: Vec<String> = (0..20_000).map(|i| format!("line number {i}\n")).collect();
+    let body = lines.concat();
+    fs::write(input.join("big.md"), format!("# Big\n\n{body}")).unwrap();
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&out).unwrap();
+    let page = w.page("big").unwrap();
+    let t = w.page_text("big", true, Some(50)).unwrap();
+    let (kept, marker) = t.trim_end().rsplit_once('\n').unwrap();
+    assert!(token_estimate(&t) <= 50, "{t}");
+    assert!(page.starts_with(&format!("{kept}\n")));
+    let b = token_estimate(&format!("{kept}\n"));
+    assert_eq!(
+        marker,
+        format!("… truncated at ~{b} of ~{} tokens", token_estimate(&page))
+    );
+    // One more line would not fit.
+    let more = page
+        .split_inclusive('\n')
+        .nth(kept.lines().count())
+        .unwrap();
+    let longer = format!("{kept}\n{more}");
+    let m = format!(
+        "… truncated at ~{} of ~99999 tokens\n",
+        token_estimate(&longer)
+    );
+    assert!(token_estimate(&(longer + &m)) > 50);
+}

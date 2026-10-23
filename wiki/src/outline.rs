@@ -111,17 +111,24 @@ impl Wiki {
                 room -= 1;
             }
         }
-        let lines: Vec<&str> = page.split_inclusive('\n').collect();
-        let cut = |k: usize| {
-            let kept = lines[..k].concat();
-            let b = token_estimate(&kept);
-            kept + &format!("… truncated at ~{b} of ~{n} tokens\n")
+        let marker = |chars: usize| {
+            format!(
+                "… truncated at ~{} of ~{n} tokens\n",
+                chars / 4 // token_estimate of the kept prefix
+            )
         };
-        let k = (0..=lines.len())
-            .rev()
-            .find(|&k| token_estimate(&cut(k)) <= max)
-            .unwrap_or(0);
-        Some(cut(k))
+        // One forward pass over a running char count. The marker's digits make
+        // fitting non-monotonic, so the last prefix that fits wins.
+        let (mut chars, mut end) = (0, 0);
+        let (mut best_chars, mut best_end) = (0, 0);
+        for line in page.split_inclusive('\n') {
+            chars += line.chars().count();
+            end += line.len();
+            if (chars + marker(chars).chars().count()) / 4 <= max {
+                (best_chars, best_end) = (chars, end);
+            }
+        }
+        Some(page[..best_end].to_string() + &marker(best_chars))
     }
 }
 
