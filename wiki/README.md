@@ -347,10 +347,10 @@ passes the flag on purpose):
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
 `wiki://index` (`index.json`) and `wiki://llms.txt`.
 
-**Freshness:** the server checks `index.json`'s fingerprint before each
-request and reloads if the wiki was recompiled — no restart needed. If a
-reload fails (e.g. mid-compile), the previous snapshot keeps serving and
-the reload is retried on the next request.
+**Freshness:** without `--source`, the server checks `index.json`'s
+fingerprint before each request and reloads if the wiki was recompiled — no
+restart needed. If a reload fails (e.g. mid-compile), the previous snapshot
+keeps serving and the reload is retried on the next request.
 
 **With `--source <project>`** the server compiles the project itself. An
 existing wiki is served at once while the compile runs in the background; with
