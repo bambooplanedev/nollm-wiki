@@ -75,6 +75,17 @@ fn search_finds_by_name_and_body() {
 }
 
 #[test]
+fn page_is_served_from_the_loaded_snapshot() {
+    let dir = build();
+    let out = dir.path().join("out");
+    let w = Wiki::load(&out).unwrap();
+    let original = w.page("beta").unwrap();
+    fs::write(out.join("beta.md"), "changed").unwrap();
+    assert_eq!(w.page("beta").unwrap(), original);
+    assert!(w.search("things", None, 10).iter().any(|h| h.id == "beta"));
+}
+
+#[test]
 fn neighbors_pack_includes_target_first_and_respects_max_nodes() {
     let dir = build();
     let w = Wiki::load(&dir.path().join("out")).unwrap();

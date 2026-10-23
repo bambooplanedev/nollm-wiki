@@ -8,7 +8,7 @@
 use crate::model::SourceKind;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Deserialize)]
 struct Entry {
@@ -78,31 +78,38 @@ struct Candidate<'a> {
 }
 
 pub struct Wiki {
-    dir: PathBuf,
     entries: BTreeMap<String, Entry>,
+    /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`
+    /// is a snapshot: later changes to the files on disk do not reach it.
+    bodies: BTreeMap<String, String>,
 }
 
 impl Wiki {
     /// Load a compiled output directory: reads `index.json` for metadata +
-    /// adjacency; page bodies are read on demand from `<id>.md`.
+    /// adjacency and reads every page body from `<id>.md` once; a page whose
+    /// file is missing has no body.
     pub fn load(dir: &Path) -> Result<Wiki, std::io::Error> {
         let text = std::fs::read_to_string(dir.join("index.json"))?;
         let index: IndexFile = serde_json::from_str(&text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let entries = index
+        let entries: BTreeMap<String, Entry> = index
             .entries
             .into_iter()
             .map(|e| (e.id.clone(), e))
             .collect();
-        Ok(Wiki {
-            dir: dir.to_path_buf(),
-            entries,
-        })
+        let bodies = entries
+            .keys()
+            .filter_map(|id| {
+                let body = std::fs::read_to_string(dir.join(format!("{id}.md"))).ok()?;
+                Some((id.clone(), body))
+            })
+            .collect();
+        Ok(Wiki { entries, bodies })
     }
 
-    /// Read a page's rendered Markdown body by id.
+    /// A page's rendered Markdown body by id, as it was when loaded.
     pub fn page(&self, id: &str) -> Option<String> {
-        std::fs::read_to_string(self.dir.join(format!("{id}.md"))).ok()
+        self.bodies.get(id).cloned()
     }
 
     /// Whether `id` is a page in the loaded index. Used by the MCP server to
