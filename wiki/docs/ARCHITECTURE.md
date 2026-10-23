@@ -756,8 +756,9 @@ functions and methods, types (`type` aliases included, in every language),
 Rust `mod`s, and top-level values — Rust `const`/`static`, Python module
 assignments, C++ namespace-scope variables, Go package-level `const`/`var`
 (one item per name; a spec in a `const ( … )` group has its own lines and
-doc), and JS/TS top-level variables that hold no function. Values are
-`@item`-only, so `## Exports`, `defined` and `methods` never see them.
+doc), and JS/TS top-level variables that hold no function. C++, Go and JS/TS
+values are `@item`-only, so `## Exports`, `defined` and `methods` never see
+them; Rust `const`/`static` and Python module assignments are `@def`s.
 Fields, variants, associated consts and types, impl headers and
 function-local definitions are not items. An item's range climbs from its
 signature node over the contiguous leads directly above it

@@ -895,6 +895,14 @@ mod tests {
     }
 
     #[test]
+    fn two_leads_on_one_line_keep_the_doc_above() {
+        let src = "/// Packed.\n#[derive(Debug)] #[repr(C)]\npub struct P;\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(item_lines(&e.items), vec!["1-3 type P pub"]);
+        assert_eq!(e.items[0].doc.as_deref(), Some("Packed."));
+    }
+
+    #[test]
     fn items_after_a_mid_file_test_module_keep_their_original_lines() {
         let src = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    pub fn helper() {}\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n";
         let e = CodeExtractor.extract("m.rs", src);

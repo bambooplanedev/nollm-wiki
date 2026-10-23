@@ -856,6 +856,9 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 /// pointer/reference wrapper a member returning `Level*` or `Level&` puts in
 /// the way. A JS/TS `const f = () => …` is a function through its value.
 ///
+/// A `declaration` sharing several declarators (`int x, f();`) is judged by
+/// its first, so it is a value there though a later declarator is a function.
+///
 /// Shared by `methods` and item kinds. The JS/TS/Go kinds never arrive as a
 /// kept member `@def`, so they leave `methods` as it was.
 pub(crate) fn is_function(def: Node) -> bool {
@@ -966,15 +969,30 @@ fn code_item(
     let mut first = top;
     let mut docs = Vec::new();
     while let Some(lead) = first.prev_named_sibling() {
-        if last_row(lead) + 1 < first.start_position().row || !opens_its_line(lead, text) {
+        if last_row(lead) + 1 < first.start_position().row {
             break;
         }
-        match (spec.item_lead)(lead, text) {
-            Lead::Doc(d) => docs.push(d),
-            Lead::Attr => {}
-            Lead::Stop => break,
+        // A lead that trails other nodes on its line (`#[a] #[b]`) is taken
+        // with them only when they are all leads and the first opens the line.
+        let mut group = vec![lead];
+        while !opens_its_line(group[group.len() - 1], text) {
+            let head = group[group.len() - 1];
+            match head.prev_named_sibling() {
+                Some(p) if last_row(p) == head.start_position().row => group.push(p),
+                _ => break,
+            }
         }
-        first = lead;
+        let leads: Vec<Lead> = group.iter().map(|n| (spec.item_lead)(*n, text)).collect();
+        if !opens_its_line(group[group.len() - 1], text)
+            || leads.iter().any(|l| matches!(l, Lead::Stop))
+        {
+            break;
+        }
+        docs.extend(leads.into_iter().filter_map(|l| match l {
+            Lead::Doc(d) => Some(d),
+            _ => None,
+        }));
+        first = group[group.len() - 1];
     }
     docs.reverse();
     let raw_doc = if docs.is_empty() {

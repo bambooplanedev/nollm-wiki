@@ -367,6 +367,8 @@ pub(crate) fn is_under(path: &Path, dir: &Path) -> bool {
 /// Base names (case-insensitive) reserved for manifest artifacts written
 /// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
 /// (with `--emit-json`) `graph.json`.
+/// `items` is not reserved: a page with id `items` writes `items.md`, which
+/// does not collide with `items.json`.
 const RESERVED_MANIFEST_NAMES: [&str; 4] = ["index", "llms", "agents", "graph"];
 
 fn is_reserved_manifest_name(id: &str) -> bool {
