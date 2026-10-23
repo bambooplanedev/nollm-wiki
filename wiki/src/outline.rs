@@ -6,6 +6,7 @@
 //! into text with some categories cut and a cap on item lines, which is how a
 //! token budget shrinks it.
 
+use crate::manifest::token_estimate;
 use crate::model::{CodeItem, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
@@ -54,14 +55,102 @@ impl Keep {
         imports: true,
         lines: usize::MAX,
     };
+
+    /// The items `render` shows, in order: the budget's counts read them here
+    /// too, so they always describe what was shown.
+    fn items<'a>(&self, items: &'a [CodeItem]) -> impl Iterator<Item = &'a CodeItem> {
+        let tests = self.tests;
+        items
+            .iter()
+            .filter(move |i| tests || !i.test)
+            .take(self.lines)
+    }
 }
 
 impl Wiki {
-    /// The outline of page `id`, or `None` when there is no such page.
-    /// `_max_tokens` is not applied yet: the outline is always whole.
-    pub fn outline(&self, id: &str, _max_tokens: Option<usize>) -> Option<String> {
-        Some(render(&parse(self, id)?, &Keep::ALL))
+    /// The outline of page `id`, or `None` when there is no such page. Over
+    /// `max_tokens`, test items, docs and imports are cut in that order, then
+    /// item lines stop where the budget does; a last `…` line says what was
+    /// cut. The header and that line are kept even when they do not fit.
+    pub fn outline(&self, id: &str, max_tokens: Option<usize>) -> Option<String> {
+        let o = parse(self, id)?;
+        let full = render(&o, &Keep::ALL);
+        Some(match max_tokens {
+            Some(max) if token_estimate(&full) > max => budget(&o, full, max),
+            _ => full,
+        })
     }
+}
+
+/// `o` cut down to `max` tokens; `full` is its whole outline, which does not fit.
+fn budget(o: &Outline, full: String, max: usize) -> String {
+    let fits = |text: &str| token_estimate(text) <= max;
+    let t = token_estimate(&full);
+    let marker = |dropped: &[String], more: Option<String>| {
+        let mut parts: Vec<String> = Vec::new();
+        if !dropped.is_empty() {
+            parts.push(format!("dropped: {}", dropped.join(", ")));
+        }
+        parts.extend(more);
+        format!("… {} — pass max_tokens: {t} for all\n", parts.join("; "))
+    };
+    let items = match o.body {
+        Body::Items(items) => items,
+        _ => &[],
+    };
+    let (mut keep, mut dropped, mut text) = (Keep::ALL, Vec::new(), full);
+    for what in ["test items", "docs", "imports"] {
+        // How many things the cut removes; a page of only tests keeps them.
+        let n = match what {
+            "test items" => {
+                let n = items.iter().filter(|i| i.test).count();
+                if n == items.len() {
+                    0
+                } else {
+                    keep.tests = false;
+                    n
+                }
+            }
+            "docs" => {
+                keep.docs = false;
+                keep.items(items).filter(|i| i.doc.is_some()).count()
+            }
+            _ => {
+                keep.imports = false;
+                o.imports.len()
+            }
+        };
+        if n > 0 {
+            dropped.push(format!("{n} {what}"));
+            text = render(o, &keep) + &marker(&dropped, None);
+            if fits(&text) {
+                return text;
+            }
+        }
+    }
+    // The ceiling: the first lines that fit with a marker naming the rest.
+    // `None` is a heading, which has no line of its own to name.
+    let starts: Vec<Option<usize>> = match &o.body {
+        Body::Items(_) => keep.items(items).map(|i| Some(i.start_line)).collect(),
+        Body::Headings(h) => vec![None; h.len()],
+        _ => return text,
+    };
+    if starts.is_empty() {
+        return text;
+    }
+    let ceiling = |n: usize| {
+        let r = starts.len() - n;
+        let more = match starts[n] {
+            Some(line) => format!("{r} more items from line {line}"),
+            None => format!("{r} more headings"),
+        };
+        render(o, &Keep { lines: n, ..keep }) + &marker(&dropped, Some(more))
+    };
+    // Each line makes the text longer, so the counts that fit are a prefix.
+    let n = (1..starts.len())
+        .collect::<Vec<_>>()
+        .partition_point(|&n| fits(&ceiling(n)));
+    ceiling(n)
 }
 
 /// Reads page `id`'s entry, items and rendered markdown into an `Outline`.
@@ -138,11 +227,7 @@ fn render(o: &Outline, keep: &Keep) -> String {
         Body::NoItems => out.push(NO_ITEMS.into()),
         Body::Items(items) => {
             let mut run: Option<&str> = None;
-            for it in items
-                .iter()
-                .filter(|i| keep.tests || !i.test)
-                .take(keep.lines)
-            {
+            for it in keep.items(items) {
                 let owner = it.owner.as_deref();
                 if owner != run {
                     out.extend(owner.map(|o| format!("{o}:")));
@@ -170,7 +255,8 @@ fn render(o: &Outline, keep: &Keep) -> String {
         }
         Body::Headings(headings) => {
             let top = headings.iter().map(|(l, _)| *l).min().unwrap_or(1);
-            if !headings.is_empty() {
+            // A ceiling of no headings leaves no label either.
+            if !headings.is_empty() && keep.lines > 0 {
                 out.push("headings:".into());
             }
             out.extend(

@@ -2,6 +2,7 @@
 
 use std::fs;
 use tempfile::tempdir;
+use wiki::manifest::token_estimate;
 use wiki::query::Wiki;
 use wiki::{compile, CompileOptions};
 
@@ -25,11 +26,32 @@ mod tests {
 }
 ";
 
+/// `src/big.rs`: an import, 30 documented fns, 30 private fns, then a test
+/// module of 30 tests. Line 2 is `f0`'s doc.
+fn big_rs() -> String {
+    let mut s = "use std::fmt;\n".to_string();
+    for i in 0..30 {
+        s += &format!("/// Doc number {i} explains it.\npub fn f{i}() {{}}\n");
+    }
+    for i in 0..30 {
+        s += &format!("fn p{i}() {{}}\n");
+    }
+    s + "#[cfg(test)] mod tests {\n" + &tests_30() + "}\n"
+}
+
+fn tests_30() -> String {
+    let tests: Vec<String> = (0..30).map(|i| format!("#[test] fn t{i}() {{}}")).collect();
+    tests.join("\n") + "\n"
+}
+
 /// Compiles the fixture into `<dir>/out` and loads it.
 fn fixture() -> (tempfile::TempDir, Wiki) {
     let dir = tempdir().unwrap();
     let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    let (big, all_tests) = (big_rs(), tests_30());
     let files = [
+        ("src/big.rs", big.as_str()),
+        ("tests/all_tests.rs", all_tests.as_str()),
         ("src/lib.rs", LIB_RS),
         (
             "include/book.h",
@@ -150,4 +172,110 @@ fn page_without_items_json_says_no_items() {
 fn unknown_id_is_none() {
     let (_d, w) = fixture();
     assert_eq!(w.outline("nope", None), None);
+}
+
+/// `outline(id, Some(b))` for every `b` from 40 up to the full outline's
+/// tokens, in steps of 20.
+fn sweep(w: &Wiki, id: &str) -> Vec<(usize, String)> {
+    let full = token_estimate(&outline(w, id));
+    (40..=full)
+        .step_by(20)
+        .map(|b| (b, w.outline(id, Some(b)).unwrap()))
+        .collect()
+}
+
+/// The `…` marker line of a budgeted outline, if it has one.
+fn marker(text: &str) -> Option<&str> {
+    text.lines().last().filter(|l| l.starts_with("… "))
+}
+
+/// The header lines of a page with imports: every line before `imports:`.
+fn header(full: &str) -> String {
+    full.lines()
+        .take_while(|l| *l != "imports:")
+        .flat_map(|l| [l, "\n"])
+        .collect()
+}
+
+#[test]
+fn budget_sweep_respects_ceiling_and_cut_order() {
+    let (_d, w) = fixture();
+    let header = header(&outline(&w, "big"));
+    for (b, text) in sweep(&w, "big") {
+        let floor = marker(&text).is_some() && text.lines().count() == header.lines().count() + 1;
+        assert!(token_estimate(&text) <= b || floor, "{b}: {text}");
+        if let Some(m) = marker(&text) {
+            assert!(!m.contains(" docs") || m.contains(" test items"), "{m}");
+            assert!(!m.contains(" imports") || m.contains(" docs"), "{m}");
+            assert!(
+                !m.contains("more items from line") || m.contains(" imports"),
+                "{m}"
+            );
+        }
+        if text.contains(" [test] ") {
+            assert_eq!(marker(&text), None, "{b}: {text}");
+        }
+    }
+}
+
+#[test]
+fn all_test_page_never_cuts_tests() {
+    let (_d, w) = fixture();
+    let swept = sweep(&w, "all_tests");
+    assert!(
+        swept.iter().any(|(_, t)| marker(t).is_some()),
+        "nothing was cut"
+    );
+    for (_, text) in swept {
+        assert!(
+            !marker(&text).unwrap_or("").contains("test items"),
+            "{text}"
+        );
+    }
+}
+
+#[test]
+fn marker_budget_returns_the_full_outline() {
+    let (_d, w) = fixture();
+    let full = outline(&w, "big");
+    for (_, text) in sweep(&w, "big") {
+        if let Some(m) = marker(&text) {
+            let t = m.split("pass max_tokens: ").nth(1).unwrap();
+            let t: usize = t.strip_suffix(" for all").unwrap().parse().unwrap();
+            assert_eq!(w.outline("big", Some(t)).unwrap(), full);
+        }
+    }
+}
+
+#[test]
+fn tiny_budget_keeps_header_and_marker() {
+    let (_d, w) = fixture();
+    let full = outline(&w, "big");
+    let header = header(&full);
+    assert!(header.starts_with("# Big (big)\n"), "{full}");
+    let t = token_estimate(&full);
+    assert_eq!(
+        w.outline("big", Some(1)).unwrap(),
+        format!(
+            "{header}… dropped: 31 test items, 30 docs, 1 imports; 60 more items from line 2 — pass max_tokens: {t} for all\n"
+        )
+    );
+}
+
+#[test]
+fn no_cut_no_marker() {
+    let (_d, w) = fixture();
+    assert_eq!(w.outline("lib", Some(4000)), w.outline("lib", None));
+}
+
+#[test]
+fn markdown_ceiling_counts_headings() {
+    let (_d, w) = fixture();
+    let full = outline(&w, "guide");
+    let (header, _) = full.split_once("headings:\n").unwrap();
+    let t = token_estimate(&full);
+    assert_eq!(
+        w.outline("guide", Some(1)).unwrap(),
+        format!("{header}… 4 more headings — pass max_tokens: {t} for all\n")
+    );
 }
