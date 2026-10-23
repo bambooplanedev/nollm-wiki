@@ -1019,9 +1019,10 @@ fn tag_filters_a_query_and_combines_with_kind() {
     let (_d, w) = build_tag_corpus();
     let hits = w.search_tagged("quokka", None, Some("project"), Some(50));
     assert_eq!(hits.len(), 13);
-    assert!(hits
-        .iter()
-        .all(|h| h.path.ends_with(".md") && h.path != "other.md"));
+    assert!(hits.iter().all(|h| std::path::Path::new(&h.path)
+        .extension()
+        .is_some_and(|e| e == "md")
+        && h.path != "other.md"));
     let code = KindFilter::parse("code").unwrap();
     assert!(w
         .search_tagged("quokka", Some(&code), Some("project"), None)
