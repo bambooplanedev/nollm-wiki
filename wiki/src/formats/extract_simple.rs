@@ -190,14 +190,30 @@ fn go_placement(def: Node, text: &str) -> Placement {
 }
 
 /// Go's doc convention is the `//` comment lines directly above a declaration.
+/// A directive (`//go:generate`, `//nolint`, `//export F`) sits in the same
+/// place but instructs a tool, so it belongs to the range and not the doc.
 fn go_lead(node: Node, text: &str) -> Lead {
     match text
         .get(node.byte_range())
         .and_then(|t| t.strip_prefix("//"))
     {
+        Some(doc) if node.kind() == "comment" && is_go_directive(doc) => Lead::Attr,
         Some(doc) if node.kind() == "comment" => Lead::Doc(doc.trim().to_string()),
         _ => Lead::Stop,
     }
+}
+
+/// A `//` comment body that is a directive: the named forms, or the general
+/// `//tool:args` shape, which has no space after `//`.
+fn is_go_directive(body: &str) -> bool {
+    let general = body.split_once(':').is_some_and(|(tool, rest)| {
+        let lower_alnum = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit();
+        !tool.is_empty() && tool.chars().all(lower_alnum) && rest.starts_with(lower_alnum)
+    });
+    general
+        || ["go:", "line ", "export ", "extern ", "nolint"]
+            .iter()
+            .any(|p| body.starts_with(p))
 }
 
 #[cfg(test)]
@@ -297,6 +313,19 @@ mod tests {
         let helper = e.items.iter().find(|i| i.name == "helper").unwrap();
         assert_eq!((helper.start_line, helper.end_line), (4, 4));
         assert_eq!(helper.doc, None);
+    }
+
+    #[test]
+    fn go_directives_stay_in_the_range_but_out_of_the_doc() {
+        let src = "package p\n\n// Gen makes things.\n//go:generate stringer -type=X\n//nolint\nfunc Gen() {}\n\n//go:noinline\n//lint:ignore U1000 kept\nfunc fast() {}\n\n//export Hook\n//line hook.go:1\nfunc Hook() {}\n";
+        let e = CodeExtractor.extract("p.go", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["3-6 fn Gen pub", "8-10 fn fast priv", "12-14 fn Hook pub"]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("Gen makes things."));
+        assert_eq!(e.items[1].doc, None);
+        assert_eq!(e.items[2].doc, None);
     }
 
     #[test]
