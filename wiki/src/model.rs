@@ -58,18 +58,17 @@ pub struct Entity {
     /// defined-names design).
     pub defined: Vec<String>,
     /// Names of the page's methods: `ItemKind::Member` items whose node is a
-    /// function (`function_item`, `function_signature_item`,
-    /// `function_definition`) and whose owner is not a trait impl, exactly
-    /// as the `@name` capture reads them — original case, no owner. Sorted,
+    /// function (`code::is_function`) and whose owner is not a trait impl,
+    /// exactly as the `@name` capture reads them — original case, no owner. Sorted,
     /// deduplicated. Empty for non-code pages. Inherent-impl and
     /// trait-declaration methods are in; trait-impl methods
     /// (`Default::default`, `Extractor::extract` on the implementing page)
     /// are out by owner, never by text (see the 2026-09-03 prefix-match and
     /// methods design). Python class methods are included
     /// (`function_definition`). JS/TS/Go pages always carry an empty list:
-    /// their method node kinds aren't in the checked set, a scope limit,
-    /// not a fact about the file. Search matches these whole, never
-    /// word-split.
+    /// their queries match methods only as `@item`s, never as kept member
+    /// `@def`s, so none reaches this list — a scope limit, not a fact about
+    /// the file. Search matches these whole, never word-split.
     pub methods: Vec<String>,
     /// Every definition of a code page, private ones and tests included,
     /// with the lines it spans in the original source file, so an agent can
