@@ -171,6 +171,17 @@ pub(crate) struct NeighborsParams {
     pub full: Option<bool>,
 }
 
+#[derive(Deserialize, rmcp::schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
+pub(crate) struct PageParams {
+    /// The page: its id, its title, or its source path (relative, ./, or absolute).
+    pub id: String,
+    /// Return the whole rendered page instead of the outline.
+    pub full: Option<bool>,
+    /// Token budget (default 4000 for the outline; none for full).
+    pub max_tokens: Option<usize>,
+}
+
 #[derive(Clone)]
 pub(crate) struct WikiServer {
     state: Arc<WikiState>,
@@ -187,7 +198,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `neighbors` afterwards to pull a page's full context."
+        description = "Search the wiki for pages by keyword. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `page` for a module's outline."
     )]
     async fn search(
         &self,
@@ -250,6 +261,29 @@ impl WikiServer {
     }
 
     #[tool(
+        description = "Show a page's outline: one line per code symbol (start-end kind signature) — then read just those lines with your file tool. Docs pages list their headings. full: true returns the whole page."
+    )]
+    async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
+        let full = p.full.unwrap_or(false);
+        let max_tokens = p
+            .max_tokens
+            .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
+        let (wiki, stale) = self.state.snapshot().await;
+        let result = match wiki.resolve_id(&p.id) {
+            Ok(id) => match wiki.page_text(&id, full, max_tokens) {
+                Some(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+                None => CallToolResult::error(vec![ContentBlock::text(
+                    crate::query::unknown_page(&p.id, &[]),
+                )]),
+            },
+            Err(near) => CallToolResult::error(vec![ContentBlock::text(
+                crate::query::unknown_page(&p.id, &near),
+            )]),
+        };
+        with_stale(result, stale.as_deref())
+    }
+
+    #[tool(
         description = "Check wiki health: broken wikilinks and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
@@ -279,11 +313,12 @@ impl ServerHandler for WikiServer {
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Query interface to a compiled wiki. Start with `search` to find \
-                 page ids, then `neighbors` to pull a budgeted context pack around \
-                 a page. Pages are also exposed as resources under wiki://page/<id>. \
-                 Paths in results are relative to the compiled project root; line \
-                 ranges are 1-based and inclusive.",
+                "Query interface to a compiled wiki. `search` finds pages and code \
+                 symbols with path:start-end; `page` gives a module's outline; read \
+                 only those lines with your file tool. `neighbors` packs related \
+                 pages. Paths are relative to the compiled project root; line ranges \
+                 are 1-based and inclusive. Pages are also resources under \
+                 wiki://page/<id>.",
             )
     }
 
