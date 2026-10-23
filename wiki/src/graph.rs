@@ -485,6 +485,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             aliases: vec![],
+            tags: vec![],
             created: String::new(),
             body: body.into(),
             source_path: format!("{id}.txt"),

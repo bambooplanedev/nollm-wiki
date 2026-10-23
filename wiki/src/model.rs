@@ -69,6 +69,7 @@ pub struct Entity {
     pub id: String,
     pub name: String,
     pub aliases: Vec<String>,
+    pub tags: Vec<String>,
     pub created: String,
     pub body: String,
     pub source_path: String,

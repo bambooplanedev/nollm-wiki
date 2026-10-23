@@ -282,6 +282,9 @@ pub fn render_page(
     if !entity.aliases.is_empty() {
         out.push_str(&format!("- aliases: {}\n", entity.aliases.join(", ")));
     }
+    if !entity.tags.is_empty() {
+        out.push_str(&format!("- tags: {}\n", entity.tags.join(", ")));
+    }
     out.push_str(&format!("- kind: {}\n", entity.kind.label()));
     out.push_str(&format!("- source: {}\n", entity.source_path));
     out.push_str(&format!(
@@ -375,6 +378,7 @@ pub(crate) fn render_fingerprint(
         entity.source_path.as_bytes(),
         entity.body.as_bytes(),
         entity.aliases.join(",").as_bytes(),
+        entity.content_hash.as_slice(),
         entity.symbols.join(",").as_bytes(),
         entity.imports.join(",").as_bytes(),
         out_names.join(",").as_bytes(),
@@ -475,6 +479,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             aliases: vec![],
+            tags: vec![],
             created: "2026-01-01".into(),
             body: body.into(),
             source_path: format!("{id}.txt"),
@@ -504,6 +509,28 @@ mod tests {
         assert!(a.contains("## Related") && a.contains("[[beta|Beta]]"));
         assert!(b.contains("## Referenced By") && b.contains("[[alpha|Alpha]]"));
         assert!(a.contains("generated"));
+    }
+
+    #[test]
+    fn metadata_lists_tags_after_aliases() {
+        let mut e = ent("alpha", "Alpha", "body");
+        e.aliases = vec!["x".into()];
+        e.tags = vec!["a".into(), "b/c".into()];
+        let ents = map(vec![e]);
+        let g = build_graph(&ents);
+        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
+        assert!(page.contains("- aliases: x\n- tags: a, b/c\n- kind:"), "{page}");
+    }
+
+    #[test]
+    fn fingerprint_changes_with_content_hash() {
+        let a = ent("alpha", "Alpha", "body");
+        let mut b = a.clone();
+        b.content_hash = [1u8; 32];
+        let ents = map(vec![a.clone()]);
+        let g = build_graph(&ents);
+        let e = &g.edges["alpha"];
+        assert_ne!(render_fingerprint(&a, e, &ents, ""), render_fingerprint(&b, e, &ents, ""));
     }
 
     #[test]

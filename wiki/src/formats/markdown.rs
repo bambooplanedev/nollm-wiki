@@ -1,6 +1,6 @@
-//! Markdown extractor: `---` frontmatter (title, created, description, aliases), first `# H1` as a title fallback, then the body.
+//! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
-use crate::formats::{derive_name_from_path, summarize, Extractor};
+use crate::formats::{derive_name_from_path, normalize_tags, summarize, Extractor};
 use crate::model::{slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
@@ -17,6 +17,7 @@ impl Extractor for MarkdownExtractor {
         let created = fm_get(&fm, "created").unwrap_or_default();
         let description = fm_get(&fm, "description");
         let aliases = fm_list(&fm, "aliases");
+        let tags = normalize_tags(fm_list(&fm, "tags"));
 
         if title.is_none() {
             title = first_h1(body_text);
@@ -29,6 +30,7 @@ impl Extractor for MarkdownExtractor {
             id: slugify(&name),
             name,
             aliases,
+            tags,
             created,
             body,
             source_path: String::new(),
@@ -140,6 +142,14 @@ mod tests {
 
     fn aliases_of(fm: &str) -> Vec<String> {
         MarkdownExtractor.extract("n.md", &format!("---\n{fm}---\nbody\n")).aliases
+    }
+
+    #[test]
+    fn tags_normalized_from_front_matter() {
+        let e = MarkdownExtractor.extract("n.md", "---\ntags:\n  - '#Project/Wiki'\n  - draft\n  - DRAFT\n---\nb\n");
+        assert_eq!(e.tags, vec!["project/wiki", "draft"]);
+        let e = MarkdownExtractor.extract("n.md", "---\ntags: [a, '#b']\n---\nb\n");
+        assert_eq!(e.tags, vec!["a", "b"]);
     }
 
     #[test]

@@ -963,3 +963,16 @@ fn a_path_under_another_root_does_not_resolve() {
         assert!(w.resolve_id(arg).is_err(), "{arg}");
     }
 }
+
+#[test]
+fn index_json_without_tags_still_loads() {
+    let dir = build();
+    let path = dir.path().join("out").join("index.json");
+    let mut v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for e in v["entries"].as_array_mut().unwrap() {
+        e.as_object_mut().unwrap().remove("tags");
+    }
+    fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    assert!(!w.search("beta", None, 10).is_empty());
+}

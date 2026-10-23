@@ -62,6 +62,7 @@ impl Extractor for TextExtractor {
             id: slugify(&name),
             name,
             aliases,
+            tags: Vec::new(),
             created,
             body,
             source_path: String::new(), // filled by Registry

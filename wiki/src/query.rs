@@ -16,6 +16,8 @@ pub(crate) struct Entry {
     pub(crate) title: String,
     pub(crate) kind: String,
     pub(crate) aliases: Vec<String>,
+    #[serde(default)]
+    pub(crate) tags: Vec<String>,
     /// Source path relative to the compile input.
     #[serde(default)]
     pub(crate) path: String,
