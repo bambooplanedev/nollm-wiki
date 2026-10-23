@@ -327,8 +327,24 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
         assert!(!out(&a).contains("not a git repository"), "{}", out(&a));
     }
     let ex = read(&main.join(".git/info/exclude"));
-    assert!(ex.lines().any(|l| l == ".wiki/"), "{ex}");
-    assert!(ex.lines().any(|l| l == "/.pi/mcp.json"), "{ex}");
+    // Worktree top: lines unprefixed. Subdirectory: anchored to the worktree top, so prefixed.
+    for l in [
+        ".wiki/",
+        "/.pi/mcp.json",
+        "/src/.wiki/",
+        "/src/.pi/mcp.json",
+        "/src/.agents/skills/wiki-navigation/",
+    ] {
+        assert!(ex.lines().any(|x| x == l), "{l} missing from {ex}");
+    }
+    // Real git must agree: nothing setup wrote in the subdirectory shows as untracked.
+    let st = std::process::Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=all"])
+        .current_dir(&main)
+        .output()
+        .unwrap();
+    let st = String::from_utf8(st.stdout).unwrap();
+    assert!(st.trim().is_empty(), "setup files not excluded:\n{st}");
 }
 
 #[test]

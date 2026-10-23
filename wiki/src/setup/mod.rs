@@ -94,6 +94,22 @@ fn exclude_file(root: &Path) -> Option<PathBuf> {
         .then(|| root.join(".git/info/exclude"))
 }
 
+/// `root`'s path below the worktree top, with a trailing `/` (empty at the top or without git).
+/// Patterns in `info/exclude` anchor to the top, so a subdirectory's lines need it.
+fn worktree_prefix(root: &Path) -> String {
+    if find_on_path("git").is_none() {
+        return String::new();
+    }
+    Command::new("git")
+        .args(["rev-parse", "--show-prefix"])
+        .current_dir(root)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
 impl Report<'_> {
     fn line(&mut self, s: &str) -> Result<(), WikiError> {
         writeln!(self.out, "{s}")?;
@@ -359,7 +375,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             edit::ensure_line(&root.join(".gitignore"), ".wiki/"),
         )?;
     } else if let Some(exclude) = exclude_file(root) {
+        let prefix = worktree_prefix(root);
         for line in ignore {
+            let line = match (prefix.is_empty(), line.strip_prefix('/')) {
+                (true, _) => line,
+                (false, Some(rest)) => format!("/{prefix}{rest}"),
+                (false, None) => format!("/{prefix}{line}"),
+            };
             r.item(
                 &format!("{line} in .git/info/exclude"),
                 false,
