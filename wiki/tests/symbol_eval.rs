@@ -421,7 +421,7 @@ const CASES: &[Case] = &[
         false,
     ),
     case(
-        "pagerank is deterministic and sums",
+        "pagerank is deterministic and sums to about one",
         "src/graph.rs",
         "pagerank_is_deterministic_and_sums_to_about_one",
         Class::TestTarget,
@@ -631,7 +631,7 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     let mut table = String::new();
     writeln!(
         table,
-        "{:<46}{:<11}{:<6}{:>10}{:>8}  top1_path",
+        "{:<50}{:<13}{:<6}{:>10}{:>8}  top1_path",
         "query", "class", "split", "file_rank", "tokens"
     )
     .unwrap();
@@ -650,7 +650,7 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
         ranks.push((c.class, rank));
         writeln!(
             table,
-            "{:<46}{:<11}{:<6}{:>10}{:>8}  {}",
+            "{:<50}{:<13}{:<6}{:>10}{:>8}  {}",
             c.query,
             format!("{:?}", c.class),
             split(c.held_out),
