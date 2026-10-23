@@ -564,3 +564,138 @@ fn search_without_items_json_has_no_symbol_lines() {
         assert!(ids.iter().all(|id| wiki.items(id).is_empty()));
     }
 }
+
+/// Compiles `files` (relative path, contents) and loads the wiki.
+fn code_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    for (path, text) in files {
+        let p = input.join(path);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&out).unwrap();
+    (dir, w)
+}
+
+/// Every symbol line of a response in output order: `(path, start, end, name)`.
+fn symbol_lines(hits: &[wiki::query::Hit]) -> Vec<(String, usize, usize, String)> {
+    hits.iter()
+        .flat_map(|h| &h.symbols)
+        .map(|s| (s.path.clone(), s.start_line, s.end_line, s.name.clone()))
+        .collect()
+}
+
+#[test]
+fn private_fn_is_found_by_name_with_its_lines() {
+    let (_d, w) = code_fixture(&[("src/a.rs", "fn helper_thing() {}\n")]);
+    let hits = w.search("helper_thing", None, 10);
+    let a = hits.iter().find(|h| h.id == "a").expect("page a is a hit");
+    assert_eq!(a.path, "src/a.rs");
+    assert_eq!(
+        symbol_lines(std::slice::from_ref(a)),
+        [("src/a.rs".to_string(), 1, 1, "helper_thing".to_string())]
+    );
+}
+
+#[test]
+fn method_is_found_by_split_words() {
+    let (_d, w) = code_fixture(&[
+        (
+            "src/s.rs",
+            "pub struct S;\nimpl S {\n    fn on_order_reject(&self) {}\n}\n",
+        ),
+        ("src/other.rs", "pub fn unrelated() {}\n"),
+    ]);
+    let lines = symbol_lines(&w.search("order reject", None, 10));
+    assert_eq!(
+        lines.first(),
+        Some(&(
+            "src/s.rs".to_string(),
+            3,
+            3,
+            "S::on_order_reject".to_string()
+        )),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn module_items_never_show() {
+    let (_d, w) = code_fixture(&[
+        ("src/lib.rs", "mod formats;\npub fn list_formats() {}\n"),
+        ("src/formats.rs", "pub fn formats_all() {}\n"),
+    ]);
+    let lines = symbol_lines(&w.search("formats", None, 10));
+    assert!(!lines.is_empty(), "the fns still show");
+    assert!(lines.iter().all(|l| l.3 != "formats"), "{lines:?}");
+}
+
+#[test]
+fn test_items_do_not_lift_a_page_but_still_show() {
+    // `aa` says the words more often, so a lifted test fn would put it first.
+    let (_d, w) = code_fixture(&[
+        ("src/zz.rs", "fn zebra_walk() {}\n"),
+        (
+            "tests/aa.rs",
+            "#[test]\nfn zebra_walk_works() {\n    zebra_walk();\n    zebra_walk();\n}\n",
+        ),
+    ]);
+    let hits = w.search("zebra walk", None, 10);
+    let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids, ["zz", "aa"]);
+    let test_line = &hits[1].symbols;
+    assert_eq!(test_line.len(), 1, "the test fn still shows");
+    assert_eq!(test_line[0].name, "zebra_walk_works");
+    assert!(test_line[0].test);
+}
+
+#[test]
+fn symbol_lines_are_unique_per_page() {
+    // Overloads in a header and their definitions in the `.cpp` twin: one
+    // line per item, every line on its own page's path, a doc shown once.
+    let (_d, w) = code_fixture(&[
+        (
+            "src/fsm.h",
+            "class Fsm {\npublic:\n    /// Handles an order reject.\n    void onOrderReject();\n    /// Handles an order reject.\n    void onOrderReject(int code);\n};\n",
+        ),
+        (
+            "src/fsm.cpp",
+            "#include \"fsm.h\"\nvoid Fsm::onOrderReject() {}\nvoid Fsm::onOrderReject(int code) {}\n",
+        ),
+    ]);
+    let hits = w.search("order reject", None, 10);
+    assert!(
+        hits.iter().any(|h| h.symbols.len() == 2),
+        "both overloads show"
+    );
+    for h in &hits {
+        let keys: std::collections::BTreeSet<_> =
+            symbol_lines(std::slice::from_ref(h)).into_iter().collect();
+        assert_eq!(
+            keys.len(),
+            h.symbols.len(),
+            "duplicate lines under {}",
+            h.id
+        );
+        assert!(h.symbols.iter().all(|s| s.path == h.path));
+        let docs: Vec<&str> = h.symbols.iter().filter_map(|s| s.doc.as_deref()).collect();
+        let unique: std::collections::BTreeSet<_> = docs.iter().collect();
+        assert_eq!(unique.len(), docs.len(), "a doc repeats under {}", h.id);
+    }
+}
+
+#[test]
+fn weak_lines_are_cut_response_wide() {
+    // `other` matches one token by doc only: below 0.3 of the best line in
+    // the response, though it is the best line of its own page.
+    let (_d, w) = code_fixture(&[
+        ("src/a.rs", "pub fn zebra_quokka() {}\n"),
+        ("src/b.rs", "/// Mentions quokka.\nfn other() {}\n"),
+    ]);
+    let hits = w.search("zebra quokka", None, 10);
+    assert!(hits.iter().any(|h| h.id == "b"), "b is still a page hit");
+    let names: Vec<String> = symbol_lines(&hits).into_iter().map(|l| l.3).collect();
+    assert_eq!(names, ["zebra_quokka"]);
+}

@@ -2,69 +2,69 @@
 source: tests/symbol_eval.rs
 expression: table
 ---
-query                                             class        split  file_rank  tokens  top1_path
-----------------------------------------------------------------------------------------------------
-lang_for_ext                                      Name         tune           2     179  src/formats/extract_jsx.rs
-strip_rust_test_modules                           Name         tune           1     249  src/formats/extract_rust.rs
-field_hit                                         Name         held           1      67  src/query.rs
-disambiguate_ids                                  Name         tune           1     324  src/lib.rs
-module_stem                                       Name         tune           4     334  src/graph.rs
-source_rank                                       Name         held           4     335  src/graph.rs
-PackBudget                                        Name         tune           1     297  src/query.rs
-CodeExtractor                                     Name         tune           1     307  src/formats/code.rs
-token_estimate                                    Name         held           1     380  src/manifest.rs
-snippet built                                     NameWords    tune           2     509  README.md
-split frontmatter                                 NameWords    tune           1     793  src/formats/markdown.rs
-first sentence of a summary line                  NameWords    held           1     662  src/formats/summary.rs
-name words of an identifier                       NameWords    tune           1     844  src/query.rs
-content text of page sections                     NameWords    tune           2     735  src/rewrite.rs
-attribute value of a tag                          NameWords    held           1     769  src/formats/extract_vue.rs
-excerpt around the earliest occurrence            DocOnly      tune           1     815  src/query.rs
-temp file rename half-written page                DocOnly      tune           1     780  src/rewrite.rs
-html elements that never take a closing tag       DocOnly      held           1     757  src/formats/extract_vue.rs
-ids within hops along either edge direction       DocOnly      tune           2     765  docs/ARCHITECTURE.md
-path outside output real source change            DocOnly      tune           1     799  src/watch.rs
-lazily reloading handle loaded snapshot           DocOnly      held           1     708  src/serve.rs
-where is the snippet built                        Stopwords    tune           3     735  README.md
-how do we write a page atomically                 Stopwords    tune           1     654  src/rewrite.rs
-what is the module stem of a path                 Stopwords    held           3     719  docs/ARCHITECTURE.md
-where are the test modules stripped               Stopwords    tune           2     801  src/formats/code.rs
-needs render                                      MethodSplit  tune           1     787  src/cache.rs
-retain ids                                        MethodSplit  tune           1     769  src/cache.rs
-with defaults                                     MethodSplit  held           1     807  src/formats/mod.rs
-resolve segment                                   MethodSplit  tune           1     751  src/graph.rs
-resolve include                                   MethodSplit  tune           1     813  src/graph.rs
-has page                                          MethodSplit  held           2     755  src/rewrite.rs
-list pages                                        MethodSplit  tune           6     758  src/serve.rs
-content text                                      MethodSplit  tune           4     802  src/formats/text.rs
-name words                                        MethodSplit  held           1     867  src/query.rs
-field words                                       MethodSplit  tune           1     834  src/query.rs
-field hit                                         MethodSplit  tune           1     795  src/query.rs
-defined terms                                     MethodSplit  held           1     799  src/query.rs
-bfs neighborhood                                  MethodSplit  tune           1     373  src/query.rs
-pagerank of                                       MethodSplit  tune           3     825  src/graph.rs
-with wiki                                         MethodSplit  held           4     679  README.md
-list resources                                    MethodSplit  tune           1     825  src/serve.rs
-read resource                                     MethodSplit  tune           1     777  src/serve.rs
-next u64                                          MethodSplit  held           1     788  src/generator.rs
-render fingerprint                                V7           tune           1     760  src/rewrite.rs
-render page                                       V7           tune           1     725  src/rewrite.rs
-render index json                                 V7           held           1     698  src/manifest.rs
-render span                                       V7           tune           3     797  src/rewrite.rs
-resolve                                           V7           tune           1     586  src/graph.rs
-render                                            V7           held           2     797  src/manifest.rs
-a stray backtick does not re pair later lines     TestTarget   tune           1     727  src/rewrite.rs
-pagerank is deterministic and sums to about one   TestTarget   tune           1     732  src/graph.rs
-stale page files lists orphaned on disk only      TestTarget   held           1     739  src/lib.rs
+query                                             class        split  file_rank symbol_rank  tokens  top1_path
+----------------------------------------------------------------------------------------------------------------
+lang_for_ext                                      Name         tune           1           1     255  src/formats/code.rs
+strip_rust_test_modules                           Name         tune           1           1     249  src/formats/extract_rust.rs
+field_hit                                         Name         held           1           1      68  src/query.rs
+disambiguate_ids                                  Name         tune           1           1     324  src/lib.rs
+module_stem                                       Name         tune           1           1     334  src/formats/code.rs
+source_rank                                       Name         held           1           1     335  src/formats/code.rs
+PackBudget                                        Name         tune           1           1     297  src/query.rs
+CodeExtractor                                     Name         tune           1           1     307  src/formats/code.rs
+token_estimate                                    Name         held           1           1     380  src/manifest.rs
+snippet built                                     NameWords    tune           1           1     509  src/query.rs
+split frontmatter                                 NameWords    tune           1           1     801  src/formats/markdown.rs
+first sentence of a summary line                  NameWords    held           1           1     682  src/formats/summary.rs
+name words of an identifier                       NameWords    tune           1           1     817  src/query.rs
+content text of page sections                     NameWords    tune           2           3     741  src/rewrite.rs
+attribute value of a tag                          NameWords    held           1           1     758  src/formats/extract_vue.rs
+excerpt around the earliest occurrence            DocOnly      tune           1           1     823  src/query.rs
+temp file rename half-written page                DocOnly      tune           1           1     778  src/rewrite.rs
+html elements that never take a closing tag       DocOnly      held           1           1     775  src/formats/extract_vue.rs
+ids within hops along either edge direction       DocOnly      tune           1           1     765  src/query.rs
+path outside output real source change            DocOnly      tune           1           1     773  src/watch.rs
+lazily reloading handle loaded snapshot           DocOnly      held           1           1     707  src/serve.rs
+where is the snippet built                        Stopwords    tune           1           1     735  src/query.rs
+how do we write a page atomically                 Stopwords    tune           1           1     667  src/rewrite.rs
+what is the module stem of a path                 Stopwords    held           1           1     718  src/formats/code.rs
+where are the test modules stripped               Stopwords    tune           1           1     786  src/formats/extract_rust.rs
+needs render                                      MethodSplit  tune           1           1     787  src/cache.rs
+retain ids                                        MethodSplit  tune           1           1     772  src/cache.rs
+with defaults                                     MethodSplit  held           1           1     850  src/formats/mod.rs
+resolve segment                                   MethodSplit  tune           1           1     752  src/graph.rs
+resolve include                                   MethodSplit  tune           1           1     814  src/graph.rs
+has page                                          MethodSplit  held           1           1     766  src/query.rs
+list pages                                        MethodSplit  tune           1           1     741  src/query.rs
+content text                                      MethodSplit  tune           1           1     802  src/query.rs
+name words                                        MethodSplit  held           1           1     835  src/query.rs
+field words                                       MethodSplit  tune           1           1     834  src/query.rs
+field hit                                         MethodSplit  tune           1           1     795  src/query.rs
+defined terms                                     MethodSplit  held           1           1     799  src/query.rs
+bfs neighborhood                                  MethodSplit  tune           1           1     373  src/query.rs
+pagerank of                                       MethodSplit  tune           2           2     790  src/graph.rs
+with wiki                                         MethodSplit  held           4           6     705  README.md
+list resources                                    MethodSplit  tune           1           1     825  src/serve.rs
+read resource                                     MethodSplit  tune           1           1     783  src/serve.rs
+next u64                                          MethodSplit  held           1           1     788  src/generator.rs
+render fingerprint                                V7           tune           1           1     760  src/rewrite.rs
+render page                                       V7           tune           1           1     752  src/rewrite.rs
+render index json                                 V7           held           1           1     714  src/manifest.rs
+render span                                       V7           tune           1           1     795  src/formats/code.rs
+resolve                                           V7           tune           1           3     586  src/graph.rs
+render                                            V7           held           1           1     764  src/rewrite.rs
+a stray backtick does not re pair later lines     TestTarget   tune           1           1     702  src/rewrite.rs
+pagerank is deterministic and sums to about one   TestTarget   tune           1           1     763  src/graph.rs
+stale page files lists orphaned on disk only      TestTarget   held           1           1     743  src/lib.rs
 
-tune  file_hit@1=10/17 (0.5882) file_hit@3=16/17 (0.9412) mrr@10=0.7696 tokens=583.5
-held  file_hit@1=6/8 (0.7500) file_hit@3=7/8 (0.8750) mrr@10=0.8229 tokens=549.6
-class Name: file_hit@3=7/9
-class NameWords: file_hit@3=6/6
-class DocOnly: file_hit@3=6/6
-class Stopwords: file_hit@3=4/4
-class MethodSplit: file_hit@3=15/18
-class V7: file_hit@3=6/6
-class TestTarget: file_hit@3=3/3
+tune  file_hit@1=33/35 (0.9429) file_hit@3=35/35 (1.0000) mrr@10=0.9714 symbol_hit@3=35/35 (1.0000) tokens=668.2
+held  file_hit@1=16/17 (0.9412) file_hit@3=16/17 (0.9412) mrr@10=0.9559 symbol_hit@3=16/17 (0.9412) tokens=669.8
+class Name: file_hit@3=9/9 symbol_hit@3=9/9
+class NameWords: file_hit@3=6/6 symbol_hit@3=6/6
+class DocOnly: file_hit@3=6/6 symbol_hit@3=6/6
+class Stopwords: file_hit@3=4/4 symbol_hit@3=4/4
+class MethodSplit: file_hit@3=17/18 symbol_hit@3=17/18
+class V7: file_hit@3=6/6 symbol_hit@3=6/6
+class TestTarget: file_hit@3=3/3 symbol_hit@3=3/3
 neighbors code.rs: tokens=648 target_degraded=true
 title_as_query: 27/28

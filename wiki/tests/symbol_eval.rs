@@ -17,8 +17,10 @@
 //! only the `tune` split may inform them. The split is pinned by
 //! `held_out_is_every_third_case_per_class`.
 //!
-//! Until symbol hits exist, a case is scored by the expected symbol's *file*:
-//! `file_rank` is the first hit whose source path equals the case's path.
+//! A case is scored by its file and by its symbol: `file_rank` is the first
+//! hit whose source path equals the case's path; `symbol_rank` is the position
+//! of the expected `(path, symbol)` among the response's symbol lines in
+//! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
 //! The `tokens` column charges the MCP tool's default search response (today
 //! `search_json` at limit 10). The step that changes the default renderer or
@@ -57,11 +59,6 @@ const CLASSES: &[Class] = &[
     Class::V7,
     Class::TestTarget,
 ];
-
-/// The first classes of `CLASSES` feed the `tune`/`held` aggregates and their
-/// floors; later classes are reported per class only, so the floors keep their
-/// meaning.
-const ORIGINAL_CLASSES: usize = 4;
 
 struct Case {
     query: &'static str,
@@ -585,20 +582,30 @@ fn id_paths(out: &Path) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
-/// Per-split aggregates: `(file_hit@1, file_hit@3, mrr@10, mean tokens, n)`.
+/// Per-split aggregates: `(file_hit@1, file_hit@3, mrr@10, symbol_hit@3,
+/// mean tokens, n)`.
 #[derive(Default)]
 struct Agg {
     h1: f64,
     h3: f64,
     mrr: f64,
+    s3: f64,
     tokens: f64,
     n: f64,
 }
 
+/// Whether a symbol rank counts as `symbol_hit@3`.
+fn symbol_hit3(rank: Option<usize>) -> bool {
+    rank.is_some_and(|r| r <= 3)
+}
+
 impl Agg {
-    fn add(&mut self, rank: Option<usize>, tokens: usize) {
+    fn add(&mut self, rank: Option<usize>, symbol_rank: Option<usize>, tokens: usize) {
         self.n += 1.0;
         self.tokens += tokens as f64;
+        if symbol_hit3(symbol_rank) {
+            self.s3 += 1.0;
+        }
         if let Some(r) = rank {
             self.mrr += 1.0 / r as f64;
             if r == 1 {
@@ -612,7 +619,7 @@ impl Agg {
 
     fn footer(&self, name: &str) -> String {
         format!(
-            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} tokens={:.1}\n",
+            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} symbol_hit@3={}/{} ({:.4}) tokens={:.1}\n",
             self.h1,
             self.n,
             self.h1 / self.n,
@@ -620,6 +627,9 @@ impl Agg {
             self.n,
             self.h3 / self.n,
             self.mrr / self.n,
+            self.s3,
+            self.n,
+            self.s3 / self.n,
             self.tokens / self.n,
         )
     }
@@ -631,32 +641,37 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     let mut table = String::new();
     writeln!(
         table,
-        "{:<50}{:<13}{:<6}{:>10}{:>8}  top1_path",
-        "query", "class", "split", "file_rank", "tokens"
+        "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  top1_path",
+        "query", "class", "split", "file_rank", "symbol_rank", "tokens"
     )
     .unwrap();
-    writeln!(table, "{}", "-".repeat(100)).unwrap();
+    writeln!(table, "{}", "-".repeat(112)).unwrap();
 
     let (mut tune, mut held) = (Agg::default(), Agg::default());
-    let mut ranks: Vec<(Class, Option<usize>)> = Vec::new();
+    let mut ranks: Vec<(Class, Option<usize>, Option<usize>)> = Vec::new();
     for c in CASES {
         let hits = wiki.search(c.query, None, 10);
-        let hit_paths: Vec<&str> = hits.iter().map(|h| paths[&h.id].as_str()).collect();
-        let rank = hit_paths.iter().position(|p| *p == c.path).map(|i| i + 1);
+        let rank = hits.iter().position(|h| h.path == c.path).map(|i| i + 1);
+        // The symbol line's name is `owner::name`; the label is the bare name.
+        let symbol_rank = hits
+            .iter()
+            .flat_map(|h| &h.symbols)
+            .position(|s| s.path == c.path && s.name.rsplit("::").next() == Some(c.symbol))
+            .map(|i| i + 1);
+        let top1 = hits.first().map_or("-".to_string(), |h| h.path.clone());
         let tokens = token_estimate(&search_json(hits));
-        if CLASSES[..ORIGINAL_CLASSES].contains(&c.class) {
-            (if c.held_out { &mut held } else { &mut tune }).add(rank, tokens);
-        }
-        ranks.push((c.class, rank));
+        (if c.held_out { &mut held } else { &mut tune }).add(rank, symbol_rank, tokens);
+        ranks.push((c.class, rank, symbol_rank));
+        let show = |r: Option<usize>| r.map_or("-".to_string(), |r| r.to_string());
         writeln!(
             table,
-            "{:<50}{:<13}{:<6}{:>10}{:>8}  {}",
+            "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  {top1}",
             c.query,
             format!("{:?}", c.class),
             split(c.held_out),
-            rank.map_or("-".to_string(), |r| r.to_string()),
+            show(rank),
+            show(symbol_rank),
             tokens,
-            hit_paths.first().copied().unwrap_or("-"),
         )
         .unwrap();
     }
@@ -665,9 +680,18 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     table.push_str(&tune.footer("tune"));
     table.push_str(&held.footer("held"));
     for class in CLASSES {
-        let of: Vec<_> = ranks.iter().filter(|(c, _)| c == class).collect();
-        let h3 = of.iter().filter(|(_, r)| r.is_some_and(|r| r <= 3)).count();
-        writeln!(table, "class {class:?}: file_hit@3={h3}/{}", of.len()).unwrap();
+        let of: Vec<_> = ranks.iter().filter(|(c, _, _)| c == class).collect();
+        let h3 = of
+            .iter()
+            .filter(|(_, r, _)| r.is_some_and(|r| r <= 3))
+            .count();
+        let s3 = of.iter().filter(|(_, _, s)| symbol_hit3(*s)).count();
+        let n = of.len();
+        writeln!(
+            table,
+            "class {class:?}: file_hit@3={h3}/{n} symbol_hit@3={s3}/{n}"
+        )
+        .unwrap();
     }
 
     let code_id = paths
@@ -709,8 +733,12 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
 
 // Floors, exact fractions of case counts. Never transcribe from the `{:.4}`
 // table (it rounds). Ratchet them in the commit that accepts an improvement.
-const MIN_FILE_HIT3_TUNE: f64 = 16.0 / 17.0;
-const MIN_FILE_HIT3_HELD: f64 = 7.0 / 8.0;
+// Every class counts since step 4 (the floors were reset when the method,
+// V7 and test-target classes joined the splits).
+const MIN_FILE_HIT3_TUNE: f64 = 1.0; // 35/35
+const MIN_FILE_HIT3_HELD: f64 = 16.0 / 17.0;
+const MIN_SYMBOL_HIT3_TUNE: f64 = 1.0; // 35/35
+const MIN_SYMBOL_HIT3_HELD: f64 = 16.0 / 17.0;
 const MIN_TITLE_AS_QUERY: f64 = 27.0 / 28.0;
 
 /// Slack on the floor comparisons (accumulated-sum ULP noise), as in `eval.rs`.
@@ -732,6 +760,14 @@ fn symbol_retrieval() {
     assert!(
         held.h3 / held.n >= MIN_FILE_HIT3_HELD - FLOOR_EPS,
         "held file_hit@3 regressed below {MIN_FILE_HIT3_HELD}\n{table}"
+    );
+    assert!(
+        tune.s3 / tune.n >= MIN_SYMBOL_HIT3_TUNE - FLOOR_EPS,
+        "tune symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_TUNE}\n{table}"
+    );
+    assert!(
+        held.s3 / held.n >= MIN_SYMBOL_HIT3_HELD - FLOOR_EPS,
+        "held symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_HELD}\n{table}"
     );
 
     assert!(
