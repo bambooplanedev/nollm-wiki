@@ -54,6 +54,10 @@ fn fixture() -> (tempfile::TempDir, Wiki) {
         ("tests/all_tests.rs", all_tests.as_str()),
         ("src/lib.rs", LIB_RS),
         (
+            "src/wrapped.rs",
+            "use tree_sitter::{\n    Language, Node,\n    Parser,\n};\npub fn w() {}\n",
+        ),
+        (
             "include/book.h",
             "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n};\n",
         ),
@@ -153,6 +157,16 @@ fn imports_come_only_from_before_body() {
         .take_while(|l| l.starts_with("  "))
         .collect();
     assert_eq!(block, ["  os"], "{a}");
+}
+
+#[test]
+fn a_wrapped_import_is_one_line() {
+    let (_d, w) = fixture();
+    let o = outline(&w, "wrapped");
+    assert!(
+        o.contains("\nimports:\n  tree_sitter::{ Language, Node, Parser, }\n5-5  fn"),
+        "{o}"
+    );
 }
 
 #[test]
@@ -297,6 +311,29 @@ fn full_over_budget_code_falls_back_to_outline() {
         assert!(t.contains("# Lib (lib)"), "{t}");
         assert!(token_estimate(&t) <= max, "{max}: {t}");
     }
+}
+
+#[test]
+fn full_marker_budget_returns_the_whole_outline() {
+    let (_d, w) = fixture();
+    let first = |t: &str| t.lines().next().unwrap().to_string();
+    let mut followed = 0;
+    // `lib`'s page is over twice its outline, so the outline path is taken.
+    for max in 20..150 {
+        let t = w.page_text("lib", true, Some(max)).unwrap();
+        let Some(m) = marker(&t) else { continue };
+        let n = m.split("pass max_tokens: ").nth(1).unwrap();
+        let n: usize = n.strip_suffix(" for all").unwrap().parse().unwrap();
+        let again = w.page_text("lib", true, Some(n)).unwrap();
+        assert_eq!(
+            again,
+            format!("{}\n{}", first(&t), outline(&w, "lib")),
+            "{max} -> {n}"
+        );
+        assert!(token_estimate(&again) <= n, "{n}: {again}");
+        followed += 1;
+    }
+    assert!(followed > 0, "no marker to follow");
 }
 
 #[test]

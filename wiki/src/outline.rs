@@ -17,7 +17,8 @@ const NO_ITEMS: &str = "no items — recompile with a current wiki for symbol li
 
 /// What a page's outline can show, before any cut.
 struct Outline<'a> {
-    /// `# {title} ({id})`, `{path}  {kind}`, then the summary when there is one.
+    /// `# {title} ({id})`, `{path}  {kind}`, then the summary when there is
+    /// one; `page_text` puts its `full page …` line first.
     header: Vec<String>,
     /// The page's `## Imports` entries, whitespace collapsed.
     imports: Vec<String>,
@@ -73,12 +74,7 @@ impl Wiki {
     /// item lines stop where the budget does; a last `…` line says what was
     /// cut. The header and that line are kept even when they do not fit.
     pub fn outline(&self, id: &str, max_tokens: Option<usize>) -> Option<String> {
-        let o = parse(self, id)?;
-        let full = render(&o, &Keep::ALL);
-        Some(match max_tokens {
-            Some(max) if token_estimate(&full) > max => budget(&o, full, max),
-            _ => full,
-        })
+        Some(fit(&parse(self, id)?, max_tokens))
     }
 
     /// What `page` shows: the outline, or with `full` the whole page. A full
@@ -95,21 +91,12 @@ impl Wiki {
             Some(max) if n > max => max,
             _ => return Some(page),
         };
-        if let Some(Outline {
-            body: Body::Items(_),
-            ..
-        }) = parse(self, id)
-        {
-            let first = format!("full page ~{n} tokens exceeds max_tokens; outline follows\n");
-            // Token estimates floor, so two fitting parts can overshoot by one.
-            let mut room = max.saturating_sub(token_estimate(&first));
-            loop {
-                let text = first.clone() + &self.outline(id, Some(room))?;
-                if room == 0 || token_estimate(&text) <= max {
-                    return Some(text);
-                }
-                room -= 1;
-            }
+        if let Some(mut o) = parse(self, id).filter(|o| matches!(o.body, Body::Items(_))) {
+            // A header line, so the budget and its marker's `max_tokens`
+            // count it: passing that number back with `full` shows it all.
+            let first = format!("full page ~{n} tokens exceeds max_tokens; outline follows");
+            o.header.insert(0, first);
+            return Some(fit(&o, Some(max)));
         }
         let marker = |chars: usize| {
             format!(
@@ -129,6 +116,15 @@ impl Wiki {
             }
         }
         Some(page[..best_end].to_string() + &marker(best_chars))
+    }
+}
+
+/// `o` rendered whole, or cut by `budget` when that is over `max_tokens`.
+fn fit(o: &Outline, max_tokens: Option<usize>) -> String {
+    let full = render(o, &Keep::ALL);
+    match max_tokens {
+        Some(max) if token_estimate(&full) > max => budget(o, full, max),
+        _ => full,
     }
 }
 
@@ -218,14 +214,21 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
     // before the first `## Body`, and the body ends at the last `## Notes`.
     let body_at = lines.iter().position(|l| *l == "## Body");
     let head = &lines[..body_at.unwrap_or(lines.len())];
-    let imports = head
+    // A wrapped import (`use a::{` …) continues on lines without `- `.
+    let mut imports: Vec<String> = Vec::new();
+    for l in head
         .iter()
         .skip_while(|l| **l != "## Imports")
         .skip(1)
         .take_while(|l| !l.starts_with("## "))
-        .filter_map(|l| l.strip_prefix("- "))
-        .map(one_line)
-        .collect();
+    {
+        match (l.strip_prefix("- "), imports.last_mut()) {
+            (Some(i), _) => imports.push(i.to_string()),
+            (None, Some(last)) if !l.trim().is_empty() => *last += &format!(" {l}"),
+            _ => {}
+        }
+    }
+    let imports = imports.iter().map(|i| one_line(i)).collect();
     let body = match SourceKind::parse(&e.kind) {
         Some(SourceKind::Code { .. }) => match w.items(id) {
             [] => Body::NoItems,
