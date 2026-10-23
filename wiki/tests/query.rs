@@ -968,7 +968,8 @@ fn a_path_under_another_root_does_not_resolve() {
 fn index_json_without_tags_still_loads() {
     let dir = build();
     let path = dir.path().join("out").join("index.json");
-    let mut v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    let mut v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     for e in v["entries"].as_array_mut().unwrap() {
         e.as_object_mut().unwrap().remove("tags");
     }
@@ -986,8 +987,16 @@ fn build_tag_corpus() -> (tempfile::TempDir, Wiki) {
         let body = format!("---\ntags: [project/wiki]\n---\n# N{i}\n\nquokka page.\n");
         fs::write(input.join(format!("n{i}.md")), body).unwrap();
     }
-    fs::write(input.join("root.md"), "---\ntags: [Project]\n---\n# Root\n\nquokka page.\n").unwrap();
-    fs::write(input.join("other.md"), "---\ntags: [projects]\n---\n# Other\n\nquokka page.\n").unwrap();
+    fs::write(
+        input.join("root.md"),
+        "---\ntags: [Project]\n---\n# Root\n\nquokka page.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("other.md"),
+        "---\ntags: [projects]\n---\n# Other\n\nquokka page.\n",
+    )
+    .unwrap();
     fs::write(input.join("z.rs"), "//! quokka\npub fn z() {}\n").unwrap();
     compile(&input, &output, &CompileOptions::default()).unwrap();
     let w = Wiki::load(&output).unwrap();
@@ -1010,9 +1019,13 @@ fn tag_filters_a_query_and_combines_with_kind() {
     let (_d, w) = build_tag_corpus();
     let hits = w.search_tagged("quokka", None, Some("project"), Some(50));
     assert_eq!(hits.len(), 13);
-    assert!(hits.iter().all(|h| h.path.ends_with(".md") && h.path != "other.md"));
+    assert!(hits
+        .iter()
+        .all(|h| h.path.ends_with(".md") && h.path != "other.md"));
     let code = KindFilter::parse("code").unwrap();
-    assert!(w.search_tagged("quokka", Some(&code), Some("project"), None).is_empty());
+    assert!(w
+        .search_tagged("quokka", Some(&code), Some("project"), None)
+        .is_empty());
 }
 
 #[test]
@@ -1025,6 +1038,9 @@ fn tag_filter_normalizes_and_rejects_empty() {
 #[test]
 fn punctuation_query_with_tag_is_the_listing() {
     let (_d, w) = build_tag_corpus();
-    assert_eq!(w.search_tagged("!!!", None, Some("project"), None).len(), 13);
+    assert_eq!(
+        w.search_tagged("!!!", None, Some("project"), None).len(),
+        13
+    );
     assert!(w.search("!!!", None, 10).is_empty());
 }

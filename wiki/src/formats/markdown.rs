@@ -87,14 +87,20 @@ fn fm_list(fm: &[String], key: &str) -> Vec<String> {
     };
     let v = fm[i][prefix.len()..].trim();
     if !v.is_empty() {
-        return if v == "null" || v == "~" { Vec::new() } else { parse_list(v) };
+        return if v == "null" || v == "~" {
+            Vec::new()
+        } else {
+            parse_list(v)
+        };
     }
     let mut items = Vec::new();
     for l in fm[i + 1..].iter().map(|l| l.trim()) {
         if l.is_empty() || l.starts_with('#') || l == "-" {
             continue;
         }
-        let Some(item) = l.strip_prefix("- ") else { break };
+        let Some(item) = l.strip_prefix("- ") else {
+            break;
+        };
         let item = item.split(" #").next().unwrap_or(item);
         let item = unquote(item);
         if !item.is_empty() {
@@ -110,7 +116,10 @@ fn unquote(s: &str) -> String {
 
 fn parse_list(v: &str) -> Vec<String> {
     let v = v.trim().trim_start_matches('[').trim_end_matches(']');
-    v.split(',').map(unquote).filter(|s| !s.is_empty()).collect()
+    v.split(',')
+        .map(unquote)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn first_h1(body: &str) -> Option<String> {
@@ -141,12 +150,17 @@ mod tests {
     }
 
     fn aliases_of(fm: &str) -> Vec<String> {
-        MarkdownExtractor.extract("n.md", &format!("---\n{fm}---\nbody\n")).aliases
+        MarkdownExtractor
+            .extract("n.md", &format!("---\n{fm}---\nbody\n"))
+            .aliases
     }
 
     #[test]
     fn tags_normalized_from_front_matter() {
-        let e = MarkdownExtractor.extract("n.md", "---\ntags:\n  - '#Project/Wiki'\n  - draft\n  - DRAFT\n---\nb\n");
+        let e = MarkdownExtractor.extract(
+            "n.md",
+            "---\ntags:\n  - '#Project/Wiki'\n  - draft\n  - DRAFT\n---\nb\n",
+        );
         assert_eq!(e.tags, vec!["project/wiki", "draft"]);
         let e = MarkdownExtractor.extract("n.md", "---\ntags: [a, '#b']\n---\nb\n");
         assert_eq!(e.tags, vec!["a", "b"]);
@@ -156,9 +170,15 @@ mod tests {
     fn aliases_block_list_forms() {
         assert_eq!(aliases_of("aliases:\n  - AI\n  - ШІ\n"), vec!["AI", "ШІ"]);
         assert_eq!(aliases_of("aliases:\n- a\n- b\ntitle: T\n"), vec!["a", "b"]);
-        assert_eq!(aliases_of("aliases:\n  # group\n  - a\n\n  - b # note\n"), vec!["a", "b"]);
+        assert_eq!(
+            aliases_of("aliases:\n  # group\n  - a\n\n  - b # note\n"),
+            vec!["a", "b"]
+        );
         assert_eq!(aliases_of("aliases:\n  -\n  - real\n"), vec!["real"]);
-        assert_eq!(aliases_of("aliases:\n  - \"q1\"\n  - 'q2'\n"), vec!["q1", "q2"]);
+        assert_eq!(
+            aliases_of("aliases:\n  - \"q1\"\n  - 'q2'\n"),
+            vec!["q1", "q2"]
+        );
     }
 
     #[test]
@@ -173,13 +193,17 @@ mod tests {
     #[test]
     fn indented_keys_are_not_top_level() {
         assert!(aliases_of("project:\n  aliases:\n    - inner\n").is_empty());
-        let e = MarkdownExtractor.extract("n.md", "---\ndescription: |\n  title: oops\n---\n# Real\n");
+        let e =
+            MarkdownExtractor.extract("n.md", "---\ndescription: |\n  title: oops\n---\n# Real\n");
         assert_eq!(e.name, "Real");
     }
 
     #[test]
     fn crlf_block_list() {
-        let e = MarkdownExtractor.extract("n.md", "---\r\naliases:\r\n  - a\r\n  - b\r\n---\r\nbody\r\n");
+        let e = MarkdownExtractor.extract(
+            "n.md",
+            "---\r\naliases:\r\n  - a\r\n  - b\r\n---\r\nbody\r\n",
+        );
         assert_eq!(e.aliases, vec!["a", "b"]);
     }
 

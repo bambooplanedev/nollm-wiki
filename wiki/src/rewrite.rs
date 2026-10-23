@@ -519,7 +519,10 @@ mod tests {
         let ents = map(vec![e]);
         let g = build_graph(&ents);
         let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
-        assert!(page.contains("- aliases: x\n- tags: a, b/c\n- kind:"), "{page}");
+        assert!(
+            page.contains("- aliases: x\n- tags: a, b/c\n- kind:"),
+            "{page}"
+        );
     }
 
     #[test]
@@ -530,7 +533,10 @@ mod tests {
         let ents = map(vec![a.clone()]);
         let g = build_graph(&ents);
         let e = &g.edges["alpha"];
-        assert_ne!(render_fingerprint(&a, e, &ents, ""), render_fingerprint(&b, e, &ents, ""));
+        assert_ne!(
+            render_fingerprint(&a, e, &ents, ""),
+            render_fingerprint(&b, e, &ents, "")
+        );
     }
 
     #[test]
