@@ -148,7 +148,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (page hits with symbol lines) and `neighbors()` (context-pack) queries, with `resolve_id()` mapping an id, title or path to a page, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
-| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`)/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
+| `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
+| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`)/`neighbors`/`page`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound). |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
@@ -479,6 +480,15 @@ observe a page this run wrote.
 and `items.json` (each code page's items, absent for older wikis); page
 bodies are read on demand from `<id>.md`. From the items it builds the
 per-page symbol fields below.
+
+**Id resolution** (`Wiki::resolve_id`, used by `neighbors` and `page` in the
+CLI and MCP) tries, in order, and takes the first that names exactly one page:
+the exact id; the title (case-insensitive); the slug of the argument; the
+argument normalised (`\` to `/`, one leading `./` stripped) as an exact page
+path; a unique page path ending in `/<argument>` (several are an error listing
+them); for an absolute path, the longest page path that is a `/`-suffix of the
+argument. Otherwise the error lists up to five ids sharing a word with the
+argument.
 
 **Search** (`Wiki::search`) is case-insensitive, tokenized, with partial
 matching:

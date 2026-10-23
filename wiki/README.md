@@ -216,6 +216,56 @@ wiki neighbors [OPTIONS] <ID>
 - `--full` (off) — include full neighbor page bodies instead of one-line summaries.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
+### `page`
+
+```
+wiki page [OPTIONS] <ID>
+```
+
+Prints a page's outline: for a code page one line per symbol, so you can read
+just those lines of the source instead of the whole file. `<ID>` resolves like
+`neighbors`, and an absolute path under the compiled project works too.
+
+- `--full` (off) — print the whole page instead of the outline.
+- `--max-tokens <N>` (none — unbounded) — ceiling on the output's estimated size (chars/4).
+- `--dir <out>` (`out`) — the compiled wiki directory to read.
+
+```
+# Lib (lib)
+src/lib.rs  code:rust
+Adds numbers.
+imports:
+  std::fmt
+4-5  fn  pub fn add()  — Adds.
+7-7  type  pub struct G
+G:
+  9-10  method  pub fn build(&self)  — Builds.
+  11-11  method  fn helper(&self)
+14-18  module [test]  mod tests
+16-17  fn [test]  fn adds()
+```
+
+Item lines are `start-end  kind  signature`, then `  → twin` for a paired C++
+declaration or definition and `  — doc` when there is a doc sentence. Methods
+sit under an `owner:` line. Test items carry `[test]`. A markdown page lists
+its `headings:`, a text page only the header. A code page compiled before
+`items.json` existed prints `no items — recompile with a current wiki for
+symbol lines`.
+
+When `--max-tokens` is smaller than the outline, parts are cut in this order
+until it fits: test items (not on a page that is all tests), then docs, then
+imports, then trailing items. A last line says what went:
+`… dropped: 3 test items, 5 docs — pass max_tokens: 2412 for all`, or
+`… 12 more items from line 140 — pass max_tokens: …` when trailing items were
+cut (`N more headings` on a markdown page). The header, the marker and, on a
+code page without items, the `no items` line are never cut, so a tiny budget
+can still be exceeded by them.
+
+With `--full` and `--max-tokens` below the page's size, a code page with
+items prints `full page ~N tokens exceeds max_tokens; outline follows` and
+then its budgeted outline; any other page is cut after whole lines, ending
+with `… truncated at ~B of ~N tokens`.
+
 ### `lint`
 
 ```
@@ -300,8 +350,15 @@ source tree. Four artifacts drive that:
   `## Optional`.
 - **`AGENTS.md`** — a short usage guide written into every compiled wiki,
   telling an agent where to start (`index.md`/`index.json`), how to fetch a
-  neighborhood (`wiki neighbors <id> --depth N`), and that the `## Notes`
+  neighborhood (`wiki neighbors <id> --depth N`), how to get a module's
+  symbol map (`wiki page <id>`) and where line ranges live (`items.json`),
+  and that the `## Notes`
   section of each page is preserved across recompiles.
+
+The agent workflow is search → page → read lines: `search` finds the page,
+`page` lists its symbols with line ranges, and the agent reads just those
+lines of the source file with its own file tool. `neighbors` is for when the
+surrounding pages matter.
 
 ### The `neighbors` context-pack workflow
 
@@ -350,14 +407,16 @@ out to the CLI. Client configuration:
 ```
 
 **Tools** (mirroring the CLI subcommands, with one difference: `neighbors`
-defaults `max_tokens` to 4000 here, where the CLI leaves it unbounded — an
-agent calling with defaults should not receive a 30 KB dump, while a person
-passes the flag on purpose):
+and the `page` outline default `max_tokens` to 4000 here, where the CLI leaves
+it unbounded — an agent calling with defaults should not receive a 30 KB dump,
+while a person passes the flag on purpose; `page` with `full: true` has no
+default):
 
 | Tool | Parameters | Returns |
 |---|---|---|
 | `search` | `query`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (10), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
+| `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
 | `lint` | — | JSON `{total_pages, broken_links, orphans}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
@@ -453,7 +512,7 @@ oversights:
 - **Text, markdown, and code are the only formats.** There is no PDF,
   OCR, or audio extractor; adding one means adding an `Extractor` (see
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
-- **MCP server is query-only.** `wiki serve` exposes search/neighbors/lint
+- **MCP server is query-only.** `wiki serve` exposes search/neighbors/page/lint
   and page resources over stdio (see [MCP server](#mcp-server)); there is
   deliberately no compile-over-MCP tool (`--source` recompiles on file edits,
   not on request) and no HTTP transport.

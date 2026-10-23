@@ -153,6 +153,8 @@ tree first — start here.\n\n\
 - All pages: `index.md` (human) / `index.json` (machine catalog: id, title, kind, summary, degree, neighbors).\n\
 - Machine map for tools: `llms.txt`.\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
+- Code symbols with their line ranges: `items.json` (keyed by page id).\n\
+- A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
 - Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Referenced By / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
@@ -226,7 +228,9 @@ mod tests {
         let json = render_index_json(&m);
         let _v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(render_llms_txt(&m).starts_with("# My Project"));
-        assert!(render_agents_md("My Project").contains("index.json"));
+        let agents = render_agents_md("My Project");
+        assert!(agents.contains("index.json"));
+        assert!(agents.contains("items.json") && agents.contains("wiki page"));
     }
 
     #[test]
