@@ -212,17 +212,13 @@ impl Wiki {
             e.defined.retain(|n| !test_only(n));
             e.methods.retain(|n| !test_only(n));
         }
-        let all_title_words: BTreeSet<String> = entries
-            .values()
-            .flat_map(|e| Self::field_words(&e.title.to_lowercase()))
-            .collect();
         let symbol_fields = entries
             .values()
             .filter_map(|e| {
                 let items = items.get(&e.id)?;
                 let title = e.title.to_lowercase();
                 let defined = Self::defined_terms(&title, &e.defined, &e.methods);
-                let f = Self::symbol_fields(&title, &defined, &all_title_words, items);
+                let f = Self::symbol_fields(&title, &defined, items);
                 Some((e.id.clone(), f))
             })
             .collect();
@@ -285,6 +281,10 @@ impl Wiki {
     // `W_HEADING` is deliberately below `W_SUMMARY`: at 1.5 an incidental
     // heading word on a large page outranked the page named for the query.
     const W_NAME: f64 = 3.0;
+    // Added per token when the query is the page's whole title: a title
+    // query finds its page although symbol words of other pages share the
+    // title's words (`summary_suffix` against the page `Summary`).
+    const W_TITLE: f64 = 3.0;
     const W_ALIAS: f64 = 2.0;
     // `W_DEFINED` (2026-09-02 defined-names design): equal to `W_ALIAS`,
     // above `W_SUMMARY`, below `W_NAME`, so a page whose title is the query
@@ -456,21 +456,18 @@ impl Wiki {
     /// The fields a page earns from its non-test, non-module items. Whole
     /// names lose the page's own title words; an owned item's whole name
     /// also enters as `owner::name`. Words also lose terms already
-    /// in its `defined_terms` and any page's title word (`summary_suffix`
-    /// stole the title query `Summary`), and each word lands in one field
-    /// only: a whole name, else a free name's word, else a method's word.
+    /// in its `defined_terms`, and each word lands in one field only: a
+    /// whole name, else a free name's word, else a method's word. Another
+    /// page's title words stay: dropping them hid `onOrderReject` from
+    /// `order reject` on a 2,700-page wiki; `W_TITLE` guards title queries.
     fn symbol_fields(
         title_lower: &str,
         defined_terms: &BTreeSet<String>,
-        all_title_words: &BTreeSet<String>,
         items: &[CodeItem],
     ) -> SymbolFields {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
-        let keep_word = |w: &String| {
-            !title_words.contains(&w.as_str())
-                && !defined_terms.contains(w)
-                && !all_title_words.contains(w)
-        };
+        let keep_word =
+            |w: &String| !title_words.contains(&w.as_str()) && !defined_terms.contains(w);
         let mut f = SymbolFields::default();
         for item in items
             .iter()
@@ -654,6 +651,12 @@ impl Wiki {
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
         let title_words = Self::field_words(&title);
+        // The query is this page's whole title, in any order.
+        let whole_title = tokens
+            .iter()
+            .flat_map(|t| Self::field_words(t))
+            .collect::<BTreeSet<_>>()
+            == title_words.iter().cloned().collect();
         let alias_words: Vec<Vec<String>> = e
             .aliases
             .iter()
@@ -689,6 +692,9 @@ impl Wiki {
             let mut weight = 0.0;
             if Self::field_hit(&title_words, t) {
                 weight += Self::W_NAME;
+            }
+            if whole_title {
+                weight += Self::W_TITLE;
             }
             if alias_words.iter().any(|w| Self::field_hit(w, t)) {
                 weight += Self::W_ALIAS;
@@ -1288,10 +1294,10 @@ mod tests {
     }
 
     #[test]
-    fn symbol_fields_skip_titles_defined_terms_tests_and_modules() {
+    fn symbol_fields_skip_own_title_defined_terms_tests_and_modules() {
         use CodeItemKind::{Fn, Method, Module};
         let items = [
-            // Another page's title word goes unless it is the whole name.
+            // Another page's title word (`summary`) stays.
             item(Fn, "summary_suffix", None, false),
             item(Fn, "render", None, false),
             // Own title word and a defined term go.
@@ -1302,12 +1308,7 @@ mod tests {
             item(Fn, "zebra", Some("Zebra doc."), true),
             item(Module, "formats", None, false),
         ];
-        let f = Wiki::symbol_fields(
-            "cache",
-            &set(&["store"]),
-            &set(&["cache", "render", "summary"]),
-            &items,
-        );
+        let f = Wiki::symbol_fields("cache", &set(&["store"]), &items);
         assert_eq!(
             f.whole,
             set(&[
@@ -1318,7 +1319,7 @@ mod tests {
                 "summary_suffix"
             ])
         );
-        assert_eq!(f.words, set(&["suffix"]));
+        assert_eq!(f.words, set(&["suffix", "summary"]));
         assert_eq!(f.method_words, set(&["needs", "of"]));
         assert_eq!(f.doc_words, ["writes", "atomically"]);
     }

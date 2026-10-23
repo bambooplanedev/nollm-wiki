@@ -507,7 +507,7 @@ matching:
   longer hits `process-wide`, and `wikilink` still hits `wikilinks`. The
   body hits by substring. Defined-name terms (a top-level definition name
   from `index.json`, lowercased, or one of its snake/CamelCase words; words
-  equal to a title word are skipped) and method names (`methods`,
+  equal to one of the page's own title words are skipped) and method names (`methods`,
   lowercased whole, never word-split) hit by whole term only, so `to` does
   not hit `token_estimate` and `render` does not hit `needs_render`. Fuller
   matches are not forced above partial ones by a sort key; IDF does that
@@ -525,8 +525,11 @@ matching:
   methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
   (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and module items
   feed none of them, nor the `defined` and method names that only test
-  items carry, and a word that is already a title word or defined name is
-  skipped. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
+  items carry, and a word that is already one of the page's own title
+  words or a defined name is skipped; other pages' title words stay. When
+  the query's words are exactly the title's words, in any order, every
+  token adds `W_TITLE` 3.0, so a title query finds its page even where
+  other pages' item names share the title's words. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
