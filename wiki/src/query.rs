@@ -39,6 +39,9 @@ pub(crate) struct Entry {
 
 #[derive(Deserialize)]
 struct IndexFile {
+    /// `Manifest::root`; empty for an `index.json` older than the field.
+    #[serde(default)]
+    root: String,
     entries: Vec<Entry>,
 }
 
@@ -146,6 +149,8 @@ struct Candidate<'a> {
 /// `Default` is the empty wiki: what `serve --source` holds before its first compile.
 #[derive(Default)]
 pub struct Wiki {
+    /// The compile input directory's name (`Manifest::root`), or empty.
+    root: String,
     entries: BTreeMap<String, Entry>,
     /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`
     /// is a snapshot: later changes to the files on disk do not reach it.
@@ -212,6 +217,7 @@ impl Wiki {
             })
             .collect();
         Ok(Wiki {
+            root: index.root,
             entries,
             bodies,
             items,
@@ -910,9 +916,10 @@ impl Wiki {
     /// (ignoring case), the slug of `arg`, then `arg` as a path (`\` read as
     /// `/`, one leading `./` dropped): the page whose source path is it, the
     /// one page whose path ends with `/arg`, or the page with the longest path
-    /// that `arg` ends with (an absolute path). Otherwise up to 5 candidate
-    /// ids, sorted: the several pages that suffix matched, else ids sharing a
-    /// lowercase word with `arg`.
+    /// that `arg` ends with as `/{root}/{path}` (an absolute path under the
+    /// compiled directory; none when the wiki has no `root`). Otherwise up to
+    /// 5 candidate ids, sorted: the several pages that suffix matched, else
+    /// ids sharing a lowercase word with `arg`.
     pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
         if self.entries.contains_key(arg) {
             return Ok(arg.to_string());
@@ -949,11 +956,13 @@ impl Wiki {
         if !by_path.is_empty() {
             return Err(by_path.into_iter().take(5).collect());
         }
-        // An absolute path: the longest page path that `norm` ends with.
+        // A longer path such as an absolute one, `…/{root}/{path}`: the
+        // longest such page path. Without a root (an older wiki) nothing is.
         if let Some(e) = self
             .entries
             .values()
-            .filter(|e| !e.path.is_empty() && norm.ends_with(&format!("/{}", e.path)))
+            .filter(|e| !self.root.is_empty() && !e.path.is_empty())
+            .filter(|e| norm.ends_with(&format!("/{}/{}", self.root, e.path)))
             .max_by_key(|e| e.path.len())
         {
             return Ok(e.id.clone());

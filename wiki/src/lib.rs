@@ -302,7 +302,12 @@ fn compile_inner(
     }
 
     // 6. Manifest artifacts.
-    let man = manifest::build_manifest(&project, &entities, &graph);
+    let root = input
+        .canonicalize()
+        .ok()
+        .and_then(|p| Some(p.file_name()?.to_string_lossy().to_string()))
+        .unwrap_or_default();
+    let man = manifest::build_manifest(&project, &root, &entities, &graph);
     // Ahead of `index.json`, whose change is what tells `serve` to reload,
     // so a reload never pairs a new index with the previous items.
     rewrite::write_atomic(

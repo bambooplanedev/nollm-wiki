@@ -939,14 +939,27 @@ fn absolute_and_normalised_paths_resolve() {
     let (_d, w) = readme_fixture();
     let (root, _) = id_title(&w, "README.md");
     let (docs, _) = id_title(&w, "docs/README.md");
+    // `code_fixture` compiles a directory named `raw`.
     for arg in [
         "./docs/README.md",
         "docs\\README.md",
-        "/home/u/proj/docs/README.md",
+        "/home/u/raw/docs/README.md",
     ] {
         assert_eq!(w.resolve_id(arg), Ok(docs.clone()), "{arg}");
     }
-    assert_eq!(w.resolve_id("/home/u/proj/src/lib.rs"), Ok("lib".into()));
-    assert_eq!(w.resolve_id("/home/u/proj/README.md"), Ok(root));
+    assert_eq!(w.resolve_id("/home/u/raw/src/lib.rs"), Ok("lib".into()));
+    assert_eq!(w.resolve_id("/home/u/raw/README.md"), Ok(root));
     assert!(w.resolve_id("/home/u/other.rs").is_err());
+}
+
+#[test]
+fn a_path_under_another_root_does_not_resolve() {
+    let (_d, w) = readme_fixture();
+    for arg in [
+        "/home/u/proj/src/lib.rs",
+        "/some/other/proj/README.md",
+        "/home/u/raw/x/src/lib.rs",
+    ] {
+        assert!(w.resolve_id(arg).is_err(), "{arg}");
+    }
 }

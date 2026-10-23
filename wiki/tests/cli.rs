@@ -151,6 +151,36 @@ fn compile_project_flag_names_the_manifest() {
         .stderr(contains("unexpected argument '--verbose'"));
 }
 
+/// `root` is the input directory's own name even for `compile .`, where
+/// `project` falls back to `wiki`; `page` matches absolute paths against it.
+#[test]
+fn compile_dot_records_the_directory_name_as_root() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(input.join("src/alpha.rs"), "pub fn alpha() {}\n").unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(&input)
+        .args(["compile", ".", "out"])
+        .assert()
+        .success();
+
+    let index = fs::read_to_string(input.join("out/index.json")).unwrap();
+    assert!(
+        index.contains("\"project\": \"wiki\",\n  \"root\": \"raw\","),
+        "{index}"
+    );
+    let abs = input.join("src/alpha.rs");
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(&input)
+        .args(["page", abs.to_str().unwrap(), "--dir", "out"])
+        .assert()
+        .success()
+        .stdout(contains("src/alpha.rs  code:rust"));
+}
+
 #[test]
 fn generate_cli_creates_files() {
     let dir = tempdir().unwrap();
