@@ -529,9 +529,9 @@ matching:
 - Hits whose body matched carry a `snippet`: a deterministic excerpt
   around the earliest token occurrence (60 chars of context per side,
   whitespace runs collapsed, `…` on truncated edges, comment markers such
-  as `//`, `///`, `*` and `#` dropped when they stand as whole tokens). Title/alias/
-  summary/heading-only hits have `snippet: None` — the summary explains
-  those.
+  as `//`, `///`, `*` and `#` dropped when they stand as whole tokens).
+  Title/alias/summary/heading-only hits have `snippet: None` — the summary
+  explains those.
 - **Symbol expansion** (`expand`) runs after the sort and `limit` cut, on
   the surviving code hits only. Each item of a hit page (modules excluded)
   scores per token `idf × (name + doc)`: whole name 3.5 (`IW_WHOLE`), a
@@ -560,9 +560,8 @@ matching:
   line `id  path  title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page
   without symbols); `serve::search_json` renders the JSON form. The MCP
-  `format` parameter and the CLI `--format` choose between them. The CLI
-  default changed from tab-separated `id<TAB>title<TAB>summary` plus snippet
-  to the line format.
+  `format` parameter and the CLI `--format` choose between them; `lines`
+  is the default for both.
 
 **Neighbors** (`Wiki::neighbors`) takes a page id; both the CLI and the
 MCP tool first pass what the caller typed through `Wiki::resolve_id`, which
@@ -854,13 +853,20 @@ unknown; and the names of one multi-declarator statement share its range.
     table, which rounds.
 - **Symbol eval:** `tests/symbol_eval.rs` — the symbol-level retrieval
   harness. Compiles the frozen corpus in `tests/.symbol_corpus/` (this
-  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 25
-  labelled queries (Name, NameWords, DocOnly, Stopwords) through
-  `Wiki::search`. Until symbol hits exist, a case is scored by the expected
-  symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
-  tokens, per split), gating on `file_hit@3` floors before snapshotting the
-  table; it also records the `neighbors` pack size without asserting it, and
-  the title-as-query count is floored (27/28).
+  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 52
+  labelled queries (Name, NameWords, DocOnly, Stopwords, MethodSplit, V7,
+  TestTarget) through `Wiki::search`. A case names the expected
+  `(path, symbol)` and is scored twice: `file_rank` is the first hit on the
+  expected path, `symbol_rank` the position of the expected symbol among the
+  response's symbol lines in output order. Per split (`tune`/`held`) it
+  reports `file_hit@1`, `file_hit@3`, `mrr@10`, `symbol_hit@3` (symbol rank
+  at most 3), and mean response tokens: `tokens` charges the default
+  response (`search_lines`, limit 10), `tokens_json` the `format: "json"`
+  response (`search_json`). Gates, checked before the snapshot: `file_hit@3`
+  and `symbol_hit@3` floors per split (tune 35/35, held 16/17) and the
+  title-as-query count (27/28). The `neighbors` pack size is recorded
+  without being asserted. A step that changes the default renderer or limit
+  swaps it in the harness and quotes both token numbers.
 
   **The corpus is frozen on 2026-10-22 at `a81a332` (the crate's sources as of
   `7209ee2`; the SHAs may dangle after a squash, `SYMBOL_CORPUS_HASH` is the
