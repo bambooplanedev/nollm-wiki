@@ -57,6 +57,15 @@ pub fn unknown_page(arg: &str, near: &[String]) -> String {
     format!("unknown page {arg:?}{closest} — use search to find ids")
 }
 
+/// Normalizes a tag argument as the index stores tags: trimmed, no leading
+/// `#` or trailing `/`, lowercase. `None` when nothing is left.
+pub fn tag_filter(arg: &str) -> Option<String> {
+    let t = arg.trim();
+    let t = t.strip_prefix('#').unwrap_or(t);
+    let t = t.strip_suffix('/').unwrap_or(t).to_lowercase();
+    (!t.is_empty()).then_some(t)
+}
+
 pub struct Hit {
     pub id: String,
     pub title: String,
@@ -769,10 +778,51 @@ impl Wiki {
     /// and each returned code page carries its best items as `symbols`
     /// (`expand`), with the same `idf`.
     pub fn search(&self, q: &str, kind: Option<&KindFilter>, limit: usize) -> Vec<Hit> {
+        self.search_tagged(q, kind, None, Some(limit))
+    }
+
+    /// `search` narrowed to pages tagged `tag` (already normalized by
+    /// `tag_filter`) or a sub-tag of it; the tag check sits beside `kind`, so
+    /// it narrows the corpus statistics too. With no query tokens and a tag,
+    /// lists every page that passes both filters by path, score 0 — `limit`
+    /// truncates only when given; with a query the default is 10.
+    pub fn search_tagged(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+    ) -> Vec<Hit> {
         let tokens = Self::tokenize(q);
+        let passes = |e: &Entry| {
+            kind.is_none_or(|f| SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)))
+                && tag.is_none_or(|t| {
+                    e.tags
+                        .iter()
+                        .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+                })
+        };
         if tokens.is_empty() {
-            return Vec::new();
+            let Some(_) = tag else {
+                return Vec::new();
+            };
+            let mut listed: Vec<&Entry> = self.entries.values().filter(|e| passes(e)).collect();
+            listed.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.id.cmp(&b.id)));
+            listed.truncate(limit.unwrap_or(usize::MAX));
+            return listed
+                .into_iter()
+                .map(|e| Hit {
+                    id: e.id.clone(),
+                    title: e.title.clone(),
+                    path: e.path.clone(),
+                    summary: e.summary.clone(),
+                    score: 0.0,
+                    snippet: None,
+                    symbols: Vec::new(),
+                })
+                .collect();
         }
+        let limit = limit.unwrap_or(10);
 
         // Pass 1: facts per page, statistics over every filtered page.
         let mut n = 0usize;
@@ -780,10 +830,8 @@ impl Wiki {
         let mut df = vec![0usize; tokens.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
-            if let Some(f) = kind {
-                if !SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)) {
-                    continue;
-                }
+            if !passes(e) {
+                continue;
             }
             let (len, candidate) = self.candidate(e, &tokens, &mut df);
             // Statistics count every filtered page, hits or not — `avglen`
