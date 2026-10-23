@@ -16,9 +16,7 @@ impl Extractor for MarkdownExtractor {
         let mut title = fm_get(&fm, "title");
         let created = fm_get(&fm, "created").unwrap_or_default();
         let description = fm_get(&fm, "description");
-        let aliases = fm_get(&fm, "aliases")
-            .map(|v| parse_list(&v))
-            .unwrap_or_default();
+        let aliases = fm_list(&fm, "aliases");
 
         if title.is_none() {
             title = first_h1(body_text);
@@ -71,19 +69,46 @@ fn split_frontmatter(text: &str) -> (Vec<String>, &str) {
     (Vec::new(), text) // unterminated frontmatter → treat whole file as body
 }
 
+/// Value of a top-level `key:` line; indented lines belong to some other key.
 fn fm_get(fm: &[String], key: &str) -> Option<String> {
     let prefix = format!("{key}:");
     fm.iter()
-        .find_map(|l| l.trim().strip_prefix(&prefix).map(|v| v.trim().to_string()))
+        .find_map(|l| l.strip_prefix(&prefix).map(|v| v.trim().to_string()))
         .filter(|v| !v.is_empty())
+}
+
+/// A list under a top-level `key:`: inline (`a, b` / `[a, b]`) or a YAML block of `- item` lines.
+fn fm_list(fm: &[String], key: &str) -> Vec<String> {
+    let prefix = format!("{key}:");
+    let Some(i) = fm.iter().position(|l| l.starts_with(&prefix)) else {
+        return Vec::new();
+    };
+    let v = fm[i][prefix.len()..].trim();
+    if !v.is_empty() {
+        return if v == "null" || v == "~" { Vec::new() } else { parse_list(v) };
+    }
+    let mut items = Vec::new();
+    for l in fm[i + 1..].iter().map(|l| l.trim()) {
+        if l.is_empty() || l.starts_with('#') || l == "-" {
+            continue;
+        }
+        let Some(item) = l.strip_prefix("- ") else { break };
+        let item = item.split(" #").next().unwrap_or(item);
+        let item = unquote(item);
+        if !item.is_empty() {
+            items.push(item);
+        }
+    }
+    items
+}
+
+fn unquote(s: &str) -> String {
+    s.trim().trim_matches(['"', '\'']).trim().to_string()
 }
 
 fn parse_list(v: &str) -> Vec<String> {
     let v = v.trim().trim_start_matches('[').trim_end_matches(']');
-    v.split(',')
-        .map(|s| s.trim().trim_matches('"').to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+    v.split(',').map(unquote).filter(|s| !s.is_empty()).collect()
 }
 
 fn first_h1(body: &str) -> Option<String> {
@@ -111,6 +136,41 @@ mod tests {
         assert_eq!(e.created, "2026-02-02");
         assert_eq!(e.summary.as_deref(), Some("A short desc."));
         assert!(e.body.starts_with("Body line one."));
+    }
+
+    fn aliases_of(fm: &str) -> Vec<String> {
+        MarkdownExtractor.extract("n.md", &format!("---\n{fm}---\nbody\n")).aliases
+    }
+
+    #[test]
+    fn aliases_block_list_forms() {
+        assert_eq!(aliases_of("aliases:\n  - AI\n  - ШІ\n"), vec!["AI", "ШІ"]);
+        assert_eq!(aliases_of("aliases:\n- a\n- b\ntitle: T\n"), vec!["a", "b"]);
+        assert_eq!(aliases_of("aliases:\n  # group\n  - a\n\n  - b # note\n"), vec!["a", "b"]);
+        assert_eq!(aliases_of("aliases:\n  -\n  - real\n"), vec!["real"]);
+        assert_eq!(aliases_of("aliases:\n  - \"q1\"\n  - 'q2'\n"), vec!["q1", "q2"]);
+    }
+
+    #[test]
+    fn aliases_one_line_forms_and_empties() {
+        assert_eq!(aliases_of("aliases: a, b\n"), vec!["a", "b"]);
+        assert_eq!(aliases_of("aliases: ['a', \"b\"]\n"), vec!["a", "b"]);
+        assert!(aliases_of("aliases: []\n").is_empty());
+        assert!(aliases_of("aliases: null\n").is_empty());
+        assert!(aliases_of("aliases: ~\n").is_empty());
+    }
+
+    #[test]
+    fn indented_keys_are_not_top_level() {
+        assert!(aliases_of("project:\n  aliases:\n    - inner\n").is_empty());
+        let e = MarkdownExtractor.extract("n.md", "---\ndescription: |\n  title: oops\n---\n# Real\n");
+        assert_eq!(e.name, "Real");
+    }
+
+    #[test]
+    fn crlf_block_list() {
+        let e = MarkdownExtractor.extract("n.md", "---\r\naliases:\r\n  - a\r\n  - b\r\n---\r\nbody\r\n");
+        assert_eq!(e.aliases, vec!["a", "b"]);
     }
 
     #[test]
