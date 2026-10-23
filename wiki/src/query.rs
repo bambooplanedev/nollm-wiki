@@ -5,7 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
-use crate::model::SourceKind;
+use crate::model::{KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -475,12 +475,11 @@ impl Wiki {
     /// any volume of body text on the same token. Sorted by score desc,
     /// then pagerank desc, then id asc; truncated to `limit`.
     /// Empty/punctuation-only queries return no hits.
-    pub fn search(&self, q: &str, kind: Option<SourceKind>, limit: usize) -> Vec<Hit> {
+    pub fn search(&self, q: &str, kind: Option<&KindFilter>, limit: usize) -> Vec<Hit> {
         let tokens = Self::tokenize(q);
         if tokens.is_empty() {
             return Vec::new();
         }
-        let kind_label = kind.map(|k| k.label());
 
         // Pass 1: facts per page, statistics over every filtered page.
         let mut n = 0usize;
@@ -488,8 +487,8 @@ impl Wiki {
         let mut df = vec![0usize; tokens.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
-            if let Some(k) = &kind_label {
-                if &e.kind != k {
+            if let Some(f) = kind {
+                if !SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)) {
                     continue;
                 }
             }

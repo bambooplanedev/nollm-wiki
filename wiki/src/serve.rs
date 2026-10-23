@@ -3,7 +3,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::SourceKind;
+use crate::model::KindFilter;
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -145,8 +145,8 @@ pub(crate) struct SearchParams {
     /// and method names by whole term, body by substring. A page matching
     /// any one token is a hit; rare tokens weigh far more than common ones.
     pub query: String,
-    /// Filter by source kind: `text`, `markdown`, or `code:<lang>`
-    /// (e.g. `code:rust`).
+    /// Filter by source kind: the groups `code` and `docs`, or one exact
+    /// kind: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
     pub kind: Option<String>,
     /// Maximum number of hits (default 10).
     pub limit: Option<usize>,
@@ -192,15 +192,15 @@ impl WikiServer {
     ) -> Result<CallToolResult, McpError> {
         let kind = match p.kind.as_deref() {
             None => None,
-            Some(s) => Some(SourceKind::parse(s).ok_or_else(|| {
+            Some(s) => Some(KindFilter::parse(s).ok_or_else(|| {
                 McpError::invalid_params(
-                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED),
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED),
                     None,
                 )
             })?),
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let json = search_json(wiki.search(&p.query, kind, p.limit.unwrap_or(10)));
+        let json = search_json(wiki.search(&p.query, kind.as_ref(), p.limit.unwrap_or(10)));
         Ok(with_stale(
             CallToolResult::success(vec![ContentBlock::text(json)]),
             stale.as_deref(),

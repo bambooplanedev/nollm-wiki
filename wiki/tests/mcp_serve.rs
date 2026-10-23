@@ -318,7 +318,7 @@ fn serve_reports_bad_params_and_survives() {
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
     let msg = resp["error"]["message"].as_str().unwrap();
     assert!(
-        msg.contains("expected text, markdown, or code:<lang>"),
+        msg.contains("expected code, docs, text, markdown, or code:<lang>"),
         "message: {msg}"
     );
     assert!(resp.get("result").is_none(), "got: {resp}");

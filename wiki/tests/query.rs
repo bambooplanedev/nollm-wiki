@@ -2,7 +2,7 @@
 
 use std::fs;
 use tempfile::tempdir;
-use wiki::model::SourceKind;
+use wiki::model::{KindFilter, SourceKind};
 use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
@@ -441,15 +441,15 @@ fn search_kind_filter_restricts_to_that_kind() {
         |hits: Vec<wiki::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
 
     assert_eq!(
-        ids(w.search("zebra", Some(SourceKind::Text), 10)),
+        ids(w.search("zebra", Some(&KindFilter::Exact(SourceKind::Text)), 10)),
         ["guide"]
     );
     assert_eq!(
         ids(w.search(
             "zebra",
-            Some(SourceKind::Code {
+            Some(&KindFilter::Exact(SourceKind::Code {
                 lang: "rust".into()
-            }),
+            })),
             10
         )),
         ["zoo"]
@@ -495,4 +495,50 @@ fn neighbors_depth_two_reaches_the_second_hop() {
     );
     // Non-full neighbor blocks are `## Title (id)` + summary.
     assert!(two.text.contains("## Gamma (gamma)"), "pack: {}", two.text);
+}
+
+fn kind_fixture() -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("a.rs"), "//! zebra\npub fn zebra() {}\n").unwrap();
+    fs::write(input.join("b.cpp"), "// zebra\nint zebra() { return 0; }\n").unwrap();
+    fs::write(input.join("c.md"), "# C\n\nzebra in markdown.\n").unwrap();
+    fs::write(input.join("d.txt"), "# D\n\nzebra in text.\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+fn ids_for(w: &Wiki, f: &str) -> Vec<String> {
+    let f = KindFilter::parse(f).unwrap();
+    let mut v: Vec<String> = w
+        .search("zebra", Some(&f), 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn kind_code_group_returns_only_code() {
+    let (_d, w) = kind_fixture();
+    // a.rs and b.cpp are the code pages; c.md and d.txt must not appear.
+    assert_eq!(ids_for(&w, "code"), ["a", "b"]);
+}
+
+#[test]
+fn kind_docs_group_returns_only_docs() {
+    let (_d, w) = kind_fixture();
+    assert_eq!(ids_for(&w, "docs"), ["c", "d"]);
+}
+
+#[test]
+fn kind_exact_code_rust_still_works() {
+    let (_d, w) = kind_fixture();
+    assert_eq!(ids_for(&w, "code:rust"), ["a"]);
+    assert_eq!(ids_for(&w, "markdown"), ["c"]);
+    assert!(KindFilter::parse("nope").is_none());
 }

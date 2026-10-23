@@ -302,7 +302,26 @@ fn search_cli_accepts_valid_kinds() {
         .stdout(contains("guide\t").not());
     search("pdf")
         .failure()
-        .stderr(contains("expected text, markdown, or code:<lang>"));
+        .stderr(contains(wiki::model::KindFilter::EXPECTED));
+}
+
+#[test]
+fn unknown_kind_lists_groups() {
+    let dir = compile_seed_corpus();
+    let out = dir.path().join("out");
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args([
+            "search",
+            "x",
+            "--dir",
+            out.to_str().unwrap(),
+            "--kind",
+            "nope",
+        ])
+        .assert()
+        .failure()
+        .stderr(contains("code, docs, text, markdown, or code:<lang>"));
 }
 
 /// Kills the watcher when the test ends — including on a failed assertion,

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use wiki::generator::generate_corpus;
-use wiki::model::SourceKind;
+use wiki::model::KindFilter;
 use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
@@ -144,11 +144,11 @@ fn main() -> Result<()> {
             let w = Wiki::load(&dir).context("load wiki")?;
             let kind = match kind.as_deref() {
                 None => None,
-                Some(s) => Some(SourceKind::parse(s).with_context(|| {
-                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED)
+                Some(s) => Some(KindFilter::parse(s).with_context(|| {
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
                 })?),
             };
-            for hit in w.search(&query, kind, limit) {
+            for hit in w.search(&query, kind.as_ref(), limit) {
                 println!(
                     "{}\t{}\t{}",
                     hit.id,

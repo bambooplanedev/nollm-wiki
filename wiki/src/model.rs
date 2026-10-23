@@ -13,9 +13,6 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
-    /// The kinds `parse` accepts, for user-facing error text.
-    pub const EXPECTED: &'static str = "text, markdown, or code:<lang>";
-
     pub fn label(&self) -> String {
         match self {
             SourceKind::Text => "text".into(),
@@ -31,6 +28,38 @@ impl SourceKind {
             other => other.strip_prefix("code:").map(|lang| SourceKind::Code {
                 lang: lang.to_string(),
             }),
+        }
+    }
+}
+
+/// What `search` and the CLI/MCP `kind` key accept: one exact kind, or the
+/// `code` / `docs` groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KindFilter {
+    Exact(SourceKind),
+    /// Every `code:<lang>`.
+    Code,
+    /// `markdown` and `text`.
+    Docs,
+}
+
+impl KindFilter {
+    /// The values `parse` accepts, for user-facing error text.
+    pub const EXPECTED: &'static str = "code, docs, text, markdown, or code:<lang>";
+
+    pub fn parse(s: &str) -> Option<KindFilter> {
+        match s {
+            "code" => Some(KindFilter::Code),
+            "docs" => Some(KindFilter::Docs),
+            other => SourceKind::parse(other).map(KindFilter::Exact),
+        }
+    }
+
+    pub fn matches(&self, k: &SourceKind) -> bool {
+        match self {
+            KindFilter::Exact(x) => x == k,
+            KindFilter::Code => matches!(k, SourceKind::Code { .. }),
+            KindFilter::Docs => matches!(k, SourceKind::Text | SourceKind::Markdown),
         }
     }
 }
