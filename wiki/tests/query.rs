@@ -738,3 +738,65 @@ fn snippet_drops_comment_markers() {
         assert!(!s.contains("//") && !s.contains('#'), "snippet: {s}");
     }
 }
+
+#[test]
+fn snippet_keeps_markers_that_are_content() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("a.txt"),
+        "# T\nintro\n#include zork.h\n#[derive(Debug)] zork\n*ptr = zork;\n*note* zork\n",
+    )
+    .unwrap();
+    fs::write(input.join("c.txt"), "# C\n/*\n * Zork block\n */\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("zork", None, 10);
+    let snips: Vec<String> = hits.into_iter().filter_map(|h| h.snippet).collect();
+    let all = snips.join("\n");
+    for kept in [
+        "#include zork.h",
+        "#[derive(Debug)]",
+        "*ptr = zork",
+        "*note* zork",
+    ] {
+        assert!(all.contains(kept), "{kept} lost: {all}");
+    }
+    assert!(
+        all.contains("Zork block") && !all.contains("* Zork"),
+        "{all}"
+    );
+}
+
+#[test]
+fn search_lines_keeps_one_line_per_hit_and_symbol() {
+    use wiki::query::{Hit, SymbolLine};
+    let hit = Hit {
+        id: "a".into(),
+        title: "Ti\ntle\tx".into(),
+        path: "a.rs".into(),
+        summary: Some("sum\nmary".into()),
+        score: 1.0,
+        snippet: None,
+        symbols: vec![SymbolLine {
+            path: "a.rs".into(),
+            start_line: 1,
+            end_line: 2,
+            name: "f".into(),
+            signature: "fn f(\n)".into(),
+            doc: Some("do\tc\nline".into()),
+            test: false,
+        }],
+    };
+    let out = wiki::serve::search_lines(&[hit]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "a  a.rs  Ti tle x — sum mary",
+            "  a.rs:1-2  f  fn f( )  — do c line"
+        ]
+    );
+}

@@ -46,7 +46,7 @@ pagerank of                                       MethodSplit  tune           2 
 with wiki                                         MethodSplit  held           4           4     603  README.md
 list resources                                    MethodSplit  tune           1           1     739  src/serve.rs
 read resource                                     MethodSplit  tune           1           1     674  src/serve.rs
-next u64                                          MethodSplit  held           1           1     658  src/generator.rs
+next u64                                          MethodSplit  held           1           1     659  src/generator.rs
 render fingerprint                                V7           tune           1           1     738  src/rewrite.rs
 render page                                       V7           tune           1           1    1115  src/rewrite.rs
 render index json                                 V7           held           1           1     847  src/manifest.rs
@@ -58,7 +58,7 @@ pagerank is deterministic and sums to about one   TestTarget   tune           1 
 stale page files lists orphaned on disk only      TestTarget   held           1           1     741  src/lib.rs
 
 tune  file_hit@1=34/35 (0.9714) file_hit@3=35/35 (1.0000) mrr@10=0.9857 symbol_hit@3=35/35 (1.0000) tokens=639.9 tokens_json=912.9
-held  file_hit@1=16/17 (0.9412) file_hit@3=16/17 (0.9412) mrr@10=0.9559 symbol_hit@3=16/17 (0.9412) tokens=700.6 tokens_json=1027.2
+held  file_hit@1=16/17 (0.9412) file_hit@3=16/17 (0.9412) mrr@10=0.9559 symbol_hit@3=16/17 (0.9412) tokens=700.7 tokens_json=1027.2
 class Name: file_hit@3=9/9 symbol_hit@3=9/9
 class NameWords: file_hit@3=6/6 symbol_hit@3=6/6
 class DocOnly: file_hit@3=6/6 symbol_hit@3=6/6

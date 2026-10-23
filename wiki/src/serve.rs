@@ -379,25 +379,31 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or the snippet (four-space indent) when the page has no symbols.
 pub fn search_lines(hits: &[Hit]) -> String {
+    // Fields are one-line text; collapse any newline or tab they carry.
+    let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();
     for h in hits {
-        out.push_str(&format!("{}  {}  {}", h.id, h.path, h.title));
+        out.push_str(&format!("{}  {}  {}", h.id, h.path, one(&h.title)));
         if let Some(s) = &h.summary {
-            out.push_str(&format!(" — {s}"));
+            out.push_str(&format!(" — {}", one(s)));
         }
         out.push('\n');
         for s in &h.symbols {
             out.push_str(&format!(
                 "  {}:{}-{}  {}  {}",
-                s.path, s.start_line, s.end_line, s.name, s.signature
+                s.path,
+                s.start_line,
+                s.end_line,
+                s.name,
+                one(&s.signature)
             ));
             if let Some(d) = &s.doc {
-                out.push_str(&format!("  — {d}"));
+                out.push_str(&format!("  — {}", one(d)));
             }
             out.push('\n');
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
-            out.push_str(&format!("    {sn}\n"));
+            out.push_str(&format!("    {}\n", one(sn)));
         }
     }
     out

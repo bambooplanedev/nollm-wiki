@@ -57,16 +57,19 @@ pub struct Hit {
 }
 
 /// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
-/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose.
+/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
+/// marker counts only when whitespace or the line end follows it, so
+/// `#include`, `#[derive]`, `*ptr` and `*note*` stay intact.
 fn strip_comment_marker(line: &str) -> &str {
     let l = line.trim_start();
+    let marker_end = |r: &str| r.is_empty() || r.starts_with(char::is_whitespace);
     for m in ["//!", "///", "//", "/**", "/*", "*/", "*"] {
-        if let Some(r) = l.strip_prefix(m) {
+        if let Some(r) = l.strip_prefix(m).filter(|r| marker_end(r)) {
             return r;
         }
     }
     match l.trim_start_matches('#') {
-        r if r.len() < l.len() && (r.is_empty() || r.starts_with(char::is_whitespace)) => r,
+        r if r.len() < l.len() && marker_end(r) => r,
         _ => l,
     }
 }
