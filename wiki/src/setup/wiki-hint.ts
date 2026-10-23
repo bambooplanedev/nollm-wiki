@@ -8,7 +8,7 @@ export default function (pi: ExtensionAPI) {
     if (event.messageType !== "user" || !event.prompt.trim()) return;
     let text = "";
     try {
-      text = execFileSync("<cmd>", ["hint", event.prompt, "--dir", path.join(ctx.cwd, ".wiki")], {
+      text = execFileSync("<cmd>", ["hint", "--dir", path.join(ctx.cwd, ".wiki"), "--", event.prompt], {
         encoding: "utf8",
         timeout: 3000,
       });

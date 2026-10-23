@@ -263,12 +263,91 @@ fn setup_repo_writes_wiki_even_when_not_on_path() {
 }
 
 #[test]
-fn setup_local_uses_the_binary_path_when_wiki_is_not_on_path() {
+fn setup_local_writes_wiki_and_warns_when_it_is_not_on_path() {
     let f = fixture(false, false);
-    f.setup(&["--agent", "pi", "--scope", "local"]).success();
-    let v: serde_json::Value = serde_json::from_str(&read(&f.root().join(".pi/mcp.json"))).unwrap();
-    let c = v["mcpServers"]["wiki"]["command"].as_str().unwrap();
-    assert!(Path::new(c).is_absolute() && c.ends_with("wiki"), "{c}");
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(out(&a).contains("not on PATH"));
+    assert!(read(&f.root().join(".pi/mcp.json")).contains("\"command\": \"wiki\""));
+}
+
+/// Puts the real `git` on the stub PATH.
+fn real_git(f: &Fixture) {
+    let out = std::process::Command::new("which")
+        .arg("git")
+        .output()
+        .unwrap();
+    let git = String::from_utf8(out.stdout).unwrap();
+    symlink(git.trim(), f.bin().join("git")).unwrap();
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let s = std::process::Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .unwrap();
+    assert!(s.success(), "git {args:?}");
+}
+
+#[test]
+fn setup_hook_remove_without_hook_flag_undoes_hooks() {
+    let f = fixture(true, true);
+    let r = f.root();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
+    let args = ["--agent", "claude,pi", "--scope", "repo"];
+    f.setup(&[&args[..], &["--hook"]].concat()).success();
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
+    assert!(!r.join(".pi/extensions").exists());
+    // No hooks installed: plain --remove still succeeds and says so.
+    let a = f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(out(&a).contains("not present: .pi/extensions/wiki-hint/index.ts hook for pi"));
+}
+
+#[test]
+fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let main = f.root();
+    git(&main, &["add", "."]);
+    git(&main, &["commit", "-q", "-m", "x"]);
+    let wt = f.tmp.path().join("wt");
+    git(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
+    let sub = main.join("src");
+    for root in [&wt, &sub] {
+        let a = Command::cargo_bin("wiki")
+            .unwrap()
+            .args(["setup", "--agent", "pi", "--scope", "local"])
+            .current_dir(root)
+            .env("PATH", f.bin())
+            .assert()
+            .success();
+        assert!(!out(&a).contains("not a git repository"), "{}", out(&a));
+    }
+    let ex = read(&main.join(".git/info/exclude"));
+    assert!(ex.lines().any(|l| l == ".wiki/"), "{ex}");
+    assert!(ex.lines().any(|l| l == "/.pi/mcp.json"), "{ex}");
+}
+
+#[test]
+fn setup_local_skips_a_file_git_tracks() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let r = f.root();
+    fs::create_dir_all(r.join(".pi")).unwrap();
+    let mcp = "{\n  \"mcpServers\": {}\n}\n";
+    fs::write(r.join(".pi/mcp.json"), mcp).unwrap();
+    git(&r, &["add", ".pi/mcp.json"]);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).code(1);
+    assert!(
+        out(&a).contains("tracked by git; use --scope repo"),
+        "{}",
+        out(&a)
+    );
+    assert_eq!(read(&r.join(".pi/mcp.json")), mcp);
+    assert!(r.join(".agents/skills/wiki-navigation/SKILL.md").exists());
 }
 
 #[test]

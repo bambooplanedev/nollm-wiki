@@ -61,6 +61,7 @@ fn hint_ignores_docs_and_caps_lines() {
         actually loaded in this project because it is the thing that I need to know about right now \
         and also what the code does with them when they are there please and thank you very much";
     let out = hint(&tmp.path().join(".wiki"), chatty);
+    assert!(out.contains("load_member_creds"), "{out}");
     assert!(out.lines().count() <= 9, "{out}");
     assert!(!out.contains("notes.md"), "{out}");
 }
@@ -93,4 +94,30 @@ fn hint_reads_claude_hook_json() {
         expected
     );
     assert!(!expected.is_empty());
+}
+
+#[test]
+fn hint_text_may_start_with_a_dash() {
+    let tmp = project();
+    let dir = tmp.path().join(".wiki");
+    let out = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", "--dir"])
+        .arg(&dir)
+        .args(["--", "-- where are member creds loaded"])
+        .assert()
+        .success();
+    let out = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(out.contains("load_member_creds"), "{out}");
+}
+
+#[test]
+fn hint_claude_hook_is_silent_on_non_utf8_stdin() {
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", "--claude-hook"])
+        .write_stdin(vec![0xff, 0xfe, 0xfd])
+        .assert()
+        .success()
+        .stdout("");
 }

@@ -333,16 +333,22 @@ Claude Code and pi use the wiki on their own: the MCP server (`wiki serve
   `.pi/mcp.json`, `.claude/skills/wiki-navigation/SKILL.md`,
   `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
   `wiki` must be on `PATH`; setup warns when it is not.
-- `--scope local` — this checkout only: Claude Code's server goes through
+- `--scope local` — this checkout only (also written as `wiki`, with the same
+  warning; a file git already tracks is skipped, use `--scope repo` for it): Claude Code's server goes through
   `claude mcp add-json wiki … --scope local`, the other files are written and
   listed in `.git/info/exclude`.
 - Without `--scope`, setup asks on a terminal and fails without one.
-- `--remove` deletes exactly what setup wrote. Ignore lines and `.wiki/` stay.
+- `--remove` deletes exactly what setup wrote, hooks included even without
+  `--hook`. Ignore lines and `.wiki/` stay.
 - `--hook` — also adds the wiki's code lines for each prompt before the model
   runs. Claude Code gets a `UserPromptSubmit` entry (`wiki hint --claude-hook`)
   in `.claude/settings.json` (`settings.local.json` with `--scope local`);
   pi gets `.pi/extensions/wiki-hint/index.ts`. The hook is silent when there
   is no wiki, it cannot be read or nothing matches, and never blocks a prompt.
+
+A JSON config setup edits is rewritten as 2-space pretty JSON (keys and their
+order kept), so a hand-formatted file comes back reformatted after install or
+`--remove`.
 
 Safe to run twice. An entry or file at the same place with other content is
 left alone and reported; setup does the rest and exits 1. pi loads project

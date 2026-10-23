@@ -1,4 +1,4 @@
-//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, and generate subcommands.
+//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, hint, setup, and generate subcommands.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -302,9 +302,10 @@ fn main() -> Result<()> {
         } => {
             let text = if claude_hook {
                 let mut json = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut json)
-                    .context("read hook input")?;
                 // A hook must never break the prompt: unusable input is silence.
+                if std::io::Read::read_to_string(&mut std::io::stdin(), &mut json).is_err() {
+                    return Ok(());
+                }
                 match wiki::hint::prompt_from_hook_json(&json) {
                     Some(t) => t,
                     None => return Ok(()),

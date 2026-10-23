@@ -55,12 +55,43 @@ pub fn find_on_path(name: &str) -> Option<PathBuf> {
         .find(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
 }
 
+#[allow(clippy::struct_excessive_bools)]
 struct Report<'a> {
     out: &'a mut dyn Write,
     remove: bool,
     /// Nothing skipped so far.
     ok: bool,
     wrote_pi: bool,
+    /// Local-scope install: skip files git already tracks.
+    guard_tracked: bool,
+}
+
+/// Whether git (when on `PATH`) tracks `file` in `root`.
+fn tracked(root: &Path, file: &str) -> bool {
+    find_on_path("git").is_some()
+        && Command::new("git")
+            .args(["ls-files", "--error-unmatch", "--", file])
+            .current_dir(root)
+            .output()
+            .is_ok_and(|o| o.status.success())
+}
+
+/// The repository's `info/exclude`: asked of git when it is on `PATH`, else `.git/info/exclude`.
+fn exclude_file(root: &Path) -> Option<PathBuf> {
+    if find_on_path("git").is_some() {
+        let o = Command::new("git")
+            .args(["rev-parse", "--git-path", "info/exclude"])
+            .current_dir(root)
+            .output()
+            .ok()
+            .filter(|o| o.status.success());
+        if let Some(o) = o {
+            return Some(root.join(String::from_utf8_lossy(&o.stdout).trim()));
+        }
+    }
+    root.join(".git")
+        .is_dir()
+        .then(|| root.join(".git/info/exclude"))
 }
 
 impl Report<'_> {
@@ -72,6 +103,23 @@ impl Report<'_> {
     fn skip(&mut self, what: &str, why: &str) -> Result<(), WikiError> {
         self.ok = false;
         self.line(&format!("skipped {what}: {why}"))
+    }
+
+    /// `item` for a file in `root`, except that a local-scope install skips a file git tracks:
+    /// an exclude line does nothing for it, so the "local" change would become a diff.
+    fn file_item(
+        &mut self,
+        root: &Path,
+        file: &str,
+        what: &str,
+        pi: bool,
+        res: impl FnOnce() -> std::io::Result<Outcome>,
+    ) -> Result<bool, WikiError> {
+        if self.guard_tracked && tracked(root, file) {
+            self.skip(what, "tracked by git; use --scope repo")?;
+            return Ok(false);
+        }
+        self.item(what, pi, res())
     }
 
     /// Reports one outcome; `true` when the item is in place (written or already there).
@@ -161,6 +209,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         remove: opts.remove,
         ok: true,
         wrote_pi: false,
+        guard_tracked: local && !opts.remove,
     };
     let agents = if let Some(a) = &opts.agents {
         a.clone()
@@ -212,12 +261,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
 
     let on_path = find_on_path("wiki").is_some();
-    let cmd = if on_path || !local {
-        "wiki".to_string()
-    } else {
-        std::env::current_exe()?.to_string_lossy().into_owned()
-    };
-    if !on_path && !opts.remove && !local {
+    let cmd = "wiki";
+    if !on_path && !opts.remove {
         r.line("warning: wiki is not on PATH; the agents will not find it until it is")?;
     }
     let entry = json!({"command": cmd, "args": ["serve", "--source", "."]});
@@ -239,39 +284,47 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 (".mcp.json", entry.clone())
             };
             let path = root.join(file);
-            let res = if opts.remove {
-                edit::remove_entry(root, &path, &["mcpServers"], "wiki", &value)
-            } else {
-                edit::upsert_entry(&path, &["mcpServers"], "wiki", &value)
+            let res = || {
+                if opts.remove {
+                    edit::remove_entry(root, &path, &["mcpServers"], "wiki", &value)
+                } else {
+                    edit::upsert_entry(&path, &["mcpServers"], "wiki", &value)
+                }
             };
-            if r.item(&format!("{file} wiki server"), pi, res)? && pi {
+            if r.file_item(root, file, &format!("{file} wiki server"), pi, res)? && pi {
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, &cmd, &entry, opts.remove);
+            let o = claude_local_mcp(root, cmd, &entry, opts.remove);
             r.item("Claude Code local wiki server", false, Ok(o))?;
         }
         // Skill
         let file = skill.join("SKILL.md");
-        let res = if opts.remove {
-            edit::remove_file(root, &root.join(&file), SKILL)
-        } else {
-            edit::write_file(&root.join(&file), SKILL)
+        let res = || {
+            if opts.remove {
+                edit::remove_file(root, &root.join(&file), SKILL)
+            } else {
+                edit::write_file(&root.join(&file), SKILL)
+            }
         };
-        if r.item(&format!("{} skill for {name}", file.display()), pi, res)? {
+        let what = format!("{} skill for {name}", file.display());
+        if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
             ignore.push(format!("/{}/", skill.display()));
         }
-        // Hook
-        if opts.hook {
+        // Hook (`--remove` always looks, so it undoes a hook installed earlier)
+        if opts.hook || opts.remove {
             if pi {
-                let content = PI_HOOK.replace("<cmd>", &cmd);
+                let content = PI_HOOK.replace("<cmd>", cmd);
                 let path = root.join(PI_HOOK_FILE);
-                let res = if opts.remove {
-                    edit::remove_file(root, &path, &content)
-                } else {
-                    edit::write_file(&path, &content)
+                let res = || {
+                    if opts.remove {
+                        edit::remove_file(root, &path, &content)
+                    } else {
+                        edit::write_file(&path, &content)
+                    }
                 };
-                if r.item(&format!("{PI_HOOK_FILE} hook for pi"), true, res)? {
+                let what = format!("{PI_HOOK_FILE} hook for pi");
+                if r.file_item(root, PI_HOOK_FILE, &what, true, res)? {
                     ignore.push("/.pi/extensions/wiki-hint/".into());
                 }
             } else {
@@ -283,12 +336,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let item = json!({"hooks": [{"type": "command", "command": format!("{cmd} hint --claude-hook")}]});
                 let path = root.join(file);
                 let parents = ["hooks", "UserPromptSubmit"];
-                let res = if opts.remove {
-                    edit::remove_item(root, &path, &parents, &item)
-                } else {
-                    edit::append_item(&path, &parents, &item)
+                let res = || {
+                    if opts.remove {
+                        edit::remove_item(root, &path, &parents, &item)
+                    } else {
+                        edit::append_item(&path, &parents, &item)
+                    }
                 };
-                if r.item(&format!("{file} prompt hook"), false, res)? && local {
+                if r.file_item(root, file, &format!("{file} prompt hook"), false, res)? && local {
                     ignore.push(format!("/{file}"));
                 }
             }
@@ -303,12 +358,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             false,
             edit::ensure_line(&root.join(".gitignore"), ".wiki/"),
         )?;
-    } else if root.join(".git").is_dir() {
+    } else if let Some(exclude) = exclude_file(root) {
         for line in ignore {
             r.item(
                 &format!("{line} in .git/info/exclude"),
                 false,
-                edit::ensure_line(&root.join(".git/info/exclude"), &line),
+                edit::ensure_line(&exclude, &line),
             )?;
         }
     } else {
