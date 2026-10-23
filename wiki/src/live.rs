@@ -22,7 +22,6 @@ const WAIT: Duration = Duration::from_secs(5);
 /// Barrier files go in this subdirectory of `--dir`: it stays writable when
 /// the `--dir` root is not, and no `.md` name there is a page the prune knows.
 const BARRIER_DIR: &str = ".serve";
-const BARRIER_PREFIX: &str = "barrier-";
 
 struct State {
     /// Bumped by every relevant watch event.
@@ -129,7 +128,7 @@ impl Live {
         let barrier = self
             .dir
             .join(BARRIER_DIR)
-            .join(format!("{BARRIER_PREFIX}{token}"));
+            .join(format!("{}{token}", barrier_prefix()));
         let wrote = std::fs::write(&barrier, "").is_ok();
         if wrote {
             s = self.wait(s, left(), |s| s.barrier_seen < token);
@@ -171,14 +170,10 @@ impl Live {
         let mut s = self.lock();
         let relevant = match res {
             Ok(ev) => {
-                for token in ev.paths.iter().filter_map(|p| self.barrier_token(p)) {
+                for token in ev.paths.iter().filter_map(|p| barrier_token(&self.dir, p)) {
                     s.barrier_seen = s.barrier_seen.max(token);
                 }
-                ev.need_rescan()
-                    || ev.paths.iter().any(|p| {
-                        !is_under(p, &self.dir)
-                            && s.watch_set.as_ref().is_none_or(|w| w.relevant(p))
-                    })
+                is_edit(ev, &self.dir, s.watch_set.as_ref())
             }
             // A lost event may be a real change: count it.
             Err(_) => true,
@@ -189,23 +184,14 @@ impl Live {
         self.changed.notify_all();
     }
 
-    fn barrier_token(&self, path: &Path) -> Option<u64> {
-        if path.parent()? != self.dir.join(BARRIER_DIR) {
-            return None;
-        }
-        path.file_name()?
-            .to_str()?
-            .strip_prefix(BARRIER_PREFIX)?
-            .parse()
-            .ok()
-    }
-
     /// Compile once and publish the result: a new snapshot on success, the
     /// error as the stale reason on failure (the old snapshot stays).
     fn compile_step(&self) -> Result<(), WikiError> {
         let target = self.lock().event_gen;
-        let result = compile(&self.source, &self.dir, &self.opts)
-            .and_then(|r| Ok((Wiki::load(&self.dir)?, r.watch_set)));
+        let result = unpanicked(|| {
+            compile(&self.source, &self.dir, &self.opts)
+                .and_then(|r| Ok((Wiki::load(&self.dir)?, r.watch_set)))
+        });
         let mut s = self.lock();
         let outcome = match result {
             Ok((wiki, watch_set)) => {
@@ -222,5 +208,88 @@ impl Live {
         s.compiled_gen = target;
         self.changed.notify_all();
         outcome
+    }
+}
+
+/// Does `ev` change what a compile into `dir` would see? `watch_set` is the
+/// last compile's; with none yet, every path outside `dir` counts.
+fn is_edit(ev: &notify::Event, dir: &Path, watch_set: Option<&WatchSet>) -> bool {
+    ev.need_rescan()
+        || watch::is_change(ev)
+            && ev
+                .paths
+                .iter()
+                .any(|p| !is_under(p, dir) && watch_set.is_none_or(|w| w.relevant(p)))
+}
+
+/// Barrier names are this prefix plus the token; the pid keeps two servers
+/// sharing one `--dir` from closing each other's barriers.
+fn barrier_prefix() -> String {
+    format!("barrier-{}-", std::process::id())
+}
+
+/// The token of `path` if it is one of this process's barriers in `dir`.
+fn barrier_token(dir: &Path, path: &Path) -> Option<u64> {
+    if path.parent()? != dir.join(BARRIER_DIR) {
+        return None;
+    }
+    path.file_name()?
+        .to_str()?
+        .strip_prefix(&barrier_prefix())?
+        .parse()
+        .ok()
+}
+
+/// `f`, with a panic turned into an error: the compile thread must outlive a
+/// bug in one compile, or every later call would wait out its 5 s.
+fn unpanicked<T>(f: impl FnOnce() -> Result<T, WikiError>) -> Result<T, WikiError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .unwrap_or_else(|_| Err(std::io::Error::other("the compile panicked").into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{AccessKind, AccessMode, Flag, ModifyKind};
+    use notify::{Event, EventKind};
+
+    #[test]
+    fn opening_a_walked_file_is_not_an_edit() {
+        let dir = Path::new("/proj/.wiki");
+        let file = PathBuf::from("/proj/src/a.rs");
+        let set = WatchSet::new(
+            Path::new("/proj"),
+            [file.clone()],
+            [PathBuf::from("/proj/src")],
+        );
+        let open =
+            Event::new(EventKind::Access(AccessKind::Open(AccessMode::Any))).add_path(file.clone());
+        let modify = Event::new(EventKind::Modify(ModifyKind::Any)).add_path(file);
+        let rescan = Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        assert!(!is_edit(&open, dir, Some(&set)));
+        assert!(!is_edit(&open, dir, None));
+        assert!(is_edit(&modify, dir, Some(&set)));
+        assert!(is_edit(&rescan, dir, Some(&set)));
+    }
+
+    #[test]
+    fn barrier_token_reads_only_this_process_barriers() {
+        let dir = Path::new("/out");
+        let own = dir.join(BARRIER_DIR).join(format!("{}7", barrier_prefix()));
+        let other = dir
+            .join(BARRIER_DIR)
+            .join(format!("barrier-{}-7", std::process::id() + 1));
+        assert_eq!(barrier_token(dir, &own), Some(7));
+        assert_eq!(barrier_token(dir, &other), None);
+        assert_eq!(
+            barrier_token(dir, &dir.join(format!("{}7", barrier_prefix()))),
+            None
+        );
+    }
+
+    #[test]
+    fn a_panicking_compile_is_an_error() {
+        let r: Result<(), WikiError> = unpanicked(|| panic!("boom"));
+        assert_eq!(r.unwrap_err().to_string(), "the compile panicked");
     }
 }

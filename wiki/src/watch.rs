@@ -108,12 +108,18 @@ pub fn watch(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), W
     Ok(())
 }
 
-/// True if a watch event touches at least one path outside `output` — i.e. a
+/// False for a mere read: inotify reports every open, and a compile's own
+/// walk opens every source file, so counting reads would recompile forever.
+pub(crate) fn is_change(ev: &notify::Event) -> bool {
+    !matches!(ev.kind, notify::EventKind::Access(_))
+}
+
+/// True if a watch event changes at least one path outside `output` — i.e. a
 /// real source change, not our own generated pages. Watch errors are treated
 /// as relevant so a real change is never missed.
 fn event_is_relevant(res: &notify::Result<notify::Event>, output: &Path) -> bool {
     match res {
-        Ok(ev) => ev.paths.iter().any(|p| !crate::is_under(p, output)),
+        Ok(ev) => is_change(ev) && ev.paths.iter().any(|p| !crate::is_under(p, output)),
         Err(_) => true,
     }
 }
@@ -173,6 +179,18 @@ mod tests {
             notify::Event::new(notify::EventKind::Any).add_path(PathBuf::from("/proj/alpha.txt"));
         assert!(!event_is_relevant(&Ok(generated), output));
         assert!(event_is_relevant(&Ok(source), output));
+    }
+
+    #[test]
+    fn opening_a_source_file_is_not_relevant() {
+        use notify::event::{AccessKind, AccessMode, ModifyKind};
+        let output = Path::new("/proj/wiki");
+        let file = PathBuf::from("/proj/src/a.rs");
+        let open = notify::Event::new(notify::EventKind::Access(AccessKind::Open(AccessMode::Any)))
+            .add_path(file.clone());
+        let modify = notify::Event::new(notify::EventKind::Modify(ModifyKind::Any)).add_path(file);
+        assert!(!event_is_relevant(&Ok(open), output));
+        assert!(event_is_relevant(&Ok(modify), output));
     }
 
     /// Compile a tempdir and return its (canonical root, watch set).

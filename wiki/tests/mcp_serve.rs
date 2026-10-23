@@ -515,6 +515,34 @@ fn serve_source_compiles_missing_wiki_and_answers() {
 }
 
 #[test]
+fn serve_source_catches_up_an_existing_wiki() {
+    let project = source_project();
+    let opts = wiki::CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    wiki::compile(project.path(), &project.path().join(".wiki"), &opts).unwrap();
+    // Edits made while no server ran: the start-up compile must pick them up.
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("notes/gamma.md"), "# Gamma\n\nquokka\n").unwrap();
+
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    for (id, word) in [(2, "zebrafish"), (3, "quokka")] {
+        let resp = search(&mut stdin, &stdout, id, word);
+        assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+        assert_eq!(stale_block(&resp), None);
+    }
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn serve_source_sees_edit_without_sleep() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
