@@ -1,5 +1,6 @@
 //! MCP server for a compiled wiki (`wiki serve`): exposes
-//! search/neighbors/lint as tools and pages as resources over stdio.
+//! search/page/neighbors (and, on request, lint) as tools and pages as
+//! resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
@@ -29,6 +30,18 @@ use std::time::SystemTime;
 /// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
 /// an agent calling with defaults should not receive a 30 KB dump.
 pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
+
+/// Hits the `search` tool returns when the caller omits `limit` (the CLI
+/// keeps 10): every hit line is re-read on every later turn of the agent.
+pub const DEFAULT_SEARCH_LIMIT: usize = 5;
+
+/// Every tool the server has.
+pub const TOOLS: [&str; 4] = ["search", "page", "neighbors", "lint"];
+
+/// The tools exposed without `--tools`. `lint` serves the person keeping
+/// the wiki, not an agent mid-task, and each exposed tool costs schema
+/// tokens on every request.
+pub const DEFAULT_TOOLS: [&str; 3] = ["search", "page", "neighbors"];
 
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.
@@ -140,18 +153,13 @@ fn with_stale(mut result: CallToolResult, stale: Option<&str>) -> CallToolResult
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct SearchParams {
-    /// Search query, matched case-insensitively: title, aliases, summary and
-    /// section headings by word prefix (every part of the token), defined
-    /// and method names by whole term, body by substring. A page matching
-    /// any one token is a hit; rare tokens weigh far more than common ones.
+    /// Words or a symbol name, e.g. `order reject` or `onOrderReject`.
     pub query: String,
-    /// Filter by source kind: the groups `code` and `docs`, or one exact
-    /// kind: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
+    /// `code`, `docs`, or one kind such as `code:rust` or `markdown`.
     pub kind: Option<String>,
-    /// Only pages carrying this tag; `a` also matches `a/b`. With an empty
-    /// query, lists every such page.
+    /// Only pages with this tag (`a` also matches `a/b`); an empty query lists them.
     pub tag: Option<String>,
-    /// Maximum number of hits (default 10 with a query; none for a tag-only listing).
+    /// Maximum pages (default 5).
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
@@ -160,28 +168,26 @@ pub(crate) struct SearchParams {
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct NeighborsParams {
-    /// The page to build the context pack around: its id, its title, or its
-    /// source path (a path suffix works when only one page ends with it).
+    /// Page id, title, or source path.
     pub id: String,
-    /// BFS hop count from the target page (default 1).
+    /// Link hops from the page (default 1).
     pub depth: Option<usize>,
-    /// Token budget for the returned pack (default 4000). Pass a larger
-    /// value for more context; there is no way to make it unbounded here.
+    /// Token budget (default 4000).
     pub max_tokens: Option<usize>,
-    /// Node-count budget for the returned pack (default unbounded).
+    /// Maximum pages in the pack (default no limit).
     pub max_nodes: Option<usize>,
-    /// Include full neighbor bodies instead of one-line summaries.
+    /// Whole linked pages instead of one-line summaries.
     pub full: Option<bool>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct PageParams {
-    /// The page: its id, its title, or its source path (relative, ./, or absolute).
+    /// Page id, title, or source path.
     pub id: String,
-    /// Return the whole rendered page instead of the outline.
+    /// The whole page instead of the outline.
     pub full: Option<bool>,
-    /// Token budget (default 4000 for the outline; none for full).
+    /// Token budget (default 4000 for the outline, none with `full`).
     pub max_tokens: Option<usize>,
 }
 
@@ -193,15 +199,17 @@ pub(crate) struct WikiServer {
 
 #[tool_router]
 impl WikiServer {
-    pub fn new(state: Arc<WikiState>) -> Self {
-        Self {
-            state,
-            tool_router: Self::tool_router(),
+    /// A server exposing only `tools` (names from [`TOOLS`]).
+    pub fn new(state: Arc<WikiState>, tools: &[&str]) -> Self {
+        let mut tool_router = Self::tool_router();
+        for name in TOOLS.iter().filter(|t| !tools.contains(t)) {
+            tool_router.remove_route(name);
         }
+        Self { state, tool_router }
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword, or list pages by tag. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `page` for a module's outline."
+        description = "Find where code or docs live in this project. Use it before grep or reading files. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive."
     )]
     async fn search(
         &self,
@@ -234,7 +242,10 @@ impl WikiServer {
                 ))
             }
         };
-        let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), p.limit);
+        // A tag-only listing (no query words) stays unbounded by default.
+        let has_words = p.query.chars().any(char::is_alphanumeric);
+        let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
+        let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), limit);
         let text = if json {
             search_json(hits)
         } else {
@@ -247,7 +258,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Build a budgeted context pack around a page: the page in full, then its graph neighbors ordered by centrality (most important last). Prefer this over reading pages one by one."
+        description = "Show a page with the pages linked to it (imports, mentions) as one-line summaries, within a token budget. Use it to see what a module connects to."
     )]
     async fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
         let budget = PackBudget {
@@ -271,7 +282,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Show a page's outline: one line per code symbol (start-end kind signature) — then read just those lines with your file tool. Docs pages list their headings. full: true returns the whole page."
+        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
     )]
     async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
         let full = p.full.unwrap_or(false);
@@ -294,7 +305,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Check wiki health: broken wikilinks and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
+        description = "Check the wiki for broken links and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
         let (_, stale) = self.state.snapshot().await;
@@ -323,12 +334,11 @@ impl ServerHandler for WikiServer {
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "Query interface to a compiled wiki. `search` finds pages and code \
-                 symbols with path:start-end; `page` gives a module's outline; read \
-                 only those lines with your file tool. `neighbors` packs related \
-                 pages. Paths are relative to the compiled project root; line ranges \
-                 are 1-based and inclusive. Pages are also resources under \
-                 wiki://page/<id>.",
+                "Map of this project. Find code with `search` (symbols with \
+                 path:start-end) and `page` (a module's outline), then read only \
+                 those lines with your file tool. `neighbors` shows linked pages. \
+                 Paths are relative to the project root; line ranges are 1-based \
+                 and inclusive. Pages are also resources under wiki://page/<id>.",
             )
     }
 
@@ -467,7 +477,29 @@ pub fn search_lines(hits: &[Hit]) -> String {
 
 /// Start the MCP server over stdio and block until the client disconnects.
 /// With `source`, the server compiles it into `dir` and keeps recompiling.
-pub fn run(dir: &Path, source: Option<&Path>, jobs: Option<usize>) -> Result<(), WikiError> {
+/// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]).
+pub fn run(
+    dir: &Path,
+    source: Option<&Path>,
+    jobs: Option<usize>,
+    tools: Option<&[String]>,
+) -> Result<(), WikiError> {
+    let tools: Vec<&str> = match tools {
+        None => DEFAULT_TOOLS.to_vec(),
+        Some(names) => {
+            let mut picked = Vec::new();
+            for name in names {
+                let Some(&t) = TOOLS.iter().find(|t| **t == name.trim()) else {
+                    return Err(WikiError::Serve(format!(
+                        "unknown tool {name:?}; expected {}",
+                        TOOLS.join(", ")
+                    )));
+                };
+                picked.push(t);
+            }
+            picked
+        }
+    };
     let state = match source {
         Some(source) => {
             let opts = CompileOptions {
@@ -487,7 +519,7 @@ pub fn run(dir: &Path, source: Option<&Path>, jobs: Option<usize>) -> Result<(),
             ))
         })?,
     };
-    let server = WikiServer::new(Arc::new(state));
+    let server = WikiServer::new(Arc::new(state), &tools);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?

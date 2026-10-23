@@ -25,9 +25,18 @@ fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
 /// and `read_response` waits on the channel with a deadline. The channel
 /// closes when the server closes stdout.
 fn spawn_server(dir: &std::path::Path) -> (Child, ChildStdin, Receiver<String>) {
+    spawn_server_with(dir, &[])
+}
+
+/// `spawn_server` plus `extra` args after `--dir <dir>`.
+fn spawn_server_with(
+    dir: &std::path::Path,
+    extra: &[&str],
+) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
         .args(["serve", "--dir"])
         .arg(dir)
+        .args(extra)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -112,10 +121,10 @@ fn serve_lists_and_calls_tools() {
         .iter()
         .map(|t| t["name"].as_str().unwrap())
         .collect();
-    assert!(names.contains(&"search"), "tools: {names:?}");
-    assert!(names.contains(&"neighbors"), "tools: {names:?}");
-    assert!(names.contains(&"lint"), "tools: {names:?}");
-    assert!(names.contains(&"page"), "tools: {names:?}");
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    // `lint` is left out unless `--tools` names it.
+    assert_eq!(sorted, ["neighbors", "page", "search"], "tools: {names:?}");
 
     // tools/call search — seed-42 corpus contains gradient_descent
     send(
@@ -149,20 +158,101 @@ fn serve_lists_and_calls_tools() {
     let resp = read_response(&stdout, 5);
     assert_eq!(resp["result"]["isError"], json!(true));
 
-    // tools/call lint
+    drop(stdin); // close stdin -> server exits
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_tools_flag_picks_the_tools() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "search,lint"]);
+    initialize(&mut stdin, &stdout);
     send(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {
+        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+    );
+    let resp = read_response(&stdout, 2);
+    let mut names: Vec<&str> = resp["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names, ["lint", "search"]);
+
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
             "name": "lint", "arguments": {}
         }}),
     );
-    let resp = read_response(&stdout, 6);
+    let resp = read_response(&stdout, 3);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
 
-    drop(stdin); // close stdin -> server exits
-    let _ = child.wait();
+    // A tool left out is not callable.
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+            "name": "page", "arguments": {"id": "gradient_descent"}
+        }}),
+    );
+    let resp = read_response(&stdout, 4);
+    assert!(
+        resp.get("error").is_some() || resp["result"]["isError"] == json!(true),
+        "resp: {resp}"
+    );
+    child.kill().ok();
+}
+
+#[test]
+fn serve_refuses_an_unknown_tool() {
+    let (_tmp, out) = compile_fixture();
+    let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
+        .args(["serve", "--tools", "search,nope", "--dir"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown tool \"nope\""), "stderr: {stderr}");
+}
+
+#[test]
+fn mcp_search_returns_five_hits_unless_asked() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let count = |stdin: &mut ChildStdin, id: u64, args: Value| {
+        send(
+            stdin,
+            &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
+                "name": "search", "arguments": args}}),
+        );
+        let resp = read_response(&stdout, id);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        serde_json::from_str::<Value>(text)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .len()
+    };
+    // `the` hits 10 of the 12 corpus pages.
+    assert_eq!(
+        count(&mut stdin, 2, json!({"query": "the", "format": "json"})),
+        5
+    );
+    assert_eq!(
+        count(
+            &mut stdin,
+            3,
+            json!({"query": "the", "format": "json", "limit": 8})
+        ),
+        8
+    );
+    child.kill().ok();
 }
 
 #[test]

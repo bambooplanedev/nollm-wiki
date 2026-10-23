@@ -23,16 +23,18 @@
 //! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
 //! The `tokens` column charges the MCP tool's default search response
-//! (`search_lines` at limit 10); `tokens_json` in the footers charges the
-//! `format: "json"` response (`search_json`). The step that changes the
-//! default renderer or limit must swap it here and quote both numbers.
+//! (`search_lines` at `DEFAULT_SEARCH_LIMIT`, 5; it was 639.9 / 700.7
+//! tune / held at limit 10); `tokens_json` in the footers charges the
+//! `format: "json"` response (`search_json`) at the same limit. Ranks are
+//! still taken at limit 10. A step that changes the default renderer or
+//! limit must swap it here and quote both numbers.
 
 use regex::Regex;
 use std::fmt::Write as _;
 use std::path::Path;
 use wiki::manifest::token_estimate;
 use wiki::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS};
+use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS, DEFAULT_SEARCH_LIMIT};
 
 #[path = "common/corpus.rs"]
 mod corpus;
@@ -669,8 +671,9 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
             .position(|s| s.path == c.path && s.name.rsplit("::").next() == Some(c.symbol))
             .map(|i| i + 1);
         let top1 = hits.first().map_or("-".to_string(), |h| h.path.clone());
-        let tokens = token_estimate(&search_lines(&hits));
-        let tokens_json = token_estimate(&search_json(hits));
+        let sent = wiki.search(c.query, None, DEFAULT_SEARCH_LIMIT);
+        let tokens = token_estimate(&search_lines(&sent));
+        let tokens_json = token_estimate(&search_json(sent));
         (if c.held_out { &mut held } else { &mut tune }).add(
             rank,
             symbol_rank,
