@@ -548,15 +548,18 @@ fn symbol_retrieval() {
 #[test]
 fn items_on_the_frozen_corpus_are_line_true() {
     let (_dir, out, _wiki) = corpus::compile_frozen("tests/.symbol_corpus", SYMBOL_CORPUS_HASH);
-    let index: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    let read = |name: &str| -> serde_json::Value {
+        serde_json::from_str(&std::fs::read_to_string(out.join(name)).unwrap()).unwrap()
+    };
+    let (index, all_items) = (read("index.json"), read("items.json"));
     let entries = index["entries"].as_array().unwrap();
+    let items_of = |entry: &serde_json::Value| all_items[entry["id"].as_str().unwrap()].as_array();
     let line_of =
         |item: &serde_json::Value, key: &str| usize::try_from(item[key].as_u64().unwrap()).unwrap();
 
     let mut checked = 0;
     for entry in entries {
-        let Some(items) = entry["items"].as_array() else {
+        let Some(items) = items_of(entry) else {
             continue;
         };
         let path = entry["path"].as_str().unwrap();
@@ -587,8 +590,7 @@ fn items_on_the_frozen_corpus_are_line_true() {
         let text = read_corpus_file(c.path);
         let at = definition_re(c.symbol).find(&text).unwrap().start();
         let line = text[..at].matches('\n').count() + 1;
-        let item = entry["items"]
-            .as_array()
+        let item = items_of(entry)
             .unwrap_or_else(|| panic!("`{}` has no items", c.path))
             .iter()
             .find(|i| {

@@ -292,6 +292,12 @@ fn compile_inner(
 
     // 6. Manifest artifacts.
     let man = manifest::build_manifest(&project, &entities, &graph);
+    // Ahead of `index.json`, whose change is what tells `serve` to reload,
+    // so a reload never pairs a new index with the previous items.
+    rewrite::write_atomic(
+        &output.join("items.json"),
+        &manifest::render_items_json(&entities),
+    )?;
     rewrite::write_atomic(
         &output.join("index.json"),
         &manifest::render_index_json(&man),

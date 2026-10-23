@@ -21,14 +21,10 @@ pub struct ManifestEntry {
     pub neighbors_in: Vec<String>,
     /// Top-level definition names of the page (see `Entity::defined`).
     pub defined: Vec<String>,
-    /// Method names of the page (see `Entity::methods`). The last key of
-    /// every entry without items: serde emits fields in declaration order.
+    /// Method names of the page (see `Entity::methods`). Declared last so
+    /// it is the last key of every `index.json` entry: serde emits fields
+    /// in declaration order.
     pub methods: Vec<String>,
-    /// Every definition of the page with its lines (see `Entity::items`).
-    /// Declared last and skipped when empty, so a page with no items keeps
-    /// exactly the keys it had before items existed.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<CodeItem>,
 }
 
 #[derive(Serialize)]
@@ -72,7 +68,6 @@ pub fn build_manifest(
                 neighbors_in: inc,
                 defined: e.defined.clone(),
                 methods: e.methods.clone(),
-                items: e.items.clone(),
             }
         })
         .collect();
@@ -84,6 +79,20 @@ pub fn build_manifest(
 
 pub fn render_index_json(m: &Manifest) -> String {
     serde_json::to_string_pretty(m).expect("manifest serialization is infallible")
+}
+
+/// `items.json`: each code page's items (see `Entity::items`) keyed by page
+/// id, in id order, pages without items left out. A sidecar rather than a
+/// field of `index.json` entries, because items outweigh the rest of the
+/// catalog several times over and `index.json` is served whole as
+/// `wiki://index`. Compact, as only tools read it.
+pub fn render_items_json(entities: &BTreeMap<String, Entity>) -> String {
+    let items: BTreeMap<&str, &[CodeItem]> = entities
+        .iter()
+        .filter(|(_, e)| !e.items.is_empty())
+        .map(|(id, e)| (id.as_str(), e.items.as_slice()))
+        .collect();
+    serde_json::to_string(&items).expect("items serialization is infallible")
 }
 
 pub fn render_index_md(m: &Manifest) -> String {
@@ -168,7 +177,7 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
 mod tests {
     use super::*;
     use crate::graph::build_graph;
-    use crate::model::{CodeItem, CodeItemKind, SourceKind};
+    use crate::model::{CodeItemKind, SourceKind};
 
     fn ent(id: &str, name: &str, body: &str, summary: Option<&str>) -> Entity {
         Entity {
@@ -254,35 +263,11 @@ mod tests {
     }
 
     #[test]
-    fn index_json_carries_defined_methods_and_items_as_the_last_entry_keys() {
+    fn index_json_carries_defined_and_methods_as_the_last_entry_keys() {
         let (mut ents, g) = setup();
         let alpha_e = ents.get_mut("alpha").unwrap();
         alpha_e.defined = vec!["Alpha".into(), "build_alpha".into()];
         alpha_e.methods = vec!["build".into()];
-        alpha_e.items = vec![
-            CodeItem {
-                kind: CodeItemKind::Fn,
-                name: "build_alpha".into(),
-                owner: None,
-                signature: "pub fn build_alpha()".into(),
-                start_line: 1,
-                end_line: 1,
-                doc: None,
-                public: true,
-                twin: None,
-            },
-            CodeItem {
-                kind: CodeItemKind::Method,
-                name: "build".into(),
-                owner: Some("Alpha".into()),
-                signature: "fn build()".into(),
-                start_line: 3,
-                end_line: 5,
-                doc: Some("Builds.".into()),
-                public: false,
-                twin: None,
-            },
-        ];
         let m = build_manifest("My Project", &ents, &g);
         let json = render_index_json(&m);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -296,7 +281,7 @@ mod tests {
         assert_eq!(v["entries"][1]["defined"], serde_json::json!([]));
         assert_eq!(v["entries"][1]["methods"], serde_json::json!([]));
         // Key order in the pretty output: neighbors_in < defined < methods,
-        // so `methods` is the last key of every entry without items.
+        // so `methods` is the last key of every entry.
         let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
         let pos_neighbors_in = a_text.find("\"neighbors_in\"").unwrap();
         let pos_defined = a_text.find("\"defined\"").unwrap();
@@ -305,20 +290,44 @@ mod tests {
             pos_neighbors_in < pos_defined && pos_defined < pos_methods,
             "expected neighbors_in < defined < methods:\n{json}"
         );
-        // A code entry with items ends with `items`, each item's keys in
-        // declaration order with the `None` ones skipped; an entry without
-        // items has no `items` key, so `methods` stays its last key.
-        let alpha_compact = serde_json::to_string(&m.entries[0]).unwrap();
-        assert!(
-            alpha_compact.ends_with(concat!(
-                r#""methods":["build"],"items":["#,
-                r#"{"kind":"fn","name":"build_alpha","signature":"pub fn build_alpha()","start_line":1,"end_line":1,"public":true},"#,
-                r#"{"kind":"method","name":"build","owner":"Alpha","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false}]}"#
-            )),
-            "{alpha_compact}"
+    }
+
+    #[test]
+    fn items_json_keys_each_code_page_by_id_and_skips_pages_without_items() {
+        let (mut ents, _) = setup();
+        ents.get_mut("beta").unwrap().items = vec![
+            CodeItem {
+                kind: CodeItemKind::Fn,
+                name: "build_beta".into(),
+                owner: None,
+                signature: "pub fn build_beta()".into(),
+                start_line: 1,
+                end_line: 1,
+                doc: None,
+                public: true,
+                twin: None,
+            },
+            CodeItem {
+                kind: CodeItemKind::Method,
+                name: "build".into(),
+                owner: Some("Beta".into()),
+                signature: "fn build()".into(),
+                start_line: 3,
+                end_line: 5,
+                doc: Some("Builds.".into()),
+                public: false,
+                twin: Some("beta.cpp:2-4".into()),
+            },
+        ];
+        // Each item's keys in declaration order, the `None` ones skipped;
+        // `alpha` has no items, so it has no key.
+        assert_eq!(
+            render_items_json(&ents),
+            concat!(
+                r#"{"beta":["#,
+                r#"{"kind":"fn","name":"build_beta","signature":"pub fn build_beta()","start_line":1,"end_line":1,"public":true},"#,
+                r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4"}]}"#
+            )
         );
-        let beta_compact = serde_json::to_string(&m.entries[1]).unwrap();
-        assert!(beta_compact.ends_with(r#""methods":[]}"#), "{beta_compact}");
-        assert!(!beta_compact.contains("\"items\""), "{beta_compact}");
     }
 }

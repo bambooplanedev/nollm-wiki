@@ -18,8 +18,9 @@ src/walk.rs           src/formats/            src/lib.rs             src/graph.r
 
 SourceFile     →      Entity        →         BTreeMap<id,        →  Graph             →  pages (String)     →   Manifest            →  LintReport
 (sorted by                                     Entity>                (edges + pagerank)   + .wiki/cache.json      + index.json/.md,
- rel_path)                                                                                  fingerprints            llms.txt, AGENTS.md,
-                                                                                                                     graph.json (--emit-json)
+ rel_path)                                                                                  fingerprints            items.json, llms.txt,
+                                                                                                                     AGENTS.md, graph.json
+                                                                                                                     (--emit-json)
 ```
 
 1. **Walk** (`walk::walk`) — recursively lists `input`, respecting
@@ -96,9 +97,14 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    [Incremental build](#incremental-build)).
 6. **Manifest** (`manifest::build_manifest`) — builds `index.json`,
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
-   `graph.json` from the final entity map and graph. A code entry of
-   `index.json` ends with `items` (omitted when empty): one object per
-   definition, keys in this order — `kind` (`fn`, `method`, `type` for a
+   `graph.json` from the final entity map and graph, and
+   `manifest::render_items_json` writes the `items.json` sidecar (before
+   `index.json`, whose change triggers `serve`'s reload). Items live beside
+   the catalog, not in it, because they outweigh it several times over and
+   `index.json` is served whole as `wiki://index`. `items.json` is one
+   compact object keyed by page id, in id order, holding only code pages
+   with at least one item; each value lists that page's items, one object
+   per item, keys in this order — `kind` (`fn`, `method`, `type` for a
    struct, class, enum, trait, interface, union, exported macro or type
    alias in every language, `value` for a constant, static or module-level
    variable, `module`), `name`, `owner` (omitted when free), `signature` (as
@@ -106,7 +112,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    (1-based, inclusive, in the original file, from the first attached doc
    or attribute line), `doc` (the doc comment's first sentence, at most 120
    chars; omitted when none), `public` (whether it is in `## Exports`), and
-   `twin` (omitted when none).
+   `twin` (`path:start-end` of a paired C++ declaration or definition;
+   omitted when none).
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
    broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
@@ -137,7 +144,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
-| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
+| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search`/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources; `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes, keeping the last good snapshot if a reload fails. |

@@ -21,6 +21,7 @@ fn compiles_a_small_corpus_and_emits_artifacts() {
     assert_eq!(result.pages_total, 2);
     assert!(output.join("alpha.md").exists());
     assert!(output.join("index.json").exists());
+    assert_eq!(fs::read_to_string(output.join("items.json")).unwrap(), "{}");
     assert!(output.join("llms.txt").exists());
     assert!(output.join("AGENTS.md").exists());
     let alpha = fs::read_to_string(output.join("alpha.md")).unwrap();

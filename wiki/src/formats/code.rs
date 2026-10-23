@@ -864,7 +864,7 @@ fn is_function(def: Node) -> bool {
     }
 }
 
-/// An item's doc is one line in `index.json`, so it is cut to this many
+/// An item's doc is one line in `items.json`, so it is cut to this many
 /// chars, the trailing `…` included.
 const ITEM_DOC_MAX_CHARS: usize = 120;
 

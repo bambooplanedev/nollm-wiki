@@ -101,7 +101,7 @@ pub enum CodeItemKind {
 }
 
 /// One definition of a code page and where it lives. Field order is the
-/// `index.json` key order.
+/// `items.json` key order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CodeItem {
     pub kind: CodeItemKind,
