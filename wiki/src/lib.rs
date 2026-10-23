@@ -14,6 +14,7 @@ pub mod outline;
 pub mod query;
 pub mod rewrite;
 pub mod serve;
+pub mod setup;
 pub mod walk;
 pub mod watch;
 
