@@ -58,6 +58,9 @@ enum Command {
         kind: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        /// Output format: `lines` or `json`.
+        #[arg(long, value_parser = ["lines", "json"], default_value = "lines")]
+        format: String,
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
@@ -139,6 +142,7 @@ fn main() -> Result<()> {
             query,
             kind,
             limit,
+            format,
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
@@ -148,16 +152,11 @@ fn main() -> Result<()> {
                     format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
                 })?),
             };
-            for hit in w.search(&query, kind.as_ref(), limit) {
-                println!(
-                    "{}\t{}\t{}",
-                    hit.id,
-                    hit.title,
-                    hit.summary.unwrap_or_default()
-                );
-                if let Some(s) = &hit.snippet {
-                    println!("    {s}");
-                }
+            let hits = w.search(&query, kind.as_ref(), limit);
+            if format == "json" {
+                println!("{}", wiki::serve::search_json(hits));
+            } else {
+                print!("{}", wiki::serve::search_lines(&hits));
             }
         }
         Command::Lint { dir } => {

@@ -715,3 +715,26 @@ fn whole_name_outranks_an_earlier_word_match() {
         "{lines:?}"
     );
 }
+
+#[test]
+fn snippet_drops_comment_markers() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("a.rs"),
+        "//! Foo bar\n/// Foo baz\npub fn f() {}\n",
+    )
+    .unwrap();
+    fs::write(input.join("b.py"), "# Foo qux\ndef g(): pass\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("foo", None, 10);
+    assert_eq!(hits.len(), 2);
+    for h in hits {
+        let s = h.snippet.unwrap();
+        assert!(s.starts_with("Foo "), "snippet: {s}");
+        assert!(!s.contains("//") && !s.contains('#'), "snippet: {s}");
+    }
+}

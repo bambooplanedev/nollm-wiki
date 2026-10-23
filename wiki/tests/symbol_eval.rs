@@ -22,16 +22,17 @@
 //! of the expected `(path, symbol)` among the response's symbol lines in
 //! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
-//! The `tokens` column charges the MCP tool's default search response (today
-//! `search_json` at limit 10). The step that changes the default renderer or
-//! limit must swap it here and quote both numbers.
+//! The `tokens` column charges the MCP tool's default search response
+//! (`search_lines` at limit 10); `tokens_json` in the footers charges the
+//! `format: "json"` response (`search_json`). The step that changes the
+//! default renderer or limit must swap it here and quote both numbers.
 
 use regex::Regex;
 use std::fmt::Write as _;
 use std::path::Path;
 use wiki::manifest::token_estimate;
 use wiki::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::serve::{search_json, DEFAULT_NEIGHBORS_MAX_TOKENS};
+use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS};
 
 #[path = "common/corpus.rs"]
 mod corpus;
@@ -591,6 +592,7 @@ struct Agg {
     mrr: f64,
     s3: f64,
     tokens: f64,
+    tokens_json: f64,
     n: f64,
 }
 
@@ -600,9 +602,16 @@ fn symbol_hit3(rank: Option<usize>) -> bool {
 }
 
 impl Agg {
-    fn add(&mut self, rank: Option<usize>, symbol_rank: Option<usize>, tokens: usize) {
+    fn add(
+        &mut self,
+        rank: Option<usize>,
+        symbol_rank: Option<usize>,
+        tokens: usize,
+        tokens_json: usize,
+    ) {
         self.n += 1.0;
         self.tokens += tokens as f64;
+        self.tokens_json += tokens_json as f64;
         if symbol_hit3(symbol_rank) {
             self.s3 += 1.0;
         }
@@ -619,7 +628,7 @@ impl Agg {
 
     fn footer(&self, name: &str) -> String {
         format!(
-            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} symbol_hit@3={}/{} ({:.4}) tokens={:.1}\n",
+            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} symbol_hit@3={}/{} ({:.4}) tokens={:.1} tokens_json={:.1}\n",
             self.h1,
             self.n,
             self.h1 / self.n,
@@ -631,6 +640,7 @@ impl Agg {
             self.n,
             self.s3 / self.n,
             self.tokens / self.n,
+            self.tokens_json / self.n,
         )
     }
 }
@@ -659,8 +669,14 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
             .position(|s| s.path == c.path && s.name.rsplit("::").next() == Some(c.symbol))
             .map(|i| i + 1);
         let top1 = hits.first().map_or("-".to_string(), |h| h.path.clone());
-        let tokens = token_estimate(&search_json(hits));
-        (if c.held_out { &mut held } else { &mut tune }).add(rank, symbol_rank, tokens);
+        let tokens = token_estimate(&search_lines(&hits));
+        let tokens_json = token_estimate(&search_json(hits));
+        (if c.held_out { &mut held } else { &mut tune }).add(
+            rank,
+            symbol_rank,
+            tokens,
+            tokens_json,
+        );
         ranks.push((c.class, rank, symbol_rank));
         let show = |r: Option<usize>| r.map_or("-".to_string(), |r| r.to_string());
         writeln!(

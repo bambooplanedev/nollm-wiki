@@ -56,6 +56,21 @@ pub struct Hit {
     pub symbols: Vec<SymbolLine>,
 }
 
+/// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
+/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose.
+fn strip_comment_marker(line: &str) -> &str {
+    let l = line.trim_start();
+    for m in ["//!", "///", "//", "/**", "/*", "*/", "*"] {
+        if let Some(r) = l.strip_prefix(m) {
+            return r;
+        }
+    }
+    match l.trim_start_matches('#') {
+        r if r.len() < l.len() && (r.is_empty() || r.starts_with(char::is_whitespace)) => r,
+        _ => l,
+    }
+}
+
 /// One code item shown under its page's hit.
 pub struct SymbolLine {
     pub path: String,
@@ -555,7 +570,8 @@ impl Wiki {
         let (w_start, w_end) = (start - before, end + after);
 
         let mut s = content[w_start..w_end]
-            .split_whitespace()
+            .lines()
+            .flat_map(|l| strip_comment_marker(l).split_whitespace())
             .collect::<Vec<_>>()
             .join(" ");
         if w_start > 0 {

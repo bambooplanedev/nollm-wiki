@@ -150,6 +150,8 @@ pub(crate) struct SearchParams {
     pub kind: Option<String>,
     /// Maximum number of hits (default 10).
     pub limit: Option<usize>,
+    /// Output format: `lines` (default) or `json`.
+    pub format: Option<String>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
@@ -184,7 +186,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score, snippet}]. Use `neighbors` afterwards to pull a page's full context."
+        description = "Search the wiki for pages by keyword. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `neighbors` afterwards to pull a page's full context."
     )]
     async fn search(
         &self,
@@ -200,9 +202,24 @@ impl WikiServer {
             })?),
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let json = search_json(wiki.search(&p.query, kind.as_ref(), p.limit.unwrap_or(10)));
+        let json = match p.format.as_deref() {
+            None | Some("lines") => false,
+            Some("json") => true,
+            Some(f) => {
+                return Err(McpError::invalid_params(
+                    format!("unknown format {f:?}; expected lines or json"),
+                    None,
+                ))
+            }
+        };
+        let hits = wiki.search(&p.query, kind.as_ref(), p.limit.unwrap_or(10));
+        let text = if json {
+            search_json(hits)
+        } else {
+            search_lines(&hits)
+        };
         Ok(with_stale(
-            CallToolResult::success(vec![ContentBlock::text(json)]),
+            CallToolResult::success(vec![ContentBlock::text(text)]),
             stale.as_deref(),
         ))
     }
@@ -324,22 +341,66 @@ impl ServerHandler for WikiServer {
     }
 }
 
-/// Render search hits as the JSON array the `search` tool returns:
-/// `[{id, title, summary, score, snippet}]`.
+/// Render search hits as the JSON array `search` returns with
+/// `format: "json"`: `[{id, title, summary, score, snippet, path, symbols}]`.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()
         .map(|h| {
+            let symbols: Vec<_> = h
+                .symbols
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "path": s.path,
+                        "start_line": s.start_line,
+                        "end_line": s.end_line,
+                        "name": s.name,
+                        "signature": s.signature,
+                        "doc": s.doc,
+                    })
+                })
+                .collect();
             serde_json::json!({
                 "id": h.id,
                 "title": h.title,
                 "summary": h.summary,
                 "score": h.score,
                 "snippet": h.snippet,
+                "path": h.path,
+                "symbols": symbols,
             })
         })
         .collect();
     serde_json::Value::Array(hits).to_string()
+}
+
+/// Render search hits as the default line output: `id  path  title — summary`
+/// per page, then one `  path:start-end  name  signature  — doc` line per
+/// symbol, or the snippet (four-space indent) when the page has no symbols.
+pub fn search_lines(hits: &[Hit]) -> String {
+    let mut out = String::new();
+    for h in hits {
+        out.push_str(&format!("{}  {}  {}", h.id, h.path, h.title));
+        if let Some(s) = &h.summary {
+            out.push_str(&format!(" — {s}"));
+        }
+        out.push('\n');
+        for s in &h.symbols {
+            out.push_str(&format!(
+                "  {}:{}-{}  {}  {}",
+                s.path, s.start_line, s.end_line, s.name, s.signature
+            ));
+            if let Some(d) = &s.doc {
+                out.push_str(&format!("  — {d}"));
+            }
+            out.push('\n');
+        }
+        if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
+            out.push_str(&format!("    {sn}\n"));
+        }
+    }
+    out
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.

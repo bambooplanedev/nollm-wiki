@@ -284,7 +284,7 @@ fn search_hits_include_snippet_field() {
     send(
         &mut stdin,
         &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": "gradient"}}}),
+            "name": "search", "arguments": {"query": "gradient", "format": "json"}}}),
     );
     let resp = read_response(&stdout, 7);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
@@ -295,6 +295,50 @@ fn search_hits_include_snippet_field() {
         assert!(h.get("snippet").is_some(), "hit missing snippet key: {h}");
     }
     child.kill().ok();
+}
+
+/// The text of one `search` call against a compiled `source_project`.
+fn search_text(args: &Value) -> String {
+    let src = source_project();
+    let out = src.path().join("out");
+    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
+            "name": "search", "arguments": args}}),
+    );
+    let resp = read_response(&stdout, 9);
+    child.kill().ok();
+    resp["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn mcp_search_defaults_to_lines() {
+    let text = search_text(&json!({"query": "add"}));
+    let first = text.lines().next().unwrap();
+    let (id, rest) = first.split_once("  ").expect("id, two spaces, path");
+    assert!(
+        !id.contains(' ') && rest.contains("lib.rs"),
+        "first: {first}"
+    );
+    let sym = regex::Regex::new(r"(?m)^  \S+:\d+-\d+  ").unwrap();
+    assert!(sym.is_match(&text), "no symbol line: {text}");
+}
+
+#[test]
+fn mcp_search_json_on_request() {
+    let text = search_text(&json!({"query": "add", "format": "json"}));
+    let hits: Value = serde_json::from_str(&text).unwrap();
+    let hit = &hits.as_array().unwrap()[0];
+    assert!(
+        hit["symbols"].is_array() && hit["path"].is_string(),
+        "{hit}"
+    );
 }
 
 /// Bad-parameter paths and the over-budget neighbors block, then a final
@@ -467,7 +511,7 @@ fn send_search(stdin: &mut ChildStdin, id: u64, query: &str) {
     send(
         stdin,
         &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": query}
+            "name": "search", "arguments": {"query": query, "format": "json"}
         }}),
     );
 }

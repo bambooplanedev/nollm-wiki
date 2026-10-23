@@ -294,12 +294,12 @@ fn search_cli_accepts_valid_kinds() {
 
     search("text")
         .success()
-        .stdout(contains("guide\t"))
-        .stdout(contains("zoo\t").not());
+        .stdout(contains("guide  "))
+        .stdout(contains("zoo  ").not());
     search("code:rust")
         .success()
-        .stdout(contains("zoo\t"))
-        .stdout(contains("guide\t").not());
+        .stdout(contains("zoo  "))
+        .stdout(contains("guide  ").not());
     search("pdf")
         .failure()
         .stderr(contains(wiki::model::KindFilter::EXPECTED));
@@ -392,4 +392,33 @@ fn watch_recompiles_on_change() {
         &output.join("gamma.md"),
         "the watcher to recompile the new gamma.txt into gamma.md",
     );
+}
+
+#[test]
+fn cli_search_prints_the_same_lines_as_mcp() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("lib.rs"), "/// Adds.\npub fn add() {}\n").unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let run = |extra: &[&str]| {
+        let mut args = vec!["search", "add", "--dir", output.to_str().unwrap()];
+        args.extend(extra);
+        let o = Command::cargo_bin("wiki")
+            .unwrap()
+            .args(args)
+            .assert()
+            .success();
+        String::from_utf8(o.get_output().stdout.clone()).unwrap()
+    };
+    let w = wiki::query::Wiki::load(&output).unwrap();
+    assert_eq!(
+        run(&[]),
+        wiki::serve::search_lines(&w.search("add", None, 10))
+    );
+    let json = run(&["--format", "json"]);
+    assert!(serde_json::from_str::<serde_json::Value>(&json)
+        .unwrap()
+        .is_array());
 }
