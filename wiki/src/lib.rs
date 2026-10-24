@@ -1,6 +1,7 @@
 //! The `wiki` compiler library: `compile` turns a source tree into a deterministic markdown wiki plus index files.
 
 pub mod cache;
+pub mod calls;
 pub mod formats;
 pub mod generator;
 pub mod graph;
@@ -203,6 +204,8 @@ fn compile_inner(
 
     // 3. Graph.
     let graph = graph::build_graph(&entities);
+    // Reads the import edges, so it follows the graph.
+    calls::resolve_calls(&mut entities, &graph);
 
     // 4. Incremental cache + parallel render. Only the LOAD is gated: a plain
     // compile re-renders everything, but still records what it wrote (see the

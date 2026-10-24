@@ -86,6 +86,20 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    schemes, bare anchors, and targets above the root are ignored). Then it
    runs a fixed-iteration
    PageRank over the link graph. Produces a `Graph { edges, pagerank }`.
+   Then `calls::resolve_calls` turns each function item's call sites
+   (gathered at extraction: every `call_expression`/`call` in its lines)
+   into `calls`, the `path:start-end` of the project functions they name,
+   matched by name alone, within the caller's language (the JavaScript
+   dialects and components count as one): `f()` is the caller's owner's
+   method, else a free function in its file or a file it sees (its imports
+   and theirs), a method a file it sees (a C++ base class's), or the
+   project's only free function of that name;
+   `Q::f()` and `x.f()` on a project type or module are that owner's or
+   module's; other `x.f()` are the methods the caller's file sees, else the
+   project's only one. A `Q` that is no project type or module is outside
+   the project. A header declaration stands for its definition: its
+   `twin`, else the one same-named function of its owner in a file of the
+   same stem.
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the
@@ -114,7 +128,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    or attribute line), `doc` (the doc comment's first sentence, at most 120
    chars; omitted when none), `public` (whether it is in `## Exports`), and
    `twin` (`path:start-end` of a paired C++ declaration or definition;
-   omitted when none).
+   omitted when none), `test` (omitted when false) and `calls` (the
+   `path:start-end` of each function a function calls, sorted; omitted when
+   none).
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
    broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
@@ -141,6 +157,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), `CodeItem` (with the `test` flag) and `is_test_path()`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
+| `src/calls.rs` | `resolve_calls()` — call edges between code items, matched by name after the graph is built; `Wiki::calls` — what `neighbors --symbol` prints. |
 | `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
@@ -620,6 +637,15 @@ both edge directions, then builds a budgeted context pack:
   lands last, closest to the end of the pack ("lost in the middle"
   placement). `--full` swaps neighbor summary blocks for whole outlines
   (code) and full page bodies (other pages).
+
+**Calls** (`Wiki::calls`, `neighbors --symbol`) walks `items.json`'s
+`calls` breadth-first from every function on the page named `symbol`
+(a name or `Owner::name`; a paired declaration's definition is a root
+too), to `depth` (no limit by default), and prints one
+`start-end  kind  Owner::name` line per function reached, grouped by file
+in the order the walk first reaches each file. Over `max_tokens` the
+farthest functions are cut, and a last
+`… N more functions — pass max_tokens: T for all` line says so.
 
 ## Extending: add a format extractor
 

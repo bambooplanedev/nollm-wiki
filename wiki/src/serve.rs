@@ -170,7 +170,8 @@ pub(crate) struct SearchParams {
 pub(crate) struct NeighborsParams {
     /// Page id, title, or source path.
     pub id: String,
-    /// Link hops from the page (default 1).
+    /// Link hops from the page (default 1); with `symbol`, calls deep
+    /// (default no limit).
     pub depth: Option<usize>,
     /// Token budget (default 4000).
     pub max_tokens: Option<usize>,
@@ -181,6 +182,10 @@ pub(crate) struct NeighborsParams {
     /// Only linked pages of this kind: `code`, `docs`, or one kind such as
     /// `code:rust` or `markdown`.
     pub kind: Option<String>,
+    /// A function on the page, e.g. `canOpenPosition` or
+    /// `RiskManager::canOpenPosition`: list every function it calls, through
+    /// all levels, instead of linked pages.
+    pub symbol: Option<String>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
@@ -261,7 +266,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to; `kind: \"code\"` keeps it to code."
+        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
     )]
     async fn neighbors(
         &self,
@@ -284,6 +289,13 @@ impl WikiServer {
         };
         let (wiki, stale) = self.state.snapshot().await;
         let result = match wiki.resolve_id(&p.id) {
+            Ok(id) if p.symbol.is_some() => {
+                let symbol = p.symbol.as_deref().unwrap_or_default();
+                match wiki.calls(&id, symbol, p.depth, budget.max_tokens) {
+                    Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+                    Err(e) => CallToolResult::error(vec![ContentBlock::text(e)]),
+                }
+            }
             Ok(id) => match wiki.neighbors(&id, p.depth.unwrap_or(1), &budget) {
                 Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
                 None => CallToolResult::error(vec![ContentBlock::text(
@@ -352,7 +364,7 @@ impl ServerHandler for WikiServer {
             .with_instructions(
                 "Map of this project. Find code with `search` (symbols with \
                  path:start-end) and `page` (a module's outline), then read only \
-                 those lines with your file tool. `neighbors` shows linked pages. \
+                 those lines with your file tool. `neighbors` shows linked pages, or with `symbol` what a function calls. \
                  Paths are relative to the project root; line ranges are 1-based \
                  and inclusive. Pages are also resources under wiki://page/<id>.",
             )

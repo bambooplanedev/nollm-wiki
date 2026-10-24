@@ -211,11 +211,12 @@ wiki neighbors [OPTIONS] <ID>
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a title, or a source path or unique path suffix (e.g. `query.rs`). It resolves like `page`, so an absolute path under the compiled directory works too. If nothing matches, the error lists the closest ids.
 
-- `--depth <N>` (`1`) — BFS hop count from `<ID>`.
+- `--depth <N>` (`1`) — BFS hop count from `<ID>`; with `--symbol`, how many calls deep (no limit by default).
 - `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). A code target is its outline, cut to fit; another target that alone exceeds it degrades to a title + summary block pointing at the full page.
 - `--max-nodes <N>` (none — unbounded) — node-count budget for the returned context pack.
 - `--full` (off) — include whole neighbor outlines (code) and page bodies (other pages) instead of one-line summaries. Without it, the modules the target imports or is imported by come first, as outlines when they fit.
 - `--kind <KIND>` (none) — only neighbors of this kind, with the values of `search --kind`.
+- `--symbol <NAME>` (none) — a function on the page (`name` or `Owner::name`): print every function it calls instead, through all levels (or `--depth` of them), one `start-end  kind  Owner::name` line each, grouped by file. Calls are matched by name, so a method called on a value can list every same-named method the caller's file sees.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
 ### `page`
@@ -410,7 +411,8 @@ source tree. Four artifacts drive that:
   least one item); each value lists the page's items — its top-level items
   and methods — with `kind`, `name`, `owner`, `signature`, original
   `start_line`/`end_line` (so an agent can read just those lines), `doc`,
-  `public` flag and, for a paired C++ declaration or definition, `twin`.
+  `public` flag, for a paired C++ declaration or definition `twin`, and
+  for a function `calls` (the `path:start-end` of the functions it calls).
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under
@@ -487,7 +489,7 @@ tool costs schema tokens on every request.
 | Tool | Parameters | Returns |
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
-| `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
+| `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context-pack text, or with `symbol` the functions it calls |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans}` |
 

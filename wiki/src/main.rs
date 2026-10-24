@@ -42,8 +42,9 @@ enum Command {
     },
     Neighbors {
         id: String,
-        #[arg(long, default_value_t = 1)]
-        depth: usize,
+        /// Link hops (default 1); with `--symbol`, calls deep (default no limit).
+        #[arg(long)]
+        depth: Option<usize>,
         #[arg(long)]
         max_tokens: Option<usize>,
         #[arg(long)]
@@ -53,6 +54,9 @@ enum Command {
         /// Only neighbors of this kind: code, docs, text, markdown, or code:<lang>.
         #[arg(long)]
         kind: Option<String>,
+        /// A function on the page: list every function it calls instead.
+        #[arg(long)]
+        symbol: Option<String>,
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
@@ -197,6 +201,7 @@ fn main() -> Result<()> {
             max_nodes,
             full,
             kind,
+            symbol,
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
@@ -216,8 +221,17 @@ fn main() -> Result<()> {
                 .resolve_id(&id)
                 .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
                 .context("unknown id")?;
-            let pack = w.neighbors(&rid, depth, &budget).context("unknown id")?;
-            println!("{}", pack.text);
+            if let Some(symbol) = symbol {
+                let text = w
+                    .calls(&rid, &symbol, depth, max_tokens)
+                    .map_err(anyhow::Error::msg)?;
+                print!("{text}");
+            } else {
+                let pack = w
+                    .neighbors(&rid, depth.unwrap_or(1), &budget)
+                    .context("unknown id")?;
+                println!("{}", pack.text);
+            }
         }
         Command::Page {
             id,
