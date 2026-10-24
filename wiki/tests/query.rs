@@ -1264,3 +1264,26 @@ fn title_resolves_case_insensitively_in_any_script() {
         "morskyi_maiak"
     );
 }
+
+#[test]
+fn cyrillic_query_words_match_another_grammatical_form() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("a.md"), "# Плани агента\n\nНотатка.\n").unwrap();
+    fs::write(input.join("b.md"), "# Плани агентів\n\nНотатка.\n").unwrap();
+    fs::write(input.join("c.md"), "# Ринок\n\nОгляд конкурентів.\n").unwrap();
+    fs::write(input.join("d.md"), "# Шлюз\n\nПідключає mcp-сервер.\n").unwrap();
+    compile(&input, &dir.path().join("out"), &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    // The whole-title bonus compares the words as typed.
+    assert_eq!(w.search("плани агентів", None, 10)[0].id, "plany_ahentiv");
+    assert!(w
+        .search("конкуренти", None, 10)
+        .iter()
+        .any(|h| h.id == "rynok"));
+    assert!(w
+        .search("mcp-сервери", None, 10)
+        .iter()
+        .any(|h| h.id == "shliuz"));
+}

@@ -382,6 +382,42 @@ impl Wiki {
         tokens
     }
 
+    /// Cut a Cyrillic grammatical ending (longest first) when at least four
+    /// letters remain, so another form of a word still matches. Other tokens
+    /// are returned unchanged.
+    fn stem(token: &str) -> String {
+        const ENDINGS: [&str; 38] = [
+            "ами", "ями", "ові", "еві", "ого", "ому", "ими", "іми", "ій", "ий", "ою", "ею", "ів",
+            "їв", "ах", "ях", "ам", "ям", "ом", "ем", "ої", "а", "я", "і", "ї", "и", "у", "ю", "о",
+            "е", "є", "ь", "ити", "ати", "ють", "ують", "ться", "ся",
+        ];
+        if !token.chars().any(|c| ('\u{400}'..='\u{4FF}').contains(&c)) {
+            return token.to_string();
+        }
+        let len = token.chars().count();
+        ENDINGS
+            .iter()
+            .filter(|e| token.ends_with(**e) && len - e.chars().count() >= 4)
+            .max_by_key(|e| e.chars().count())
+            .map_or_else(
+                || token.to_string(),
+                |e| token[..token.len() - e.len()].to_string(),
+            )
+    }
+
+    /// `tokenize`, then `stem` each word and dedupe again: (stemmed, raw).
+    fn query_tokens(query: &str) -> (Vec<String>, Vec<String>) {
+        let raw = Self::tokenize(query);
+        let mut stemmed: Vec<String> = Vec::new();
+        for t in &raw {
+            let s = Self::stem(t);
+            if !stemmed.contains(&s) {
+                stemmed.push(s);
+            }
+        }
+        (stemmed, raw)
+    }
+
     /// The words of an identifier, lowercased: split on `_`/`-`, at a
     /// lower→Upper boundary, and at an Upper→Upper-lower boundary so an
     /// acronym run stays one word (`HTTPServer` → `http`, `server`;
@@ -691,12 +727,13 @@ impl Wiki {
         &self,
         e: &'a Entry,
         tokens: &[String],
+        raw: &[String],
         df: &mut [usize],
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
         let title_words = Self::field_words(&title);
         // The query is this page's whole title, in any order.
-        let whole_title = tokens
+        let whole_title = raw
             .iter()
             .flat_map(|t| Self::field_words(t))
             .collect::<BTreeSet<_>>()
@@ -844,7 +881,7 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
-        let tokens = Self::tokenize(q);
+        let (tokens, raw) = Self::query_tokens(q);
         let passes = |e: &Entry| {
             kind.is_none_or(|f| SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)))
                 && tag.is_none_or(|t| {
@@ -885,7 +922,7 @@ impl Wiki {
             if !passes(e) {
                 continue;
             }
-            let (len, candidate) = self.candidate(e, &tokens, &mut df);
+            let (len, candidate) = self.candidate(e, &tokens, &raw, &mut df);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             n += 1;
@@ -1280,6 +1317,36 @@ mod tests {
 
     fn set(items: &[&str]) -> BTreeSet<String> {
         items.iter().map(std::string::ToString::to_string).collect()
+    }
+
+    #[test]
+    fn stem_cuts_a_cyrillic_ending_but_keeps_four_letters() {
+        for (word, stem) in [
+            ("конкурентів", "конкурент"),
+            ("конкуренти", "конкурент"),
+            ("куратором", "куратор"),
+            ("куратор", "куратор"),
+            ("агенти", "агент"),
+            ("позначки", "позначк"),
+            ("мова", "мова"),
+            ("routes", "routes"),
+            ("mcp-сервери", "mcp-сервер"),
+        ] {
+            assert_eq!(Wiki::stem(word), stem, "{word}");
+        }
+    }
+
+    #[test]
+    fn query_tokens_stem_dedupe_and_keep_the_raw_words() {
+        let owned = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(
+            Wiki::query_tokens("агента агентом"),
+            (owned(&["агент"]), owned(&["агента", "агентом"]))
+        );
+        assert_eq!(
+            Wiki::query_tokens("MCP resources"),
+            (owned(&["mcp", "resources"]), owned(&["mcp", "resources"]))
+        );
     }
 
     #[test]
