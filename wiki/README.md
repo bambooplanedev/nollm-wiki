@@ -185,7 +185,7 @@ and leaves them in place — delete them or recompile into a clean directory.
 wiki search [OPTIONS] [QUERY]
 ```
 
-- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`, but not an exact `SourceKind`.
+- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`.
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With no query, lists every such page by path. A query or `--tag` is required.
 - `--limit <N>` (`10` with a query; none for a bare `--tag`) — maximum number of hits returned.
 - `--format <lines|json>` (`lines`) — output shape, below.
