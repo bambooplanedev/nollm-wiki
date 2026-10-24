@@ -75,7 +75,7 @@ fn split_frontmatter(text: &str) -> (Vec<String>, &str) {
 fn fm_get(fm: &[String], key: &str) -> Option<String> {
     let prefix = format!("{key}:");
     fm.iter()
-        .find_map(|l| l.strip_prefix(&prefix).map(|v| v.trim().to_string()))
+        .find_map(|l| l.strip_prefix(&prefix).map(unquote))
         .filter(|v| !v.is_empty())
 }
 
@@ -119,7 +119,25 @@ fn unquote(s: &str) -> String {
     let s = s.trim();
     let b = s.as_bytes();
     let pair = b.len() >= 2 && matches!(b[0], b'"' | b'\'') && b[b.len() - 1] == b[0];
-    if pair { s[1..s.len() - 1].trim() } else { s }.to_string()
+    if !pair {
+        return s.to_string();
+    }
+    let inner = s[1..s.len() - 1].trim();
+    if b[0] == b'\'' {
+        return inner.replace("''", "'");
+    }
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    while let Some(c) = chars.next() {
+        match chars.peek() {
+            Some(&n) if c == '\\' && matches!(n, '"' | '\\') => {
+                out.push(n);
+                chars.next();
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 fn parse_list(v: &str) -> Vec<String> {
@@ -154,6 +172,36 @@ mod tests {
             vec!["Issue #42", "Peoples'"]
         );
         assert_eq!(tags("tags: [\"a b\", 'c']"), vec!["a b", "c"]);
+    }
+
+    fn extract_fm(line: &str) -> Entity {
+        MarkdownExtractor.extract("n.md", &format!("---\n{line}\n---\n\nBody.\n"))
+    }
+
+    #[test]
+    fn quoted_description_is_unquoted_and_unescaped() {
+        let e = extract_fm(r#"description: "A \"quoted\" word.""#);
+        assert_eq!(e.summary.as_deref(), Some("A \"quoted\" word."));
+    }
+
+    #[test]
+    fn single_quoted_title_doubles_its_quote() {
+        assert_eq!(extract_fm("title: 'It''s mine'").name, "It's mine");
+    }
+
+    #[test]
+    fn backslash_escape_in_double_quotes() {
+        assert_eq!(extract_fm(r#"title: "a\\b""#).name, "a\\b");
+    }
+
+    #[test]
+    fn unmatched_quote_stays() {
+        assert_eq!(extract_fm("title: \"abc").name, "\"abc");
+    }
+
+    #[test]
+    fn quoted_created() {
+        assert_eq!(extract_fm("created: \"2026-02-02\"").created, "2026-02-02");
     }
 
     #[test]
