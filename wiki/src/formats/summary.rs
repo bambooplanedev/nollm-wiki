@@ -46,15 +46,31 @@ fn is_doc_tag(line: &str) -> bool {
 /// real line — consecutive non-empty lines joined by one space — so a
 /// sentence wrapped at 80 columns (a `//!` block, README prose) is not cut at
 /// the line break. A tag line ends the paragraph: a `@brief` with no period
-/// would otherwise run on into the `@param` lines under it.
+/// would otherwise run on into the `@param` lines under it. A list item ends
+/// it too, and a list's summary is its first item, not the whole list joined.
 fn first_real_sentence(text: &str) -> Option<String> {
     let mut lines = text.lines().map(str::trim);
     let first = lines.find(|l| !l.is_empty() && !l.starts_with('#') && !is_boilerplate(l))?;
+    let first = list_item_text(first).unwrap_or(first);
     let paragraph = std::iter::once(first)
-        .chain(lines.take_while(|l| !l.is_empty() && !is_doc_tag(l)))
+        .chain(lines.take_while(|l| !l.is_empty() && !is_doc_tag(l) && !is_list_item(l)))
         .collect::<Vec<_>>()
         .join(" ");
     Some(first_sentence(&paragraph))
+}
+
+/// The text after a list marker (`- `, `* `, `+ `, `12. `) of a trimmed line.
+fn list_item_text(line: &str) -> Option<&str> {
+    if let Some(rest) = line.strip_prefix(['-', '*', '+']) {
+        return rest.strip_prefix(' ');
+    }
+    line.trim_start_matches(|c: char| c.is_ascii_digit())
+        .strip_prefix(". ")
+        .filter(|_| line.starts_with(|c: char| c.is_ascii_digit()))
+}
+
+fn is_list_item(line: &str) -> bool {
+    list_item_text(line).is_some()
 }
 
 /// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else
@@ -147,5 +163,47 @@ mod tests {
             Some("fn foo(a: i32)")
         );
         assert_eq!(summarize(None, None, "   \n\n", None), None);
+    }
+
+    #[test]
+    fn a_list_yields_its_first_item() {
+        let s = summarize(
+            None,
+            None,
+            "- [A](a.md) — first\n- [B](b.md) — second",
+            None,
+        );
+        assert_eq!(s.as_deref(), Some("[A](a.md) — first"));
+    }
+
+    #[test]
+    fn a_list_item_ends_the_paragraph() {
+        let s = summarize(None, None, "Intro line\n- item", None);
+        assert_eq!(s.as_deref(), Some("Intro line"));
+    }
+
+    #[test]
+    fn numbered_items() {
+        let s = summarize(None, None, "1. one\n2. two", None);
+        assert_eq!(s.as_deref(), Some("one"));
+        let s = summarize(None, None, "10. ten\n11. eleven", None);
+        assert_eq!(s.as_deref(), Some("ten"));
+    }
+
+    #[test]
+    fn not_list_items() {
+        for (body, want) in [
+            ("-foo bar\nmore.", "-foo bar more."),
+            ("*emphasis* text\nnext.", "*emphasis* text next."),
+            ("Intro\n---\nmore.", "Intro --- more."),
+        ] {
+            assert_eq!(summarize(None, None, body, None).as_deref(), Some(want));
+        }
+    }
+
+    #[test]
+    fn wrapped_item_continues() {
+        let s = summarize(None, None, "- first item\n  wraps here\n- second", None);
+        assert_eq!(s.as_deref(), Some("first item wraps here"));
     }
 }
