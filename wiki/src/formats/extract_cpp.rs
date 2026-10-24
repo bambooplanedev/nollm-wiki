@@ -425,15 +425,49 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
         .any(|c| c.kind() == "function_declarator")
 }
 
-/// The `(owner, name)` keys that occur exactly once among `items`, with the
-/// index of their item. Overloads share a key, so they drop out here.
-fn unique_keys(items: &[CodeItem]) -> BTreeMap<(Option<&str>, &str), usize> {
-    let mut seen: BTreeMap<(Option<&str>, &str), Option<usize>> = BTreeMap::new();
+/// The number of parameters in the list right after `name(` in a signature:
+/// top-level commas plus one, with `()` and `(void)` counting none. `None`
+/// when the signature has no such list.
+fn arity(signature: &str, name: &str) -> Option<usize> {
+    let start = signature.find(&format!("{name}("))? + name.len() + 1;
+    let params = &signature[start..];
+    let (mut depth, mut commas) = (0i32, 0);
+    let mut end = None;
+    for (i, c) in params.char_indices() {
+        match c {
+            '(' | '<' | '[' | '{' => depth += 1,
+            ')' if depth == 0 => {
+                end = Some(i);
+                break;
+            }
+            ')' | '>' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => commas += 1,
+            _ => {}
+        }
+    }
+    let list = params[..end?].trim();
+    Some(if list.is_empty() || list == "void" {
+        0
+    } else {
+        commas + 1
+    })
+}
+
+type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
+
+/// The `(owner, name, arity)` keys that occur exactly once among `items`,
+/// with the index of their item. Overloads with the same parameter count
+/// share a key, so they drop out here.
+fn unique_keys(items: &[CodeItem]) -> BTreeMap<Key<'_>, usize> {
+    let mut seen: BTreeMap<Key<'_>, Option<usize>> = BTreeMap::new();
     for (i, it) in items.iter().enumerate() {
         if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
-            seen.entry((it.owner.as_deref(), it.name.as_str()))
-                .and_modify(|v| *v = None)
-                .or_insert(Some(i));
+            let key = (
+                it.owner.as_deref(),
+                it.name.as_str(),
+                arity(&it.signature, &it.name),
+            );
+            seen.entry(key).and_modify(|v| *v = None).or_insert(Some(i));
         }
     }
     seen.into_iter()
@@ -441,12 +475,30 @@ fn unique_keys(items: &[CodeItem]) -> BTreeMap<(Option<&str>, &str), usize> {
         .collect()
 }
 
+/// The header and the implementation file of a group of files: its only
+/// `.cpp` and its only lowest-rank header, when both are unique.
+fn header_and_impl<'a>(
+    entities: &BTreeMap<String, Entity>,
+    ids: &[&'a str],
+) -> Option<(&'a str, &'a str)> {
+    let rank = |id: &str| source_rank(&entities[id].source_path);
+    let impls: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == 2).collect();
+    let min = ids.iter().map(|id| rank(id)).min().filter(|r| *r < 2)?;
+    let headers: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == min).collect();
+    match (impls.as_slice(), headers.as_slice()) {
+        ([imp], [hdr]) => Some((*hdr, *imp)),
+        _ => None,
+    }
+}
+
 /// Pairs a header's declarations with the definitions in the one `.cpp` that
 /// implements it: the doc usually sits on the declaration, so the definition
 /// inherits it, and each side's `twin` names the other's lines. Only a
 /// group with exactly one implementation file and a unique lowest-rank header
-/// pairs, and only keys unique on both sides: a wrong pairing is worse than
-/// none, so overloads and ambiguous groups stay untouched.
+/// pairs (a same-stem group that is not one pairs within each directory),
+/// and only keys unique on both sides: a wrong pairing is worse than none,
+/// so overloads with the same parameter count and ambiguous groups stay
+/// untouched.
 pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, e) in entities.iter() {
@@ -460,32 +512,30 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     }
     let mut pairs: Vec<(String, usize, String, usize)> = Vec::new();
     for ids in groups.values() {
-        let impls: Vec<&str> = ids
-            .iter()
-            .copied()
-            .filter(|id| source_rank(&entities[*id].source_path) == 2)
-            .collect();
-        let Some(min) = ids
-            .iter()
-            .map(|id| source_rank(&entities[*id].source_path))
-            .min()
-            .filter(|r| *r < 2)
-        else {
-            continue;
-        };
-        let headers: Vec<&str> = ids
-            .iter()
-            .copied()
-            .filter(|id| source_rank(&entities[*id].source_path) == min)
-            .collect();
-        let ([imp], [hdr]) = (impls.as_slice(), headers.as_slice()) else {
-            continue;
-        };
-        let (h, c) = (&entities[*hdr].items, &entities[*imp].items);
-        let cu = unique_keys(c);
-        for (key, hi) in unique_keys(h) {
-            if let Some(&ci) = cu.get(&key) {
-                pairs.push(((*hdr).to_string(), hi, (*imp).to_string(), ci));
+        let found = header_and_impl(entities, ids).map_or_else(
+            || {
+                // Same-stem files in several directories (`src/exchange/x.cpp`,
+                // `src/execution/x.cpp`) pair within each directory.
+                let mut dirs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+                for &id in ids {
+                    let sp = entities[id].source_path.as_str();
+                    dirs.entry(sp.rsplit_once('/').map_or("", |(d, _)| d))
+                        .or_default()
+                        .push(id);
+                }
+                dirs.values()
+                    .filter_map(|d| header_and_impl(entities, d))
+                    .collect()
+            },
+            |p| vec![p],
+        );
+        for (hdr, imp) in found {
+            let (h, c) = (&entities[hdr].items, &entities[imp].items);
+            let cu = unique_keys(c);
+            for (key, hi) in unique_keys(h) {
+                if let Some(&ci) = cu.get(&key) {
+                    pairs.push((hdr.to_string(), hi, imp.to_string(), ci));
+                }
             }
         }
     }
@@ -495,13 +545,15 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
             format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
         };
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
-        let doc = entities[&hid].items[hi].doc.clone();
+        let h_doc = &entities[&hid].items[hi];
+        let (doc, doc_text) = (h_doc.doc.clone(), h_doc.doc_text.clone());
         let h_item = &mut entities.get_mut(&hid).unwrap().items[hi];
         h_item.twin = Some(c_span);
         let c_item = &mut entities.get_mut(&cid).unwrap().items[ci];
         c_item.twin = Some(h_span);
         if c_item.doc.is_none() {
             c_item.doc = doc;
+            c_item.doc_text = doc_text;
         }
     }
 }
@@ -1092,5 +1144,29 @@ mod tests {
         assert_eq!(e.items[1].doc, None);
         assert_eq!(e.items[2].doc.as_deref(), Some("Resets everything."));
         assert_eq!(e.items[3].doc, None);
+    }
+
+    #[test]
+    fn arity_counts_top_level_parameters() {
+        use super::arity;
+        assert_eq!(arity("void Book::apply()", "apply"), Some(0));
+        assert_eq!(arity("void apply(void)", "apply"), Some(0));
+        assert_eq!(arity("void apply(int o)", "apply"), Some(1));
+        assert_eq!(
+            arity(
+                "void apply(std::map<int, int> m, void (*cb)(int, int), int n = f(1, 2))",
+                "apply"
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            arity("bool operator()(int a, int b) const", "operator()"),
+            Some(2)
+        );
+        assert_eq!(
+            arity("KillSwitch::KillSwitch(int a)", "KillSwitch"),
+            Some(1)
+        );
+        assert_eq!(arity("using Cb = int", "Cb"), None);
     }
 }
