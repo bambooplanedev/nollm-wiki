@@ -299,6 +299,9 @@ wiki serve [OPTIONS]
   compiled wiki directory to serve.
 - `--tools <list>` (`search,page,neighbors`) — the tools to expose,
   comma-separated, from `search`, `page`, `neighbors`, `lint`.
+- `--memory <none|DIR>` — with `--source`, `none` leaves out this repo's local
+  agent memory folder and `DIR` replaces it; a `DIR` that does not exist at
+  start is not watched (the next start picks it up).
 
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).

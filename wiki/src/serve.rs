@@ -524,6 +524,7 @@ pub fn run(
     source: Option<&Path>,
     jobs: Option<usize>,
     tools: Option<&[String]>,
+    memory: Option<&str>,
 ) -> Result<(), WikiError> {
     let tools: Vec<&str> = match tools {
         None => DEFAULT_TOOLS.to_vec(),
@@ -543,13 +544,21 @@ pub fn run(
     };
     let state = match source {
         Some(source) => {
+            // The repo's local folder unless `none`; `DIR` replaces it.
+            let memory = match memory {
+                Some("none") => None,
+                Some(d) => Some(crate::memory::resolve(Path::new(d))?),
+                None => crate::memory::local_dir(source)
+                    .map(|d| crate::memory::resolve(&d))
+                    .transpose()?,
+            };
             let opts = CompileOptions {
                 incremental: true,
                 respect_ignore: true,
                 emit_json: dir.join("graph.json").exists(),
                 jobs,
                 project: None,
-                memory: None,
+                memory,
             };
             WikiState::live(Live::start(source, dir, opts)?)
         }

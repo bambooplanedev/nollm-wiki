@@ -20,9 +20,21 @@ pub fn data_dir_for(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Pa
     }
 }
 
-/// `p` as an absolute display path with `/` separators on every OS.
+/// `p` as an absolute display path with `/` separators on every OS; a Windows
+/// verbatim prefix (`\\?\`, `\\?\UNC\`) is dropped so page paths stay plain.
 pub fn display_path(p: &Path) -> String {
-    p.to_string_lossy().replace('\\', "/")
+    let s = p.to_string_lossy().replace('\\', "/");
+    if let Some(unc) = s.strip_prefix("//?/UNC/") {
+        format!("//{unc}")
+    } else {
+        s.strip_prefix("//?/").map_or(s.clone(), str::to_string)
+    }
+}
+
+/// An external memory folder as one stable absolute path: canonical when it
+/// exists (no `..`, no symlink aliases, so it matches watch events), else merely absolute.
+pub fn resolve(dir: &Path) -> std::io::Result<PathBuf> {
+    dir.canonicalize().or_else(|_| std::path::absolute(dir))
 }
 
 pub fn data_dir() -> Option<PathBuf> {
@@ -83,6 +95,11 @@ mod tests {
             "C:/Users/a/m/n.md"
         );
         assert_eq!(display_path(Path::new("/h/m/n.md")), "/h/m/n.md");
+        assert_eq!(display_path(Path::new(r"\\?\C:\m\n.md")), "C:/m/n.md");
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\srv\share\n.md")),
+            "//srv/share/n.md"
+        );
     }
 
     #[test]

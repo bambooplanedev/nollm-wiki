@@ -196,9 +196,13 @@ fn compile_inner(
     let mut memory_files = Vec::new();
     for (root, in_repo) in &roots {
         let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p))?;
-        dirs.extend(w.dirs);
+        dirs.extend(w.dirs.into_iter().filter(|d| !is_under(d, output)));
         let abs_root = std::path::absolute(root)?;
-        for mut sf in w.files {
+        for mut sf in w
+            .files
+            .into_iter()
+            .filter(|sf| !is_under(&sf.abs_path, output))
+        {
             sf.rel_path = if *in_repo {
                 format!("{}/{}", memory::REPO_DIR, sf.rel_path)
             } else {
@@ -214,7 +218,8 @@ fn compile_inner(
             .chain(&memory_files)
             .map(|sf| sf.abs_path.clone()),
         dirs,
-    );
+    )
+    .with_memory(std::iter::once(in_tree).chain(opts.memory.clone()));
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))

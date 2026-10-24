@@ -86,6 +86,13 @@ impl Live {
         if !is_under(&barriers, &live.source) {
             paths.push((barriers.as_path(), RecursiveMode::NonRecursive));
         }
+        // A memory folder outside the source is its own watch; one that does
+        // not exist yet is left to the next start.
+        if let Some(mem) = live.opts.memory.as_deref().filter(|m| m.is_dir()) {
+            if !is_under(mem, &live.source) {
+                paths.push((mem, RecursiveMode::Recursive));
+            }
+        }
         let hook = Arc::clone(&live);
         let watcher = watch::start(&paths, move |res| hook.on_event(&res))?;
 

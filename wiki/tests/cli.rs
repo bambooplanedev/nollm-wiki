@@ -633,3 +633,37 @@ fn compile_memory_flag_takes_a_dir_or_local() {
     wiki(&out3, "local");
     assert!(titles(&out3).contains(&"Local Note".to_string()));
 }
+
+#[test]
+fn compile_memory_dir_with_dotdot_gives_the_same_page_path() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let ext = dir.path().join("ext");
+    fs::create_dir_all(&input).unwrap();
+    fs::create_dir_all(&ext).unwrap();
+    fs::write(input.join("doc.md"), "# Doc\n\nbody\n").unwrap();
+    fs::write(ext.join("n.md"), "# Ext Note\n\nbody\n").unwrap();
+    let path_of = |out: &str, memory: &std::path::Path| -> String {
+        let out = dir.path().join(out);
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+            .arg("--memory")
+            .arg(memory)
+            .assert()
+            .success();
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+        let e = v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["title"] == "Ext Note")
+            .unwrap();
+        e["path"].as_str().unwrap().to_string()
+    };
+    let plain = path_of("o1", &ext);
+    let dotted = path_of("o2", &ext.join("../ext/../ext"));
+    assert!(!plain.contains(".."));
+    assert_eq!(plain, dotted);
+}
