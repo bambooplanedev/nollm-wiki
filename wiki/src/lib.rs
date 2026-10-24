@@ -194,6 +194,7 @@ fn compile_inner(
         .filter(|d| !is_under(d, output))
         .collect();
     let mut memory_files = Vec::new();
+    let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
     for (root, in_repo) in &roots {
         let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p))?;
         dirs.extend(w.dirs.into_iter().filter(|d| !is_under(d, output)));
@@ -206,7 +207,9 @@ fn compile_inner(
             sf.rel_path = if *in_repo {
                 format!("{}/{}", memory::REPO_DIR, sf.rel_path)
             } else {
-                memory::display_path(&abs_root.join(&sf.rel_path))
+                let abs = memory::display_path(&abs_root.join(&sf.rel_path));
+                virtual_paths.insert(abs.clone(), format!("memory/{}", sf.rel_path));
+                abs
             };
             memory_files.push(sf);
         }
@@ -232,19 +235,38 @@ fn compile_inner(
             e
         })
         .collect();
-    extracted.extend(notes);
 
     // 1b. Qualify names that would otherwise share a slug. An extractor names
     // a page from its own file alone and cannot see the rest of the tree, so
     // this runs here, where every entity is in hand. Ordering is irrelevant to
     // the result — the pass depends on the set of (name, source_path) pairs,
     // not on the order `extracted` arrives in.
+    // Project pages first, alone, so a memory note can never rename one; then
+    // the notes among themselves with the project ids already taken. An
+    // external note is qualified by its virtual `memory/<rel>` path, never by
+    // the absolute key folder; its `source_path` is restored afterwards.
     disambiguate_ids(&mut extracted);
+    let taken: BTreeSet<String> = extracted.iter().map(|e| e.id.clone()).collect();
+    let real_paths: BTreeMap<&String, &String> =
+        virtual_paths.iter().map(|(a, v)| (v, a)).collect();
+    let mut notes = notes;
+    for n in &mut notes {
+        if let Some(v) = virtual_paths.get(&n.source_path) {
+            n.source_path = v.clone();
+        }
+    }
+    disambiguate_taken(&mut notes, &taken);
+    for n in &mut notes {
+        if let Some(abs) = real_paths.get(&n.source_path) {
+            n.source_path = (*abs).clone();
+        }
+    }
+    extracted.extend(notes);
 
-    // 2. Dedup slug collisions deterministically (first by sorted rel_path
-    // wins — `extracted` is already ordered by rel_path from the walk, so a
-    // simple "keep the first insertion" rule is order-stable regardless of
-    // thread count).
+    // 2. Dedup slug collisions deterministically. After disambiguation ids
+    // are unique, so which entity a collision would keep never matters; the
+    // result does not depend on the order `extracted` arrives in (project
+    // files by rel_path, then notes by folder).
     let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
     for e in extracted {
         match entities.get(&e.id) {
@@ -622,12 +644,16 @@ fn assign_free_ids(
     state: &LadderState<'_>,
     ordinal: &mut [usize],
     claimed: &mut BTreeSet<String>,
+    fixed: &BTreeSet<String>,
 ) -> bool {
     // Every member of `group` currently shares this exact id (that is what
     // makes them a group) — vacate it once, for the whole group, rather than
     // per member: removing it again for a later member would just be
     // removing whatever a not-yet-processed sibling still has not replaced.
-    claimed.remove(&extracted[group[0]].id);
+    // (A id taken by a fixed entity outside `extracted` stays claimed.)
+    if !fixed.contains(&extracted[group[0]].id) {
+        claimed.remove(&extracted[group[0]].id);
+    }
 
     let mut sorted = group.to_vec();
     sorted.sort_by(|a, b| extracted[*a].source_path.cmp(&extracted[*b].source_path));
@@ -694,6 +720,13 @@ fn assign_free_ids(
 /// qualified page picks up fewer lexical edges. That is the trade against
 /// pages that previously did not exist at all.
 fn disambiguate_ids(extracted: &mut [Entity]) {
+    disambiguate_taken(extracted, &BTreeSet::new());
+}
+
+/// `disambiguate_ids` for entities that must also avoid `taken` ids, which
+/// stay fixed: an entity whose id is taken is treated as colliding, never as
+/// the winner, so it is renamed through the same ladder.
+fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
     let base: Vec<String> = extracted.iter().map(|e| e.name.clone()).collect();
     let disc: Vec<String> = extracted.iter().map(discriminator).collect();
     let key: Vec<(u8, usize)> = extracted
@@ -731,9 +764,15 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
         // groups processed in the same round must not both compute a free id
         // from the round's starting snapshot and land on the same choice.
         let mut claimed: BTreeSet<String> = extracted.iter().map(|e| e.id.clone()).collect();
+        claimed.extend(taken.iter().cloned());
 
         let mut changed = false;
-        for group in by_id.values().filter(|g| g.len() > 1) {
+        for (id, group) in by_id
+            .iter()
+            .filter(|(id, g)| g.len() > 1 || taken.contains(*id))
+        {
+            let group = group.as_slice();
+            let is_taken = taken.contains(id);
             if !force_free_ids {
                 let first_parents = parent_segments(&extracted[group[0]].source_path);
                 let same_dir = group
@@ -753,7 +792,11 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
                     continue;
                 }
 
-                let winner = strict_winner(group, &key);
+                let winner = if is_taken {
+                    None
+                } else {
+                    strict_winner(group, &key)
+                };
                 let mut applied = false;
                 for &i in group {
                     if Some(i) == winner || used_disc[i] || disc[i].is_empty() {
@@ -782,7 +825,7 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
                 depth: &depth,
                 used_disc: &used_disc,
             };
-            if assign_free_ids(group, extracted, &state, &mut ordinal, &mut claimed) {
+            if assign_free_ids(group, extracted, &state, &mut ordinal, &mut claimed, taken) {
                 changed = true;
             }
         }
@@ -1140,7 +1183,14 @@ mod tests {
             depth: &depth,
             used_disc: &used_disc,
         };
-        let changed = assign_free_ids(&[0, 1], &extracted, &state, &mut ordinal, &mut claimed);
+        let changed = assign_free_ids(
+            &[0, 1],
+            &extracted,
+            &state,
+            &mut ordinal,
+            &mut claimed,
+            &BTreeSet::new(),
+        );
 
         assert!(changed);
         assert_eq!(

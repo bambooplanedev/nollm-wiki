@@ -160,9 +160,16 @@ per question is noise-level: treat single results as anecdotes.
 - Windows paths (data dir, `\\?\` prefix, `C:/` page paths) are covered by unit
   tests only; CI is Linux.
 - The local key is the root commit, so a worktree checked out on an orphan
-  branch gets a different, empty local memory; a shallow clone or a repo
-  without commits keys on its git dir and is not shared with re-clones.
+  branch gets a different, empty local memory; a shallow clone keys on its
+  git dir and is not shared with re-clones.
 - Forks of one project share local memory (same root commit).
 - Setup's exact-match contract: a skill text from an older release (before the
   Memory section) is reported as foreign and left alone; delete it and re-run.
 - Local memory is not backed up and a local-scope skill names a machine path.
+- `compile --watch` does not watch an external `--memory` folder.
+- `--no-ignore` walks `.wiki/`, whose pages can hold local-memory text.
+- Unshallowing a shallow clone changes its local memory key (the old folder is
+  orphaned).
+- A git failure such as `safe.directory` reads as "not a git repo", so no
+  local memory.
+- A new repo has no local memory until its first commit.

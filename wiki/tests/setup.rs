@@ -308,7 +308,14 @@ fn real_git(f: &Fixture) {
 
 fn git(dir: &Path, args: &[&str]) {
     let s = std::process::Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .current_dir(dir)
         .status()
@@ -593,6 +600,19 @@ fn setup_local_without_a_git_repo_says_so_and_continues() {
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
     assert!(
         out(&a).contains("no local memory: not a git repo"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_in_a_repo_with_no_commits_says_so_and_continues() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(
+        out(&a).contains("no local memory: no commits yet"),
         "{}",
         out(&a)
     );

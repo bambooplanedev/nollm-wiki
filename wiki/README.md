@@ -171,6 +171,7 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 - `--no-ignore` (off) — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
 - `--emit-json` (off) — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`, `llms.txt`, and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project differently.
+- `--memory <local|DIR>` (none) — also compile an agent memory folder as flagged memory pages: `local` for this repo's per-user folder, or a directory. `<INPUT>/.agents/memory` is always compiled. Without a resolvable folder it warns on stderr and continues.
 - `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change. Events are debounced for 150 ms and events under `<OUTPUT>` are ignored; each run reports `recompiled: N pages (M written)` on stderr.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an
@@ -184,7 +185,7 @@ and leaves them in place — delete them or recompile into a clean directory.
 wiki search [OPTIONS] [QUERY]
 ```
 
-- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`).
+- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`, but not an exact `SourceKind`.
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With no query, lists every such page by path. A query or `--tag` is required.
 - `--limit <N>` (`10` with a query; none for a bare `--tag`) — maximum number of hits returned.
 - `--format <lines|json>` (`lines`) — output shape, below.

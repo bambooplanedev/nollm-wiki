@@ -109,7 +109,7 @@ enum Command {
         /// With `--source`, the agent memory folder to include: `none` for no
         /// local folder, or a directory instead of it (default: this repo's
         /// per-user folder).
-        #[arg(long, value_name = "none|DIR")]
+        #[arg(long, value_name = "none|DIR", requires = "source")]
         memory: Option<String>,
     },
     /// Print the code locations for a task text; silent when there is nothing to say.
@@ -180,7 +180,8 @@ fn main() -> Result<()> {
             project,
             memory,
         } => {
-            let memory = match memory.as_deref() {
+            let memory_arg = memory;
+            let memory = match memory_arg.as_deref() {
                 None => None,
                 Some("local") => wiki::memory::local_dir(&input)
                     .map(|d| wiki::memory::resolve(&d))
@@ -190,6 +191,13 @@ fn main() -> Result<()> {
                     wiki::memory::resolve(std::path::Path::new(dir)).context("resolve --memory")?,
                 ),
             };
+            if let Some(arg) = &memory_arg {
+                if memory.as_ref().is_none_or(|d| !d.is_dir()) {
+                    eprintln!(
+                        "warning: --memory {arg}: no such memory folder; compiling without it"
+                    );
+                }
+            }
             let opts = CompileOptions {
                 incremental,
                 respect_ignore: !no_ignore,

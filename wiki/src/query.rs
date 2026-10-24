@@ -82,8 +82,6 @@ pub(crate) const MEMORY_BOOST: f64 = 4.0;
 
 /// Which pages a search sees: all, none of the memory notes, or only them.
 #[derive(Clone, Copy, PartialEq, Eq)]
-// `Without` and `Only` have no caller until the memory hint.
-#[allow(dead_code)]
 pub(crate) enum MemoryScope {
     With,
     Without,

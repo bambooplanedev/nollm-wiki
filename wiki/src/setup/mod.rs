@@ -283,6 +283,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     "git is not on PATH"
                 } else if memory::data_dir().is_none() {
                     "no data dir (set HOME, XDG_DATA_HOME or LOCALAPPDATA)"
+                } else if memory::is_git_repo(root) {
+                    "no commits yet"
                 } else {
                     "not a git repo"
                 };

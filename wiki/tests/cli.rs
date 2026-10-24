@@ -563,7 +563,14 @@ fn compile_memory_flag_takes_a_dir_or_local() {
         let ok = std::process::Command::new("git")
             .arg("-C")
             .arg(&input)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .status()
             .is_ok_and(|s| s.success());
@@ -666,4 +673,29 @@ fn compile_memory_dir_with_dotdot_gives_the_same_page_path() {
     let dotted = path_of("o2", &ext.join("../ext/../ext"));
     assert!(!plain.contains(".."));
     assert_eq!(plain, dotted);
+}
+
+#[test]
+fn compile_memory_dir_that_does_not_exist_warns_and_continues() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("doc.md"), "# Doc\n\nbody\n").unwrap();
+    let out = dir.path().join("out");
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+        .args(["--memory", dir.path().join("nope").to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("no such memory folder"));
+}
+
+#[test]
+fn serve_memory_requires_source() {
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["serve", "--memory", "none"])
+        .assert()
+        .failure();
 }

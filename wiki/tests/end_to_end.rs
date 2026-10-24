@@ -1048,6 +1048,7 @@ fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
     write(&input, "docs/s.md", "---\ntitle: Setup\n---\n\nProject.\n");
+    write(&input, "docs/l.md", "# Linker\n\nSee [[Setup]].\n");
     write(
         &input,
         ".agents/memory/s.md",
@@ -1055,13 +1056,51 @@ fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
     );
 
     let result = compile(&input, &output, &CompileOptions::default()).unwrap();
-    assert_eq!(result.pages_total, 2);
+    assert_eq!(result.pages_total, 3);
     let entries = index_entries(&output);
-    let ids: BTreeSet<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
-    assert_eq!(ids.len(), 2);
-    assert!(entries
+    let project = entries.iter().find(|e| e["path"] == "docs/s.md").unwrap();
+    assert_eq!(project["id"], "setup");
+    assert_eq!(project["title"], "Setup");
+    let note = entries
         .iter()
-        .all(|e| e["title"].as_str().unwrap().contains("Setup")));
+        .find(|e| e["path"] == ".agents/memory/s.md")
+        .unwrap();
+    assert_ne!(note["id"], "setup");
+    assert!(note["title"].as_str().unwrap().contains("Setup"));
+    let pages = wiki::lint::load_compiled_pages(&output).unwrap();
+    assert!(wiki::lint::lint(&pages).broken_links.is_empty());
+    let linker = fs::read_to_string(output.join("linker.md")).unwrap();
+    assert!(linker.contains("[[setup|Setup]]"), "{linker}");
+}
+
+#[test]
+fn external_note_colliding_with_another_never_gets_the_key_folder_in_its_title() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let external = dir.path().join("0123456789abcdef0123456789abcdef01234567");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&external, "a/n.md", "---\ntitle: Dup\n---\n\nA.\n");
+    write(&external, "b/n.md", "---\ntitle: Dup\n---\n\nB.\n");
+    let opts = CompileOptions {
+        memory: Some(external),
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+    let entries = index_entries(&output);
+    let dups: Vec<_> = entries
+        .iter()
+        .filter(|e| e["title"].as_str().unwrap().contains("Dup"))
+        .collect();
+    assert_eq!(dups.len(), 2);
+    for e in dups {
+        let t = e["title"].as_str().unwrap().to_lowercase();
+        assert!(!t.contains("0123456789abcdef"), "{t}");
+        assert!(
+            e["path"].as_str().unwrap().starts_with('/')
+                || e["path"].as_str().unwrap().contains(':')
+        );
+    }
 }
 
 #[test]

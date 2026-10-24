@@ -53,11 +53,18 @@ fn git(root: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// Whether `root` is inside a git repo.
+pub fn is_git_repo(root: &Path) -> bool {
+    git(root, &["rev-parse", "--git-common-dir"]).is_some()
+}
+
 /// A key shared by every checkout and worktree of one repo: the smallest root commit hash, or, when
-/// history is shallow or empty, a hash of the canonical git common dir. `None` outside a git repo.
+/// history is shallow, a hash of the canonical git common dir. `None` outside a git repo and in a
+/// repo with no commits yet (a key must not change at the first commit).
 pub fn repo_key(root: &Path) -> Option<String> {
     let common = git(root, &["rev-parse", "--git-common-dir"])?;
     let shallow = git(root, &["rev-parse", "--is-shallow-repository"]).as_deref() == Some("true");
+    git(root, &["rev-parse", "--verify", "-q", "HEAD"])?;
     if !shallow {
         if let Some(roots) = git(root, &["rev-list", "--max-parents=0", "HEAD"]) {
             if let Some(smallest) = roots.lines().filter(|l| !l.is_empty()).min() {
@@ -140,7 +147,14 @@ mod tests {
         let st = Command::new("git")
             .arg("-C")
             .arg(dir)
-            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
             .args(args)
             .output()
             .unwrap();
@@ -191,15 +205,13 @@ mod tests {
     }
 
     #[test]
-    fn no_commits_falls_back_to_common_dir_hash() {
+    fn no_commits_has_no_key() {
         if !have_git() {
             return;
         }
         let d = tempfile::tempdir().unwrap();
         run(d.path(), &["init", "-q"]);
-        let key = repo_key(d.path()).unwrap();
-        assert_eq!(key.len(), 16);
-        assert!(key.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(repo_key(d.path()), None);
     }
 
     #[test]
