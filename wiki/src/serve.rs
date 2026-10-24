@@ -468,6 +468,9 @@ pub fn search_json(hits: Vec<Hit>) -> String {
             if h.memory {
                 hit["memory"] = true.into();
             }
+            if let Some(by) = h.superseded_by {
+                hit["superseded_by"] = by.into();
+            }
             hit
         })
         .collect();
@@ -493,6 +496,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
         out.push_str(&one(&h.title));
         if let Some(s) = &h.summary {
             out.push_str(&format!(" — {}", one(s)));
+        }
+        if let Some(by) = &h.superseded_by {
+            out.push_str(&format!(" (superseded by {by})"));
         }
         out.push('\n');
         for s in &h.symbols {

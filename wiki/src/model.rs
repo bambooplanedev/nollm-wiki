@@ -75,6 +75,10 @@ pub struct Entity {
     pub updated: String,
     /// From an agent memory folder. Reaches `index.json` only, never the page.
     pub memory: bool,
+    /// Names of memory notes this note retires (front-matter `supersedes`).
+    pub supersedes: Vec<String>,
+    /// The id of the memory note that supersedes this one; set after ids are final.
+    pub superseded_by: Option<String>,
     pub body: String,
     pub source_path: String,
     pub kind: SourceKind,

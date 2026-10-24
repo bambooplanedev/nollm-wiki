@@ -66,6 +66,8 @@ impl Extractor for TextExtractor {
             created,
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body,
             source_path: String::new(), // filled by Registry
             kind: SourceKind::Text,

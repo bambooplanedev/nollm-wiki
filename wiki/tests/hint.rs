@@ -225,3 +225,26 @@ fn hint_memory_gate_ignores_short_words() {
     assert_eq!(hint(&dir, "що в"), "");
     assert!(hint(&dir, "що в релізі").contains("memory: "));
 }
+
+#[test]
+fn hint_never_shows_a_superseded_note() {
+    let tmp = project_with_memory();
+    fs::write(
+        tmp.path().join(".agents/memory/vault2.md"),
+        "---\ntitle: Vault weekly\nsupersedes: Vault rotation\ndescription: Credentials rotate weekly.\n---\n\nbody\n",
+    )
+    .unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile"])
+        .arg(tmp.path())
+        .arg(tmp.path().join(".wiki"))
+        .assert()
+        .success();
+    let out = hint(&tmp.path().join(".wiki"), "vault rotation nightly");
+    let line = memory_line(&out).unwrap();
+    assert!(
+        line.contains("vault2.md") && !line.contains("vault.md"),
+        "{out}"
+    );
+}

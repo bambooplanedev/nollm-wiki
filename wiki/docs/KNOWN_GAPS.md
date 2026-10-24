@@ -168,6 +168,7 @@ per question is noise-level: treat single results as anecdotes.
 - Local memory is not backed up and a local-scope skill names a machine path.
 - `compile --watch` does not watch an external `--memory` folder.
 - `--no-ignore` walks `.wiki/`, whose pages can hold local-memory text.
+- `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
 - Unshallowing a shallow clone changes its local memory key (the old folder is
   orphaned).
 - A git failure such as `safe.directory` reads as "not a git repo", so no

@@ -19,6 +19,7 @@ impl Extractor for MarkdownExtractor {
         let description = fm_get(&fm, "description");
         let aliases = fm_list(&fm, "aliases");
         let tags = normalize_tags(fm_list(&fm, "tags"));
+        let supersedes = fm_list(&fm, "supersedes");
 
         if title.is_none() {
             title = first_h1(body_text);
@@ -35,6 +36,8 @@ impl Extractor for MarkdownExtractor {
             created,
             updated,
             memory: false,
+            supersedes,
+            superseded_by: None,
             body,
             source_path: String::new(),
             kind: SourceKind::Markdown,

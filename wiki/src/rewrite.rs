@@ -492,6 +492,8 @@ mod tests {
             created: "2026-01-01".into(),
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

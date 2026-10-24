@@ -26,3 +26,4 @@ code.
   (search words are English).
 - A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
 - Search first; update the note that exists instead of adding a copy.
+- When a decision changes, update its note. If you write a new note instead, add `supersedes: <old note's title>` to it.

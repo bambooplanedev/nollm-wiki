@@ -471,6 +471,8 @@ impl Extractor for CodeExtractor {
             created: String::new(),
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: source,
             source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },

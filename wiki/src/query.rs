@@ -27,6 +27,9 @@ pub(crate) struct Entry {
     /// From an agent memory folder; absent in `index.json` when false.
     #[serde(default)]
     pub(crate) memory: bool,
+    /// The id of the note that supersedes this one; absent in `index.json` when unset.
+    #[serde(default)]
+    pub(crate) superseded_by: Option<String>,
     pub(crate) pagerank: f64,
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
@@ -99,6 +102,8 @@ pub struct Hit {
     pub score: f64,
     /// The page is an agent memory note; its score carries `MEMORY_BOOST`.
     pub memory: bool,
+    /// The id of the note that supersedes this one; it gets no boost.
+    pub superseded_by: Option<String>,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, defined name, summary, or a
     /// section heading — the summary explains those).
@@ -925,7 +930,8 @@ impl Wiki {
     /// `search_tagged` over the memory notes only, all but them, or both.
     /// A memory note passes the `code` and `docs` groups whatever its real
     /// kind (agents filter by `code`); an exact kind matches its real kind.
-    /// Memory hits' scores are multiplied by `MEMORY_BOOST`, and of two
+    /// Memory hits' scores are multiplied by `MEMORY_BOOST` (a superseded
+    /// note gets neither the boost nor the tie keys), and of two
     /// equal-scored notes the later `updated` comes first (dated before
     /// undated).
     pub(crate) fn search_scoped(
@@ -968,6 +974,7 @@ impl Wiki {
                     updated: e.updated.clone(),
                     score: 0.0,
                     memory: e.memory,
+                    superseded_by: e.superseded_by.clone(),
                     snippet: None,
                     symbols: Vec::new(),
                 })
@@ -1020,7 +1027,7 @@ impl Wiki {
                         idf_t * (weight + Self::W_BODY * tf_norm)
                     })
                     .sum();
-                let total = if c.entry.memory {
+                let total = if c.entry.memory && c.entry.superseded_by.is_none() {
                     base * MEMORY_BOOST
                 } else {
                     base
@@ -1033,18 +1040,21 @@ impl Wiki {
                     updated: c.entry.updated.clone(),
                     score: total,
                     memory: c.entry.memory,
+                    superseded_by: c.entry.superseded_by.clone(),
                     snippet: c.snippet,
                     symbols: Vec::new(),
                 };
                 (hit, c.entry.pagerank)
             })
             .collect();
+        // Only live notes (not superseded) take the memory tie keys.
+        let live = |h: &Hit| h.memory && h.superseded_by.is_none();
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
-                .then_with(|| b.memory.cmp(&a.memory))
+                .then_with(|| live(b).cmp(&live(a)))
                 .then_with(|| {
-                    if a.memory {
+                    if live(a) {
                         b.updated.cmp(&a.updated)
                     } else {
                         std::cmp::Ordering::Equal

@@ -847,6 +847,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         updated: None,
         score: 1.0,
         memory: false,
+        superseded_by: None,
         snippet: None,
         symbols: vec![SymbolLine {
             path: "a.rs".into(),
@@ -1226,6 +1227,7 @@ fn search_lines_shows_date_after_path() {
         snippet: None,
         symbols: vec![],
         memory: false,
+        superseded_by: None,
     };
     assert_eq!(
         wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
@@ -1390,4 +1392,120 @@ fn index_json_without_memory_still_loads() {
     assert!(v["entries"][0].get("memory").is_none());
     let w = Wiki::load(&out).unwrap();
     assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
+}
+
+fn note(title: &str, extra: &str, body: &str) -> String {
+    format!("---\ntitle: {title}\n{extra}---\n\n{body}\n")
+}
+
+fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(d.path().join("out/index.json")).unwrap())
+            .unwrap();
+    v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["id"].as_str().unwrap().to_string(),
+                e.get("superseded_by")
+                    .map(|s| s.as_str().unwrap().to_string()),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn supersedes_marks_a_memory_note_by_title_alias_or_slug_only() {
+    let (d, _w) = memory_fixture(&[
+        (".agents/memory/t.md", &note("Old Title", "", "x")),
+        (".agents/memory/a.md", &note("Aliased", "aliases: [Former Name]\n", "x")),
+        (".agents/memory/s.md", &note("Slugged Note", "", "x")),
+        ("proj.md", &note("Project Page", "", "x")),
+        (
+            ".agents/memory/new.md",
+            &note(
+                "New",
+                "supersedes:\n  - old title\n  - FORMER NAME\n  - slugged_note\n  - Project Page\n  - Nothing Here\n",
+                "x",
+            ),
+        ),
+    ]);
+    let m = superseded_by(&d);
+    for id in ["old_title", "aliased", "slugged_note"] {
+        assert_eq!(m[id].as_deref(), Some("new"), "{id}");
+    }
+    assert_eq!(m["project_page"], None);
+    assert_eq!(m["new"], None);
+}
+
+#[test]
+fn two_superseders_resolve_to_the_smaller_id() {
+    let (d, _w) = memory_fixture(&[
+        (".agents/memory/o.md", &note("Old", "", "x")),
+        (
+            ".agents/memory/z.md",
+            &note("Zed", "supersedes: Old\n", "x"),
+        ),
+        (
+            ".agents/memory/b.md",
+            &note("Bee", "supersedes: [Old]\n", "x"),
+        ),
+    ]);
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("bee"));
+}
+
+#[test]
+fn superseded_note_loses_boost_and_tie_key() {
+    // The old note holds the words in its description, the new one in the body.
+    let old = note("Old", "description: nightly benchmarks nightly\n", "filler");
+    let new = note("New", "supersedes: Old\n", "benchmarks run nightly");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/old.md", &old),
+        (".agents/memory/new.md", &new),
+    ]);
+    let hits = w.search("nightly benchmarks", None, 10);
+    assert_eq!(hits[0].id, "new");
+    assert_eq!(hits[1].superseded_by.as_deref(), Some("new"));
+    assert_eq!(hits[0].superseded_by, None);
+    // Without the boost the old note's raw score stays unmultiplied.
+    let (_d, plain) = memory_fixture(&[("old.md", &old), ("new.md", &new)]);
+    let raw = plain.search("nightly benchmarks", None, 10);
+    let raw_old = raw.iter().find(|h| h.id == "old").unwrap().score;
+    assert!((hits[1].score - raw_old).abs() < 1e-9, "{}", hits[1].score);
+}
+
+#[test]
+fn superseded_note_does_not_win_the_memory_first_tie() {
+    let same = |t: &str, extra: &str| note(t, extra, "zebra");
+    let (_d, w) = memory_fixture(&[
+        ("c.md", &same("Ccc", "")),
+        (".agents/memory/a.md", &same("Aaa", "")),
+        (".agents/memory/b.md", &same("Bbb", "supersedes: Aaa\n")),
+    ]);
+    let hits = w.search("zebra", None, 10);
+    // Bbb (live memory) first; then the superseded note ties plain code by id.
+    assert_eq!(hits[0].id, "bbb");
+    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids[1..], ["aaa", "ccc"], "{ids:?}");
+}
+
+#[test]
+fn search_output_marks_only_superseded_hits() {
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/old.md", &note("Old", "", "zebra")),
+        (
+            ".agents/memory/new.md",
+            &note("New", "supersedes: Old\n", "zebra"),
+        ),
+    ]);
+    let hits = w.search("zebra", None, 10);
+    let lines = wiki::serve::search_lines(&hits);
+    let line = |id: &str| lines.lines().find(|l| l.starts_with(id)).unwrap();
+    assert!(!line("new  ").contains("superseded"), "{lines}");
+    assert!(line("old  ").ends_with(" (superseded by new)"), "{lines}");
+    let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(hits)).unwrap();
+    assert!(j[0].get("superseded_by").is_none());
+    assert_eq!(j[1]["superseded_by"], "new");
 }

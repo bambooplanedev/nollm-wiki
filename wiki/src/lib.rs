@@ -289,6 +289,7 @@ fn compile_inner(
     // final ids. Processes the (already sorted) BTreeMap in key order so the
     // remap is identical across runs/machines/thread counts.
     let mut entities = remap_reserved_names(entities);
+    resolve_supersedes(&mut entities);
     // Needs the final ids and `source_path`s, so it follows the remap.
     formats::extract_cpp::pair_declarations(&mut entities);
 
@@ -847,6 +848,35 @@ fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
     }
 }
 
+/// Marks each memory note named by another note's `supersedes` with the
+/// superseder's id. A name matches a note's title or alias ignoring case, or
+/// its id as a slug; project pages are never marked. Several superseders
+/// resolve to the smallest id (ids are visited in sorted order).
+fn resolve_supersedes(entities: &mut BTreeMap<String, Entity>) {
+    let mut marks: BTreeMap<String, String> = BTreeMap::new();
+    for (id, e) in entities.iter().filter(|(_, e)| e.memory) {
+        for name in &e.supersedes {
+            let lower = name.to_lowercase();
+            let slug = crate::model::slugify(name);
+            let target = entities.iter().find(|(tid, t)| {
+                t.memory
+                    && *tid != id
+                    && (**tid == slug
+                        || t.name.to_lowercase() == lower
+                        || t.aliases.iter().any(|a| a.to_lowercase() == lower))
+            });
+            if let Some((tid, _)) = target {
+                marks.entry(tid.clone()).or_insert_with(|| id.clone());
+            }
+        }
+    }
+    for (tid, by) in marks {
+        if let Some(t) = entities.get_mut(&tid) {
+            t.superseded_by = Some(by);
+        }
+    }
+}
+
 /// Rewrite any entity id that collides with a reserved manifest base name to
 /// a non-colliding id, deterministically. Ids that already exist and are not
 /// themselves reserved are treated as fixed and never displaced; a remapped
@@ -901,6 +931,8 @@ mod tests {
             created: String::new(),
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: String::new(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

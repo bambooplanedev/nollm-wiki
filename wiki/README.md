@@ -497,6 +497,13 @@ page. When a prompt names a note in its title, an alias or its summary,
 `wiki hint` adds one `memory: <path> — <summary>` line to its code lines;
 only prompt words of four or more characters count toward that match.
 
+A note can retire an older one with `supersedes:` in its front matter (a list
+of titles, aliases or ids, in `aliases:` syntax). The older note then gets no
+boost and no memory-first tie order, `search` prints ` (superseded by <id>)`
+after its line (`"superseded_by"` in JSON), and `wiki hint` never shows it. Only
+memory notes are matched, a name that matches nothing is ignored, and with
+several superseders the smallest id is shown.
+
 The skill carries these rules; copy them into the agent's instructions file
 if it has no skill:
 
@@ -512,6 +519,7 @@ Memory notes live in <folder> (.agents/memory, or the local folder setup named),
 - A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
 - Mention a related note by its exact title or alias, or as `[[title]]`.
 - Search before writing. Update the note that exists instead of adding a copy.
+- When a decision changes, update its note. If you write a new note instead, add `supersedes: <old note's title>` to it.
 - `MEMORY.md` is optional and is not searched.
 ```
 

@@ -497,6 +497,8 @@ mod tests {
             created: String::new(),
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

@@ -18,6 +18,8 @@ pub struct ManifestEntry {
     pub updated: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub memory: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
     pub degree_in: usize,
     pub degree_out: usize,
     pub pagerank: f64,
@@ -82,6 +84,7 @@ pub fn build_manifest(
                 summary: e.summary.clone(),
                 updated: Some(e.updated.clone()).filter(|u| !u.is_empty()),
                 memory: e.memory,
+                superseded_by: e.superseded_by.clone(),
                 degree_in: inc.len(),
                 degree_out: out.len(),
                 pagerank: *graph.pagerank.get(id).unwrap_or(&0.0),
@@ -216,6 +219,8 @@ mod tests {
             created: String::new(),
             updated: String::new(),
             memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

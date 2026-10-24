@@ -58,7 +58,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
             MemoryScope::Only,
         )
         .into_iter()
-        .find(|h| wiki.names_page(&h.id, text));
+        .find(|h| h.superseded_by.is_none() && wiki.names_page(&h.id, text));
     if let Some(h) = note {
         let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
         push_line(
