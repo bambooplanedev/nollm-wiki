@@ -1241,3 +1241,26 @@ fn search_lines_shows_date_after_path() {
     assert_eq!(j[0]["updated"], "2026-10-23");
     assert!(j[1].get("updated").is_none());
 }
+
+#[test]
+fn title_resolves_case_insensitively_in_any_script() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("note.md"),
+        "---\ntitle: Морський Маяк\n---\n\nBody.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let wiki = Wiki::load(&output).unwrap();
+    assert_eq!(
+        wiki.resolve_id("морський маяк").unwrap(),
+        "morskyi_maiak"
+    );
+    assert_eq!(
+        wiki.resolve_id("МОРСЬКИЙ МАЯК").unwrap(),
+        "morskyi_maiak"
+    );
+}

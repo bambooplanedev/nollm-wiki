@@ -913,3 +913,36 @@ fn incremental_compile_rerenders_on_tag_edit() {
         .unwrap()
         .contains("- tags: b"));
 }
+
+/// `Канал` and `Kanal` slug to the same ascii stem; both keep a page (the
+/// link `[[Канал]]` is then ambiguous, like any shared slug). A Cyrillic title
+/// with a stem of its own is linked by its wikilink.
+#[test]
+fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    write(&input, "a.md", "---\ntitle: Канал\n---\n\nCyrillic body.\n");
+    write(&input, "b.md", "---\ntitle: Kanal\n---\n\nLatin body.\n");
+    write(
+        &input,
+        "c.md",
+        "---\ntitle: Third\n---\n\nSee [[Маяк]].\n",
+    );
+    write(&input, "d.md", "---\ntitle: Маяк\n---\n\nPlan.\n");
+
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(result.pages_total, 4);
+
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    let entries = index["entries"].as_array().unwrap();
+    let ids: BTreeSet<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!(
+        ids,
+        BTreeSet::from(["kanal_a", "kanal_b", "third", "maiak"])
+    );
+    let third = entries.iter().find(|e| e["id"] == "third").unwrap();
+    assert_eq!(third["neighbors_out"], serde_json::json!(["maiak"]));
+}

@@ -1034,7 +1034,7 @@ impl Wiki {
                 _ => None,
             }
         };
-        if let Some(id) = by(&|e| e.title.eq_ignore_ascii_case(arg)) {
+        if let Some(id) = by(&|e| e.title.to_lowercase() == arg.to_lowercase()) {
             return Ok(id);
         }
         let slug = crate::model::slugify(arg);
