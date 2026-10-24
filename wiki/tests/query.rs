@@ -1509,3 +1509,63 @@ fn search_output_marks_only_superseded_hits() {
     assert!(j[0].get("superseded_by").is_none());
     assert_eq!(j[1]["superseded_by"], "new");
 }
+
+fn journals() -> (tempfile::TempDir, Wiki) {
+    let j = |day: &str| {
+        (
+            format!(".agents/memory/journal/2026-10-{day}.md"),
+            format!("---\ntitle: Journal {day}\n---\n\nstand run notes\n"),
+        )
+    };
+    let files = [j("05"), j("12"), j("19")];
+    let mut refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    refs.push(("src/stand.rs", "pub fn stand() {}\n"));
+    memory_fixture(&refs)
+}
+
+#[test]
+fn a_date_in_the_query_ranks_the_note_of_that_day_first() {
+    let (_d, w) = journals();
+    for q in [
+        "що сталося зі stand 12 жовтня",
+        "stand October 12",
+        "stand 12.10",
+        "stand 2026-10-12",
+    ] {
+        let hits = w.search(q, None, 10);
+        assert_eq!(hits[0].updated.as_deref(), Some("2026-10-12"), "{q}");
+    }
+    // No date: the three journals tie, newest first.
+    assert_eq!(
+        w.search("stand", None, 10)[0].updated.as_deref(),
+        Some("2026-10-19")
+    );
+}
+
+#[test]
+fn a_date_without_a_year_hits_every_year_newer_first() {
+    let note = |u: &str| format!("---\ntitle: N{u}\nupdated: {u}\n---\n\nstand\n");
+    let (a, b) = (note("2025-10-12"), note("2026-10-12"));
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &a),
+        (".agents/memory/b.md", &b),
+        (".agents/memory/c.md", &note("2026-10-13")),
+    ]);
+    let hits = w.search("12 жовтня", None, 10);
+    let ups: Vec<_> = hits.iter().map(|h| h.updated.clone().unwrap()).collect();
+    assert_eq!(ups, ["2026-10-12", "2025-10-12"]);
+    let hits = w.search("12 жовтня 2025", None, 10);
+    assert_eq!(hits[0].updated.as_deref(), Some("2025-10-12"));
+}
+
+#[test]
+fn a_project_page_with_a_date_in_its_name_is_not_date_matched() {
+    let (_d, w) = memory_fixture(&[(
+        "docs/2026-10-12-spec.md",
+        "---\ntitle: Spec\nupdated: 2026-10-12\n---\n\nplain\n",
+    )]);
+    assert!(w.search("12 жовтня", None, 10).is_empty());
+}

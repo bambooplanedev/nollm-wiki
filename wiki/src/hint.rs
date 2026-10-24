@@ -68,7 +68,8 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
         .into_iter()
         .find(|h| {
             h.superseded_by.is_none()
-                && (wiki.names_page(&h.id, text, HINT_MEMORY_LONG)
+                && (wiki.dated_on(&h.id, text)
+                    || wiki.names_page(&h.id, text, HINT_MEMORY_LONG)
                     || (h.score / MEMORY_BOOST >= HINT_MEMORY_RATIO * best
                         && wiki.names_page(&h.id, text, HINT_MEMORY_SHORT)))
         });

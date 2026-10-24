@@ -497,7 +497,13 @@ page. When a prompt names a note in its title, an alias or its summary,
 `wiki hint` adds one `memory: <path> — <summary>` line to its code lines;
 the line needs a prompt word of six or more characters in that match, or a
 word of four or five characters while the note scores at least twice the best
-code page (before the memory boost).
+code page (before the memory boost), or a date in the prompt that is the
+note's `updated` day.
+
+A date in a query finds the memory notes dated that day: `12 жовтня`,
+`October 12`, `12.10`, `2026-10-12` (Ukrainian, Russian and English month
+names; `DD.MM` needs a two-digit month; without a year every year matches).
+Project pages are never matched by date.
 
 A note can retire an older one with `supersedes:` in its front matter (a list
 of titles, aliases or ids, in `aliases:` syntax). The older note then gets no

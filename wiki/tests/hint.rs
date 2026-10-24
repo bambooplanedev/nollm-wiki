@@ -298,3 +298,32 @@ fn hint_memory_line_keeps_a_long_word_the_code_outscores() {
     assert!(out.contains("cache_keyring"), "{out}");
     assert!(memory_line(&out).is_some(), "{out}");
 }
+
+#[test]
+fn hint_shows_the_journal_of_a_date_in_the_prompt() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agents/memory/journal")).unwrap();
+    fs::write(tmp.path().join("src/lib.rs"), "pub fn stand() {}\n").unwrap();
+    for day in ["05", "12"] {
+        fs::write(
+            tmp.path()
+                .join(format!(".agents/memory/journal/2026-10-{day}.md")),
+            format!("---\ntitle: Journal {day}\n---\n\nstand run\n"),
+        )
+        .unwrap();
+    }
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile"])
+        .arg(tmp.path())
+        .arg(tmp.path().join(".wiki"))
+        .assert()
+        .success();
+    let out = hint(
+        &tmp.path().join(".wiki"),
+        "Що сталося зі стендом 12 жовтня?",
+    );
+    assert!(memory_line(&out).unwrap().contains("2026-10-12"), "{out}");
+    assert!(memory_line(&hint(&tmp.path().join(".wiki"), "Що сталося зі стендом?")).is_none());
+}

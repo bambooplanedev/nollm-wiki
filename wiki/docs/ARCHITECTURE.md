@@ -562,6 +562,11 @@ matching:
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
+- A date written in the query (`query_dates` on the raw text: ISO, `D.MM[.YYYY]`,
+  `<day> <month name>`, `<month name> <day>`) acts as one more token: a memory
+  note whose `updated` is that day (any year when none is given) scores
+  `W_TITLE` for it, with its own `df`/IDF; the words of the date still match
+  as usual. `wiki hint` lets such a hit through its gate (`dated_on`).
 - Hits sort descending by score (`total_cmp`; a memory note's score is
   multiplied by `MEMORY_BOOST`, ×4), then memory notes before project pages,
   then among memory notes newest `updated` first, then descending by PageRank,
