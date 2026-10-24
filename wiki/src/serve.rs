@@ -451,16 +451,19 @@ pub fn search_json(hits: Vec<Hit>) -> String {
                     })
                 })
                 .collect();
-            serde_json::json!({
+            let mut hit = serde_json::json!({
                 "id": h.id,
                 "title": h.title,
                 "summary": h.summary,
-                "updated": h.updated,
                 "score": h.score,
                 "snippet": h.snippet,
                 "path": h.path,
                 "symbols": symbols,
-            })
+            });
+            if let Some(u) = h.updated {
+                hit["updated"] = u.into();
+            }
+            hit
         })
         .collect();
     serde_json::Value::Array(hits).to_string()

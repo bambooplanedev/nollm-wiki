@@ -1239,5 +1239,5 @@ fn search_lines_shows_date_after_path() {
     ]))
     .unwrap();
     assert_eq!(j[0]["updated"], "2026-10-23");
-    assert!(j[1]["updated"].is_null());
+    assert!(j[1].get("updated").is_none());
 }
