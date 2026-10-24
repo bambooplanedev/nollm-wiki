@@ -546,6 +546,7 @@ pub fn run(
                 emit_json: dir.join("graph.json").exists(),
                 jobs,
                 project: None,
+                memory: None,
             };
             WikiState::live(Live::start(source, dir, opts)?)
         }

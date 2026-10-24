@@ -20,6 +20,11 @@ pub fn data_dir_for(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<Pa
     }
 }
 
+/// `p` as an absolute display path with `/` separators on every OS.
+pub fn display_path(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
 pub fn data_dir() -> Option<PathBuf> {
     data_dir_for(std::env::consts::OS, &|k| std::env::var(k).ok())
 }
@@ -69,6 +74,15 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         move |k| m.get(k).cloned()
+    }
+
+    #[test]
+    fn display_path_uses_forward_slashes() {
+        assert_eq!(
+            display_path(Path::new(r"C:\Users\a\m\n.md")),
+            "C:/Users/a/m/n.md"
+        );
+        assert_eq!(display_path(Path::new("/h/m/n.md")), "/h/m/n.md");
     }
 
     #[test]

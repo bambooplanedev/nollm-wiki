@@ -39,6 +39,10 @@ enum Command {
         /// (default: the input directory's basename).
         #[arg(long)]
         project: Option<String>,
+        /// Also compile an agent memory folder as flagged memory pages:
+        /// `local` for this repo's per-user folder, or a directory.
+        #[arg(long, value_name = "local|DIR")]
+        memory: Option<String>,
     },
     Neighbors {
         id: String,
@@ -169,13 +173,20 @@ fn main() -> Result<()> {
             emit_json,
             watch,
             project,
+            memory,
         } => {
+            let memory = match memory.as_deref() {
+                None => None,
+                Some("local") => wiki::memory::local_dir(&input),
+                Some(dir) => Some(std::path::absolute(dir).context("resolve --memory")?),
+            };
             let opts = CompileOptions {
                 incremental,
                 respect_ignore: !no_ignore,
                 emit_json,
                 jobs: cli.jobs,
                 project,
+                memory,
             };
             if watch {
                 wiki::watch::watch(&input, &output, &opts).context("watch failed")?;

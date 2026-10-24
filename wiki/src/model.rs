@@ -73,6 +73,8 @@ pub struct Entity {
     pub created: String,
     /// `YYYY-MM-DD` of the last change, or empty when the source gives none.
     pub updated: String,
+    /// From an agent memory folder. Reaches `index.json` only, never the page.
+    pub memory: bool,
     pub body: String,
     pub source_path: String,
     pub kind: SourceKind,

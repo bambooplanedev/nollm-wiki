@@ -546,3 +546,90 @@ fn cli_page_prints_the_same_text_as_page_text() {
         .failure()
         .stderr(contains("unknown page"));
 }
+
+#[test]
+fn compile_memory_flag_takes_a_dir_or_local() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let ext = dir.path().join("ext");
+    let home = dir.path().join("home");
+    let xdg = dir.path().join("xdg");
+    let lad = dir.path().join("lad");
+    fs::create_dir_all(&input).unwrap();
+    fs::create_dir_all(&ext).unwrap();
+    fs::write(input.join("doc.md"), "# Doc\n\nbody\n").unwrap();
+    fs::write(ext.join("n.md"), "# Ext Note\n\nbody\n").unwrap();
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&input)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .status()
+            .is_ok_and(|s| s.success());
+        assert!(ok, "git {args:?}");
+    };
+    let have_git = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok();
+
+    let wiki = |out: &std::path::Path, memory: &str| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .env("HOME", &home)
+            .env("XDG_DATA_HOME", &xdg)
+            .env("LOCALAPPDATA", &lad)
+            .args([
+                "compile",
+                input.to_str().unwrap(),
+                out.to_str().unwrap(),
+                "--memory",
+                memory,
+            ])
+            .assert()
+            .success();
+    };
+    let titles = |out: &std::path::Path| -> Vec<String> {
+        let v: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+        v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["title"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let out1 = dir.path().join("out1");
+    wiki(&out1, ext.to_str().unwrap());
+    assert!(titles(&out1).contains(&"Ext Note".to_string()));
+
+    if !have_git {
+        return;
+    }
+    git(&["init", "-q"]);
+    git(&["commit", "-q", "--allow-empty", "-m", "one"]);
+    let env = |k: &str| match k {
+        "HOME" => Some(home.to_string_lossy().to_string()),
+        "XDG_DATA_HOME" => Some(xdg.to_string_lossy().to_string()),
+        "LOCALAPPDATA" => Some(lad.to_string_lossy().to_string()),
+        _ => None,
+    };
+    let key = wiki::memory::repo_key(&input).unwrap();
+    let local = wiki::memory::data_dir_for(std::env::consts::OS, &env)
+        .unwrap()
+        .join("wiki/memory")
+        .join(key);
+
+    // An absent local folder is no memory, not an error.
+    let out2 = dir.path().join("out2");
+    wiki(&out2, "local");
+    assert_eq!(titles(&out2), vec!["Doc".to_string()]);
+
+    fs::create_dir_all(&local).unwrap();
+    fs::write(local.join("l.md"), "# Local Note\n\nbody\n").unwrap();
+    let out3 = dir.path().join("out3");
+    wiki(&out3, "local");
+    assert!(titles(&out3).contains(&"Local Note".to_string()));
+}

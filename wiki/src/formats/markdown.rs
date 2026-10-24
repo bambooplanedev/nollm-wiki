@@ -34,6 +34,7 @@ impl Extractor for MarkdownExtractor {
             tags,
             created,
             updated,
+            memory: false,
             body,
             source_path: String::new(),
             kind: SourceKind::Markdown,

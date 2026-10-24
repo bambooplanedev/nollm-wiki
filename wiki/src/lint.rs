@@ -124,6 +124,7 @@ mod tests {
             tags: vec![],
             created: String::new(),
             updated: String::new(),
+            memory: false,
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

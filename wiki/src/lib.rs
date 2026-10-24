@@ -24,7 +24,7 @@ use crate::formats::Registry;
 use crate::model::{Entity, LintReport};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WikiError {
@@ -46,6 +46,8 @@ pub struct CompileOptions {
     pub emit_json: bool,
     pub jobs: Option<usize>,
     pub project: Option<String>,
+    /// An extra agent memory folder (absolute), compiled as flagged pages.
+    pub memory: Option<std::path::PathBuf>,
 }
 
 impl Default for CompileOptions {
@@ -56,6 +58,7 @@ impl Default for CompileOptions {
             emit_json: false,
             jobs: None,
             project: None,
+            memory: None,
         }
     }
 }
@@ -152,20 +155,79 @@ fn compile_inner(
     // `--watch` recompile loop).
     let registry = Registry::with_defaults();
     let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?;
+
+    // Memory folders: the repo's `.agents/memory` and the optional extra
+    // folder. Both are walked with every ignore rule off (they are usually
+    // git-excluded on purpose); markdown and text only. The main walk may
+    // reach the in-tree one (`--no-ignore`), so its files are dropped there
+    // and come back only from the memory walk, flagged. One folder given
+    // twice is walked once.
+    let in_tree = input.join(memory::REPO_DIR);
+    let mut roots: Vec<(PathBuf, bool)> = Vec::new();
+    if in_tree.is_dir() {
+        roots.push((in_tree.clone(), true));
+    }
+    if let Some(extra) = opts.memory.as_ref().filter(|d| d.is_dir()) {
+        let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        if !roots.iter().any(|(r, _)| same(r, extra)) {
+            roots.push((extra.clone(), false));
+        }
+    }
+    let is_note = |p: &str| {
+        Path::new(p)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["md", "markdown", "txt"].contains(&e.to_ascii_lowercase().as_str()))
+    };
     let files: Vec<_> = walked
         .files
         .into_iter()
         .filter(|sf| !is_under(&sf.abs_path, output))
+        .filter(|sf| !roots.iter().any(|(r, _)| is_under(&sf.abs_path, r)))
         .collect();
+    let mut dirs: Vec<PathBuf> = walked
+        .dirs
+        .into_iter()
+        .filter(|d| !is_under(d, output))
+        .collect();
+    let mut memory_files = Vec::new();
+    for (root, in_repo) in &roots {
+        let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p))?;
+        dirs.extend(w.dirs);
+        let abs_root = std::path::absolute(root)?;
+        for mut sf in w.files {
+            sf.rel_path = if *in_repo {
+                format!("{}/{}", memory::REPO_DIR, sf.rel_path)
+            } else {
+                memory::display_path(&abs_root.join(&sf.rel_path))
+            };
+            memory_files.push(sf);
+        }
+    }
     let watch_set = watch::WatchSet::new(
         input,
-        files.iter().map(|sf| sf.abs_path.clone()),
-        walked.dirs.into_iter().filter(|d| !is_under(d, output)),
+        files
+            .iter()
+            .chain(&memory_files)
+            .map(|sf| sf.abs_path.clone()),
+        dirs,
     );
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
         .collect();
+    let notes: Vec<Entity> = memory_files
+        .par_iter()
+        .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
+        .map(|mut e| {
+            e.memory = true;
+            e
+        })
+        .collect();
+    extracted.extend(notes);
 
     // 1b. Qualify names that would otherwise share a slug. An extractor names
     // a page from its own file alone and cannot see the rest of the tree, so
@@ -790,6 +852,7 @@ mod tests {
             tags: vec![],
             created: String::new(),
             updated: String::new(),
+            memory: false,
             body: String::new(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

@@ -16,6 +16,8 @@ pub struct ManifestEntry {
     pub summary: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub memory: bool,
     pub degree_in: usize,
     pub degree_out: usize,
     pub pagerank: f64,
@@ -79,6 +81,7 @@ pub fn build_manifest(
                 page: format!("{id}.md"),
                 summary: e.summary.clone(),
                 updated: Some(e.updated.clone()).filter(|u| !u.is_empty()),
+                memory: e.memory,
                 degree_in: inc.len(),
                 degree_out: out.len(),
                 pagerank: *graph.pagerank.get(id).unwrap_or(&0.0),
@@ -212,6 +215,7 @@ mod tests {
             tags: vec![],
             created: String::new(),
             updated: String::new(),
+            memory: false,
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,
@@ -381,5 +385,16 @@ mod tests {
             serde_json::from_str(&render_index_json(&build_manifest("p", "", &ents, &g))).unwrap();
         assert_eq!(v["entries"][0]["updated"], "2026-10-23");
         assert!(v["entries"][1].get("updated").is_none());
+    }
+
+    #[test]
+    fn index_entry_has_memory_only_when_flagged() {
+        let (mut ents, _) = setup();
+        ents.get_mut("alpha").unwrap().memory = true;
+        let g = build_graph(&ents);
+        let v: serde_json::Value =
+            serde_json::from_str(&render_index_json(&build_manifest("p", "", &ents, &g))).unwrap();
+        assert_eq!(v["entries"][0]["memory"], true);
+        assert!(v["entries"][1].get("memory").is_none());
     }
 }
