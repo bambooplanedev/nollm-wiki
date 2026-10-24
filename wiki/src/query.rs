@@ -503,7 +503,8 @@ impl Wiki {
 
     /// Whether any query token of `q` (stemmed, as `search` reads it) hits
     /// the title, an alias or the summary of page `id` by `field_hit`'s
-    /// prefix rule. The body is not looked at: a hint gates on this, because
+    /// prefix rule; tokens under 4 characters are skipped (`в`, `що`, `the`
+    /// hit nearly every note). The body is not looked at: a hint gates on this, because
     /// a Ukrainian prompt matches nearly every Ukrainian note body.
     pub(crate) fn names_page(&self, id: &str, q: &str) -> bool {
         let Some(e) = self.entries.get(id) else {
@@ -517,6 +518,7 @@ impl Wiki {
         Self::query_tokens(q)
             .0
             .iter()
+            .filter(|t| t.chars().count() >= 4)
             .any(|t| fields.iter().any(|w| Self::field_hit(w, t)))
     }
 

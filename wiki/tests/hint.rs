@@ -204,3 +204,24 @@ fn hint_code_lines_are_the_same_with_and_without_memory() {
         code(hint(&without.path().join(".wiki"), prompt))
     );
 }
+
+#[test]
+fn hint_memory_gate_ignores_short_words() {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join(".agents/memory")).unwrap();
+    fs::write(
+        tmp.path().join(".agents/memory/n.md"),
+        "---\ntitle: Що робити в релізі\n---\n\nРелізний чекліст.\n",
+    )
+    .unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile"])
+        .arg(tmp.path())
+        .arg(tmp.path().join(".wiki"))
+        .assert()
+        .success();
+    let dir = tmp.path().join(".wiki");
+    assert_eq!(hint(&dir, "що в"), "");
+    assert!(hint(&dir, "що в релізі").contains("memory: "));
+}
