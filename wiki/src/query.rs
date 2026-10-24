@@ -1045,7 +1045,7 @@ impl Wiki {
     }
 
     /// Between the blocks of a context pack.
-    const SEPARATOR: &str = "\n\n---\n\n";
+    pub(crate) const SEPARATOR: &str = "\n\n---\n\n";
 
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {

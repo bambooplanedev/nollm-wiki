@@ -333,7 +333,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Check the wiki for broken links and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
+        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
         let (_, stale) = self.state.snapshot().await;
@@ -344,6 +344,7 @@ impl WikiServer {
             "total_pages": r.total_pages,
             "broken_links": r.broken_links,
             "orphans": r.orphans,
+            "large": r.large,
         });
         Ok(with_stale(
             CallToolResult::success(vec![ContentBlock::text(report.to_string())]),

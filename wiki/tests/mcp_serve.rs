@@ -191,6 +191,7 @@ fn serve_tools_flag_picks_the_tools() {
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
+    assert_eq!(report["large"], json!([]));
 
     // A tool left out is not callable.
     send(

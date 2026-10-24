@@ -261,6 +261,8 @@ pub struct LintReport {
     pub total_pages: usize,
     pub broken_links: Vec<(String, String)>,
     pub orphans: Vec<String>,
+    /// Pages (id, tokens) too big for a default `neighbors` pack, sorted by id.
+    pub large: Vec<(String, usize)>,
 }
 
 /// Capitalize each whitespace-separated word and lowercase the rest of it.

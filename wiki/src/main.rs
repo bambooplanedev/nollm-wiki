@@ -188,9 +188,10 @@ fn main() -> Result<()> {
                     output.display()
                 );
                 println!(
-                    "Lint: {} broken links, {} orphans",
+                    "Lint: {} broken links, {} orphans, {} large",
                     r.lint.broken_links.len(),
-                    r.lint.orphans.len()
+                    r.lint.orphans.len(),
+                    r.lint.large.len()
                 );
             }
         }
@@ -289,10 +290,11 @@ fn main() -> Result<()> {
             let pages = wiki::lint::load_compiled_pages(&dir).context("read output dir")?;
             let r = wiki::lint::lint(&pages);
             println!(
-                "Linted {} pages: {} broken links, {} orphans",
+                "Linted {} pages: {} broken links, {} orphans, {} large",
                 r.total_pages,
                 r.broken_links.len(),
-                r.orphans.len()
+                r.orphans.len(),
+                r.large.len()
             );
             // Counts alone are not actionable: print what to go fix. The MCP
             // `lint` tool already returns both lists.
@@ -304,6 +306,9 @@ fn main() -> Result<()> {
             }
             for id in &r.orphans {
                 println!("  orphan: {id}");
+            }
+            for (id, tokens) in &r.large {
+                println!("  large: {id} ({tokens} tokens)");
             }
             // Broken links fail the process so `lint` can gate a build (the
             // self-host script does). Orphans are advice, not a defect: a

@@ -1,6 +1,7 @@
 //! Wiki health checks (`wiki lint`, MCP `lint` tool): broken wikilinks and orphan pages over a compiled output directory.
 
 use crate::model::{slugify, LintReport};
+use crate::query::Wiki;
 use crate::rewrite::{mask_code, parse_sections};
 use regex::Regex;
 use std::borrow::Cow;
@@ -53,9 +54,17 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
     let known: std::collections::BTreeSet<&String> = pages.keys().collect();
     let mut incoming: BTreeMap<String, usize> = pages.keys().map(|k| (k.clone(), 0)).collect();
     let mut broken_links = Vec::new();
+    let mut large = Vec::new();
 
     for (id, text) in pages {
         let sections = parse_sections(text);
+        // A pack separator is charged to every block, so a page over the
+        // budget with it is degraded to a summary; code pages are exempt
+        // (their outline is the intended view).
+        let tokens = (text.chars().count() + Wiki::SEPARATOR.chars().count()) / 4;
+        if !is_code_page(&sections) && tokens > crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS {
+            large.push((id.clone(), tokens));
+        }
         // Scan a code mask, not the raw page: a `[[slug|Name]]` written as a
         // syntax example in a fenced block or inline code is not a link. A code
         // page goes further: its `## Body` is verbatim source, where a
@@ -95,6 +104,7 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         total_pages: pages.len(),
         broken_links,
         orphans,
+        large,
     }
 }
 
@@ -246,5 +256,35 @@ mod tests {
         let pages = load_compiled_pages(tmp.path()).unwrap();
         assert_eq!(pages.len(), 1);
         assert_eq!(pages["alpha"], "# Alpha");
+    }
+
+    /// A page whose `(chars + separator) / 4` tokens equal `tokens`.
+    fn page_of_tokens(kind: &str, tokens: usize) -> String {
+        let head = format!("# T\n\n## Metadata\n- kind: {kind}\n\n## Body\n");
+        let chars = tokens * 4 - Wiki::SEPARATOR.chars().count();
+        head.clone() + &"x".repeat(chars - head.chars().count())
+    }
+
+    fn one(text: String) -> BTreeMap<String, String> {
+        BTreeMap::from([("t".to_string(), text)])
+    }
+
+    #[test]
+    fn large_reports_a_page_over_the_default_pack_budget() {
+        let over = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
+        let r = lint(&one(page_of_tokens("markdown", over)));
+        assert_eq!(r.large, vec![("t".to_string(), over)]);
+        let at = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS;
+        assert!(lint(&one(page_of_tokens("markdown", at))).large.is_empty());
+    }
+
+    #[test]
+    fn large_skips_code_pages_and_reports_text_pages() {
+        let over = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
+        assert!(lint(&one(page_of_tokens("code:rust", over)))
+            .large
+            .is_empty());
+        let r = lint(&one(page_of_tokens("text", over)));
+        assert_eq!(r.large, vec![("t".to_string(), over)]);
     }
 }

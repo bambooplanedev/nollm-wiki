@@ -132,7 +132,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `path:start-end` of each function a function calls, sorted; omitted when
    none).
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
-   broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
+   broken `[[links]]`, orphaned pages and non-code pages too large for a default
+   `neighbors` pack (`large`: id and tokens); no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
    inline code span is never reported, and a code page's `## Body` (verbatim
    source, per its `## Metadata` kind) is dropped from the scan altogether.
@@ -163,7 +164,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
-| `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
+| `src/lint.rs` | `lint()` — in-memory broken-link, orphan-page and too-large-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (page hits with symbol lines) and `neighbors()` (context-pack) queries, with `resolve_id()` mapping an id, title or path to a page, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
 | `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`; `limit` 5 by default)/`neighbors`/`page` tools, plus `lint` when `--tools` names it (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |

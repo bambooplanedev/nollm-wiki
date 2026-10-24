@@ -42,7 +42,7 @@ Wrote 12 files to demo_raw
 
 $ ./target/release/wiki compile demo_raw demo_wiki --incremental --emit-json
 Compiled 12 pages (12 written) -> demo_wiki
-Lint: 0 broken links, 1 orphans
+Lint: 0 broken links, 1 orphans, 0 large
 
 $ ./target/release/wiki search gradient --dir demo_wiki
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
@@ -91,7 +91,7 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 
 
 $ ./target/release/wiki lint --dir demo_wiki
-Linted 12 pages: 0 broken links, 1 orphans
+Linted 12 pages: 0 broken links, 1 orphans, 0 large
   orphan: embedding_layer
 ```
 
@@ -277,10 +277,12 @@ with `… truncated at ~B of ~N tokens`.
 wiki lint [OPTIONS]
 ```
 
-- `--dir <out>` (`out`) — the compiled wiki directory to check for broken links and orphan pages.
+- `--dir <out>` (`out`) — the compiled wiki directory to check for broken links, orphan pages and pages too large for a default `neighbors` pack.
 
-Prints the counts, then one `  broken: <page> -> "<link>"` or `  orphan: <id>`
-line per offender. `[[links]]` inside fenced blocks or inline code are not
+Prints the counts, then one `  broken: <page> -> "<link>"`, `  orphan: <id>` or
+`  large: <id> (<n> tokens)` line per offender. A page is large when it is over
+4000 tokens with the pack separator, so `neighbors` would degrade it to a
+summary; code pages are not checked. `[[links]]` inside fenced blocks or inline code are not
 counted, and the `## Body` of a code page is skipped entirely: it is verbatim
 source, where a wikilink is a string literal or a comment, not a link. Exits
 1 when any broken link is found, so `lint` can gate a build; orphans alone
@@ -492,7 +494,7 @@ tool costs schema tokens on every request.
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context-pack text, or with `symbol` the functions it calls |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
-| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans}` |
+| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
 `wiki://index` (`index.json`) and `wiki://llms.txt`.
