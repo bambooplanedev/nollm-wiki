@@ -10,6 +10,7 @@ pub mod hint;
 pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
+pub mod memory;
 pub mod model;
 pub mod outline;
 pub mod query;
