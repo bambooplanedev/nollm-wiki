@@ -576,16 +576,72 @@ fn setup_local_creates_the_empty_folder() {
     assert!(f.local_memory().is_dir());
 }
 
+fn no_memory_section(f: &Fixture) {
+    let text = read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md"));
+    assert!(
+        !text.contains("Memory") && !text.contains("<memory-dir>"),
+        "{text}"
+    );
+    assert!(!f.root().join(".agents/memory").exists());
+}
+
 #[test]
 fn setup_local_without_a_git_repo_says_so_and_continues() {
     let f = fixture(true, true);
+    real_git(&f);
     fs::remove_dir_all(f.root().join(".git")).unwrap();
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
-    let o = out(&a);
-    assert!(o.contains("local memory needs a git repo"), "{o}");
-    assert!(f
-        .root()
-        .join(".agents/skills/wiki-navigation/SKILL.md")
-        .exists());
-    assert!(!f.home().exists());
+    assert!(
+        out(&a).contains("no local memory: not a git repo"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_without_git_on_path_says_so() {
+    let f = fixture(true, true);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(
+        out(&a).contains("no local memory: git is not on PATH"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_without_a_data_dir_says_so() {
+    let f = committed();
+    let a = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["setup", "--agent", "pi", "--scope", "local"])
+        .current_dir(f.root())
+        .env("PATH", f.bin())
+        .env_remove("HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("LOCALAPPDATA")
+        .assert()
+        .success();
+    assert!(
+        out(&a).contains("no local memory: no data dir"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_twice_reports_everything_already_there() {
+    let f = committed();
+    let args = ["--agent", "claude", "--scope", "local"];
+    f.setup(&args).success();
+    let o = out(&f.setup(&args).success());
+    assert!(o.contains("already set up: memory folder"), "{o}");
+    assert!(
+        o.contains("already set up: .claude/skills/wiki-navigation/SKILL.md"),
+        "{o}"
+    );
+    assert!(!o.contains("skipped"), "{o}");
 }

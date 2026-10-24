@@ -264,18 +264,29 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
 
     let local_memory = memory::local_dir(root);
-    // The folder the skill names; a local scope without one (no git) falls back to the repo folder.
-    let memory_dir = match (&local_memory, local) {
-        (Some(d), true) => memory::display_path(d),
-        _ => memory::REPO_DIR.to_string(),
+    // The skill's Memory section names the scope's folder; local scope without a local folder
+    // gets no section (naming the committable repo folder would defeat the scope).
+    let skill_text = match (&local_memory, local) {
+        (Some(d), true) => SKILL_TEMPLATE.replace("<memory-dir>", &memory::display_path(d)),
+        (None, true) => SKILL_TEMPLATE
+            .split_once("\n# Memory\n")
+            .map_or(SKILL_TEMPLATE, |(head, _)| head)
+            .to_string(),
+        _ => SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR),
     };
-    let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", &memory_dir);
     let skill_text = skill_text.as_str();
     if !opts.remove {
         let folder = match (&local_memory, local) {
             (Some(d), true) => Some(d.clone()),
             (None, true) => {
-                r.line("local memory needs a git repo with git on PATH; no memory folder created")?;
+                let why = if find_on_path("git").is_none() {
+                    "git is not on PATH"
+                } else if memory::data_dir().is_none() {
+                    "no data dir (set HOME, XDG_DATA_HOME or LOCALAPPDATA)"
+                } else {
+                    "not a git repo"
+                };
+                r.line(&format!("no local memory: {why}; no memory folder created"))?;
                 None
             }
             _ => Some(root.join(memory::REPO_DIR)),

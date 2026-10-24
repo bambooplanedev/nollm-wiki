@@ -493,7 +493,8 @@ deletes notes.
 Memory pages rank above code (their score is multiplied by 4), pass the
 `code` and `docs` filters of `search`, and are found by the same tools as any
 page. When a prompt names a note in its title, an alias or its summary,
-`wiki hint` adds one `memory: <path> — <summary>` line to its code lines.
+`wiki hint` adds one `memory: <path> — <summary>` line to its code lines;
+only prompt words of four or more characters count toward that match.
 
 The skill carries these rules; copy them into the agent's instructions file
 if it has no skill:
