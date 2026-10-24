@@ -1023,9 +1023,13 @@ impl Wiki {
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
-                .then_with(|| match (a.memory, b.memory) {
-                    (true, true) => b.updated.cmp(&a.updated),
-                    _ => std::cmp::Ordering::Equal,
+                .then_with(|| b.memory.cmp(&a.memory))
+                .then_with(|| {
+                    if a.memory {
+                        b.updated.cmp(&a.updated)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
                 })
                 .then_with(|| b_pr.total_cmp(a_pr))
                 .then_with(|| a.id.cmp(&b.id))

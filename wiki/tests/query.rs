@@ -1299,18 +1299,35 @@ fn memory_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
 }
 
 #[test]
-fn memory_note_outranks_code_with_a_higher_raw_score() {
-    let (_d, w) = memory_fixture(&[
-        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
-        (
-            ".agents/memory/note.md",
-            "---\ntitle: Note\n---\n\nWe once saw a zebra here and filler words follow.\n",
-        ),
-    ]);
+fn memory_boost_lifts_a_note_above_code_with_a_higher_raw_score() {
+    let code = "//! zebra\npub fn zebra() { /* zebra zebra */ }\n";
+    let body = "---\ntitle: Note\n---\n\nOnce a zebra, then filler words follow.\n";
+    let (_d, plain) = memory_fixture(&[("a.rs", code), ("note.md", body)]);
+    let raw = plain.search("zebra", None, 10);
+    assert_eq!(raw[0].id, "a");
+    let raw_note = raw.iter().find(|h| h.id == "note").unwrap().score;
+    let (_d, w) = memory_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
     let hits = w.search("zebra", None, 10);
-    assert_eq!(hits.len(), 2);
-    assert!(hits[0].memory && !hits[1].memory);
-    assert!(hits[0].score > hits[1].score);
+    assert_eq!(hits[0].id, "note");
+    assert!((hits[0].score - 4.0 * raw_note).abs() < 1e-9);
+}
+
+#[test]
+fn equal_scores_order_memory_then_date_then_pagerank_without_a_cycle() {
+    // Same words, so equal scores; pagerank differs by link count.
+    let note = |t: &str, u: &str| format!("---\ntitle: {t}\nupdated: {u}\n---\n\nzebra\n");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &note("Aaa", "2026-01-01")),
+        (".agents/memory/b.md", &note("Bbb", "2026-03-01")),
+        ("c.md", "---\ntitle: Ccc\n---\n\nzebra\n"),
+        ("d.md", "[[Ccc]] [[Ccc]] [[Aaa]]\n"),
+    ]);
+    let ids: Vec<_> = w
+        .search("zebra", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(&ids[..3], ["bbb", "aaa", "ccc"]);
 }
 
 #[test]
