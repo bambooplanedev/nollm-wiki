@@ -22,6 +22,8 @@ pub(crate) struct Entry {
     #[serde(default)]
     pub(crate) path: String,
     pub(crate) summary: Option<String>,
+    #[serde(default)]
+    pub(crate) updated: Option<String>,
     pub(crate) pagerank: f64,
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
@@ -77,6 +79,8 @@ pub struct Hit {
     /// The page's source path, relative to the compile input.
     pub path: String,
     pub summary: Option<String>,
+    /// `YYYY-MM-DD` of the page's last change, when known.
+    pub updated: Option<String>,
     pub score: f64,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, defined name, summary, or a
@@ -863,6 +867,7 @@ impl Wiki {
                     title: e.title.clone(),
                     path: e.path.clone(),
                     summary: e.summary.clone(),
+                    updated: e.updated.clone(),
                     score: 0.0,
                     snippet: None,
                     symbols: Vec::new(),
@@ -921,6 +926,7 @@ impl Wiki {
                     title: c.entry.title.clone(),
                     path: c.entry.path.clone(),
                     summary: c.entry.summary.clone(),
+                    updated: c.entry.updated.clone(),
                     score,
                     snippet: c.snippet,
                     symbols: Vec::new(),

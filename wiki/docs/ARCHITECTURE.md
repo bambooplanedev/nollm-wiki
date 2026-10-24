@@ -600,7 +600,7 @@ matching:
   (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
   share it and its error text.
 - **Output.** `serve::search_lines` renders the default line format (page
-  line `id  path  title — summary`, indented symbol lines
+  line `id  path  [date  ]title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page
   without symbols; `no matches` when nothing hit); `serve::search_json`
   renders the JSON form. The MCP `format` parameter and the CLI

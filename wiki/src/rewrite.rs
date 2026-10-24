@@ -279,6 +279,9 @@ pub fn render_page(
             &entity.created
         }
     ));
+    if !entity.updated.is_empty() {
+        out.push_str(&format!("- updated: {}\n", entity.updated));
+    }
     if !entity.aliases.is_empty() {
         out.push_str(&format!("- aliases: {}\n", entity.aliases.join(", ")));
     }
@@ -378,6 +381,7 @@ pub(crate) fn render_fingerprint(
     combine(&[
         entity.name.as_bytes(),
         entity.created.as_bytes(),
+        entity.updated.as_bytes(),
         entity.kind.label().as_bytes(),
         entity.source_path.as_bytes(),
         entity.body.as_bytes(),
@@ -486,6 +490,7 @@ mod tests {
             aliases: vec![],
             tags: vec![],
             created: "2026-01-01".into(),
+            updated: String::new(),
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,
@@ -687,5 +692,17 @@ mod tests {
         assert_eq!(prior_page_for(&both, &renamed), Some(orphan));
         // Nothing declares this source: the caller falls back to its own file.
         assert_eq!(prior_page_for(&BTreeSet::new(), &own), None);
+    }
+
+    #[test]
+    fn metadata_shows_updated_when_known() {
+        let mut e = ent("alpha", "Alpha", "x");
+        let render = |e: &Entity| {
+            let ents = map(vec![e.clone()]);
+            render_page(e, &build_graph(&ents).edges["alpha"], &ents, "")
+        };
+        assert!(!render(&e).contains("- updated:"));
+        e.updated = "2026-10-23".into();
+        assert!(render(&e).contains("- created: 2026-01-01\n- updated: 2026-10-23\n"));
     }
 }

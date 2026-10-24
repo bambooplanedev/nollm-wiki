@@ -15,6 +15,7 @@ impl Extractor for MarkdownExtractor {
 
         let mut title = fm_get(&fm, "title");
         let created = fm_get(&fm, "created").unwrap_or_default();
+        let updated = find_date(&fm, rel_path);
         let description = fm_get(&fm, "description");
         let aliases = fm_list(&fm, "aliases");
         let tags = normalize_tags(fm_list(&fm, "tags"));
@@ -32,6 +33,7 @@ impl Extractor for MarkdownExtractor {
             aliases,
             tags,
             created,
+            updated,
             body,
             source_path: String::new(),
             kind: SourceKind::Markdown,
@@ -69,6 +71,64 @@ fn split_frontmatter(text: &str) -> (Vec<String>, &str) {
         fm.push(seg.trim_end_matches(['\n', '\r']).to_string());
     }
     (Vec::new(), text) // unterminated frontmatter → treat whole file as body
+}
+
+const DATE_KEYS: [&str; 3] = ["updated", "modified", "date"];
+
+/// The page's date: the first valid one among the top-level date keys, the same
+/// keys one level down in a top-level `metadata:` block, then the file name's stem.
+fn find_date(fm: &[String], rel_path: &str) -> String {
+    let top = DATE_KEYS
+        .iter()
+        .find_map(|k| fm_get(fm, k).as_deref().and_then(leading_date));
+    let block = || {
+        let lines: Vec<&String> = fm
+            .iter()
+            .skip_while(|l| l.trim_end() != "metadata:")
+            .skip(1)
+            .take_while(|l| l.starts_with([' ', '\t']))
+            .collect();
+        let indent = lines.first()?.len() - lines.first()?.trim_start().len();
+        let own: Vec<String> = lines
+            .iter()
+            .filter(|l| l.len() - l.trim_start().len() == indent)
+            .map(|l| l.trim_start().to_string())
+            .collect();
+        DATE_KEYS
+            .iter()
+            .find_map(|k| fm_get(&own, k).as_deref().and_then(leading_date))
+    };
+    let stem = || {
+        let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+        leading_date(name.rsplit_once('.').map_or(name, |(s, _)| s))
+    };
+    top.or_else(block).or_else(stem).unwrap_or_default()
+}
+
+/// The `YYYY-MM-DD` that starts `s`, when it is a real calendar date not
+/// followed by another digit. A time or zone after it is ignored, not converted.
+fn leading_date(s: &str) -> Option<String> {
+    let date = s.get(..10)?;
+    let bytes = date.as_bytes();
+    let num = |r: std::ops::Range<usize>| -> Option<u32> {
+        bytes[r.clone()]
+            .iter()
+            .all(u8::is_ascii_digit)
+            .then(|| date[r].parse().ok())?
+    };
+    if bytes[4] != b'-' || bytes[7] != b'-' || s.as_bytes().get(10).is_some_and(u8::is_ascii_digit)
+    {
+        return None;
+    }
+    let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let len = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => 28 + u32::from(leap),
+        _ => return None,
+    };
+    (1..=len).contains(&day).then(|| date.to_string())
 }
 
 /// Value of a top-level `key:` line; indented lines belong to some other key.
@@ -309,5 +369,84 @@ mod tests {
             "closing delimiter leaked into body: {:?}",
             e.body
         );
+    }
+
+    fn updated_of(fm: &str) -> String {
+        extract_fm(fm).updated
+    }
+
+    #[test]
+    fn updated_key_is_read() {
+        assert_eq!(updated_of("updated: 2026-10-23"), "2026-10-23");
+    }
+
+    #[test]
+    fn key_order_updated_then_modified_then_date() {
+        let all = "date: 2026-01-01\nmodified: 2026-01-02\nupdated: 2026-01-03";
+        assert_eq!(updated_of(all), "2026-01-03");
+        assert_eq!(
+            updated_of("date: 2026-01-01\nmodified: 2026-01-02"),
+            "2026-01-02"
+        );
+    }
+
+    #[test]
+    fn metadata_block_one_level() {
+        let t = "metadata:\n  type: user\n  modified: 2026-10-24T04:57:37.464Z";
+        assert_eq!(updated_of(t), "2026-10-24");
+        assert_eq!(
+            updated_of("metadata:\n  sub:\n    modified: 2026-01-01"),
+            ""
+        );
+    }
+
+    #[test]
+    fn top_level_beats_metadata() {
+        let t = "updated: 2026-03-03\nmetadata:\n  modified: 2026-04-04";
+        assert_eq!(updated_of(t), "2026-03-03");
+    }
+
+    #[test]
+    fn quoted_date() {
+        assert_eq!(updated_of("updated: \"2026-03-04\""), "2026-03-04");
+    }
+
+    #[test]
+    fn file_name_date() {
+        let at = |path: &str, text: &str| MarkdownExtractor.extract(path, text).updated;
+        assert_eq!(at("digests/2026-05-06.md", "# A\n"), "2026-05-06");
+        assert_eq!(at("2026-05-06-notes.md", "# A\n"), "2026-05-06");
+        let fm = "---\ndate: 2026-07-08\n---\n# A\n";
+        assert_eq!(at("2026-05-06.md", fm), "2026-07-08");
+    }
+
+    #[test]
+    fn date_with_zone_keeps_own_date() {
+        assert_eq!(
+            updated_of("updated: 2026-10-23T23:59:00-05:00"),
+            "2026-10-23"
+        );
+    }
+
+    #[test]
+    fn invalid_dates_dropped() {
+        for bad in [
+            "2026-02-30",
+            "2023-02-29",
+            "2026-13-01",
+            "2026-1-5",
+            "20260101",
+            "2026-10-231",
+            "soon",
+        ] {
+            assert_eq!(updated_of(&format!("updated: {bad}")), "", "{bad}");
+        }
+        assert_eq!(updated_of("updated: 2024-02-29"), "2024-02-29");
+    }
+
+    #[test]
+    fn created_is_untouched() {
+        let e = extract_fm("created: 2026-02-02");
+        assert_eq!((e.created.as_str(), e.updated.as_str()), ("2026-02-02", ""));
     }
 }

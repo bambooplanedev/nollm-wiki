@@ -64,6 +64,7 @@ impl Extractor for TextExtractor {
             aliases,
             tags: Vec::new(),
             created,
+            updated: String::new(),
             body,
             source_path: String::new(), // filled by Registry
             kind: SourceKind::Text,

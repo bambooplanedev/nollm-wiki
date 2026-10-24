@@ -59,6 +59,7 @@ $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --
 
 ## Metadata
 - created: 2026-01-10
+- updated: 2026-01-12
 - aliases: gradient_descent, gradient_descent_notes
 - kind: text
 - source: gradient_descent.txt
@@ -190,7 +191,7 @@ wiki search [OPTIONS] [QUERY]
 - `--format <lines|json>` (`lines`) — output shape, below.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
-The default `lines` output is one line per page, `id  path  title — summary`.
+The default `lines` output is one line per page, `id  path  [date  ]title — summary` (the date is the page's `updated`, shown when known).
 Under a code page, up to 3 indented lines name its matching symbols,
 `  path:start-end  name  signature  — doc` (1-based, inclusive line range;
 `name` is `Owner::name` for methods; `doc` is left out when empty or already

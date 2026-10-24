@@ -71,6 +71,8 @@ pub struct Entity {
     pub aliases: Vec<String>,
     pub tags: Vec<String>,
     pub created: String,
+    /// `YYYY-MM-DD` of the last change, or empty when the source gives none.
+    pub updated: String,
     pub body: String,
     pub source_path: String,
     pub kind: SourceKind,

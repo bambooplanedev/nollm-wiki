@@ -432,7 +432,7 @@ impl ServerHandler for WikiServer {
 }
 
 /// Render search hits as the JSON array `search` returns with
-/// `format: "json"`: `[{id, title, summary, score, snippet, path, symbols}]`.
+/// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()
@@ -455,6 +455,7 @@ pub fn search_json(hits: Vec<Hit>) -> String {
                 "id": h.id,
                 "title": h.title,
                 "summary": h.summary,
+                "updated": h.updated,
                 "score": h.score,
                 "snippet": h.snippet,
                 "path": h.path,
@@ -465,7 +466,7 @@ pub fn search_json(hits: Vec<Hit>) -> String {
     serde_json::Value::Array(hits).to_string()
 }
 
-/// Render search hits as the default line output: `id  path  title — summary`
+/// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or the snippet (four-space indent) when the page has no symbols.
 /// No hits render as one `no matches` line.
@@ -477,7 +478,11 @@ pub fn search_lines(hits: &[Hit]) -> String {
     let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();
     for h in hits {
-        out.push_str(&format!("{}  {}  {}", h.id, h.path, one(&h.title)));
+        out.push_str(&format!("{}  {}  ", h.id, h.path));
+        if let Some(u) = &h.updated {
+            out.push_str(&format!("{u}  "));
+        }
+        out.push_str(&one(&h.title));
         if let Some(s) = &h.summary {
             out.push_str(&format!(" — {}", one(s)));
         }
