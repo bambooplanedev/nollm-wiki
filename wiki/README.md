@@ -558,7 +558,8 @@ make this guarantee hold.
 ## Limitations & roadmap
 
 Deliberate scope cuts, recorded so they read as decisions rather than
-oversights:
+oversights. Measured shortfalls and agent behaviour are listed in
+[`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md).
 
 - **Linking is lexical.** No LLM, embeddings, or semantic matching at
   generation time. A text or markdown page is linked when a name or alias
@@ -571,9 +572,11 @@ oversights:
   link a code page: a one-word module name would otherwise draw an edge
   from every English use of the word. This is the core design trade-off,
   not a bug.
-- **No call graph.** `find_definition` / `callers`-style queries need
-  cross-file name resolution, which is not built. Code extraction is
-  imports + exported signatures only, with Rust signatures owner-qualified
+- **Call chains are resolved by name.** `neighbors --symbol` follows
+  call edges matched by name at compile time, within one language, with
+  no type information and no callers query. Code extraction is
+  imports + exported signatures plus each function's line range,
+  with Rust signatures owner-qualified
   (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`) and Python
   signatures owner-qualified through the full class chain and carrying
   their decorators (`def Article.Inner.deep(self) -> None`,
@@ -598,5 +601,7 @@ oversights:
 
 ## Links
 
+- [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md) — where results fall short
+  and what agents do with the wiki.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — pipeline internals,
   module map, determinism rules, and how to extend the compiler.
