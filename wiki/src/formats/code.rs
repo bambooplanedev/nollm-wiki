@@ -130,13 +130,27 @@ pub(crate) fn plain_doc(
     {
         return None;
     }
-    // Divider lines go, and so does a title framed on its own line.
-    let lines: Vec<&str> = lines
+    // Divider lines (no letters) go, and so does a title framed on its own
+    // line (`--- Risk ---`): one opening and closing with a run of three or
+    // more of the same `-`, `=`, `~`, `#` or `*`. A `===` inside prose stays.
+    let opens_with_run = |l: &str| {
+        l.chars()
+            .next()
+            .is_some_and(|c| "-=~#*".contains(c) && l.starts_with(&c.to_string().repeat(3)))
+    };
+    let framed =
+        |l: &str| opens_with_run(l) && opens_with_run(&l.chars().rev().collect::<String>());
+    let lines: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
+    let divider = lines
         .iter()
-        .map(|l| l.trim())
-        .filter(|l| l.chars().any(char::is_alphabetic) && !l.contains("---") && !l.contains("==="))
+        .any(|l| !l.is_empty() && !l.chars().any(char::is_alphabetic));
+    let lines: Vec<&str> = lines
+        .into_iter()
+        .filter(|l| l.chars().any(char::is_alphabetic) && !framed(l))
         .collect();
+    // A lone line between dividers is a section banner's title.
     if lines.is_empty()
+        || divider && lines.len() == 1
         || lines.iter().all(|l| {
             ["TODO", "FIXME", "XXX", "HACK"]
                 .iter()

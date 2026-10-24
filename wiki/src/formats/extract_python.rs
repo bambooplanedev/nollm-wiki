@@ -152,7 +152,7 @@ pub(crate) fn python_spec() -> LangSpec {
     }
 }
 
-/// A `#` comment above an item is a plain lead; a shebang or an encoding
+/// A `#` (or Sphinx `#:`) comment above an item is a plain lead; a shebang or an encoding
 /// declaration on the first two lines is not. Decorators sit inside the
 /// `decorated_definition` that `sig_start` returns, so nothing else leads.
 fn python_lead(node: Node, text: &str) -> Lead {
@@ -166,7 +166,8 @@ fn python_lead(node: Node, text: &str) -> Lead {
                 && !(node.start_position().row <= 1
                     && (body.contains("coding:") || body.contains("coding="))) =>
         {
-            Lead::Plain(body.trim().to_string())
+            // A Sphinx attribute doc is `#:`.
+            Lead::Plain(body.strip_prefix(':').unwrap_or(body).trim().to_string())
         }
         _ => Lead::Stop,
     }
@@ -932,6 +933,15 @@ mod tests {
         assert_eq!(
             doc_of(src, "W_MIN_DEFAULT_S"),
             (Some("Wait longer than w_min counts as a stall.".into()), 2)
+        );
+    }
+
+    #[test]
+    fn a_sphinx_attribute_comment_drops_its_colon() {
+        let src = "x = 1\n#: Sphinx attribute doc.\nLIMIT = 5\n";
+        assert_eq!(
+            doc_of(src, "LIMIT"),
+            (Some("Sphinx attribute doc.".into()), 2)
         );
     }
 

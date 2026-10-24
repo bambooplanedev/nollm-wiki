@@ -922,11 +922,11 @@ mod tests {
     fn rejected_blocks_give_no_doc_and_keep_the_range() {
         for block in [
             "// Getters",
-            "// ---- Risk ----",
-            "// ======\n// Connection Management\n// ======",
-            "// TODO: EXCEPTION_FREE",
+            "// ---- Get X ----",
+            "// ======\n// Get X\n// ======",
+            "// TODO: make get_x exception free.",
             "// int x = 1;\n// foo();",
-            "// Copyright 2024 X",
+            "// Copyright 2024 Acme Corp. All rights reserved.",
         ] {
             let src = format!("int a;\n\n{block}\nint get_x();\n");
             let line = 4 + block.matches('\n').count();
@@ -934,6 +934,15 @@ mod tests {
         }
         let src = "// Returns the current x of the cursor.\nint get_x();\n";
         assert_eq!(doc_of("x.h", src, "get_x"), (None, 2));
+        // Not a banner: a title line inside a longer block goes, the rest
+        // stays; an empty line of a `/* */` block is no divider.
+        let src = "int a;\n// --- Get X ---\n// Reads x from the cursor.\nint get_x();\n";
+        assert_eq!(
+            doc_of("x.h", src, "get_x"),
+            (Some("Reads x from the cursor.".into()), 2)
+        );
+        let src = "int a;\n/*\n * Reads x.\n */\nint get_x();\n";
+        assert_eq!(doc_of("x.h", src, "get_x"), (Some("Reads x.".into()), 2));
     }
 
     #[test]

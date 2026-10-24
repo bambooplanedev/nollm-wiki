@@ -796,7 +796,8 @@ first, then a Python docstring, then the plain block (`plain_doc`). A plain
 block above a doc comment neither joins its doc nor extends its range. The
 block is no doc, and the range keeps its own start, when it begins on the
 file's first line or names `SPDX-License-Identifier`/`Copyright`, when it
-is only dividers and `---`/`===`-framed titles, all TODO/FIXME/XXX/HACK
+is only dividers and framed titles (`--- Risk ---`) or one title line
+between dividers (a banner), all TODO/FIXME/XXX/HACK
 lines, mostly code (half its lines end in `;`, `{` or `}`), or a group
 label: one line of at most three words, no closing `.`, `!`, `?` or `:`,
 sharing no word with the item's name ("Getters", but "Risk limits" above

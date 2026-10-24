@@ -515,6 +515,12 @@ mod tests {
             doc_of(src, "parse"),
             (Some("Parses the reply body as JSON.".into()), 2)
         );
+        let src =
+            "import x from 'y';\n// Compares with === so NaN never matches.\nfunction eq() {}\n";
+        assert_eq!(
+            doc_of(src, "eq"),
+            (Some("Compares with === so NaN never matches.".into()), 2)
+        );
         let src = "// plain\n/** Real doc. */\nfunction f() {}\n";
         assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 2));
     }
