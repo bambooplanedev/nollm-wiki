@@ -125,6 +125,8 @@ struct SymbolFields {
     method_words: BTreeSet<String>,
     /// Words of the items' docs.
     doc_words: Vec<String>,
+    /// Words of the items' whole docs, scored below `doc_words`.
+    doc_rest_words: Vec<String>,
 }
 
 #[derive(Default)]
@@ -307,6 +309,8 @@ impl Wiki {
     const W_SYMBOL_WORD: f64 = 2.0;
     const W_METHOD_WORD: f64 = 2.0;
     const W_SYMBOL_DOC: f64 = 0.75;
+    // A token the first sentence misses but the rest of the doc has.
+    const W_SYMBOL_DOC_REST: f64 = Self::W_SYMBOL_DOC / 2.0;
     const W_SUMMARY: f64 = 1.5;
     const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
@@ -489,6 +493,10 @@ impl Wiki {
             if let Some(doc) = &item.doc {
                 f.doc_words.extend(Self::field_words(&doc.to_lowercase()));
             }
+            if let Some(text) = &item.doc_text {
+                f.doc_rest_words
+                    .extend(Self::field_words(&text.to_lowercase()));
+            }
         }
         f.words.retain(|w| !f.whole.contains(w));
         f.method_words
@@ -505,6 +513,7 @@ impl Wiki {
     const IW_NAME_WORD: f64 = 2.0;
     const IW_METHOD_WORD: f64 = 2.0;
     const IW_DOC: f64 = 1.0;
+    const IW_DOC_REST: f64 = Self::IW_DOC / 2.0;
     const TEST_ITEM_FACTOR: f64 = 0.5;
     /// Symbol lines per page at most.
     const SYMBOLS_PER_PAGE: usize = 3;
@@ -526,6 +535,11 @@ impl Wiki {
             .as_deref()
             .map(|d| Self::field_words(&d.to_lowercase()))
             .unwrap_or_default();
+        let doc_rest = item
+            .doc_text
+            .as_deref()
+            .map(|d| Self::field_words(&d.to_lowercase()))
+            .unwrap_or_default();
         let score: f64 = tokens
             .iter()
             .zip(idf)
@@ -539,6 +553,8 @@ impl Wiki {
                 };
                 let doc = if !doc.is_empty() && Self::field_hit(&doc, t) {
                     Self::IW_DOC
+                } else if !doc_rest.is_empty() && Self::field_hit(&doc_rest, t) {
+                    Self::IW_DOC_REST
                 } else {
                     0.0
                 };
@@ -716,6 +732,8 @@ impl Wiki {
                 }
                 if Self::field_hit(&f.doc_words, t) {
                     weight += Self::W_SYMBOL_DOC;
+                } else if Self::field_hit(&f.doc_rest_words, t) {
+                    weight += Self::W_SYMBOL_DOC_REST;
                 }
             }
             if summary_words
@@ -1166,6 +1184,8 @@ const _: () = assert!(
         && Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC
+        && Wiki::W_SYMBOL_WORD > Wiki::W_SYMBOL_DOC + Wiki::W_SYMBOL_DOC_REST
+        && Wiki::IW_NAME_WORD > Wiki::IW_DOC + Wiki::IW_DOC_REST
         && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
         && Wiki::IW_WHOLE > Wiki::IW_METHOD_WORD + Wiki::IW_DOC
 );
@@ -1287,10 +1307,33 @@ mod tests {
             start_line: 1,
             end_line: 1,
             doc: doc.map(Into::into),
+            doc_text: None,
             public: false,
             twin: None,
             test,
         }
+    }
+
+    #[test]
+    fn tail_scores_only_words_the_first_sentence_misses() {
+        use CodeItemKind::Fn;
+        let mut a = item(Fn, "alpha", Some("Opens the gate."), false);
+        let b = item(Fn, "beta", None, false);
+        let score = |i: &CodeItem, q: &[&str]| {
+            let t: Vec<String> = q.iter().map(|s| (*s).into()).collect();
+            Wiki::item_score(i, &t, &vec![1.0; t.len()])
+        };
+        let head = score(&a, &["opens", "gate"]);
+        a.doc_text = Some("Opens the gate. Refuses when a position is open.".into());
+        assert!(score(&a, &["refuses", "position"]) > score(&b, &["refuses", "position"]));
+        assert!((score(&a, &["opens", "gate"]) - head).abs() < 1e-12);
+    }
+
+    #[test]
+    fn old_items_json_without_doc_text_loads() {
+        let json = r#"{"kind":"fn","name":"f","signature":"fn f()","start_line":1,"end_line":1,"doc":"X.","public":true}"#;
+        let i: CodeItem = serde_json::from_str(json).unwrap();
+        assert_eq!(i.doc_text, None);
     }
 
     #[test]

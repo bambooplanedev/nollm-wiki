@@ -527,7 +527,9 @@ matching:
   name, also as `owner::name` (`W_SYMBOL` 2.8, in place of `defined` and
   below the title weight), the words of item names (`W_SYMBOL_WORD` 2.0,
   methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
-  (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and module items
+  (`W_SYMBOL_DOC` 0.75); a token the first sentence misses but the rest of the
+  item's doc (`CodeItem.doc_text`, never shown) has scores half that
+  (`W_SYMBOL_DOC_REST`; on item lines `IW_DOC_REST`). Test items (`CodeItem.test`) and module items
   feed none of them, nor the `defined` and method names that only test
   items carry, and a word that is already one of the page's own title
   words or a defined name is skipped; other pages' title words stay. When

@@ -975,6 +975,20 @@ fn item_doc_line(raw: &str) -> Option<String> {
     Some(cut)
 }
 
+/// The most chars of an item's whole doc kept in `items.json`.
+const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
+
+/// An item's whole raw doc on one line, capped at `ITEM_DOC_TEXT_MAX_CHARS`
+/// (the `…` included); `None` when it is just `doc`.
+fn item_doc_text(raw: &str, doc: Option<&str>) -> Option<String> {
+    let mut text = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.chars().count() > ITEM_DOC_TEXT_MAX_CHARS {
+        text = text.chars().take(ITEM_DOC_TEXT_MAX_CHARS - 1).collect();
+        text.push('…');
+    }
+    (!text.is_empty() && doc != Some(text.as_str())).then_some(text)
+}
+
 /// The 0-based row a node's text really ends on. A node that ends with its
 /// line's newline (a Rust `line_comment`) reports the start of the next row.
 fn last_row(node: Node) -> usize {
@@ -1112,7 +1126,7 @@ fn code_item(
         Some(docs.join("\n"))
     };
 
-    let item = CodeItem {
+    let mut item = CodeItem {
         kind,
         name: name_text.to_string(),
         owner,
@@ -1120,10 +1134,14 @@ fn code_item(
         start_line: first.start_position().row + 1,
         end_line: last_row(top) + 1,
         doc: raw_doc.as_deref().and_then(item_doc_line),
+        doc_text: None,
         public,
         twin: None,
         test: false,
     };
+    item.doc_text = raw_doc
+        .as_deref()
+        .and_then(|r| item_doc_text(r, item.doc.as_deref()));
     Some((name.start_byte(), item))
 }
 
@@ -2169,6 +2187,40 @@ mod tests {
         for p in ["src/attest.rs", "src/testing.rs", "contest/a.rs"] {
             assert!(!is_test_path(p), "{p}");
         }
+    }
+
+    fn doc_of(src: &str) -> (Option<String>, Option<String>) {
+        let i = CodeExtractor.extract("src/a.rs", src).items.remove(0);
+        (i.doc, i.doc_text)
+    }
+
+    #[test]
+    fn doc_text_keeps_the_whole_doc() {
+        let (doc, text) = doc_of(
+            "/// Pure decision.\n///\n/// * `creds_present` — owner has a futures key.\npub fn decide() {}\n",
+        );
+        assert_eq!(doc.as_deref(), Some("Pure decision."));
+        let text = text.unwrap();
+        assert!(
+            text.contains("creds_present") && text.contains("futures key"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn doc_text_is_none_for_a_one_sentence_doc() {
+        assert_eq!(doc_of("/// Only this.\nfn f() {}\n").1, None);
+    }
+
+    #[test]
+    fn doc_text_caps_on_a_char_boundary() {
+        let src = format!("/// {}\nfn f() {{}}\n", "é".repeat(500).replace('é', "éé "));
+        let text = doc_of(&src).1.unwrap();
+        assert!(
+            text.chars().count() <= 1000 && text.ends_with('…'),
+            "{}",
+            text.len()
+        );
     }
 
     fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
