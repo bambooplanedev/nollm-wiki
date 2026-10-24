@@ -200,7 +200,7 @@ A page without symbol lines gets its body snippet on a four-space-indented
 line instead, with comment markers (`//`, `///`, `#`, …) dropped. A C++
 declaration that declares several names shows one signature per name, which
 may not appear verbatim in the file. `--format json` prints
-`[{id, title, summary, score, snippet, path, symbols}]`, where each symbol is
+`[{id, title, summary, updated, score, snippet, path, symbols}]` (`updated` only when the page's date is known), where each symbol is
 `{path, start_line, end_line, name, signature, doc}`.
 
 ### `neighbors`
@@ -396,7 +396,7 @@ source tree. Four artifacts drive that:
 
 - **`index.json`** — the machine catalog. Top level is `{ project, root, entries: [...] }`,
   where `root` is the compiled directory's own name (even for `compile .`);
-  each entry has: `id`, `title`, `kind`, `aliases`, `tags`, `path`, `page`, `summary`
+  each entry has: `id`, `title`, `kind`, `aliases`, `tags`, `updated` (present only when the page has a date), `path`, `page`, `summary`
   (`null` when none could be derived — a code file with no doc comment and
   no exported item), `degree_in`, `degree_out`, `pagerank`, `token_estimate`,
   `neighbors_out`, `neighbors_in` (edge targets and sources; what makes an
@@ -472,10 +472,11 @@ instructions file:
 ```
 Memory notes live in <folder>, one markdown file per fact or topic.
 - Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
-- Name the file for what it says. The name becomes the title unless front
-  matter sets one; any script works.
+- Name the file for what it says. The title is the front-matter `title:`,
+  else the first `# heading`, else the file name; any script works.
 - Front matter, all optional: `title:`, `description:` (one line, the search
-  summary), `aliases:`, `tags:`, `updated:` (date of the last change). A
+  summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
+  ignored). A
   journal note can instead be named `YYYY-MM-DD.md`.
 - Mention a related note by its exact title or alias, or as `[[title]]`.
 - Search before writing. Update the note that exists instead of adding a copy.
@@ -514,7 +515,7 @@ tool costs schema tokens on every request.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, updated, score, snippet, path, symbols}]` (`updated` only when known; `snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context-pack text, or with `symbol` the functions it calls |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
@@ -612,7 +613,7 @@ oversights. Measured shortfalls and agent behaviour are listed in
   unannotated Python assignment truncates it with `…`. `#[cfg(test)]`
   modules are omitted from `## Body` and replaced with a
   `// [tests omitted: …]` marker.
-- **Markdown front matter** may carry `aliases:` and `tags:`, written `a, b`, `[a, b]` or a YAML block list (`key:` then `  - a` lines). Tags are lowercased with any `#` stripped, and show on the page and in `index.json`.
+- **Markdown front matter** may carry `aliases:` and `tags:`, written `a, b`, `[a, b]` or a YAML block list (`key:` then `  - a` lines). Tags are lowercased with any `#` stripped, and show on the page and in `index.json`. A markdown page's date is read from `updated`, `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name starting `YYYY-MM-DD`; the value's leading `YYYY-MM-DD` is kept.
 - **Text, markdown, and code are the only formats.** There is no PDF,
   OCR, or audio extractor; adding one means adding an `Extractor` (see
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).

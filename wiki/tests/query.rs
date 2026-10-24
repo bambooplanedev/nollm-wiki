@@ -1255,14 +1255,8 @@ fn title_resolves_case_insensitively_in_any_script() {
     .unwrap();
     compile(&input, &output, &CompileOptions::default()).unwrap();
     let wiki = Wiki::load(&output).unwrap();
-    assert_eq!(
-        wiki.resolve_id("морський маяк").unwrap(),
-        "morskyi_maiak"
-    );
-    assert_eq!(
-        wiki.resolve_id("МОРСЬКИЙ МАЯК").unwrap(),
-        "morskyi_maiak"
-    );
+    assert_eq!(wiki.resolve_id("морський маяк").unwrap(), "morskyi_maiak");
+    assert_eq!(wiki.resolve_id("МОРСЬКИЙ МАЯК").unwrap(), "morskyi_maiak");
 }
 
 #[test]

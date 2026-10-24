@@ -373,7 +373,9 @@ pub fn slugify(name: &str) -> String {
                 continue; // combining mark, also from the lowercase of 'İ'
             }
             let mut buf = [0; 4];
-            let folded = if lc.is_ascii_alphanumeric() {
+            let folded = if lc == 'и' && chars.get(i + 1) == Some(&'\u{306}') {
+                "i" // `й` written as `и` + combining breve
+            } else if lc.is_ascii_alphanumeric() {
                 &*lc.encode_utf8(&mut buf)
             } else if let Some(f) = fold_char(lc) {
                 f
@@ -436,6 +438,13 @@ mod tests {
         assert_eq!(slugify("Chapter 1 | Overview"), "chapter_1_overview");
         // 'İ' lowercases to `i` plus a combining dot, which is dropped.
         assert_eq!(slugify("İstanbul"), "istanbul");
+    }
+
+    #[test]
+    fn slugify_treats_decomposed_short_i_like_precomposed() {
+        // `й` written as `и` + combining breve, as macOS tools write file names.
+        assert_eq!(slugify("Морськии\u{306} маяк"), "morskyi_maiak");
+        assert_eq!(slugify("МОРСЬКИИ\u{306} МАЯК"), "morskyi_maiak");
     }
 
     #[test]

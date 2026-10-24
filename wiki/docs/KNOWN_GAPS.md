@@ -123,8 +123,12 @@ per question is noise-level: treat single results as anecdotes.
 
 - **Transliterated ids can be long.** A Cyrillic title becomes a Latin id
   with no length cap yet.
-- **A date comes only from front matter or a dated file name.** Never from
-  git or mtime, so a note without either shows no `updated`.
+- **A date comes only from front matter or a dated file name, and only for
+  markdown pages.** Never from git or mtime, so a note without either shows
+  no `updated`.
+- **Ids changed for Cyrillic and accented titles.** After upgrading the
+  binary, recompile the wiki: linting an old wiki with a new binary (or the
+  reverse) reports false broken links.
 - **`large` measures the compiled page** against the default 4000-token
   `neighbors` budget, not the source file's size.
 

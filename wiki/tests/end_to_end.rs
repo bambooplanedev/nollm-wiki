@@ -925,11 +925,7 @@ fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
     fs::create_dir_all(&input).unwrap();
     write(&input, "a.md", "---\ntitle: Канал\n---\n\nCyrillic body.\n");
     write(&input, "b.md", "---\ntitle: Kanal\n---\n\nLatin body.\n");
-    write(
-        &input,
-        "c.md",
-        "---\ntitle: Third\n---\n\nSee [[Маяк]].\n",
-    );
+    write(&input, "c.md", "---\ntitle: Third\n---\n\nSee [[Маяк]].\n");
     write(&input, "d.md", "---\ntitle: Маяк\n---\n\nPlan.\n");
 
     let result = compile(&input, &output, &CompileOptions::default()).unwrap();
