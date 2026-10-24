@@ -357,7 +357,7 @@ impl Wiki {
     /// `version`). Must run on the ORIGINAL-case name: lowercasing first
     /// erases every CamelCase boundary (the 2026-09-02 V7 prototype's dead
     /// rule).
-    fn name_words(name: &str) -> Vec<String> {
+    pub(crate) fn name_words(name: &str) -> Vec<String> {
         let mut words = Vec::new();
         let mut cur = String::new();
         let chars: Vec<char> = name.chars().collect();

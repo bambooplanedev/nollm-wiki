@@ -2,8 +2,8 @@
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
 use super::code::{
-    default_shape, keep_any_vis, no_header_group, no_lead, owner_anchor_identity, LangSpec,
-    Placement, Rank, Shape,
+    default_shape, keep_any_vis, no_header_group, owner_anchor_identity, LangSpec, Lead, Placement,
+    Rank, Shape,
 };
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -52,9 +52,13 @@ pub(crate) fn validate_queries() {
 /// A comment between the decorator and the definition (`@dataclass  # noqa`)
 /// used to be spliced in with it. `render_span` drops comment nodes, so that
 /// risk is closed.
+///
+/// An assignment climbs to its `expression_statement`, which starts at the
+/// same byte: the statement, not the assignment, is the sibling of a `#`
+/// comment above it.
 pub(crate) fn python_sig_start(def: Node) -> Node {
     match def.parent() {
-        Some(p) if p.kind() == "decorated_definition" => p,
+        Some(p) if matches!(p.kind(), "decorated_definition" | "expression_statement") => p,
         _ => def,
     }
 }
@@ -142,9 +146,29 @@ pub(crate) fn python_spec() -> LangSpec {
         sig_start: python_sig_start,
         owner_anchor: owner_anchor_identity,
         header_group: no_header_group,
-        item_lead: no_lead,
+        item_lead: python_lead,
         body_doc: python_body_doc,
         query_gates_visibility: false,
+    }
+}
+
+/// A `#` comment above an item is a plain lead; a shebang or an encoding
+/// declaration on the first two lines is not. Decorators sit inside the
+/// `decorated_definition` that `sig_start` returns, so nothing else leads.
+fn python_lead(node: Node, text: &str) -> Lead {
+    match text
+        .get(node.byte_range())
+        .filter(|_| node.kind() == "comment")
+        .and_then(|t| t.strip_prefix('#'))
+    {
+        Some(body)
+            if !body.starts_with('!')
+                && !(node.start_position().row <= 1
+                    && (body.contains("coding:") || body.contains("coding="))) =>
+        {
+            Lead::Plain(body.trim().to_string())
+        }
+        _ => Lead::Stop,
     }
 }
 
@@ -893,5 +917,30 @@ mod tests {
         );
         assert_eq!(e.items[0].doc.as_deref(), Some("A news article."));
         assert_eq!(e.items[1].doc.as_deref(), Some("Slug for the url."));
+    }
+
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    fn doc_of(src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract("a.py", src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
+    #[test]
+    fn python_hash_comment_is_a_doc() {
+        let src = "x = 1\n# Wait longer than w_min counts as a stall.\nW_MIN_DEFAULT_S = 5\n";
+        assert_eq!(
+            doc_of(src, "W_MIN_DEFAULT_S"),
+            (Some("Wait longer than w_min counts as a stall.".into()), 2)
+        );
+    }
+
+    #[test]
+    fn python_docstring_wins_over_hash_comment() {
+        let src = "x = 1\n# note\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
+        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
+        let src =
+            "x = 1\n# Builds the frame for each caller.\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
+        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
     }
 }

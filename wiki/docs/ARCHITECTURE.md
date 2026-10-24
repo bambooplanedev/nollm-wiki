@@ -789,6 +789,18 @@ that trails code on its own line (`int n; ///< Count.`), or at anything
 else, so a stray doc comment never stretches it. A C++ member-trailing doc
 (`///<`, `//!<`, `/**<`, `/*!<`) stops the climb even on a line of its own:
 it documents the member before it.
+In C++, JS/TS (JSX/TSX and SFC scripts included) and Python, a plain
+comment block (`//` lines, a `/* … */` block, `#` lines) directly above an
+item is its doc when nothing better exists: a Doxygen or JSDoc doc comes
+first, then a Python docstring, then the plain block (`plain_doc`). A plain
+block above a doc comment neither joins its doc nor extends its range. The
+block is no doc, and the range keeps its own start, when it begins on the
+file's first line or names `SPDX-License-Identifier`/`Copyright`, when it
+is only dividers and `---`/`===`-framed titles, all TODO/FIXME/XXX/HACK
+lines, mostly code (half its lines end in `;`, `{` or `}`), or a group
+label: one line of at most three words, no closing `.`, `!`, `?` or `:`,
+sharing no word with the item's name ("Getters", but "Risk limits" above
+`risk_limit` is a doc). Rust and Go plain comments still stop the climb.
 Items of a Rust file with a test module come from a second pass over the
 **unstripped** text and its tree (`Stripped::Rewritten` carries it), so
 their lines are the file's and test functions are items too, while

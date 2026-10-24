@@ -2,7 +2,8 @@
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
     cpp_doc_line, default_cut, ext_of, keep_all, keep_any_vis, module_stem, no_body_doc,
-    no_export_set, no_header_group, source_rank, LangSpec, Lead, Placement, Rank, Shape,
+    no_export_set, no_header_group, plain_comment_text, source_rank, LangSpec, Lead, Placement,
+    Rank, Shape,
 };
 use crate::model::{CodeItem, CodeItemKind, Entity};
 use std::collections::BTreeMap;
@@ -188,11 +189,11 @@ fn cpp_comment_doc(comment: &str) -> Option<String> {
     (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-/// A Doxygen comment directly above an item is its doc; anything else ends the
-/// walk. A member-trailing doc (`///<`, `//!<`, `/**<`, `/*!<`) documents the
-/// member BEFORE it even on a line of its own, so it ends the walk too. Every
-/// C++ item is `public: true`, because the spec keeps all visibilities (see
-/// `vis_filter`).
+/// A Doxygen comment directly above an item is its doc, and any other comment
+/// a plain lead; anything else ends the walk. A member-trailing doc (`///<`,
+/// `//!<`, `/**<`, `/*!<`) documents the member BEFORE it even on a line of its
+/// own, so it ends the walk too. Every C++ item is `public: true`, because the
+/// spec keeps all visibilities (see `vis_filter`).
 fn cpp_lead(node: Node, text: &str) -> Lead {
     let Some(comment) = text
         .get(node.byte_range())
@@ -206,7 +207,7 @@ fn cpp_lead(node: Node, text: &str) -> Lead {
     {
         return Lead::Stop;
     }
-    cpp_comment_doc(comment).map_or(Lead::Stop, Lead::Doc)
+    cpp_comment_doc(comment).map_or_else(|| Lead::Plain(plain_comment_text(comment)), Lead::Doc)
 }
 
 /// Climb to the enclosing `template_declaration`, nested ones included, so a
@@ -892,8 +893,67 @@ mod tests {
         assert_eq!(s.as_deref(), Some("Maintains the book."), "got {s:?}");
     }
 
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
     #[test]
-    fn cpp_items_take_doxygen_docs_and_skip_plain_comments() {
+    fn cpp_plain_comment_above_a_method_is_its_doc() {
+        let src = "class F {\n  // true once an open request has been held longer than the ceiling.\n  bool maxWaitExpired() const;\n};\n";
+        assert_eq!(
+            doc_of("f.h", src, "maxWaitExpired"),
+            (
+                Some("true once an open request has been held longer than the ceiling.".into()),
+                2
+            )
+        );
+    }
+
+    #[test]
+    fn plain_above_doxygen_neither_joins_nor_extends() {
+        let src = "// Accessors\n/// Best bid.\nint getBids();\n";
+        assert_eq!(doc_of("b.h", src, "getBids"), (Some("Best bid.".into()), 2));
+    }
+
+    #[test]
+    fn rejected_blocks_give_no_doc_and_keep_the_range() {
+        for block in [
+            "// Getters",
+            "// ---- Risk ----",
+            "// ======\n// Connection Management\n// ======",
+            "// TODO: EXCEPTION_FREE",
+            "// int x = 1;\n// foo();",
+            "// Copyright 2024 X",
+        ] {
+            let src = format!("int a;\n\n{block}\nint get_x();\n");
+            let line = 4 + block.matches('\n').count();
+            assert_eq!(doc_of("x.h", &src, "get_x"), (None, line), "{block:?}");
+        }
+        let src = "// Returns the current x of the cursor.\nint get_x();\n";
+        assert_eq!(doc_of("x.h", src, "get_x"), (None, 2));
+    }
+
+    #[test]
+    fn group_label_sharing_a_name_word_is_a_doc() {
+        let src = "int a;\n// Risk limits\nint risk_limit();\n";
+        assert_eq!(
+            doc_of("r.h", src, "risk_limit"),
+            (Some("Risk limits".into()), 2)
+        );
+    }
+
+    #[test]
+    fn blank_line_or_trailing_comment_is_not_a_doc() {
+        let src = "int a;\n// about f\n\nvoid f();\nint n; // count\nvoid g();\n";
+        assert_eq!(doc_of("f.h", src, "f"), (None, 4));
+        assert_eq!(doc_of("f.h", src, "g"), (None, 6));
+    }
+
+    #[test]
+    fn cpp_items_take_doxygen_docs_and_skip_labels() {
         let src = "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n  // plain\n  int size() const;\n};\n/** Frees all. */\nvoid reset();\n";
         let e = CodeExtractor.extract("book.h", src);
         assert_eq!(

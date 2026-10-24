@@ -73,13 +73,13 @@ pub(crate) struct LangSpec {
     /// resolves a group from `owner` or `@name` and never reaches it.
     pub(crate) header_group: fn(Node, &str) -> Option<String>,
     /// What a named sibling directly above an item is to that item: its doc
-    /// comment, an attribute that belongs to it, or neither. Only the
-    /// language's own doc convention counts, so a plain comment stops the
-    /// walk instead of being read as documentation.
+    /// comment, an attribute that belongs to it, a plain comment that may
+    /// document it (C++, JS/TS, Python), or neither. Rust and Go read only
+    /// their own doc convention, so a plain comment stops their walk.
     pub(crate) item_lead: fn(Node, &str) -> Lead,
     /// An item's doc when it lives inside the definition (Python's
     /// docstring) rather than above it. Consulted only when no `Doc` lead
-    /// was attached.
+    /// was attached, and before a plain comment block.
     pub(crate) body_doc: fn(Node, &str) -> Option<String>,
     /// True when the query's @def patterns already gate visibility, so an
     /// @item-only match is private by construction (Rust: a public item
@@ -92,15 +92,78 @@ pub(crate) struct LangSpec {
 pub(crate) enum Lead {
     /// A doc-comment line, its marker stripped.
     Doc(String),
+    /// A plain comment's text, markers stripped, lines kept: the item's doc
+    /// only as a fallback, and only if `plain_doc` takes it.
+    Plain(String),
     /// An attribute or decorator: part of the item's range, not its doc.
     Attr,
     /// Not part of the item; the walk ends here.
     Stop,
 }
 
-/// `item_lead` for a language whose items attach nothing from above.
-pub(crate) fn no_lead(_: Node, _: &str) -> Lead {
-    Lead::Stop
+/// The text of a `//` or `/* … */` comment, markers and a block's leading
+/// `*` stripped, lines kept.
+pub(crate) fn plain_comment_text(comment: &str) -> String {
+    if let Some(line) = comment.strip_prefix("//") {
+        return line.trim().to_string();
+    }
+    let body = comment.trim_start_matches("/*").trim_end_matches("*/");
+    let lines: Vec<&str> = body
+        .lines()
+        .map(|l| l.trim().trim_start_matches('*').trim())
+        .collect();
+    lines.join("\n")
+}
+
+/// The doc a plain comment block directly above `item_name` gives, or `None`
+/// when the block is not a doc: a file header, a banner or divider, a group
+/// label ("Getters"), a TODO, or commented-out code.
+pub(crate) fn plain_doc(
+    lines: &[String],
+    item_name: &str,
+    starts_at_file_top: bool,
+) -> Option<String> {
+    if starts_at_file_top
+        || lines
+            .iter()
+            .any(|l| l.contains("SPDX-License-Identifier") || l.contains("Copyright"))
+    {
+        return None;
+    }
+    // Divider lines go, and so does a title framed on its own line.
+    let lines: Vec<&str> = lines
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| l.chars().any(char::is_alphabetic) && !l.contains("---") && !l.contains("==="))
+        .collect();
+    if lines.is_empty()
+        || lines.iter().all(|l| {
+            ["TODO", "FIXME", "XXX", "HACK"]
+                .iter()
+                .any(|t| l.starts_with(t))
+        })
+        || 2 * lines
+            .iter()
+            .filter(|l| l.ends_with([';', '{', '}']))
+            .count()
+            >= lines.len()
+    {
+        return None;
+    }
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .flat_map(crate::query::Wiki::name_words)
+            .filter(|w| w.chars().count() >= 3)
+            .collect()
+    };
+    let label = lines.len() == 1
+        && lines[0].split_whitespace().count() <= 3
+        && !lines[0].ends_with(['.', '!', '?', ':'])
+        && {
+            let name = words(item_name);
+            !words(lines[0]).iter().any(|w| name.contains(w))
+        };
+    (!label).then(|| lines.join("\n"))
 }
 
 /// `body_doc` for a language with no in-body doc convention.
@@ -925,8 +988,9 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 ///
 /// The range climbs from the signature's start node over the contiguous
 /// leads above it; a blank line, a lead trailing other code on its line, or
-/// a `Stop` lead (a plain comment, other code) ends the climb, so a stray
-/// doc comment never stretches the range.
+/// a `Stop` lead (other code) ends the climb, so a stray doc comment never
+/// stretches the range. A plain block directly above the item (or its
+/// attributes) extends the range only when `plain_doc` makes it the doc.
 fn code_item(
     def: Node,
     name: Option<Node>,
@@ -966,11 +1030,16 @@ fn code_item(
         return None;
     }
 
+    let name_text = text.get(name.byte_range())?;
     let top = (spec.sig_start)(def);
+    // `first` is where the range starts unless the plain block becomes the
+    // doc; `cursor` is how far the walk has climbed, over that block too.
     let mut first = top;
+    let mut cursor = top;
     let mut docs = Vec::new();
-    while let Some(lead) = first.prev_named_sibling() {
-        if last_row(lead) + 1 < first.start_position().row {
+    let mut plain = Vec::new();
+    while let Some(lead) = cursor.prev_named_sibling() {
+        if last_row(lead) + 1 < cursor.start_position().row {
             break;
         }
         // A lead that trails other nodes on its line (`#[a] #[b]`) is taken
@@ -989,22 +1058,49 @@ fn code_item(
         {
             break;
         }
-        docs.extend(leads.into_iter().filter_map(|l| match l {
-            Lead::Doc(d) => Some(d),
-            _ => None,
-        }));
-        first = group[group.len() - 1];
+        // A plain block is only ever the nearest thing above the item: a
+        // plain lead above a doc, or anything but plain above the block,
+        // ends the walk.
+        let is_plain = |l: &Lead| matches!(l, Lead::Plain(_));
+        if (leads.iter().any(is_plain) || !plain.is_empty())
+            && (!docs.is_empty() || !leads.iter().all(is_plain))
+        {
+            break;
+        }
+        for lead in leads {
+            match lead {
+                Lead::Doc(d) => docs.push(d),
+                Lead::Plain(p) => plain.push(p),
+                Lead::Attr | Lead::Stop => {}
+            }
+        }
+        cursor = group[group.len() - 1];
+        if plain.is_empty() {
+            first = cursor;
+        }
     }
     docs.reverse();
+    plain.reverse();
+    // Doc comments, then the in-body doc, then the plain block; the range
+    // takes in the plain block only when it is the doc used.
     let raw_doc = if docs.is_empty() {
-        (spec.body_doc)(def, text)
+        (spec.body_doc)(def, text).or_else(|| {
+            let lines: Vec<String> = plain
+                .iter()
+                .flat_map(|p| p.lines())
+                .map(str::to_string)
+                .collect();
+            let doc = plain_doc(&lines, name_text, cursor.start_position().row == 0)?;
+            first = cursor;
+            Some(doc)
+        })
     } else {
         Some(docs.join("\n"))
     };
 
     let item = CodeItem {
         kind,
-        name: text.get(name.byte_range())?.to_string(),
+        name: name_text.to_string(),
         owner,
         signature,
         start_line: first.start_position().row + 1,
