@@ -465,6 +465,9 @@ pub fn search_json(hits: Vec<Hit>) -> String {
             if let Some(u) = h.updated {
                 hit["updated"] = u.into();
             }
+            if h.memory {
+                hit["memory"] = true.into();
+            }
             hit
         })
         .collect();

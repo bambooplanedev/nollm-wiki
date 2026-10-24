@@ -846,6 +846,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         summary: Some("sum\nmary".into()),
         updated: None,
         score: 1.0,
+        memory: false,
         snippet: None,
         symbols: vec![SymbolLine {
             path: "a.rs".into(),
@@ -1224,6 +1225,7 @@ fn search_lines_shows_date_after_path() {
         score: 1.0,
         snippet: None,
         symbols: vec![],
+        memory: false,
     };
     assert_eq!(
         wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
@@ -1280,4 +1282,95 @@ fn cyrillic_query_words_match_another_grammatical_form() {
         .search("mcp-сервери", None, 10)
         .iter()
         .any(|h| h.id == "shliuz"));
+}
+
+fn memory_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    for (name, body) in files {
+        let p = input.join(name);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+#[test]
+fn memory_note_outranks_code_with_a_higher_raw_score() {
+    let (_d, w) = memory_fixture(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        (
+            ".agents/memory/note.md",
+            "---\ntitle: Note\n---\n\nWe once saw a zebra here and filler words follow.\n",
+        ),
+    ]);
+    let hits = w.search("zebra", None, 10);
+    assert_eq!(hits.len(), 2);
+    assert!(hits[0].memory && !hits[1].memory);
+    assert!(hits[0].score > hits[1].score);
+}
+
+#[test]
+fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
+    let note =
+        |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
+        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
+        (".agents/memory/c.md", &note("Ccc", "")),
+    ]);
+    let ids: Vec<_> = w
+        .search("zebra", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(ids, ["bbb", "aaa", "ccc"]);
+}
+
+#[test]
+fn memory_passes_code_and_docs_filters_but_not_exact_code_kind() {
+    let (_d, w) = memory_fixture(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+    ]);
+    let ids = |f: &str| {
+        let f = KindFilter::parse(f).unwrap();
+        let mut v: Vec<_> = w
+            .search("zebra", Some(&f), 10)
+            .into_iter()
+            .map(|h| h.id)
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(ids("code"), ["a", "note"]);
+    assert_eq!(ids("docs"), ["note"]);
+    assert_eq!(ids("markdown"), ["note"]);
+    assert_eq!(ids("code:rust"), ["a"]);
+}
+
+#[test]
+fn memory_flag_shows_in_json_only_on_memory_hits() {
+    let (_d, w) = memory_fixture(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+    ]);
+    let j: serde_json::Value =
+        serde_json::from_str(&wiki::serve::search_json(w.search("zebra", None, 10))).unwrap();
+    assert_eq!(j[0]["memory"], true);
+    assert!(j[1].get("memory").is_none());
+}
+
+#[test]
+fn index_json_without_memory_still_loads() {
+    let (d, _w) = memory_fixture(&[("a.md", "# A\n\nzebra\n")]);
+    let out = d.path().join("out");
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    assert!(v["entries"][0].get("memory").is_none());
+    let w = Wiki::load(&out).unwrap();
+    assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
 }

@@ -24,6 +24,9 @@ pub(crate) struct Entry {
     pub(crate) summary: Option<String>,
     #[serde(default)]
     pub(crate) updated: Option<String>,
+    /// From an agent memory folder; absent in `index.json` when false.
+    #[serde(default)]
+    pub(crate) memory: bool,
     pub(crate) pagerank: f64,
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
@@ -73,6 +76,20 @@ pub fn tag_filter(arg: &str) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
+/// Multiplies a memory page's final score, so a note outranks code that
+/// matches the same words.
+pub(crate) const MEMORY_BOOST: f64 = 4.0;
+
+/// Which pages a search sees: all, none of the memory notes, or only them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+// `Without` and `Only` have no caller until the memory hint.
+#[allow(dead_code)]
+pub(crate) enum MemoryScope {
+    With,
+    Without,
+    Only,
+}
+
 pub struct Hit {
     pub id: String,
     pub title: String,
@@ -82,6 +99,8 @@ pub struct Hit {
     /// `YYYY-MM-DD` of the page's last change, when known.
     pub updated: Option<String>,
     pub score: f64,
+    /// The page is an agent memory note; its score carries `MEMORY_BOOST`.
+    pub memory: bool,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, defined name, summary, or a
     /// section heading — the summary explains those).
@@ -881,14 +900,37 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
+        self.search_scoped(q, kind, tag, limit, MemoryScope::With)
+    }
+
+    /// `search_tagged` over the memory notes only, all but them, or both.
+    /// A memory note passes the `code` and `docs` groups whatever its real
+    /// kind (agents filter by `code`); an exact kind matches its real kind.
+    /// Memory hits' scores are multiplied by `MEMORY_BOOST`, and of two
+    /// equal-scored notes the later `updated` comes first (dated before
+    /// undated).
+    pub(crate) fn search_scoped(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+        scope: MemoryScope,
+    ) -> Vec<Hit> {
         let (tokens, raw) = Self::query_tokens(q);
         let passes = |e: &Entry| {
-            kind.is_none_or(|f| SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)))
-                && tag.is_none_or(|t| {
-                    e.tags
-                        .iter()
-                        .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
-                })
+            (match scope {
+                MemoryScope::With => true,
+                MemoryScope::Without => !e.memory,
+                MemoryScope::Only => e.memory,
+            }) && kind.is_none_or(|f| {
+                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs))
+                    || SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k))
+            }) && tag.is_none_or(|t| {
+                e.tags
+                    .iter()
+                    .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+            })
         };
         if tokens.is_empty() {
             let Some(_) = tag else {
@@ -906,6 +948,7 @@ impl Wiki {
                     summary: e.summary.clone(),
                     updated: e.updated.clone(),
                     score: 0.0,
+                    memory: e.memory,
                     snippet: None,
                     symbols: Vec::new(),
                 })
@@ -947,7 +990,7 @@ impl Wiki {
             .into_iter()
             .map(|c| {
                 let norm = c.len as f64 / avglen;
-                let score = c
+                let base: f64 = c
                     .per_token
                     .iter()
                     .zip(&idf)
@@ -958,13 +1001,19 @@ impl Wiki {
                         idf_t * (weight + Self::W_BODY * tf_norm)
                     })
                     .sum();
+                let total = if c.entry.memory {
+                    base * MEMORY_BOOST
+                } else {
+                    base
+                };
                 let hit = Hit {
                     id: c.entry.id.clone(),
                     title: c.entry.title.clone(),
                     path: c.entry.path.clone(),
                     summary: c.entry.summary.clone(),
                     updated: c.entry.updated.clone(),
-                    score,
+                    score: total,
+                    memory: c.entry.memory,
                     snippet: c.snippet,
                     symbols: Vec::new(),
                 };
@@ -974,6 +1023,10 @@ impl Wiki {
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
+                .then_with(|| match (a.memory, b.memory) {
+                    (true, true) => b.updated.cmp(&a.updated),
+                    _ => std::cmp::Ordering::Equal,
+                })
                 .then_with(|| b_pr.total_cmp(a_pr))
                 .then_with(|| a.id.cmp(&b.id))
         });
