@@ -1,7 +1,7 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
 use crate::model::KindFilter;
-use crate::query::{SymbolLine, Wiki};
+use crate::query::{MemoryScope, SymbolLine, Wiki};
 use std::collections::HashSet;
 
 /// Most symbol lines a hint prints.
@@ -19,10 +19,17 @@ pub const HINT_PAGE_LINES: usize = 2;
 const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines:\n";
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
-/// `text`, or an empty string when no code page matches.
+/// `text`, then one `memory: path — summary` line for the best memory note
+/// whose title, alias or summary the text names; empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
-    let hits = wiki.search(text, Some(&KindFilter::Code), HINT_PAGES);
+    let hits = wiki.search_scoped(
+        text,
+        Some(&KindFilter::Code),
+        None,
+        Some(HINT_PAGES),
+        MemoryScope::Without,
+    );
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let mut seen = HashSet::new();
     let mut out = String::new();
@@ -33,18 +40,31 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
         .filter(|s| seen.insert((s.path.clone(), s.start_line, s.end_line)))
         .take(HINT_LINES);
     for s in symbols {
-        let line = format!(
-            "{}:{}-{}  {}  {}",
-            s.path, s.start_line, s.end_line, s.name, s.signature
+        push_line(
+            &mut out,
+            &format!(
+                "{}:{}-{}  {}  {}",
+                s.path, s.start_line, s.end_line, s.name, s.signature
+            ),
         );
-        let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
-        if line.chars().count() > HINT_LINE_CHARS {
-            out.extend(line.chars().take(HINT_LINE_CHARS - 1));
-            out.push('…');
-        } else {
-            out.push_str(&line);
-        }
-        out.push('\n');
+    }
+    // Only a field match: a body match is too cheap in a note-heavy language.
+    let note = wiki
+        .search_scoped(
+            text,
+            Some(&KindFilter::Code),
+            None,
+            Some(HINT_PAGES),
+            MemoryScope::Only,
+        )
+        .into_iter()
+        .find(|h| wiki.names_page(&h.id, text));
+    if let Some(h) = note {
+        let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
+        push_line(
+            &mut out,
+            &format!("memory: {} — {}", h.path, said.unwrap_or(&h.title)),
+        );
     }
     if out.is_empty() {
         out
@@ -53,7 +73,18 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     }
 }
 
-/// The `prompt` string of Claude Code's `UserPromptSubmit` hook input.
+/// Append `line` whitespace-collapsed and cut to `HINT_LINE_CHARS`.
+fn push_line(out: &mut String, line: &str) {
+    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() > HINT_LINE_CHARS {
+        out.extend(line.chars().take(HINT_LINE_CHARS - 1));
+        out.push('…');
+    } else {
+        out.push_str(&line);
+    }
+    out.push('\n');
+}
+
 /// A page's lines worth injecting: no test items, no line whose range holds
 /// another of the page's lines (a class around its method is thousands of
 /// lines no model reads), at most `HINT_PAGE_LINES`.
@@ -67,6 +98,7 @@ fn page_lines(symbols: &[SymbolLine]) -> impl Iterator<Item = &SymbolLine> {
         .take(HINT_PAGE_LINES)
 }
 
+/// The `prompt` string of Claude Code's `UserPromptSubmit` hook input.
 #[must_use]
 pub fn prompt_from_hook_json(json: &str) -> Option<String> {
     serde_json::from_str::<serde_json::Value>(json)

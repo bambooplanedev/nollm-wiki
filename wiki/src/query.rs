@@ -501,6 +501,25 @@ impl Wiki {
             .all(|p| words.iter().any(|w| w.starts_with(p)))
     }
 
+    /// Whether any query token of `q` (stemmed, as `search` reads it) hits
+    /// the title, an alias or the summary of page `id` by `field_hit`'s
+    /// prefix rule. The body is not looked at: a hint gates on this, because
+    /// a Ukrainian prompt matches nearly every Ukrainian note body.
+    pub(crate) fn names_page(&self, id: &str, q: &str) -> bool {
+        let Some(e) = self.entries.get(id) else {
+            return false;
+        };
+        let fields = std::iter::once(e.title.as_str())
+            .chain(e.aliases.iter().map(String::as_str))
+            .chain(e.summary.as_deref())
+            .map(|f| Self::field_words(&f.to_lowercase()))
+            .collect::<Vec<_>>();
+        Self::query_tokens(q)
+            .0
+            .iter()
+            .any(|t| fields.iter().any(|w| Self::field_hit(w, t)))
+    }
+
     /// The search terms a page earns from its `defined` names — each
     /// lowercased full name plus each of its words, minus the self-name
     /// skip — plus every `methods` name lowercased whole, minus names equal
