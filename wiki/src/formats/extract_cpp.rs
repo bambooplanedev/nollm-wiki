@@ -207,7 +207,11 @@ fn cpp_lead(node: Node, text: &str) -> Lead {
     {
         return Lead::Stop;
     }
-    cpp_comment_doc(comment).map_or_else(|| Lead::Plain(plain_comment_text(comment)), Lead::Doc)
+    // `/***…` is a star box, never Doxygen.
+    Some(comment)
+        .filter(|c| !c.starts_with("/***"))
+        .and_then(cpp_comment_doc)
+        .map_or_else(|| Lead::Plain(plain_comment_text(comment)), Lead::Doc)
 }
 
 /// Climb to the enclosing `template_declaration`, nested ones included, so a
@@ -943,6 +947,37 @@ mod tests {
         );
         let src = "int a;\n/*\n * Reads x.\n */\nint get_x();\n";
         assert_eq!(doc_of("x.h", src, "get_x"), (Some("Reads x.".into()), 2));
+    }
+
+    #[test]
+    fn unicode_framed_titles_and_star_boxes_are_dividers() {
+        let src = "int a;\n// ─── Risk limits section ───\nint get_x();\n";
+        assert_eq!(doc_of("x.h", src, "get_x"), (None, 3));
+        let src = "int a;\n/*****\n * Market Data Feed Handlers\n *****/\nvoid onTick();\n";
+        assert_eq!(doc_of("x.h", src, "onTick"), (None, 5));
+    }
+
+    #[test]
+    fn a_doc_lead_above_a_plain_block_keeps_the_block_out() {
+        let src = "/// Best bid.\n// NOLINTNEXTLINE(readability-identifier-naming) because legacy API\nint getBids();\n";
+        assert_eq!(doc_of("b.h", src, "getBids"), (None, 3));
+    }
+
+    #[test]
+    fn a_wrapped_todo_is_no_doc() {
+        let src =
+            "int a;\n// TODO(b/123): make this faster once the\n// cache lands.\nint get_x();\n";
+        assert_eq!(doc_of("x.h", src, "get_x"), (None, 4));
+    }
+
+    #[test]
+    fn empty_comment_lines_stay_paragraph_breaks() {
+        let src =
+            "int a;\n// Reads x from the cursor\n//\n// More detail follows here.\nint get_x();\n";
+        assert_eq!(
+            doc_of("x.h", src, "get_x"),
+            (Some("Reads x from the cursor".into()), 2)
+        );
     }
 
     #[test]

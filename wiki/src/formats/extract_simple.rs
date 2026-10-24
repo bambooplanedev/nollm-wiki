@@ -143,7 +143,7 @@ fn ecma_lead(node: Node, text: &str) -> Lead {
         .get(node.byte_range())
         .filter(|_| node.kind() == "comment")
     {
-        Some(t) if t.starts_with("/**") && !t.starts_with("/**/") => {
+        Some(t) if t.starts_with("/**") && !t.starts_with("/***") && !t.starts_with("/**/") => {
             let body = t.trim_start_matches("/**").trim_end_matches("*/");
             let lines: Vec<&str> = body
                 .lines()
@@ -152,6 +152,8 @@ fn ecma_lead(node: Node, text: &str) -> Lead {
                 .collect();
             Lead::Doc(lines.join("\n"))
         }
+        // A triple-slash directive (`/// <reference …/>`) is no doc.
+        Some(t) if t.starts_with("/// <") => Lead::Stop,
         Some(t) => Lead::Plain(plain_comment_text(t)),
         None => Lead::Stop,
     }
@@ -286,6 +288,25 @@ mod tests {
     use crate::formats::code::testutil::{assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
+
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
+    #[test]
+    fn a_jsdoc_keeps_a_plain_directive_below_it_out_of_the_doc() {
+        let src = "/** Best bid. */\n// eslint-disable-next-line no-unused-vars because legacy API\nexport function getBids() {}\n";
+        assert_eq!(doc_of("b.ts", src, "getBids"), (None, 3));
+    }
+
+    #[test]
+    fn a_triple_slash_directive_is_no_doc() {
+        let src = "const a = 1;\n/// <reference path=\"types.d.ts\"/>\nexport function f() {}\n";
+        assert_eq!(doc_of("f.ts", src, "f"), (None, 3));
+    }
 
     #[test]
     fn defined_ts_generic_function_and_go_struct_keep_original_case() {

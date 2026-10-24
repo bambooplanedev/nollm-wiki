@@ -361,6 +361,14 @@ mod tests {
     use crate::formats::Extractor;
 
     #[test]
+    fn a_unicode_framed_comment_title_is_no_doc() {
+        let src = "x = 1\n# ─── indexing helpers ───\ndef build():\n    pass\n";
+        let e = CodeExtractor.extract("b.py", src);
+        let item = e.items.iter().find(|i| i.name == "build").unwrap();
+        assert_eq!((item.doc.clone(), item.start_line), (None, 3));
+    }
+
+    #[test]
     fn defined_excludes_dataclass_fields_and_keeps_class_def_constant() {
         let src = "from dataclasses import dataclass\n\n@dataclass\nclass Invoice:\n    total: float\n\ndef render():\n    pass\n\nDEFAULT = 3\n";
         let e = CodeExtractor.extract("billing.py", src);

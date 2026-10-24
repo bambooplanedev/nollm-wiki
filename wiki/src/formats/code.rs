@@ -110,7 +110,15 @@ pub(crate) fn plain_comment_text(comment: &str) -> String {
     let body = comment.trim_start_matches("/*").trim_end_matches("*/");
     let lines: Vec<&str> = body
         .lines()
-        .map(|l| l.trim().trim_start_matches('*').trim())
+        .map(|l| {
+            let l = l.trim();
+            // A run of stars is a divider (`/*****`), not an empty line.
+            if l.len() > 1 && l.chars().all(|c| c == '*') {
+                l
+            } else {
+                l.trim_start_matches('*').trim()
+            }
+        })
         .collect();
     lines.join("\n")
 }
@@ -131,31 +139,44 @@ pub(crate) fn plain_doc(
         return None;
     }
     // Divider lines (no letters) go, and so does a title framed on its own
-    // line (`--- Risk ---`): one opening and closing with a run of three or
-    // more of the same `-`, `=`, `~`, `#` or `*`. A `===` inside prose stays.
-    let opens_with_run = |l: &str| {
-        l.chars()
-            .next()
-            .is_some_and(|c| "-=~#*".contains(c) && l.starts_with(&c.to_string().repeat(3)))
+    // line (`--- Risk ---`, `─── Risk ───`): one opening and closing with a
+    // run of three or more of the same character that is neither
+    // alphanumeric nor whitespace. A `===` inside prose stays. Empty lines
+    // stay as paragraph breaks.
+    let opens_with_run = |mut cs: std::str::Chars| {
+        cs.next().is_some_and(|c| {
+            !c.is_alphanumeric()
+                && !c.is_whitespace()
+                && cs.take(2).filter(|x| *x == c).count() == 2
+        })
     };
-    let framed =
-        |l: &str| opens_with_run(l) && opens_with_run(&l.chars().rev().collect::<String>());
+    let framed = |l: &str| {
+        opens_with_run(l.chars()) && opens_with_run(l.chars().rev().collect::<String>().chars())
+    };
     let lines: Vec<&str> = lines.iter().map(|l| l.trim()).collect();
     let divider = lines
         .iter()
         .any(|l| !l.is_empty() && !l.chars().any(char::is_alphabetic));
-    let lines: Vec<&str> = lines
+    let mut lines: Vec<&str> = lines
         .into_iter()
-        .filter(|l| l.chars().any(char::is_alphabetic) && !framed(l))
+        .filter(|l| l.is_empty() || l.chars().any(char::is_alphabetic) && !framed(l))
         .collect();
-    // A lone line between dividers is a section banner's title.
+    while lines.first() == Some(&"") {
+        lines.remove(0);
+    }
+    while lines.last() == Some(&"") {
+        lines.pop();
+    }
+    lines.dedup_by(|a, b| a.is_empty() && b.is_empty());
+    let text = lines.join("\n");
+    let lines: Vec<&str> = lines.into_iter().filter(|l| !l.is_empty()).collect();
+    // A lone line between dividers is a section banner's title; a block
+    // opening with TODO (a wrapped one included) is a note, not a doc.
     if lines.is_empty()
         || divider && lines.len() == 1
-        || lines.iter().all(|l| {
-            ["TODO", "FIXME", "XXX", "HACK"]
-                .iter()
-                .any(|t| l.starts_with(t))
-        })
+        || ["TODO", "FIXME", "XXX", "HACK"]
+            .iter()
+            .any(|t| lines[0].starts_with(t))
         || 2 * lines
             .iter()
             .filter(|l| l.ends_with([';', '{', '}']))
@@ -177,7 +198,7 @@ pub(crate) fn plain_doc(
             let name = words(item_name);
             !words(lines[0]).iter().any(|w| name.contains(w))
         };
-    (!label).then(|| lines.join("\n"))
+    (!label).then_some(text)
 }
 
 /// `body_doc` for a language with no in-body doc convention.
@@ -1066,6 +1087,9 @@ fn code_item(
     let mut cursor = top;
     let mut docs = Vec::new();
     let mut plain = Vec::new();
+    // A `Doc` lead directly above the plain block ends the walk and keeps
+    // the block from being the doc: the doc lead is the item's.
+    let mut doc_above_plain = false;
     while let Some(lead) = cursor.prev_named_sibling() {
         if last_row(lead) + 1 < cursor.start_position().row {
             break;
@@ -1093,6 +1117,7 @@ fn code_item(
         if (leads.iter().any(is_plain) || !plain.is_empty())
             && (!docs.is_empty() || !leads.iter().all(is_plain))
         {
+            doc_above_plain = !plain.is_empty() && leads.iter().any(|l| matches!(l, Lead::Doc(_)));
             break;
         }
         for lead in leads {
@@ -1113,9 +1138,12 @@ fn code_item(
     // takes in the plain block only when it is the doc used.
     let raw_doc = if docs.is_empty() {
         (spec.body_doc)(def, text).or_else(|| {
+            if doc_above_plain {
+                return None;
+            }
             let lines: Vec<String> = plain
                 .iter()
-                .flat_map(|p| p.lines())
+                .flat_map(|p| p.split('\n'))
                 .map(str::to_string)
                 .collect();
             let doc = plain_doc(&lines, name_text, cursor.start_position().row == 0)?;
