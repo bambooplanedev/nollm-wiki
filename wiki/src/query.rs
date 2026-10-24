@@ -197,8 +197,8 @@ fn numeric_date(word: &str) -> Option<QueryDate> {
         ([y, m, d], true) if [y.len(), m.len(), d.len()] == [4, 2, 2] => {
             QueryDate::new(num(0), num(1)?, num(2)?)
         }
-        ([d, m], false) if m.len() == 2 && d.len() <= 2 => QueryDate::new(None, num(1)?, num(0)?),
-        ([d, m, y], false) if m.len() == 2 && d.len() <= 2 && y.len() == 4 => {
+        ([d, m], false) if m.len() == 2 && d.len() == 2 => QueryDate::new(None, num(1)?, num(0)?),
+        ([d, m, y], false) if m.len() == 2 && d.len() == 2 && y.len() == 4 => {
             QueryDate::new(num(2), num(1)?, num(0)?)
         }
         _ => None,
@@ -1791,7 +1791,7 @@ mod tests {
         let ok = [
             ("2026-10-12", d(Some(2026), 10, 12)),
             ("12.10", d(None, 10, 12)),
-            ("2.10", d(None, 10, 2)),
+            ("03.10", d(None, 10, 3)),
             ("12.10.", d(None, 10, 12)),
             ("12.10.2026", d(Some(2026), 10, 12)),
             ("12 жовтня", d(None, 10, 12)),

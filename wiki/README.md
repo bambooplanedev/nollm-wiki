@@ -502,7 +502,7 @@ note's `updated` day.
 
 A date in a query finds the memory notes dated that day: `12 жовтня`,
 `October 12`, `12.10`, `2026-10-12` (Ukrainian, Russian and English month
-names; `DD.MM` needs a two-digit month; without a year every year matches).
+names; `DD.MM` needs a two-digit day and month; without a year every year matches).
 Project pages are never matched by date.
 
 A note can retire an older one with `supersedes:` in its front matter (a list

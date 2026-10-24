@@ -1511,13 +1511,14 @@ fn search_output_marks_only_superseded_hits() {
 }
 
 fn journals() -> (tempfile::TempDir, Wiki) {
-    let j = |day: &str| {
+    // The day number appears nowhere in the note's text, only in its date.
+    let j = |day: &str, name: &str| {
         (
             format!(".agents/memory/journal/2026-10-{day}.md"),
-            format!("---\ntitle: Journal {day}\n---\n\nstand run notes\n"),
+            format!("---\ntitle: Journal {name}\n---\n\nstand run notes\n"),
         )
     };
-    let files = [j("05"), j("12"), j("19")];
+    let files = [j("05", "alpha"), j("12", "beta"), j("19", "gamma")];
     let mut refs: Vec<(&str, &str)> = files
         .iter()
         .map(|(a, b)| (a.as_str(), b.as_str()))
@@ -1568,4 +1569,36 @@ fn a_project_page_with_a_date_in_its_name_is_not_date_matched() {
         "---\ntitle: Spec\nupdated: 2026-10-12\n---\n\nplain\n",
     )]);
     assert!(w.search("12 жовтня", None, 10).is_empty());
+}
+
+#[test]
+fn a_date_lifts_only_the_notes_it_hits_and_a_missed_date_changes_nothing() {
+    let note = |name: &str, u: &str| {
+        (
+            format!(".agents/memory/{name}.md"),
+            format!("---\ntitle: {name}\nupdated: {u}\n---\n\nstand run\n"),
+        )
+    };
+    let files = [
+        note("alpha", "2026-10-12"),
+        note("beta", "2026-10-13"),
+        note("gamma", "2026-10-14"),
+    ];
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let (_d, w) = memory_fixture(&refs);
+    let scores = |q: &str| -> Vec<(String, f64)> {
+        w.search(q, None, 10)
+            .into_iter()
+            .map(|h| (h.id, h.score))
+            .collect()
+    };
+    let hit = scores("stand 12 жовтня");
+    assert_eq!(hit[0].0, "alpha");
+    assert!(hit[0].1 > hit[1].1);
+    assert!((hit[1].1 - hit[2].1).abs() < 1e-12);
+    // Dated 25 October: nothing; same scores as the non-date "250".
+    assert_eq!(scores("stand 25 жовтня"), scores("stand 250 жовтня"));
 }
