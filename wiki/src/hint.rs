@@ -1,7 +1,7 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
 use crate::model::KindFilter;
-use crate::query::{MemoryScope, SymbolLine, Wiki};
+use crate::query::{MemoryScope, SymbolLine, Wiki, MEMORY_BOOST};
 use std::collections::HashSet;
 
 /// Most symbol lines a hint prints.
@@ -15,12 +15,20 @@ pub const HINT_LINE_CHARS: usize = 160;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
 pub const HINT_PAGE_LINES: usize = 2;
+/// A prompt word of at least this many characters naming a note is enough
+/// for its memory line.
+const HINT_MEMORY_LONG: usize = 6;
+/// A shorter word (down to this length) also counts when the note's score is
+/// at least `HINT_MEMORY_RATIO` times the best code page's.
+const HINT_MEMORY_SHORT: usize = 4;
+const HINT_MEMORY_RATIO: f64 = 2.0;
 
 const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines:\n";
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
 /// `text`, then one `memory: path — summary` line for the best memory note
-/// whose title, alias or summary the text names; empty when neither exists.
+/// whose title, alias or summary the text names with a long word or clearly
+/// outscores the code; empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     let hits = wiki.search_scoped(
@@ -58,7 +66,12 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
             MemoryScope::Only,
         )
         .into_iter()
-        .find(|h| h.superseded_by.is_none() && wiki.names_page(&h.id, text));
+        .find(|h| {
+            h.superseded_by.is_none()
+                && (wiki.names_page(&h.id, text, HINT_MEMORY_LONG)
+                    || (h.score / MEMORY_BOOST >= HINT_MEMORY_RATIO * best
+                        && wiki.names_page(&h.id, text, HINT_MEMORY_SHORT)))
+        });
     if let Some(h) = note {
         let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
         push_line(

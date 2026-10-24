@@ -495,7 +495,9 @@ Memory pages rank above code (their score is multiplied by 4), pass the
 `code` and `docs` filters of `search`, and are found by the same tools as any
 page. When a prompt names a note in its title, an alias or its summary,
 `wiki hint` adds one `memory: <path> — <summary>` line to its code lines;
-only prompt words of four or more characters count toward that match.
+the line needs a prompt word of six or more characters in that match, or a
+word of four or five characters while the note scores at least twice the best
+code page (before the memory boost).
 
 A note can retire an older one with `supersedes:` in its front matter (a list
 of titles, aliases or ids, in `aliases:` syntax). The older note then gets no

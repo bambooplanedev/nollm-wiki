@@ -155,8 +155,8 @@ fn memory_line(out: &str) -> Option<&str> {
 fn hint_adds_one_memory_line_after_the_code_lines() {
     let tmp = project_with_memory();
     let dir = tmp.path().join(".wiki");
-    // Title word, alias word and summary word each gate the line in.
-    for prompt in ["vault", "keyring", "nightly"] {
+    // Title word, alias word and summary word (all 6+ characters) each gate the line in.
+    for prompt in ["rotation", "keyring", "nightly"] {
         let out = hint(&dir, &format!("{prompt} where are member creds loaded"));
         assert!(out.starts_with("Code locations"), "{out}");
         assert_eq!(out.matches("memory: ").count(), 1, "{out}");
@@ -247,4 +247,54 @@ fn hint_never_shows_a_superseded_note() {
         line.contains("vault2.md") && !line.contains("vault.md"),
         "{out}"
     );
+}
+
+/// A code page that says `cache` in every doc line, plus a note naming it once
+/// (`cache` is 5 characters, `keyring` 7).
+fn project_with_loud_code() -> TempDir {
+    let tmp = tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::create_dir_all(tmp.path().join(".agents/memory")).unwrap();
+    fs::write(
+        tmp.path().join("src/lib.rs"),
+        "/// Cache cache cache: the cache of cached cache entries.\npub fn cache_cache() {}\n\n/// Cache keyring keyring lookups.\npub fn cache_keyring() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        tmp.path().join(".agents/memory/n.md"),
+        "---\ntitle: Eviction notes\naliases: [keyring]\n---\n\nEntries live in the cache.\n",
+    )
+    .unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile"])
+        .arg(tmp.path())
+        .arg(tmp.path().join(".wiki"))
+        .assert()
+        .success();
+    tmp
+}
+
+#[test]
+fn hint_memory_line_skips_a_short_word_the_code_outscores() {
+    let tmp = project_with_loud_code();
+    let out = hint(&tmp.path().join(".wiki"), "cache");
+    assert!(out.contains("cache_cache"), "{out}");
+    assert!(memory_line(&out).is_none(), "{out}");
+}
+
+#[test]
+fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
+    let tmp = project_with_memory();
+    // `vault` (5 characters) hits the title; no code page mentions it.
+    let out = hint(&tmp.path().join(".wiki"), "vault");
+    assert!(memory_line(&out).is_some(), "{out}");
+}
+
+#[test]
+fn hint_memory_line_keeps_a_long_word_the_code_outscores() {
+    let tmp = project_with_loud_code();
+    let out = hint(&tmp.path().join(".wiki"), "cache keyring");
+    assert!(out.contains("cache_keyring"), "{out}");
+    assert!(memory_line(&out).is_some(), "{out}");
 }
