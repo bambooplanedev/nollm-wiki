@@ -50,6 +50,9 @@ enum Command {
         max_nodes: Option<usize>,
         #[arg(long)]
         full: bool,
+        /// Only neighbors of this kind: code, docs, text, markdown, or code:<lang>.
+        #[arg(long)]
+        kind: Option<String>,
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
@@ -193,13 +196,21 @@ fn main() -> Result<()> {
             max_tokens,
             max_nodes,
             full,
+            kind,
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
+            let kind = match kind.as_deref() {
+                None => None,
+                Some(s) => Some(KindFilter::parse(s).with_context(|| {
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
+                })?),
+            };
             let budget = PackBudget {
                 max_nodes,
                 max_tokens,
                 full_neighbors: full,
+                kind,
             };
             let rid = w
                 .resolve_id(&id)

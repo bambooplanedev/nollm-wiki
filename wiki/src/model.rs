@@ -212,6 +212,10 @@ pub fn is_test_path(rel_path: &str) -> bool {
 pub struct Edges {
     pub outgoing: BTreeSet<String>,
     pub incoming: BTreeSet<String>,
+    /// The import edges among `outgoing`: pages this page's imports name.
+    pub imports: BTreeSet<String>,
+    /// The import edges among `incoming`.
+    pub imported_by: BTreeSet<String>,
 }
 
 #[derive(Default, Clone, Debug)]

@@ -176,8 +176,11 @@ pub(crate) struct NeighborsParams {
     pub max_tokens: Option<usize>,
     /// Maximum pages in the pack (default no limit).
     pub max_nodes: Option<usize>,
-    /// Whole linked pages instead of one-line summaries.
+    /// Whole linked pages (outlines for code) instead of one-line summaries.
     pub full: Option<bool>,
+    /// Only linked pages of this kind: `code`, `docs`, or one kind such as
+    /// `code:rust` or `markdown`.
+    pub kind: Option<String>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
@@ -258,13 +261,26 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Show a page with the pages linked to it (imports, mentions) as one-line summaries, within a token budget. Use it to see what a module connects to."
+        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to; `kind: \"code\"` keeps it to code."
     )]
-    async fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
+    async fn neighbors(
+        &self,
+        Parameters(p): Parameters<NeighborsParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let kind = match p.kind.as_deref() {
+            None => None,
+            Some(s) => Some(KindFilter::parse(s).ok_or_else(|| {
+                McpError::invalid_params(
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED),
+                    None,
+                )
+            })?),
+        };
         let budget = PackBudget {
             max_tokens: Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             max_nodes: p.max_nodes,
             full_neighbors: p.full.unwrap_or(false),
+            kind,
         };
         let (wiki, stale) = self.state.snapshot().await;
         let result = match wiki.resolve_id(&p.id) {
@@ -278,7 +294,7 @@ impl WikiServer {
                 crate::query::unknown_page(&p.id, &near),
             )]),
         };
-        with_stale(result, stale.as_deref())
+        Ok(with_stale(result, stale.as_deref()))
     }
 
     #[tool(

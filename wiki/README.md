@@ -67,7 +67,7 @@ $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --
 ## Related
 - [[learning_rate_schedule|Learning Rate Schedule]]
 
-## Referenced By
+## Mentioned in
 - [[layer_normalization|Layer Normalization]]
 - [[learning_rate_schedule|Learning Rate Schedule]]
 
@@ -212,9 +212,10 @@ wiki neighbors [OPTIONS] <ID>
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a title, or a source path or unique path suffix (e.g. `query.rs`). It resolves like `page`, so an absolute path under the compiled directory works too. If nothing matches, the error lists the closest ids.
 
 - `--depth <N>` (`1`) — BFS hop count from `<ID>`.
-- `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). If the target page alone exceeds it, the target degrades to a title + summary block pointing at the full page.
+- `--max-tokens <N>` (none — unbounded) — hard ceiling on the pack's estimated size (chars/4). A code target is its outline, cut to fit; another target that alone exceeds it degrades to a title + summary block pointing at the full page.
 - `--max-nodes <N>` (none — unbounded) — node-count budget for the returned context pack.
-- `--full` (off) — include full neighbor page bodies instead of one-line summaries.
+- `--full` (off) — include whole neighbor outlines (code) and page bodies (other pages) instead of one-line summaries. Without it, the modules the target imports or is imported by come first, as outlines when they fit.
+- `--kind <KIND>` (none) — only neighbors of this kind, with the values of `search --kind`.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
 ### `page`
@@ -397,6 +398,9 @@ source tree. Four artifacts drive that:
   no exported item), `degree_in`, `degree_out`, `pagerank`, `token_estimate`,
   `neighbors_out`, `neighbors_in` (edge targets and sources; what makes an
   edge is described under [Limitations & roadmap](#limitations--roadmap)),
+  `imports_out`, `imports_in` (the import edges among them; a page's
+  `## Imported by` section lists `imports_in`, `## Mentioned in` the rest of
+  `neighbors_in`),
   `defined` (the page's top-level definition names —
   functions, types, constants — in original case; empty for non-code pages),
   `methods` (the page's inherent-impl and trait-declaration method names, in

@@ -306,18 +306,21 @@ pub fn render_page(
         out.push('\n');
     }
 
-    // Referenced By (omit if empty)
-    let refby: Vec<String> = edges
-        .incoming
-        .iter()
-        .filter_map(|id| link_name(id, entities))
-        .collect();
-    if !refby.is_empty() {
-        out.push_str("## Referenced By\n");
-        for l in &refby {
-            out.push_str(&format!("- {l}\n"));
+    // Incoming edges, importers apart from the rest (each omitted if empty)
+    for (heading, imported) in [("Imported by", true), ("Mentioned in", false)] {
+        let refby: Vec<String> = edges
+            .incoming
+            .iter()
+            .filter(|id| edges.imported_by.contains(*id) == imported)
+            .filter_map(|id| link_name(id, entities))
+            .collect();
+        if !refby.is_empty() {
+            out.push_str(&format!("## {heading}\n"));
+            for l in &refby {
+                out.push_str(&format!("- {l}\n"));
+            }
+            out.push('\n');
         }
-        out.push('\n');
     }
 
     // Code-only sections
@@ -371,6 +374,7 @@ pub(crate) fn render_fingerprint(
     };
     let out_names = names_of(&edges.outgoing);
     let in_names = names_of(&edges.incoming);
+    let importer_names = names_of(&edges.imported_by);
     combine(&[
         entity.name.as_bytes(),
         entity.created.as_bytes(),
@@ -383,6 +387,7 @@ pub(crate) fn render_fingerprint(
         entity.imports.join(",").as_bytes(),
         out_names.join(",").as_bytes(),
         in_names.join(",").as_bytes(),
+        importer_names.join(",").as_bytes(),
         preserved_notes.trim().as_bytes(),
         entity.summary.as_deref().unwrap_or("").as_bytes(),
     ])
@@ -498,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn related_and_referenced_by_rendered() {
+    fn related_and_mentioned_in_rendered() {
         let ents = map(vec![
             ent("alpha", "Alpha", "mentions Beta"),
             ent("beta", "Beta", "nothing"),
@@ -507,8 +512,30 @@ mod tests {
         let a = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
         let b = render_page(&ents["beta"], &g.edges["beta"], &ents, "");
         assert!(a.contains("## Related") && a.contains("[[beta|Beta]]"));
-        assert!(b.contains("## Referenced By") && b.contains("[[alpha|Alpha]]"));
+        assert!(b.contains("## Mentioned in") && b.contains("[[alpha|Alpha]]"));
         assert!(a.contains("generated"));
+    }
+
+    #[test]
+    fn importers_and_mentions_render_apart() {
+        let mut text = ent("text", "Text", "");
+        text.source_path = "pkg/text.py".into();
+        text.kind = SourceKind::Code {
+            lang: "python".into(),
+        };
+        let mut consumer = ent("consumer", "Consumer", "");
+        consumer.source_path = "pkg/consumer.py".into();
+        consumer.kind = text.kind.clone();
+        consumer.imports = vec![".text".into()];
+        let ents = map(vec![text, consumer, ent("notes", "Notes", "see `text.py`")]);
+        let g = build_graph(&ents);
+        let page = render_page(&ents["text"], &g.edges["text"], &ents, "");
+        assert!(
+            page.contains(
+                "## Imported by\n- [[consumer|Consumer]]\n\n## Mentioned in\n- [[notes|Notes]]\n"
+            ),
+            "{page}"
+        );
     }
 
     #[test]

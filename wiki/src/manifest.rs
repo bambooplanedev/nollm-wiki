@@ -20,6 +20,10 @@ pub struct ManifestEntry {
     pub token_estimate: usize,
     pub neighbors_out: Vec<String>,
     pub neighbors_in: Vec<String>,
+    /// The import edges among `neighbors_out` (see `Edges::imports`).
+    pub imports_out: Vec<String>,
+    /// The import edges among `neighbors_in`.
+    pub imports_in: Vec<String>,
     /// Top-level definition names of the page (see `Entity::defined`).
     pub defined: Vec<String>,
     /// Method names of the page (see `Entity::methods`). Declared last so
@@ -57,6 +61,12 @@ pub fn build_manifest(
             let inc: Vec<String> = edges
                 .map(|x| x.incoming.iter().cloned().collect())
                 .unwrap_or_default();
+            let imports_out: Vec<String> = edges
+                .map(|x| x.imports.iter().cloned().collect())
+                .unwrap_or_default();
+            let imports_in: Vec<String> = edges
+                .map(|x| x.imported_by.iter().cloned().collect())
+                .unwrap_or_default();
             ManifestEntry {
                 id: id.clone(),
                 title: e.name.clone(),
@@ -72,6 +82,8 @@ pub fn build_manifest(
                 token_estimate: token_estimate(&e.body),
                 neighbors_out: out,
                 neighbors_in: inc,
+                imports_out,
+                imports_in,
                 defined: e.defined.clone(),
                 methods: e.methods.clone(),
             }
@@ -162,7 +174,7 @@ tree first — start here.\n\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
 - Code symbols with their line ranges: `items.json` (keyed by page id).\n\
 - A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
-- Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Referenced By / Body sections.\n\
+- Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Imported by / Mentioned in / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
 }

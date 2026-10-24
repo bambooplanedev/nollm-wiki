@@ -26,6 +26,12 @@ pub(crate) struct Entry {
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
     pub(crate) neighbors_in: Vec<String>,
+    /// The import edges among `neighbors_out` and `neighbors_in`. Defaulted
+    /// like `defined`: an older `index.json` has no such keys.
+    #[serde(default)]
+    pub(crate) imports_out: Vec<String>,
+    #[serde(default)]
+    pub(crate) imports_in: Vec<String>,
     /// Top-level definition names (`ManifestEntry::defined`), minus those
     /// only test items carry (dropped in `Wiki::load`). Defaulted so
     /// an `index.json` written by a compiler older than this field still
@@ -134,6 +140,8 @@ pub struct PackBudget {
     pub max_nodes: Option<usize>,
     pub max_tokens: Option<usize>,
     pub full_neighbors: bool,
+    /// Only neighbors of this kind; the target is always shown.
+    pub kind: Option<KindFilter>,
 }
 
 pub struct ContextPack {
@@ -271,7 +279,16 @@ impl Wiki {
     /// exact match excludes the generated sections and nothing else. A
     /// case-insensitive match would also hide an author's own `## notes` or
     /// `## NOTES` section (2026-09-02 audit, findings-log item 37).
-    const CHROME_SECTIONS: [&'static str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
+    /// `Referenced By` is what `Imported by` and `Mentioned in` replaced: a
+    /// served wiki may be older than the compiler.
+    const CHROME_SECTIONS: [&'static str; 6] = [
+        "Metadata",
+        "Related",
+        "Imported by",
+        "Mentioned in",
+        "Referenced By",
+        "Notes",
+    ];
 
     /// Generated content headings excluded from the `heading` field: they
     /// sit on nearly every page and say nothing about it. Measured on the
@@ -1057,38 +1074,72 @@ impl Wiki {
             .collect())
     }
 
+    /// Whether page `id` is a code page.
+    fn is_code(&self, id: &str) -> bool {
+        self.entries
+            .get(id)
+            .and_then(|e| SourceKind::parse(&e.kind))
+            .is_some_and(|k| KindFilter::Code.matches(&k))
+    }
+
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
     /// context pack: target first, neighbors ordered ascending by pagerank
     /// (highest-centrality lands last — "lost in the middle").
     ///
     /// `max_tokens` is a hard ceiling on the estimated size of the returned
     /// pack text (`manifest::token_estimate`, chars/4): every block is
-    /// charged at the size of the text actually emitted. When the target's
-    /// full page alone would blow the ceiling, it degrades to a summary
+    /// charged at the size of the text actually emitted. A code target is
+    /// its outline, cut to the budget. Another target is its full page;
+    /// when that alone would blow the ceiling, it degrades to a summary
     /// block (title + summary + a pointer at `wiki://page/<id>`) so the
-    /// neighborhood still fits. The one floor exception: the degraded block
-    /// is always emitted, even when a pathologically small budget cannot
-    /// contain it — a neighbors call always says something about the target.
+    /// neighborhood still fits. The one floor exception: the outline's
+    /// header or the degraded block is always emitted, even when a
+    /// pathologically small budget cannot contain it — a neighbors call
+    /// always says something about the target.
     ///
-    /// Neighbor selection walks candidates in descending centrality and
-    /// keeps whichever fit the remaining budget (skip, not break), so the
-    /// kept set is the highest-centrality set the greedy can admit —
+    /// Neighbor selection walks the target's import neighbors (either
+    /// direction) first, then the rest, each group in descending centrality,
+    /// and keeps whichever fit the remaining budget (skip, not break), so
+    /// the kept set is the highest-centrality set the greedy can admit —
     /// deliberately NOT a maximum-cardinality fill. A heavier high-
     /// centrality neighbor beats several lighter lower-centrality ones; see
     /// `full_neighbors_max_tokens_prefers_centrality_over_packing`.
-    /// Neighbors get summary blocks unless `full_neighbors` is set.
+    /// An import neighbor is its whole outline when that fits, else a
+    /// summary block like every other neighbor. With `full_neighbors`,
+    /// every neighbor is its whole outline (code) or full page (other).
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
         let seen = self.bfs_neighborhood(id, depth);
+        let imports: BTreeSet<&str> = target
+            .imports_out
+            .iter()
+            .chain(&target.imports_in)
+            .map(String::as_str)
+            .collect();
 
-        // Candidates (excluding target), descending by pagerank, so every
-        // budget below always considers the highest-centrality neighbor
+        // Candidates (excluding target, of `kind` when given): import
+        // neighbors first, then descending by pagerank, so every budget
+        // below always considers them, and the highest-centrality neighbor,
         // first.
-        let mut candidates: Vec<String> = seen.iter().filter(|n| *n != id).cloned().collect();
+        let mut candidates: Vec<String> = seen
+            .iter()
+            .filter(|n| *n != id)
+            .filter(|n| {
+                budget.kind.as_ref().is_none_or(|k| {
+                    self.entries
+                        .get(*n)
+                        .and_then(|e| SourceKind::parse(&e.kind))
+                        .is_some_and(|sk| k.matches(&sk))
+                })
+            })
+            .cloned()
+            .collect();
         candidates.sort_by(|a, b| {
-            self.pagerank_of(b)
-                .total_cmp(&self.pagerank_of(a))
+            imports
+                .contains(b.as_str())
+                .cmp(&imports.contains(a.as_str()))
+                .then_with(|| self.pagerank_of(b).total_cmp(&self.pagerank_of(a)))
                 .then_with(|| a.cmp(b))
         });
 
@@ -1111,13 +1162,18 @@ impl Wiki {
             None => true,
         };
 
-        // Target block: the full page, degraded to a summary block when
-        // the full page (plus separator) alone would blow the ceiling.
+        // Target block: a code page's outline, cut so that it and the
+        // separator fit (the separator's 7 chars cost at most 2 tokens on
+        // top of the outline's own count). Another page in full, degraded
+        // to a summary block when it (plus separator) alone would blow the
+        // ceiling.
         let full_target = self
             .page(id)
             .unwrap_or_else(|| format!("# {}\n", target.title));
         let sep_chars = Self::SEPARATOR.chars().count();
-        let target_block = if fits(full_target.chars().count() + sep_chars) {
+        let target_block = if self.is_code(id) {
+            self.outline(id, budget.max_tokens.map(|m| m.saturating_sub(2)))?
+        } else if fits(full_target.chars().count() + sep_chars) {
             full_target
         } else {
             format!(
@@ -1130,22 +1186,35 @@ impl Wiki {
         // Floor: the target block is charged but never dropped.
         let mut chars_used = target_block.chars().count() + sep_chars;
 
-        // Admit neighbors in descending centrality, each charged at the
-        // size of the block actually emitted (summary line or full page).
+        // Admit neighbors in candidate order, each charged at the size of
+        // the block actually emitted (outline, summary line or full page).
         let mut kept: Vec<(String, String)> = Vec::new();
         for nid in candidates {
             let Some(e) = self.entries.get(&nid) else {
                 continue;
             };
-            let block = if budget.full_neighbors {
-                self.page(&nid).unwrap_or_default()
-            } else {
+            let summary = || {
                 format!(
                     "## {} ({})\n{}\n\n",
                     e.title,
                     nid,
                     e.summary.as_deref().unwrap_or("(no summary)")
                 )
+            };
+            let outline = || self.outline(&nid, None).map(|o| o + "\n");
+            let block = if budget.full_neighbors {
+                if self.is_code(&nid) {
+                    outline()
+                } else {
+                    self.page(&nid)
+                }
+                .unwrap_or_default()
+            } else if imports.contains(nid.as_str()) {
+                outline()
+                    .filter(|o| fits(chars_used + o.chars().count()))
+                    .unwrap_or_else(summary)
+            } else {
+                summary()
             };
             let cost = block.chars().count();
             if !fits(chars_used + cost) {

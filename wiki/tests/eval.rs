@@ -84,7 +84,14 @@ fn corpus_compiles_to_the_expected_pages() {
 /// against the text search actually reads, not the whole rendered page.
 /// (Scanning the rendered page instead makes `source_hash:` in the Metadata
 /// block put the token `hash` on every page.)
-const CHROME_SECTIONS: [&str; 4] = ["Metadata", "Related", "Referenced By", "Notes"];
+const CHROME_SECTIONS: [&str; 6] = [
+    "Metadata",
+    "Related",
+    "Imported by",
+    "Mentioned in",
+    "Referenced By",
+    "Notes",
+];
 
 /// Minimum token length the label guard considers. Without it, `on` and
 /// `line` — which occur in 16 and 15 of the 17 corpus pages — let any label
@@ -393,8 +400,10 @@ fn pack_ceiling_holds_on_a_real_graph() {
             // today that always coincides with the degraded block alone
             // exceeding the budget, but that coincidence is what this checks
             // for, not the condition itself.
-            let is_floor =
-                pack.included.len() == 1 && pack.text.contains(wiki::query::OVER_BUDGET_NOTE);
+            // A code target's floor is its cut outline's header and `…` line.
+            let is_floor = pack.included.len() == 1
+                && (pack.text.contains(wiki::query::OVER_BUDGET_NOTE)
+                    || pack.text.contains("— pass max_tokens:"));
             if is_floor {
                 floor_fires += 1;
             }
@@ -413,9 +422,11 @@ fn pack_ceiling_holds_on_a_real_graph() {
     // ceiling trivially satisfiable — is visible rather than silent. 8 since
     // mention edges into code pages must be code-shaped and imports resolve
     // by module segment (2026-09-05): one more target has no admissible
-    // neighbours, so its degraded block stands alone.
+    // neighbours, so its degraded block stands alone. 30 since a code
+    // target is its outline (2026-10-24): at the small budgets a cut
+    // outline's header and `…` line stand alone too.
     assert_eq!(
-        floor_fires, 8,
+        floor_fires, 30,
         "floor exception fired an unexpected number of times"
     );
 }

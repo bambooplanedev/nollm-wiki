@@ -66,6 +66,6 @@ class Stopwords: file_hit@3=4/4 symbol_hit@3=4/4
 class MethodSplit: file_hit@3=18/18 symbol_hit@3=18/18
 class V7: file_hit@3=6/6 symbol_hit@3=6/6
 class TestTarget: file_hit@3=3/3 symbol_hit@3=3/3
-neighbors code.rs: tokens=648 target_degraded=true
+neighbors code.rs: tokens=3998 target_degraded=false
 page outline code.rs: tokens=2433 cut=none
 title_as_query: 28/28

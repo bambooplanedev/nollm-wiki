@@ -1,4 +1,4 @@
-//! Link graph: mention edges (code-shaped when the target is a code page), import edges, markdown-link edges, orphan detection, and `PageRank` centrality with damping.
+//! Link graph: mention edges (code-shaped when the target is a code page), import edges (also kept apart), markdown-link edges, orphan detection, and `PageRank` centrality with damping.
 
 use crate::formats::code::module_stem;
 use crate::model::{Edges, Entity, Graph, SourceKind};
@@ -207,9 +207,17 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         );
         // Import edges: every segment of an import string that names a code
         // page's module stem or one of its defined items (see `ImportResolver`).
-        for imp in &ent.imports {
-            targets.extend(resolver.resolve(imp).into_iter().filter(|tid| tid != eid));
+        let imports: BTreeSet<String> = ent
+            .imports
+            .iter()
+            .flat_map(|imp| resolver.resolve(imp))
+            .filter(|tid| tid != eid)
+            .collect();
+        for tid in &imports {
+            edges.get_mut(eid).unwrap().imports.insert(tid.clone());
+            edges.get_mut(tid).unwrap().imported_by.insert(eid.clone());
         }
+        targets.extend(imports);
         for tid in targets {
             edges.get_mut(eid).unwrap().outgoing.insert(tid.clone());
             edges.get_mut(&tid).unwrap().incoming.insert(eid.clone());
@@ -752,6 +760,21 @@ mod tests {
             "src/ path wins the shared stem `query`; struct names resolve through `defined`; \
              rmcp/std/serde roots resolve nothing; the README is never an import target"
         );
+    }
+
+    #[test]
+    fn import_edges_are_kept_apart_from_mentions() {
+        let text = code("text", "Text", "pkg/text.py", "");
+        let mut consumer = code("consumer", "Consumer", "pkg/consumer.py", "");
+        consumer.imports = vec![".text".into()];
+        let notes = ent("notes", "Notes", "see `text.py`");
+        let g = build_graph(&map(vec![text, consumer, notes]));
+        assert_eq!(g.edges["consumer"].imports, g.edges["consumer"].outgoing);
+        assert!(g.edges["notes"].outgoing.contains("text"));
+        assert!(g.edges["notes"].imports.is_empty());
+        let t = &g.edges["text"];
+        assert_eq!(t.incoming.len(), 2);
+        assert_eq!(t.imported_by.iter().collect::<Vec<_>>(), ["consumer"]);
     }
 
     #[test]
