@@ -2,7 +2,7 @@
 
 pub mod edit;
 
-use crate::{compile, CompileOptions, WikiError};
+use crate::{compile, memory, CompileOptions, WikiError};
 use clap::ValueEnum;
 use edit::Outcome;
 use serde_json::{json, Value};
@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SKILL: &str = include_str!("SKILL.md");
+const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/wiki-navigation";
 const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
@@ -263,10 +263,42 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
+    let local_memory = memory::local_dir(root);
+    // The folder the skill names; a local scope without one (no git) falls back to the repo folder.
+    let memory_dir = match (&local_memory, local) {
+        (Some(d), true) => memory::display_path(d),
+        _ => memory::REPO_DIR.to_string(),
+    };
+    let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", &memory_dir);
+    let skill_text = skill_text.as_str();
     if !opts.remove {
+        let folder = match (&local_memory, local) {
+            (Some(d), true) => Some(d.clone()),
+            (None, true) => {
+                r.line("local memory needs a git repo with git on PATH; no memory folder created")?;
+                None
+            }
+            _ => Some(root.join(memory::REPO_DIR)),
+        };
+        if let Some(d) = folder {
+            let what = format!("memory folder {}", memory::display_path(&d));
+            let existed = d.is_dir();
+            std::fs::create_dir_all(&d)?;
+            let o = if existed {
+                Outcome::AlreadyThere
+            } else {
+                Outcome::Done
+            };
+            r.item(&what, false, Ok(o))?;
+        }
         let wiki = root.join(".wiki");
         let c = CompileOptions {
             incremental: true,
+            // Repo-scope notes are found by the compile itself; the local folder is external.
+            memory: local_memory
+                .as_ref()
+                .filter(|d| local || d.is_dir())
+                .and_then(|d| memory::resolve(d).ok()),
             ..CompileOptions::default()
         };
         let res = compile(root, &wiki, &c)?;
@@ -318,9 +350,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         let file = skill.join("SKILL.md");
         let res = || {
             if opts.remove {
-                edit::remove_file(root, &root.join(&file), SKILL)
+                edit::remove_file(root, &root.join(&file), skill_text)
             } else {
-                edit::write_file(&root.join(&file), SKILL)
+                edit::write_file(&root.join(&file), skill_text)
             }
         };
         let what = format!("{} skill for {name}", file.display());

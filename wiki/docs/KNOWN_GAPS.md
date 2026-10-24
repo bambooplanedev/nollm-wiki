@@ -149,3 +149,20 @@ per question is noise-level: treat single results as anecdotes.
 - Agents: Claude Code and pi only.
 - Local scope skips (exit 1) a file git already tracks.
 - `--remove` leaves `.wiki/` and the ignore lines in place.
+
+## Agent memory
+
+- A local memory folder created or recreated after `serve --source` started is
+  not watched until the server restarts; a note added to a folder it already
+  watches is picked up.
+- A plain `wiki compile . .wiki` drops local memory pages until the server
+  recompiles, so `wiki hint` loses the memory line meanwhile.
+- Windows paths (data dir, `\\?\` prefix, `C:/` page paths) are covered by unit
+  tests only; CI is Linux.
+- The local key is the root commit, so a worktree checked out on an orphan
+  branch gets a different, empty local memory; a shallow clone or a repo
+  without commits keys on its git dir and is not shared with re-clones.
+- Forks of one project share local memory (same root commit).
+- Setup's exact-match contract: a skill text from an older release (before the
+  Memory section) is reported as foreign and left alone; delete it and re-run.
+- Local memory is not backed up and a local-scope skill names a machine path.

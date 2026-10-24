@@ -15,3 +15,14 @@ description: Find where something is or how it works in this project's code. Use
    function that one calls, with its lines.
 4. Only if search finds nothing relevant, try other words (a name, an
    abbreviation), then fall back to grep.
+
+# Memory
+
+Notes about this project live in `<memory-dir>`; `search` finds them before
+code.
+
+- Write one note per fact or topic, named for what it says.
+- A note not written in English needs English `aliases:` in its front matter
+  (search words are English).
+- A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
+- Search first; update the note that exists instead of adding a copy.

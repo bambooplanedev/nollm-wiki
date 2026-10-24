@@ -182,7 +182,10 @@ fn main() -> Result<()> {
         } => {
             let memory = match memory.as_deref() {
                 None => None,
-                Some("local") => wiki::memory::local_dir(&input),
+                Some("local") => wiki::memory::local_dir(&input)
+                    .map(|d| wiki::memory::resolve(&d))
+                    .transpose()
+                    .context("resolve local memory")?,
                 Some(dir) => Some(
                     wiki::memory::resolve(std::path::Path::new(dir)).context("resolve --memory")?,
                 ),

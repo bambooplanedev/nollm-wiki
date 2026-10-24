@@ -469,21 +469,48 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ## Using the wiki as agent memory
 
 An agent can keep its notes as markdown files in a folder the wiki compiles,
-then `search` them before it writes. Put these rules in the agent's
-instructions file:
+then `search` them before it writes. `wiki setup` creates the folder and tells
+the agent about it in the skill it writes:
+
+- **Repo scope** (`--scope repo`): `.agents/memory/` in the project. It is
+  committed, so everyone with the repo sees the notes. `wiki compile` always
+  includes it.
+- **Local scope** (`--scope local`): a folder outside the checkout, in the
+  per-user data dir: `%LOCALAPPDATA%\wiki\memory\<key>` on Windows,
+  `~/Library/Application Support/wiki/memory/<key>` on macOS,
+  `$XDG_DATA_HOME` (else `~/.local/share`)`/wiki/memory/<key>` elsewhere.
+  `<key>` is the repo's root commit, so every worktree and clone of one repo
+  shares it. Nothing backs it up, and it survives `git clean`. A directory
+  that is not a git repo has no local memory.
+
+`serve --source` and `wiki setup` include the local folder automatically. A
+plain `wiki compile . out` does not (so a published site never carries private
+notes); pass `--memory local` for it, or `--memory DIR` for any folder. A plain
+`wiki compile . .wiki` therefore drops local memory from `.wiki` until the
+server recompiles, and `wiki hint` reads `.wiki`. `wiki setup --remove` never
+deletes notes.
+
+Memory pages rank above code (their score is multiplied by 4), pass the
+`code` and `docs` filters of `search`, and are found by the same tools as any
+page. When a prompt names a note in its title, an alias or its summary,
+`wiki hint` adds one `memory: <path> — <summary>` line to its code lines.
+
+The skill carries these rules; copy them into the agent's instructions file
+if it has no skill:
 
 ```
-Memory notes live in <folder>, one markdown file per fact or topic.
+Memory notes live in <folder> (.agents/memory, or the local folder setup named), one markdown file per fact or topic.
 - Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
 - Name the file for what it says. The title is the front-matter `title:`,
   else the first `# heading`, else the file name; any script works.
+- A note not written in English needs English `aliases:`: agents search in English.
 - Front matter, all optional: `title:`, `description:` (one line, the search
   summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
-  ignored). A
-  journal note can instead be named `YYYY-MM-DD.md`.
+  ignored).
+- A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
 - Mention a related note by its exact title or alias, or as `[[title]]`.
 - Search before writing. Update the note that exists instead of adding a copy.
-- An index file such as `MEMORY.md` is fine; it shows as an orphan.
+- `MEMORY.md` is optional and is not searched.
 ```
 
 Cyrillic query words are stemmed, so another grammatical form of a word still

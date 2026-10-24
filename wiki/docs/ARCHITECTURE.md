@@ -30,7 +30,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    unhandled file is never read into memory. `compile_inner` then filters out anything
    under `output` (`is_under`, so a nested output dir can't feed its own
    generated pages back in as sources) before extraction runs. Produces
-   `Vec<SourceFile>`.
+   `Vec<SourceFile>`. Memory folders (`.agents/memory` in the input, plus
+   `CompileOptions.memory`) are walked separately by `walk::walk_memory`:
+   ignore rules off, hidden files and `MEMORY.md` skipped, markdown and text
+   only; their pages carry `memory: true` and, for an external folder,
+   absolute `/` paths.
 2. **Extract** (`formats::Registry`, in parallel via `rayon`) — dispatches
    each file to the `Extractor` registered for its extension and produces an
    `Entity`. Because the input `Vec` was already sorted, `.collect()`ing the
@@ -144,6 +148,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
+| `src/memory.rs` | Where agent memory lives: `REPO_DIR`, the per-user data dir per OS (`data_dir_for`, env-driven), the repo key (`repo_key`: smallest root commit, else a hash of the git common dir), `local_dir`, `resolve` and `display_path` for stable external paths. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering; produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
@@ -171,7 +176,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound). |
 | `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search, pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `HINT_LINE_CHARS`; empty when nothing matches. `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki`, then per agent (Claude Code, pi) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, or `claude mcp add-json … --scope local`), the `wiki-navigation` skill and the ignore lines; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
+| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki`, creates the memory folder for the scope, then per agent (Claude Code, pi) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, or `claude mcp add-json … --scope local`), the `wiki-navigation` skill (its Memory section rendered with the folder) and the ignore lines; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
