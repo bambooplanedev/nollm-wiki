@@ -1,4 +1,4 @@
-//! Wiki health checks (`wiki lint`, MCP `lint` tool): broken wikilinks and orphan pages over a compiled output directory.
+//! Wiki health checks (`wiki lint`, MCP `lint` tool): broken wikilinks, orphan pages and pages too large for a default `neighbors` pack over a compiled output directory.
 
 use crate::model::{slugify, LintReport};
 use crate::query::Wiki;

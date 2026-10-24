@@ -38,9 +38,11 @@ per question is noise-level: treat single results as anecdotes.
 
 ## Search
 
-- **Vocabulary is literal.** No stemming or synonyms: "credentials" does
-  not find `creds`, "decision" does not find `decide`. Doc text helps only
-  when the comment uses the user's word.
+- **Vocabulary is literal.** No synonyms: "credentials" does not find
+  `creds`. Cyrillic query words are stemmed by a fixed ending list, on the
+  query side only, so a stem can also hit an unrelated word that shares it.
+  English and other Latin-script words are not stemmed: "decision" does not
+  find `decide`. Doc text helps only when the comment uses the user's word.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
@@ -116,6 +118,15 @@ per question is noise-level: treat single results as anecdotes.
 - The outline header carries the page summary uncapped (a 5 KB summary
   was seen on one pathological doc).
 - `page` on an entry without a body says "unknown page".
+
+## Notes and ids
+
+- **Transliterated ids can be long.** A Cyrillic title becomes a Latin id
+  with no length cap yet.
+- **A date comes only from front matter or a dated file name.** Never from
+  git or mtime, so a note without either shows no `updated`.
+- **`large` measures the compiled page** against the default 4000-token
+  `neighbors` budget, not the source file's size.
 
 ## `serve --source` and `--watch`
 

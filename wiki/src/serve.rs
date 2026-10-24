@@ -433,7 +433,8 @@ impl ServerHandler for WikiServer {
 }
 
 /// Render search hits as the JSON array `search` returns with
-/// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`.
+/// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`;
+/// `updated` is present only when the page has a date.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()

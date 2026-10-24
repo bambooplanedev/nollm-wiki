@@ -59,7 +59,6 @@ $ ./target/release/wiki neighbors gradient_descent --depth 1 --max-tokens 800 --
 
 ## Metadata
 - created: 2026-01-10
-- updated: 2026-01-12
 - aliases: gradient_descent, gradient_descent_notes
 - kind: text
 - source: gradient_descent.txt
@@ -282,11 +281,11 @@ wiki lint [OPTIONS]
 Prints the counts, then one `  broken: <page> -> "<link>"`, `  orphan: <id>` or
 `  large: <id> (<n> tokens)` line per offender. A page is large when it is over
 4000 tokens with the pack separator, so `neighbors` would degrade it to a
-summary; code pages are not checked. `[[links]]` inside fenced blocks or inline code are not
-counted, and the `## Body` of a code page is skipped entirely: it is verbatim
-source, where a wikilink is a string literal or a comment, not a link. Exits
-1 when any broken link is found, so `lint` can gate a build; orphans alone
-exit 0.
+summary; code pages are not checked. `[[links]]` inside fenced blocks or
+inline code are not counted, and the `## Body` of a code page is skipped
+entirely: it is verbatim source, where a wikilink is a string literal or a
+comment, not a link. Exits 1 when any broken link is found, so `lint` can
+gate a build; orphans alone exit 0.
 
 ### `serve`
 
@@ -463,6 +462,30 @@ Layer Normalization builds directly on the ideas behind Gradient Descent.
 ## Learning Rate Schedule (learning_rate_schedule)
 Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ```
+
+## Using the wiki as agent memory
+
+An agent can keep its notes as markdown files in a folder the wiki compiles,
+then `search` them before it writes. Put these rules in the agent's
+instructions file:
+
+```
+Memory notes live in <folder>, one markdown file per fact or topic.
+- Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
+- Name the file for what it says. The name becomes the title unless front
+  matter sets one; any script works.
+- Front matter, all optional: `title:`, `description:` (one line, the search
+  summary), `aliases:`, `tags:`, `updated:` (date of the last change). A
+  journal note can instead be named `YYYY-MM-DD.md`.
+- Mention a related note by its exact title or alias, or as `[[title]]`.
+- Search before writing. Update the note that exists instead of adding a copy.
+- An index file such as `MEMORY.md` is fine; it shows as an orphan.
+```
+
+Cyrillic query words are stemmed, so another grammatical form of a word still
+matches, and a Cyrillic title gets a transliterated id (`Морський маяк`
+becomes `morskyi_maiak`). See [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md)
+for the limits.
 
 ## MCP server
 
