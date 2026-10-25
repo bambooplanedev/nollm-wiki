@@ -1,7 +1,7 @@
 # Architecture
 
 Internals of the `wiki` compiler, for contributors. For install/usage see
-[`../README.md`](../README.md).
+[`../../README.md`](../../README.md).
 
 ## Pipeline overview
 
