@@ -7,7 +7,7 @@
 //! token budget shrinks it.
 
 use crate::manifest::token_estimate;
-use crate::model::{CodeItem, SourceKind};
+use crate::model::{one_line, CodeItem, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
 
@@ -261,11 +261,6 @@ fn heading(line: &str) -> Option<(usize, String)> {
     let level = line.len() - text.len();
     let spaced = text.is_empty() || text.starts_with([' ', '\t']);
     ((1..=6).contains(&level) && spaced).then(|| (level, text.trim().to_string()))
-}
-
-/// `s` with every whitespace run, newlines included, collapsed to one space.
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The outline text with only what `keep` keeps; ends with a newline.

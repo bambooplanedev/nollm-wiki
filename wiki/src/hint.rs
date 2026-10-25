@@ -1,6 +1,6 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
-use crate::model::KindFilter;
+use crate::model::{one_line, KindFilter};
 use crate::query::{MemoryScope, SymbolLine, Wiki, MEMORY_BOOST};
 use std::collections::HashSet;
 
@@ -89,7 +89,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
 
 /// Append `line` whitespace-collapsed and cut to `HINT_LINE_CHARS`.
 fn push_line(out: &mut String, line: &str) {
-    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    let line = one_line(line);
     if line.chars().count() > HINT_LINE_CHARS {
         out.extend(line.chars().take(HINT_LINE_CHARS - 1));
         out.push('…');

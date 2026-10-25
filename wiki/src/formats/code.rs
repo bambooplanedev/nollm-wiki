@@ -2,7 +2,8 @@
 
 use crate::formats::{summarize, Extractor};
 use crate::model::{
-    slugify, title_case, CallSite, CallVia, CodeItem, CodeItemKind, Entity, SourceKind,
+    basename, one_line, slugify, title_from_slug, CallSite, CallVia, CodeItem, CodeItemKind,
+    Entity, SourceKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -290,7 +291,7 @@ fn shape_for(ext: &str) -> fn(Node) -> Shape {
 /// used to recompute the extension without lowercasing, so `Book.H` reached
 /// this extractor and then fell through `lang_for_ext` to zero symbols.
 pub(crate) fn ext_of(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = basename(rel_path);
     match base.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => ext.to_lowercase(),
         _ => String::new(),
@@ -1102,7 +1103,7 @@ const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
 /// An item's whole raw doc on one line, capped at `ITEM_DOC_TEXT_MAX_CHARS`
 /// (the `…` included); `None` when it is just `doc`.
 fn item_doc_text(raw: &str, doc: Option<&str>) -> Option<String> {
-    let mut text = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut text = one_line(raw);
     if text.chars().count() > ITEM_DOC_TEXT_MAX_CHARS {
         text = text.chars().take(ITEM_DOC_TEXT_MAX_CHARS - 1).collect();
         text.push('…');
@@ -1789,7 +1790,7 @@ const DIRECTORY_MODULES: &[(&str, &str)] = &[
 /// and the code-shaped mention filter), so there is exactly one definition
 /// of how a code page is named.
 pub(crate) fn module_stem(rel_path: &str) -> &str {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = basename(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
     let ext = rel_path.rsplit('.').next().unwrap_or("");
     if DIRECTORY_MODULES
@@ -1816,7 +1817,7 @@ pub(crate) fn module_stem(rel_path: &str) -> &str {
 /// declaration or a `common::` path link it, and `graph::ImportResolver`
 /// reaches it through the same stem.
 fn derive_code_name(rel_path: &str) -> String {
-    title_case(&module_stem(rel_path).replace(['_', '-'], " "))
+    title_from_slug(module_stem(rel_path))
 }
 
 /// Assertions shared by every language's extraction tests.

@@ -279,6 +279,21 @@ pub struct LintReport {
     pub large: Vec<(String, usize)>,
 }
 
+/// The last `/`-separated segment of `path`.
+pub(crate) fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// `title_case` of a file stem or directory name, `_` and `-` read as spaces.
+pub(crate) fn title_from_slug(s: &str) -> String {
+    title_case(&s.replace(['_', '-'], " "))
+}
+
+/// `s` with every whitespace run, newlines included, collapsed to one space.
+pub(crate) fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Capitalize each whitespace-separated word and lowercase the rest of it.
 /// Shared by every name-deriving path — the text extractor's ALL-CAPS first
 /// line, the markdown/code filename fallbacks, and `disambiguate_ids`'

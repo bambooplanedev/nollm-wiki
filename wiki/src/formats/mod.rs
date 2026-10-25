@@ -32,9 +32,9 @@ use std::sync::Arc;
 /// tokenizes them identically), but it is the drift a verbatim duplicate
 /// invites.
 pub(crate) fn derive_name_from_path(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = crate::model::basename(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
-    crate::model::title_case(&stem.replace(['_', '-'], " "))
+    crate::model::title_from_slug(stem)
 }
 
 /// Every extractor turns already-decoded text into a semantic `Entity`.

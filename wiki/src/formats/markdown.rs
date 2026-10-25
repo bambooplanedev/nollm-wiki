@@ -1,7 +1,7 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
 use crate::formats::{derive_name_from_path, summarize, Extractor};
-use crate::model::{slugify, Entity, SourceKind};
+use crate::model::{basename, slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
 
@@ -95,7 +95,7 @@ fn find_date(fm: &[String], rel_path: &str) -> String {
             .find_map(|k| fm_get(&own, k).as_deref().and_then(leading_date))
     };
     let stem = || {
-        let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+        let name = basename(rel_path);
         leading_date(name.rsplit_once('.').map_or(name, |(s, _)| s))
     };
     top.or_else(block).or_else(stem).unwrap_or_default()

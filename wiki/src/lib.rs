@@ -501,7 +501,7 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
     // Qualify from the segment above it instead.
     if segs
         .last()
-        .map(|s| crate::model::title_case(&s.replace(['_', '-'], " ")))
+        .map(|s| crate::model::title_from_slug(s))
         .as_deref()
         == Some(base)
     {
@@ -510,7 +510,7 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
     let start = segs.len().saturating_sub(depth);
     let mut name = String::new();
     for seg in &segs[start..] {
-        name.push_str(&crate::model::title_case(&seg.replace(['_', '-'], " ")));
+        name.push_str(&crate::model::title_from_slug(seg));
         name.push(' ');
     }
     name.push_str(base);
@@ -538,11 +538,7 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
 /// directory-module page (`pkg/__init__.py`) discarded no tail and uses the
 /// stem for the same reason.
 fn discriminator(entity: &Entity) -> String {
-    let base = entity
-        .source_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(&entity.source_path);
+    let base = crate::model::basename(&entity.source_path);
     let stem = base.split('.').next().unwrap_or(base);
     let named_after_stem = matches!(entity.kind, crate::model::SourceKind::Code { .. })
         && crate::formats::code::module_stem(&entity.source_path) == stem;
@@ -733,7 +729,7 @@ fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
     let key: Vec<(u8, usize)> = extracted
         .iter()
         .map(|e| {
-            let basename = e.source_path.rsplit('/').next().unwrap_or(&e.source_path);
+            let basename = crate::model::basename(&e.source_path);
             (
                 crate::formats::code::source_rank(&e.source_path),
                 basename.matches('.').count(),

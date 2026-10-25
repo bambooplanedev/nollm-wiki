@@ -4,7 +4,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::KindFilter;
+use crate::model::{one_line as one, KindFilter};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -468,7 +468,6 @@ pub fn search_lines(hits: &[Hit]) -> String {
         return "no matches\n".to_string();
     }
     // Fields are one-line text; collapse any newline or tab they carry.
-    let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();
     for h in hits {
         out.push_str(&format!("{}  {}  ", h.id, h.path));
