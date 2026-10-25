@@ -7,7 +7,7 @@
 //! caller's file can see.
 
 use crate::formats::code::{module_stem, source_rank};
-use crate::manifest::token_estimate;
+use crate::manifest::{largest_fit, token_estimate};
 use crate::model::{CallSite, CallVia, CodeItem, CodeItemKind, Entity, Graph, SourceKind};
 use crate::query::Wiki;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -358,19 +358,12 @@ impl Wiki {
                 order.len() - n
             )
         };
-        // The longest prefix of the walk that fits with its marker, by
-        // bisection (more lines never cost less); the header and the marker
-        // are kept even when they do not fit.
+        // The longest prefix of the walk that fits with its marker (more
+        // lines never cost less); the header and the marker are kept even
+        // when they do not fit.
         let cut = |n: usize| render(n) + &marker(n);
-        let (mut lo, mut hi) = (0, order.len());
-        while lo < hi {
-            let mid = (lo + hi).div_ceil(2);
-            if token_estimate(&cut(mid)) <= max {
-                lo = mid;
-            } else {
-                hi = mid - 1;
-            }
-        }
-        Ok(cut(lo))
+        Ok(cut(largest_fit(order.len(), |n| {
+            token_estimate(&cut(n)) <= max
+        })))
     }
 }

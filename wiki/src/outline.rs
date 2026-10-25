@@ -6,7 +6,7 @@
 //! into text with some categories cut and a cap on item lines, which is how a
 //! token budget shrinks it.
 
-use crate::manifest::token_estimate;
+use crate::manifest::{largest_fit, token_estimate};
 use crate::model::{one_line, CodeItem, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
@@ -193,10 +193,7 @@ fn budget(o: &Outline, full: String, max: usize) -> String {
         render(o, &Keep { lines: n, ..keep }) + &marker(&dropped, Some(more))
     };
     // Each line makes the text longer, so the counts that fit are a prefix.
-    let n = (1..starts.len())
-        .collect::<Vec<_>>()
-        .partition_point(|&n| fits(&ceiling(n)));
-    ceiling(n)
+    ceiling(largest_fit(starts.len() - 1, |n| fits(&ceiling(n))))
 }
 
 /// Reads page `id`'s entry, items and rendered markdown into an `Outline`.

@@ -51,6 +51,21 @@ pub fn token_estimate(text: &str) -> usize {
     text.chars().count() / 4
 }
 
+/// The largest `n` in `0..=max` for which `fits(n)` holds, by bisection; `0` when none does.
+/// `fits` must be monotone (true up to a point, false after) and is never asked about `0`.
+pub(crate) fn largest_fit(max: usize, fits: impl Fn(usize) -> bool) -> usize {
+    let (mut lo, mut hi) = (0, max);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
 pub fn build_manifest(
     project: &str,
     root: &str,
@@ -267,6 +282,14 @@ mod tests {
         assert!(llms.contains("- [Beta](beta.md)\n"), "{llms}");
         assert!(md.contains("(in 1, out 0)\n"), "{md}");
         assert!(!llms.contains(": \n") && !md.contains(": \n"));
+    }
+
+    #[test]
+    fn largest_fit_finds_the_boundary() {
+        assert_eq!(largest_fit(10, |n| n <= 6), 6);
+        assert_eq!(largest_fit(10, |_| true), 10);
+        assert_eq!(largest_fit(10, |_| false), 0);
+        assert_eq!(largest_fit(0, |_| true), 0);
     }
 
     #[test]
