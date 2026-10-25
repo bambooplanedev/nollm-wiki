@@ -12,6 +12,15 @@ const SKILL: &str = include_str!("../src/setup/SKILL.md");
 fn skill(dir: &str) -> String {
     SKILL.replace("<memory-dir>", dir)
 }
+
+/// The memory-only skill setup writes for Claude Code.
+fn memory_skill(dir: &str) -> String {
+    let full = skill(dir);
+    let (_, rules) = full.split_once("\n# Memory\n").unwrap();
+    format!(
+        "---\nname: wiki-memory\ndescription: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.\n---\n\n# Memory\n{rules}"
+    )
+}
 const ENTRY: &str = "{\n  \"command\": \"wiki\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
 
 struct Fixture {
@@ -168,15 +177,41 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
         )
     );
     assert_eq!(
-        read(&r.join(".claude/skills/wiki-navigation/SKILL.md")),
-        skill(".agents/memory")
+        read(&r.join(".claude/skills/wiki-memory/SKILL.md")),
+        memory_skill(".agents/memory")
     );
+    assert!(!r.join(".claude/skills/wiki-navigation").exists());
     assert_eq!(
         read(&r.join(".agents/skills/wiki-navigation/SKILL.md")),
         skill(".agents/memory")
     );
     assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".wiki/"));
     assert!(r.join(".wiki/index.json").exists());
+}
+
+#[test]
+fn setup_replaces_an_untouched_claude_navigation_skill() {
+    let f = fixture(true, true);
+    let old = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+    fs::create_dir_all(old.parent().unwrap()).unwrap();
+    fs::write(&old, skill(".agents/memory")).unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(!old.exists(), "{}", out(&a));
+    assert!(out(&a).contains("removed .claude/skills/wiki-navigation/SKILL.md"));
+    assert!(f
+        .root()
+        .join(".claude/skills/wiki-memory/SKILL.md")
+        .exists());
+}
+
+#[test]
+fn setup_keeps_an_edited_claude_navigation_skill() {
+    let f = fixture(true, true);
+    let old = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+    fs::create_dir_all(old.parent().unwrap()).unwrap();
+    fs::write(&old, "my own notes\n").unwrap();
+    f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert_eq!(read(&old), "my own notes\n");
 }
 
 #[test]
@@ -200,8 +235,8 @@ fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).code(1);
     assert_eq!(read(&f.root().join(".mcp.json")), foreign);
     assert_eq!(
-        read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md")),
-        skill(".agents/memory")
+        read(&f.root().join(".claude/skills/wiki-memory/SKILL.md")),
+        memory_skill(".agents/memory")
     );
     assert!(out(&a).contains("skipped"));
 }
@@ -219,11 +254,12 @@ fn setup_local_uses_claude_cli_and_git_exclude() {
     for l in [
         ".wiki/",
         "/.pi/mcp.json",
-        "/.claude/skills/wiki-navigation/",
         "/.agents/skills/wiki-navigation/",
     ] {
         assert!(ex.lines().any(|x| x == l), "{l} missing in {ex}");
     }
+    // No local memory here (no commit), so Claude Code gets no skill.
+    assert!(!f.root().join(".claude/skills").exists());
     assert!(!f.root().join(".gitignore").exists());
 }
 
@@ -432,9 +468,9 @@ fn setup_local_leaves_a_foreign_claude_server_alone() {
         !log.contains("mcp add-json") && !log.contains("mcp remove"),
         "{log}"
     );
-    // The skipped server leaves no exclude line; the skill does.
+    // The skipped server leaves no exclude line; `.wiki/` still gets one.
     let ex = read(&f.root().join(".git/info/exclude"));
-    assert!(ex.contains("/.claude/skills/wiki-navigation/"), "{ex}");
+    assert!(ex.lines().any(|l| l == ".wiki/"), "{ex}");
 }
 
 #[test]
@@ -527,7 +563,7 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(f.root().join(".agents/memory").is_dir());
     assert!(out(&a).contains("memory folder"), "{}", out(&a));
-    let text = read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md"));
+    let text = read(&f.root().join(".claude/skills/wiki-memory/SKILL.md"));
     assert!(text.contains("`.agents/memory`"), "{text}");
     assert!(!text.contains("<memory-dir>"));
     // Re-running recognises its own skill and the folder.
@@ -560,7 +596,7 @@ fn setup_local_creates_the_data_dir_folder_compiles_it_and_remove_keeps_it() {
         .success();
     assert!(!f.root().join(".agents/memory").exists());
     let shown = wiki::memory::display_path(&dir.canonicalize().unwrap());
-    let text = read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md"));
+    let text = read(&f.root().join(".claude/skills/wiki-memory/SKILL.md"));
     assert!(
         text.contains(&format!("`{}`", wiki::memory::display_path(&dir))),
         "{text}"
@@ -660,7 +696,7 @@ fn setup_local_twice_reports_everything_already_there() {
     let o = out(&f.setup(&args).success());
     assert!(o.contains("already set up: memory folder"), "{o}");
     assert!(
-        o.contains("already set up: .claude/skills/wiki-navigation/SKILL.md"),
+        o.contains("already set up: .claude/skills/wiki-memory/SKILL.md"),
         "{o}"
     );
     assert!(!o.contains("skipped"), "{o}");

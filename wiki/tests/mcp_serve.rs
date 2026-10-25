@@ -128,6 +128,7 @@ fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     );
     let resp = read_response(stdout, 1);
     assert_eq!(resp["result"]["serverInfo"]["name"], "wiki");
+    assert_eq!(resp["result"]["instructions"], wiki::serve::INSTRUCTIONS);
     send(
         stdin,
         &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
@@ -156,6 +157,10 @@ fn serve_lists_and_calls_tools() {
     sorted.sort_unstable();
     // `lint` is left out unless `--tools` names it.
     assert_eq!(sorted, ["neighbors", "page", "search"], "tools: {names:?}");
+    // Claude Code loads them up front instead of behind `ToolSearch`.
+    for t in resp["result"]["tools"].as_array().unwrap() {
+        assert_eq!(t["_meta"]["anthropic/alwaysLoad"], true, "{t}");
+    }
 
     // tools/call search — seed-42 corpus contains gradient_descent
     let resp = call(
