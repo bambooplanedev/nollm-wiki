@@ -1,15 +1,12 @@
 //! `Wiki::list_pages` id and title ordering, backing the MCP server's `resources/list`.
 
 use wiki::query::Wiki;
-use wiki::{compile, CompileOptions};
+
+mod common;
 
 #[test]
 fn list_pages_returns_ids_and_titles_sorted() {
-    let tmp = tempfile::tempdir().unwrap();
-    let raw = tmp.path().join("raw");
-    let out = tmp.path().join("out");
-    wiki::generator::generate_corpus(&raw, 4, 42).unwrap();
-    compile(&raw, &out, &CompileOptions::default()).unwrap();
+    let (_tmp, out) = common::seed_corpus(4);
 
     let w = Wiki::load(&out).unwrap();
     let pages = w.list_pages();

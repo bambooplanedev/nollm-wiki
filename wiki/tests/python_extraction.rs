@@ -1,41 +1,31 @@
 //! Python extraction through `compile()`: `## Exports` and `## Imports` on a reduced stand-in for the audit corpora.
 
 use std::fs;
-use tempfile::tempdir;
-use wiki::{compile, CompileOptions};
 
 mod common;
-use common::{exports, imports, write};
+use common::{exports, imports};
 
 /// A reduced stand-in for the audit corpora: a dataclass module, a module with
 /// a constant and a private helper class, and a consumer that imports both
 /// relatively. Mirrors the shapes the acceptance run checks by hand.
-fn corpus(input: &std::path::Path) {
-    write(
-        input,
+const CORPUS: [(&str, &str); 3] = [
+    (
         "shapes.py",
         "from dataclasses import dataclass\n\n@dataclass(frozen=True)\nclass Article:\n    id: str\n    title: str\n    url: str\n\n@dataclass(frozen=True)\nclass FeedSource:\n    name: str\n    tier: int\n",
-    );
-    write(
-        input,
+    ),
+    (
         "helpers.py",
         "from html.parser import HTMLParser\n\nSUMMARY_LIMIT = 300\nlog = get_logger(__name__)\n\nclass _TextExtractor(HTMLParser):\n    def handle_data(self, data: str) -> None:\n        pass\n\n    def text(self) -> str:\n        return \"\"\n\ndef clean_summary(raw: str, limit: int = SUMMARY_LIMIT) -> str:\n    return raw\n",
-    );
-    write(
-        input,
+    ),
+    (
         "consumer.py",
         "from .shapes import Article\nfrom . import helpers\nimport json.decoder as jd\n\ndef run() -> Article:\n    def nested():\n        pass\n    return Article(\"\", \"\", \"\")\n",
-    );
-}
+    ),
+];
 
 #[test]
 fn python_exports_and_imports_match_the_audited_shapes() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    fs::create_dir_all(&input).unwrap();
-    corpus(&input);
-    let out = dir.path().join("out");
-    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let (_dir, _, out) = common::compiled(&CORPUS);
 
     let shapes = fs::read_to_string(out.join("shapes.md")).unwrap();
     // `## Exports` is sorted on a grouping key, not the rendered signature:

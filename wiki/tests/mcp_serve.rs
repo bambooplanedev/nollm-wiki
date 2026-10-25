@@ -7,17 +7,14 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
+mod common;
+
 /// How long a single response may take before the test fails instead of
 /// hanging the whole `cargo test` run on a server that never answers.
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(10);
 
 fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let raw = tmp.path().join("raw");
-    let out = tmp.path().join("out");
-    wiki::generator::generate_corpus(&raw, 12, 42).unwrap();
-    wiki::compile(&raw, &out, &wiki::CompileOptions::default()).unwrap();
-    (tmp, out)
+    common::seed_corpus(12)
 }
 
 /// Spawn `wiki serve` and hand back its stdin plus a channel of stdout
