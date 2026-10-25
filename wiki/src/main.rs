@@ -64,6 +64,18 @@ enum Command {
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
+    /// List the functions that call a function on a page.
+    Callers {
+        id: String,
+        symbol: String,
+        /// Caller levels (default 1).
+        #[arg(long)]
+        depth: Option<usize>,
+        #[arg(long)]
+        max_tokens: Option<usize>,
+        #[arg(long, default_value = "out")]
+        dir: PathBuf,
+    },
     /// Print a page's outline, or with `--full` the whole page.
     Page {
         id: String,
@@ -261,6 +273,23 @@ fn main() -> Result<()> {
                 println!("{}", pack.text);
             }
         }
+        Command::Callers {
+            id,
+            symbol,
+            depth,
+            max_tokens,
+            dir,
+        } => {
+            let w = Wiki::load(&dir).context("load wiki")?;
+            let rid = w
+                .resolve(&id)
+                .map_err(anyhow::Error::msg)
+                .context("unknown id")?;
+            let text = w
+                .callers(&rid, &symbol, Some(depth.unwrap_or(1)), max_tokens)
+                .map_err(anyhow::Error::msg)?;
+            print!("{text}");
+        }
         Command::Page {
             id,
             full,
@@ -305,6 +334,7 @@ fn main() -> Result<()> {
                 tag.as_deref(),
                 limit,
             );
+
             if format == "json" {
                 println!("{}", wiki::serve::search_json(hits));
             } else {

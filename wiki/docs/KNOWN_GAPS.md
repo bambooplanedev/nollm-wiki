@@ -59,7 +59,7 @@ per question is noise-level: treat single results as anecdotes.
 - **`wiki hint` shows at most 2 lines per page**, so a third relevant
   symbol in one file is not shown.
 
-## Call chains (`neighbors` with `symbol`)
+## Call chains (`neighbors` with `symbol`, `callers`)
 
 - **Resolution is by name, not by type.** A member call on a variable
   resolves to the methods of that name the caller's files see, else to the
@@ -67,11 +67,31 @@ per question is noise-level: treat single results as anecdotes.
   `TaskRing::size`, `e.what()` can reach a vendored `exception::what`, and
   a call through a base pointer lists whichever of base and overrides are
   visible.
-- **All C++ overloads of a name are listed**; arguments are not matched.
-- **Not seen:** callers (there is no reverse walk), Python module aliases
-  (`import x as S; S.f()`), functions passed as values (callbacks, function
-  pointers, lambdas stored and called later), and calls inside Rust macro
-  arguments (`format!("{}", f())`), which tree-sitter keeps as tokens.
+- **Argument counts rule out only what cannot fit.** A Rust, Go or Python
+  function whose parameters cannot take a call's arguments is no match
+  (`.map(|x| …)` never reaches a two-parameter `map`). A C++ function is
+  ruled out only by too many arguments, since a default can sit on its
+  other declaration; JS/TS functions and decorated Python functions are
+  never ruled out. So `.get(k)` on a `HashMap` still lists a project
+  `Mapping::get(key)`, and all C++ overloads that can take the count are
+  listed.
+- **Not seen:** functions passed as values (callbacks, function pointers,
+  lambdas stored and called later), CommonJS renames (`const m =
+  require('./x')`, `const { a: b } = require(…)`), a TS default import
+  used as a namespace (`import d from './m'; d.f()`), and calls inside a
+  `macro_rules!` body.
+- **Rust macro arguments are read as tokens.** Any `name(…)` token tree
+  inside a macro invocation (`format!`, `select!`, `assert_eq!`, …) counts
+  as a call, so a tuple-struct or enum pattern in `matches!(x, Foo(y))`
+  links a project function named `Foo` that takes that many arguments. A
+  closure (`|a, b|`) or generic arguments at the top level of the call
+  leave its argument count unknown.
+- **Import aliases are one map per file and resolve by the last segment
+  only:** `import * as m from './a/b'`, `import a.b as m` and Go `m "a/b"`
+  make `m.f()` read as `b.f()`, so a second module named `b` elsewhere
+  matches too, and two imports aliased `m` in different functions both read
+  as the later one. A parameter or receiver named like the alias keeps its
+  own name.
 - **No calls across languages.** A Python binding calling C++, or FFI, is
   not an edge, by design.
 - **Unresolved names are dropped silently.** Builtins and std calls

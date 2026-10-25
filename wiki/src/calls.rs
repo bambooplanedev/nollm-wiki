@@ -107,15 +107,29 @@ impl<'a> Index<'a> {
         &self.pages[c.0].items[c.1]
     }
 
-    /// The functions named `name` in the language of page `page` that pass
-    /// `keep`, each declaration taken as its definition, deduplicated.
-    fn pick(&self, page: usize, name: &str, keep: impl Fn(FnRef) -> bool) -> Vec<FnRef> {
-        let named = self.by_name.get(name).map_or(&[][..], Vec::as_slice);
+    /// The functions `site` names in the language of page `page` that its
+    /// argument count fits and that pass `keep`, each declaration taken as
+    /// its definition, deduplicated.
+    fn pick(&self, page: usize, site: &CallSite, keep: impl Fn(FnRef) -> bool) -> Vec<FnRef> {
+        let named = self
+            .by_name
+            .get(site.name.as_str())
+            .map_or(&[][..], Vec::as_slice);
         let lang = family(self.pages[page]);
+        // `Q::f(x, …)` and Python's `K.f(x, …)` may pass the receiver.
+        let path = match &site.via {
+            CallVia::Path(_) => true,
+            CallVia::Member(Some(x)) => self.types.contains(x.as_str()),
+            _ => false,
+        };
+        let fits = |c: FnRef| match (self.item(c).arity, site.args) {
+            (Some(a), Some(n)) => a.fits(n, path),
+            _ => true,
+        };
         let found: BTreeSet<FnRef> = named
             .iter()
             .copied()
-            .filter(|&c| family(self.pages[c.0]) == lang && keep(c))
+            .filter(|&c| family(self.pages[c.0]) == lang && fits(c) && keep(c))
             .map(|c| self.def_of.get(&c).copied().unwrap_or(c))
             .collect();
         found.into_iter().collect()
@@ -130,7 +144,6 @@ impl<'a> Index<'a> {
         page: usize,
         sees: &BTreeSet<usize>,
     ) -> Vec<FnRef> {
-        let name = site.name.as_str();
         let is_fn = |c: FnRef| self.item(c).kind == CodeItemKind::Fn;
         let is_method = |c: FnRef| self.item(c).kind == CodeItemKind::Method;
         let owned_by = |key: &str, c: FnRef| {
@@ -138,17 +151,17 @@ impl<'a> Index<'a> {
         };
         let only = |v: Vec<FnRef>| if v.len() == 1 { v } else { Vec::new() };
         let own_methods = || {
-            own.map(|o| self.pick(page, name, |c| owned_by(o, c)))
+            own.map(|o| self.pick(page, site, |c| owned_by(o, c)))
                 .unwrap_or_default()
         };
-        let fn_here = || self.pick(page, name, |c| is_fn(c) && c.0 == page);
-        let fn_seen = || self.pick(page, name, |c| is_fn(c) && sees.contains(&c.0));
-        let method_seen = || self.pick(page, name, |c| is_method(c) && sees.contains(&c.0));
-        let fn_only = || only(self.pick(page, name, is_fn));
-        let method_only = || only(self.pick(page, name, is_method));
+        let fn_here = || self.pick(page, site, |c| is_fn(c) && c.0 == page);
+        let fn_seen = || self.pick(page, site, |c| is_fn(c) && sees.contains(&c.0));
+        let method_seen = || self.pick(page, site, |c| is_method(c) && sees.contains(&c.0));
+        let fn_only = || only(self.pick(page, site, is_fn));
+        let method_only = || only(self.pick(page, site, is_method));
         let qualified = |q: &str| {
             let in_module = self.modules.get(q);
-            self.pick(page, name, |c| {
+            self.pick(page, site, |c| {
                 owned_by(q, c) || (is_fn(c) && in_module.is_some_and(|m| m.contains(&c.0)))
             })
         };
@@ -195,6 +208,9 @@ impl<'a> Index<'a> {
 /// - `x.f()`: as `x::f()` when `x` names a project type or module; a method
 ///   of a file the caller sees; the one method of that name.
 ///
+/// Before any rule, a function whose parameters cannot take the call's
+/// argument count (`Arity::fits`) is no candidate.
+///
 /// Only functions in the caller's language family (`family`) count. The
 /// files a caller sees are its own, the pages it imports, and theirs:
 /// a `.cpp` reaches its types through its own header's includes. A header
@@ -211,7 +227,7 @@ pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph) {
                 .filter_map(|t| page_of.get(t.as_str()).copied())
         })
     };
-    let mut resolved: Vec<(usize, usize, Vec<String>)> = Vec::new();
+    let mut resolved: Vec<(usize, usize, BTreeMap<String, BTreeSet<usize>>)> = Vec::new();
     for (p, e) in index.pages.iter().enumerate() {
         if e.items.iter().all(|it| it.call_sites.is_empty()) {
             continue;
@@ -221,22 +237,74 @@ pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph) {
         sees.insert(p);
         for (i, caller) in e.items.iter().enumerate() {
             let own = caller.owner.as_deref().map(owner_key);
-            let calls: BTreeSet<String> = caller
-                .call_sites
-                .iter()
-                .flat_map(|site| index.resolve(site, own, p, &sees))
-                .filter(|&c| c != (p, i))
-                .map(|c| index.item(c).span(&index.pages[c.0].source_path))
-                .collect();
-            resolved.push((p, i, calls.into_iter().collect()));
+            let mut calls: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+            for site in &caller.call_sites {
+                for c in index.resolve(site, own, p, &sees) {
+                    if c != (p, i) {
+                        let span = index.item(c).span(&index.pages[c.0].source_path);
+                        calls.entry(span).or_default().insert(site.line);
+                    }
+                }
+            }
+            resolved.push((p, i, calls));
         }
     }
     let ids: Vec<String> = ids.iter().map(|s| (*s).to_string()).collect();
     for (p, i, calls) in resolved {
         let it = &mut entities.get_mut(&ids[p]).unwrap().items[i];
-        it.calls = calls;
+        it.call_lines = calls
+            .values()
+            .map(|l| l.iter().copied().collect())
+            .collect();
+        it.calls = calls.into_keys().collect();
         it.call_sites = Vec::new();
     }
+}
+
+/// A function that calls another, as `callers` shows it.
+#[derive(Clone, Debug)]
+pub struct Caller {
+    pub path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    /// `owner::name`, or `name`.
+    pub name: String,
+    pub test: bool,
+    /// Its lines that make the call; empty in a wiki compiled before
+    /// `call_lines`.
+    pub lines: Vec<usize>,
+}
+
+impl Caller {
+    pub fn span(&self) -> String {
+        format!("{}:{}-{}", self.path, self.start_line, self.end_line)
+    }
+}
+
+/// Every function's callers, keyed by its `path:start-end`: the `calls`
+/// edges turned around, each list tests last, then by path and line.
+pub(crate) fn callers_index<'a>(
+    code: impl Iterator<Item = (&'a str, &'a [CodeItem])>,
+) -> BTreeMap<String, Vec<Caller>> {
+    let mut index: BTreeMap<String, Vec<Caller>> = BTreeMap::new();
+    for (path, items) in code {
+        for it in items {
+            for (k, callee) in it.calls.iter().enumerate() {
+                index.entry(callee.clone()).or_default().push(Caller {
+                    path: path.to_string(),
+                    start_line: it.start_line,
+                    end_line: it.end_line,
+                    name: it.qualified_name(),
+                    test: it.test,
+                    lines: it.call_lines.get(k).cloned().unwrap_or_default(),
+                });
+            }
+        }
+    }
+    for list in index.values_mut() {
+        list.sort_by(|a, b| (a.test, &a.path, a.start_line).cmp(&(b.test, &b.path, b.start_line)));
+    }
+    index
 }
 
 impl Wiki {
@@ -253,6 +321,31 @@ impl Wiki {
         symbol: &str,
         depth: Option<usize>,
         max_tokens: Option<usize>,
+    ) -> Result<String, String> {
+        self.call_walk(id, symbol, depth, max_tokens, false)
+    }
+
+    /// The functions that call `symbol` on page `id`, and theirs, to
+    /// `depth` levels (no limit when `None`), as `calls` lists callees;
+    /// test code comes last.
+    pub fn callers(
+        &self,
+        id: &str,
+        symbol: &str,
+        depth: Option<usize>,
+        max_tokens: Option<usize>,
+    ) -> Result<String, String> {
+        self.call_walk(id, symbol, depth, max_tokens, true)
+    }
+
+    /// `calls`, or with `up` `callers`.
+    fn call_walk(
+        &self,
+        id: &str,
+        symbol: &str,
+        depth: Option<usize>,
+        max_tokens: Option<usize>,
+        up: bool,
     ) -> Result<String, String> {
         let path = self.entry(id).map_or("", |e| e.path.as_str());
         let fns = || {
@@ -294,6 +387,8 @@ impl Wiki {
             root_spans.iter().map(|s| (s.clone(), 0)).collect();
         let mut seen: BTreeSet<String> = queue.iter().map(|(s, _)| s.clone()).collect();
         let mut order: Vec<(&str, &CodeItem)> = Vec::new();
+        // Up the walk: per caller reached, the call that reached it.
+        let mut via: BTreeMap<String, String> = BTreeMap::new();
         while let Some((s, d)) = queue.pop_front() {
             let Some(&(p, it)) = by_span.get(&s) else {
                 continue;
@@ -304,15 +399,30 @@ impl Wiki {
             if depth.is_some_and(|max| d >= max) {
                 continue;
             }
-            for c in &it.calls {
+            let next: Vec<String> = if up {
+                let callers = self.callers_of(&s);
+                for c in callers.iter().filter(|c| !c.lines.is_empty()) {
+                    let at: Vec<String> = c.lines.iter().map(usize::to_string).collect();
+                    via.entry(c.span())
+                        .or_insert_with(|| format!("  calls {} at {}", it.name, at.join(", ")));
+                }
+                callers.iter().map(Caller::span).collect()
+            } else {
+                it.calls.clone()
+            };
+            for c in next {
                 if seen.insert(c.clone()) {
-                    queue.push_back((c.clone(), d + 1));
+                    queue.push_back((c, d + 1));
                 }
             }
         }
+        if up {
+            order.sort_by_key(|(_, it)| it.test);
+        }
 
         let head = format!(
-            "calls from {}  {}",
+            "{} {}  {}",
+            if up { "callers of" } else { "calls from" },
             roots[0].qualified_name(),
             root_spans.join(", ")
         );
@@ -335,12 +445,13 @@ impl Wiki {
                 lines.sort_by_key(|it| (it.start_line, it.end_line));
                 for it in lines {
                     out.push(format!(
-                        "  {}-{}  {}{}  {}",
+                        "  {}-{}  {}{}  {}{}",
                         it.start_line,
                         it.end_line,
                         it.kind.as_str(),
                         if it.test { " [test]" } else { "" },
-                        it.qualified_name()
+                        it.qualified_name(),
+                        via.get(&it.span(p)).map_or("", String::as_str)
                     ));
                 }
             }

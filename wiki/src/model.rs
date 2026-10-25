@@ -218,10 +218,37 @@ pub struct CodeItem {
     /// `graph::resolve_calls`). Empty for anything but a function.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub calls: Vec<String>,
+    /// For each entry of `calls`, the lines of this function that call it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub call_lines: Vec<Vec<usize>>,
     /// The call sites as the source names them, until `resolve_calls` turns
     /// them into `calls`.
     #[serde(skip)]
     pub call_sites: Vec<CallSite>,
+    /// The argument counts a call to this function can pass, when the
+    /// extractor knows them; `resolve_calls` drops a match that cannot fit.
+    #[serde(skip)]
+    pub arity: Option<Arity>,
+}
+
+/// The argument counts a function accepts: `min..=max`, `max` unbounded
+/// for a variadic. `receiver` is a `self` that a `Type::f(x, …)` call
+/// passes as the first argument.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Arity {
+    pub min: usize,
+    pub max: Option<usize>,
+    pub receiver: bool,
+}
+
+impl Arity {
+    /// Whether a call passing `args` arguments can be a call of this
+    /// function; `path` is a call through a type (`Q::f()`, Python
+    /// `K.f()`), which may pass the receiver.
+    pub fn fits(self, args: usize, path: bool) -> bool {
+        let extra = usize::from(self.receiver && path);
+        args >= self.min && self.max.is_none_or(|m| args <= m + extra)
+    }
 }
 
 /// A call in a function body, as the source writes its target.
@@ -230,6 +257,10 @@ pub struct CallSite {
     /// The called name: `f` of `f()`, `a::f()`, `x.f()`.
     pub name: String,
     pub via: CallVia,
+    /// The arguments it passes; `None` when a spread or splat hides the count.
+    pub args: Option<usize>,
+    /// 1-based, in the original file.
+    pub line: usize,
 }
 
 /// How a call site reaches its name.

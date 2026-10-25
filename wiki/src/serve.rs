@@ -41,18 +41,19 @@ what you are looking for and `kind: \"code\"`; each symbol line is \
 `path:start-end  name  signature`. Read only those lines with your file tool: \
 the ranges are exact, do not re-derive them with grep. `page` with a path \
 lists a module's symbols with their lines; `neighbors` with a path and \
-`symbol` lists every function that one calls, with its lines. If search finds \
+`symbol` lists every function that one calls, with its lines; `callers` lists \
+the functions that call it. If search finds \
 nothing relevant, try other words (a name, an abbreviation) before grep. \
 Paths are relative to the project root; line ranges are 1-based and \
 inclusive. Pages are also resources under wiki://page/<id>.";
 
 /// Every tool the server has.
-pub const TOOLS: [&str; 4] = ["search", "page", "neighbors", "lint"];
+pub const TOOLS: [&str; 5] = ["search", "page", "neighbors", "callers", "lint"];
 
 /// The tools exposed without `--tools`. `lint` serves the person keeping
 /// the wiki, not an agent mid-task, and each exposed tool costs schema
 /// tokens on every request.
-pub const DEFAULT_TOOLS: [&str; 3] = ["search", "page", "neighbors"];
+pub const DEFAULT_TOOLS: [&str; 4] = ["search", "page", "neighbors", "callers"];
 
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.
@@ -209,6 +210,20 @@ pub(crate) struct NeighborsParams {
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
+pub(crate) struct CallersParams {
+    /// Page id, title, or source path.
+    pub id: String,
+    /// A function on the page, e.g. `canOpenPosition` or
+    /// `RiskManager::canOpenPosition`.
+    pub symbol: String,
+    /// Caller levels (default 1: the direct callers).
+    pub depth: Option<usize>,
+    /// Token budget (default 4000).
+    pub max_tokens: Option<usize>,
+}
+
+#[derive(Deserialize, rmcp::schemars::JsonSchema)]
+#[schemars(crate = "rmcp::schemars")]
 pub(crate) struct PageParams {
     /// Page id, title, or source path.
     pub id: String,
@@ -276,6 +291,7 @@ impl WikiServer {
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
         let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), limit);
+
         let text = if json {
             search_json(hits)
         } else {
@@ -312,6 +328,25 @@ impl WikiServer {
                     .map(|pack| pack.text)
                     .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
             }
+        }));
+        Ok(with_stale(result, stale.as_deref()))
+    }
+
+    #[tool(
+        description = "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name. Calls are matched by name and argument count, not by type. `depth` goes up more levels."
+    )]
+    async fn callers(
+        &self,
+        Parameters(p): Parameters<CallersParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let (wiki, stale) = self.state.snapshot().await;
+        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+            wiki.callers(
+                &id,
+                &p.symbol,
+                Some(p.depth.unwrap_or(1)),
+                Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
+            )
         }));
         Ok(with_stale(result, stale.as_deref()))
     }
@@ -473,7 +508,8 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
-/// symbol, or the snippet (four-space indent) when the page has no symbols.
+/// symbol, or
+/// the snippet (four-space indent) when the page has no symbols.
 /// No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
     if hits.is_empty() {

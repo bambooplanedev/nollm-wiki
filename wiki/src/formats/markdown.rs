@@ -319,14 +319,17 @@ mod tests {
     fn aliases_one_line_forms_and_empties() {
         assert_eq!(aliases_of("aliases: a, b\n"), vec!["a", "b"]);
         assert_eq!(aliases_of("aliases: ['a', \"b\"]\n"), vec!["a", "b"]);
-        assert!(aliases_of("aliases: []\n").is_empty());
-        assert!(aliases_of("aliases: null\n").is_empty());
-        assert!(aliases_of("aliases: ~\n").is_empty());
+        assert_eq!(aliases_of("aliases: []\n"), [] as [String; 0]);
+        assert_eq!(aliases_of("aliases: null\n"), [] as [String; 0]);
+        assert_eq!(aliases_of("aliases: ~\n"), [] as [String; 0]);
     }
 
     #[test]
     fn indented_keys_are_not_top_level() {
-        assert!(aliases_of("project:\n  aliases:\n    - inner\n").is_empty());
+        assert_eq!(
+            aliases_of("project:\n  aliases:\n    - inner\n"),
+            [] as [String; 0]
+        );
         let e =
             MarkdownExtractor.extract("n.md", "---\ndescription: |\n  title: oops\n---\n# Real\n");
         assert_eq!(e.name, "Real");

@@ -796,7 +796,12 @@ fn items_json_round_trips() {
     compile(&input, &out, &CompileOptions::default()).unwrap();
     let json = fs::read_to_string(out.join("items.json")).unwrap();
     let back: BTreeMap<String, Vec<CodeItem>> = serde_json::from_str(&json).unwrap();
-    assert_eq!(back["a"], CodeExtractor.extract("a.rs", src).items);
+    // `arity` serves call matching only and is not written.
+    let mut fresh = CodeExtractor.extract("a.rs", src).items;
+    for i in &mut fresh {
+        i.arity = None;
+    }
+    assert_eq!(back["a"], fresh);
     assert!(back["a"].iter().any(|i| i.test));
     // Only the test module and its fn carry the key.
     assert_eq!(json.matches("\"test\"").count(), 2, "{json}");
@@ -969,7 +974,10 @@ fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
     assert_ne!(note["id"], "setup");
     assert!(note["title"].as_str().unwrap().contains("Setup"));
     let pages = wiki::lint::load_compiled_pages(&output).unwrap();
-    assert!(wiki::lint::lint(&pages).broken_links.is_empty());
+    assert_eq!(
+        wiki::lint::lint(&pages).broken_links,
+        [] as [(String, String); 0]
+    );
     let linker = fs::read_to_string(output.join("linker.md")).unwrap();
     assert!(linker.contains("[[setup|Setup]]"), "{linker}");
 }

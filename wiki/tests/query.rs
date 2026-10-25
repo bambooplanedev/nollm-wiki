@@ -1124,6 +1124,66 @@ fn calls_cut_to_the_budget_say_how_to_see_all() {
     );
 }
 
+/// The `path:start-end` of what function `name` on page `id` calls.
+fn callees(w: &Wiki, id: &str, name: &str) -> Vec<String> {
+    let it = w.items(id).iter().find(|i| i.name == name);
+    it.expect("the function").calls.clone()
+}
+
+#[test]
+fn a_call_whose_argument_count_cannot_fit_is_no_match() {
+    let (_dir, w) = code_fixture(&[
+        (
+            "src/m.rs",
+            "pub struct M;\nimpl M {\n    pub fn map(&self, k: u8, v: u8) {}\n    pub fn get(&self, k: u8) {}\n}\npub fn user(v: Vec<u8>, m: M) {\n    v.iter().map(|x| x);\n    m.get(1);\n}\npub fn by_path(m: M) {\n    M::get(&m, 2);\n}\n",
+        ),
+        (
+            "src/p.py",
+            "import functools\n\ndef two(a, b=0):\n    pass\n\ndef star(*xs: int):\n    pass\n\n@functools.cache\ndef memo(a):\n    pass\n\nclass K:\n    def m(self, a):\n        pass\n\n    def u(self):\n        self.m(1)\n\ndef ok():\n    two(1)\n\ndef bad():\n    two(1, 2, 3)\n\ndef splat():\n    star(1, 2, 3, 4)\n    memo(1, 2)\n\ndef unbound(k):\n    K.m(k, 2)\n",
+        ),
+        (
+            "src/c.cpp",
+            "void f(int a, int b = 0) {}\nvoid g() { f(); }\nvoid h() { f(1, 2, 3); }\n",
+        ),
+        (
+            "src/a.go",
+            "package a\n\nfunc Two(a, b int) {}\nfunc V(xs ...int) {}\nfunc A() { Two(1, 2) }\nfunc B() { Two(1) }\nfunc C() { V(1, 2, 3) }\n",
+        ),
+    ]);
+    // `.map(|x| x)` passes one argument to a two-parameter `map`; a
+    // `Type::f` call may pass the receiver.
+    assert_eq!(callees(&w, "m", "user"), ["src/m.rs:4-4"]);
+    assert_eq!(callees(&w, "m", "by_path"), ["src/m.rs:4-4"]);
+    assert_eq!(callees(&w, "p", "ok"), ["src/p.py:3-4"]);
+    assert_eq!(callees(&w, "p", "bad"), [] as [String; 0]);
+    // A star parameter takes any count; a decorator may change the signature.
+    assert_eq!(callees(&w, "p", "splat"), ["src/p.py:6-7", "src/p.py:9-11"]);
+    assert_eq!(callees(&w, "p", "u"), ["src/p.py:14-15"]);
+    assert_eq!(callees(&w, "p", "unbound"), ["src/p.py:14-15"]);
+    // C++ sets no minimum: a default may sit on another declaration.
+    assert_eq!(callees(&w, "c", "g"), ["src/c.cpp:1-1"]);
+    assert_eq!(callees(&w, "c", "h"), [] as [String; 0]);
+    assert_eq!(callees(&w, "a", "A"), ["src/a.go:3-3"]);
+    assert_eq!(callees(&w, "a", "B"), [] as [String; 0]);
+    assert_eq!(callees(&w, "a", "C"), ["src/a.go:4-4"]);
+}
+
+const CALLERS_LIB_RS: &str = "pub fn target() {}\npub fn a() {\n    target();\n}\npub fn b() {\n    target();\n}\npub fn c() {\n    target();\n}\npub fn d() {\n    target();\n    a();\n}\n#[test]\nfn checks() {\n    target();\n}\n";
+
+#[test]
+fn callers_list_one_level_by_default_with_tests_last() {
+    let (_dir, w) = code_fixture(&[("src/lib.rs", CALLERS_LIB_RS)]);
+    assert_eq!(
+        w.callers("lib", "target", Some(1), None).unwrap(),
+        "callers of target  src/lib.rs:1-1 — 5 functions in 1 files\nsrc/lib.rs\n  2-4  fn  a  calls target at 3\n  5-7  fn  b  calls target at 6\n  8-10  fn  c  calls target at 9\n  11-14  fn  d  calls target at 12\n  15-18  fn [test]  checks  calls target at 17\n"
+    );
+    // With no depth limit the walk ends where nothing calls: `d`.
+    assert_eq!(
+        w.callers("lib", "a", None, None).unwrap(),
+        "callers of a  src/lib.rs:2-4 — 1 functions in 1 files\nsrc/lib.rs\n  11-14  fn  d  calls a at 13\n"
+    );
+}
+
 #[test]
 fn a_header_declaration_stands_for_its_definition() {
     let (_dir, w) = code_fixture(&[

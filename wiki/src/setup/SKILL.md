@@ -12,7 +12,9 @@ description: Find where something is or how it works in this project's code. Use
 3. For a module's map, call `page` (`mcp__wiki__page`) with the path; it lists every symbol
    with its lines. To follow a function through the code, call `neighbors`
    (`mcp__wiki__neighbors`) with the path and `symbol`: it lists every
-   function that one calls, with its lines.
+   function that one calls, with its lines. To see what calls a function,
+   call `callers` (`mcp__wiki__callers`) with the path and `symbol`
+   instead of grepping for its name.
 4. Only if search finds nothing relevant, try other words (a name, an
    abbreviation), then fall back to grep.
 

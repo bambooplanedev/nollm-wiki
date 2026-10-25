@@ -5,6 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
+use crate::calls::{callers_index, Caller};
 use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -378,6 +379,8 @@ pub struct Wiki {
     items: BTreeMap<String, Vec<CodeItem>>,
     /// Per page with items: the fields `symbol_fields` builds from them.
     symbol_fields: BTreeMap<String, SymbolFields>,
+    /// Each function's callers by its `path:start-end` (`callers_index`).
+    callers: BTreeMap<String, Vec<Caller>>,
 }
 
 impl Wiki {
@@ -414,18 +417,29 @@ impl Wiki {
                 Some((e.id.clone(), Self::symbol_fields(&title, items)))
             })
             .collect();
+        let callers = callers_index(
+            items
+                .iter()
+                .filter_map(|(id, its)| Some((entries.get(id)?.path.as_str(), its.as_slice()))),
+        );
         Ok(Wiki {
             root: index.root,
             entries,
             bodies,
             items,
             symbol_fields,
+            callers,
         })
     }
 
     /// A page's code items, as compiled; empty when it has none.
     pub fn items(&self, id: &str) -> &[CodeItem] {
         self.items.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The functions that call the one at `span` (`path:start-end`).
+    pub(crate) fn callers_of(&self, span: &str) -> &[Caller] {
+        self.callers.get(span).map_or(&[], Vec::as_slice)
     }
 
     /// Every page with code items: its source path and its items.
@@ -1574,8 +1588,8 @@ mod tests {
     #[test]
     fn tokenize_dedupes_and_drops_empty() {
         assert_eq!(Wiki::tokenize("beta BETA beta"), vec!["beta"]);
-        assert!(Wiki::tokenize("").is_empty());
-        assert!(Wiki::tokenize("  ,, !! ").is_empty());
+        assert_eq!(Wiki::tokenize(""), [] as [String; 0]);
+        assert_eq!(Wiki::tokenize("  ,, !! "), [] as [String; 0]);
     }
 
     #[test]
@@ -1629,7 +1643,9 @@ mod tests {
             twin: None,
             test,
             calls: Vec::new(),
+            call_lines: Vec::new(),
             call_sites: Vec::new(),
+            arity: None,
         }
     }
 
