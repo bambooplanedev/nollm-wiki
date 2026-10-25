@@ -34,23 +34,13 @@ pub(crate) struct Entry {
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
     pub(crate) neighbors_in: Vec<String>,
-    /// The import edges among `neighbors_out` and `neighbors_in`. Defaulted
-    /// like `defined`: an older `index.json` has no such keys.
+    /// The import edges among `neighbors_out` and `neighbors_in`. Defaulted:
+    /// an older `index.json` has no such keys, and `serve` reads wikis it did
+    /// not compile.
     #[serde(default)]
     pub(crate) imports_out: Vec<String>,
     #[serde(default)]
     pub(crate) imports_in: Vec<String>,
-    /// Top-level definition names (`ManifestEntry::defined`), minus those
-    /// only test items carry (dropped in `Wiki::load`). Defaulted so
-    /// an `index.json` written by a compiler older than this field still
-    /// loads: `serve` reads wikis it did not compile.
-    #[serde(default)]
-    pub(crate) defined: Vec<String>,
-    /// Method names (`ManifestEntry::methods`), minus test-only ones like
-    /// `defined`. Defaulted for the same reason as `defined`: an older
-    /// `index.json` has no such key.
-    #[serde(default)]
-    pub(crate) methods: Vec<String>,
 }
 
 impl Entry {
@@ -264,7 +254,7 @@ pub struct Hit {
     /// The id of the note that supersedes this one; it gets no boost.
     pub superseded_by: Option<String>,
     /// Deterministic excerpt around the earliest body match (`None` for
-    /// hits that matched only title, alias, defined name, summary, or a
+    /// hits that matched only title, alias, item name, summary, or a
     /// section heading — the summary explains those).
     pub snippet: Option<String>,
     /// The page's best-matching code items, best first; empty for docs pages
@@ -328,10 +318,8 @@ pub struct SymbolLine {
 struct SymbolFields {
     /// Whole item names, lowercased, each also as `owner::name`.
     whole: BTreeSet<String>,
-    /// Words of non-method names, none of them in `whole`.
+    /// Words of the names, none of them in `whole` or the page's title.
     words: BTreeSet<String>,
-    /// Words of method names, none of them in `whole` or `words`.
-    method_words: BTreeSet<String>,
     /// Words of the items' docs.
     doc_words: Vec<String>,
     /// Words of the items' whole docs, scored below `doc_words`.
@@ -401,7 +389,7 @@ impl Wiki {
         let text = std::fs::read_to_string(dir.join("index.json"))?;
         let index: IndexFile = serde_json::from_str(&text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let mut entries: BTreeMap<String, Entry> = index
+        let entries: BTreeMap<String, Entry> = index
             .entries
             .into_iter()
             .map(|e| (e.id.clone(), e))
@@ -418,28 +406,12 @@ impl Wiki {
                 .ok()
                 .and_then(|t| serde_json::from_str(&t).ok())
                 .unwrap_or_default();
-        // A `defined` or `methods` name that only test items carry earns its
-        // page nothing: C++ and Go list test fns and mock methods there too.
-        for e in entries.values_mut() {
-            let Some(items) = items.get(&e.id) else {
-                continue;
-            };
-            // `any` first: a name no item carries is kept.
-            let test_only = |n: &String| {
-                items.iter().any(|i| i.name == *n && i.test)
-                    && items.iter().all(|i| i.name != *n || i.test)
-            };
-            e.defined.retain(|n| !test_only(n));
-            e.methods.retain(|n| !test_only(n));
-        }
         let symbol_fields = entries
             .values()
             .filter_map(|e| {
                 let items = items.get(&e.id)?;
                 let title = e.title.to_lowercase();
-                let defined = Self::defined_terms(&title, &e.defined, &e.methods);
-                let f = Self::symbol_fields(&title, &defined, items);
-                Some((e.id.clone(), f))
+                Some((e.id.clone(), Self::symbol_fields(&title, items)))
             })
             .collect();
         Ok(Wiki {
@@ -526,18 +498,10 @@ impl Wiki {
     // title's words (`summary_suffix` against the page `Summary`).
     const W_TITLE: f64 = 3.0;
     const W_ALIAS: f64 = 2.0;
-    // `W_DEFINED` (2026-09-02 defined-names design): equal to `W_ALIAS`,
-    // above `W_SUMMARY`, below `W_NAME`, so a page whose title is the query
-    // still beats a page that merely defines a same-named item; `W_SYMBOL`,
-    // which replaces it for an item's whole name, stays below `W_NAME` too.
-    // Measured on the 547-query live set: own-title hits unchanged at 35/37,
-    // 26 flips better / 6 worse; 1.5 moved fewer definer queries, 2.5 added
-    // a worse row.
-    const W_DEFINED: f64 = 2.0;
     // Page fields from code items (`symbol_fields`), private and method
     // items included, test and module items never. A whole item name
-    // scores `W_SYMBOL` in place of `W_DEFINED`, above every word weight
-    // plus the doc weight and below `W_NAME` (both checked at compile time
+    // scores `W_SYMBOL`, a word of one `W_SYMBOL_WORD`; `W_SYMBOL` sits
+    // above the word weight plus the doc weight and below `W_NAME` (checked at compile time
     // below), so a page naming the query beats a page whose names merely
     // contain it, and a page titled by the query beats both. Tuned on the
     // symbol eval's `tune` split (2026-10-23): `W_SYMBOL_DOC` 0.5 → 0.75
@@ -547,7 +511,6 @@ impl Wiki {
     const W_SYMBOL_WORD: f64 = 2.0;
     // Per word, when all the query's words sit inside one longer item name.
     const W_IN_ONE_NAME: f64 = 1.0;
-    const W_METHOD_WORD: f64 = 2.0;
     const W_SYMBOL_DOC: f64 = 0.75;
     // A token the first sentence misses but the rest of the doc has.
     const W_SYMBOL_DOC_REST: f64 = Self::W_SYMBOL_DOC / 2.0;
@@ -733,56 +696,13 @@ impl Wiki {
             .is_some_and(|u| dates.iter().any(|d| d.matches(u)))
     }
 
-    /// The search terms a page earns from its `defined` names — each
-    /// lowercased full name plus each of its words, minus the self-name
-    /// skip — plus every `methods` name lowercased whole, minus names equal
-    /// to a title word. The skip is word-level: a word equal to a title
-    /// word is dropped (the title already scores it at `W_NAME`; crediting
-    /// it again let `Cache` on page `cache` outrank `code`), the other
-    /// words stay, and the full name stays unless it is itself a title
-    /// word — the title never matches the full-name token, so dropping the
-    /// whole name would leave the definer with no credit (`codeextractor`
-    /// on `code`).
-    fn defined_terms(
-        title_lower: &str,
-        defined: &[String],
-        methods: &[String],
-    ) -> BTreeSet<String> {
-        let title_words: Vec<&str> = title_lower.split_whitespace().collect();
-        let mut terms = BTreeSet::new();
-        for name in defined.iter().chain(methods) {
-            let full = name.to_lowercase();
-            if !title_words.contains(&full.as_str()) {
-                terms.insert(full);
-            }
-        }
-        // Method names whole, never through `name_words`: splitting them
-        // re-creates the V7 failure (`needs_render` credits `render`).
-        for name in defined {
-            terms.extend(
-                Self::name_words(name)
-                    .into_iter()
-                    .filter(|w| !title_words.contains(&w.as_str())),
-            );
-        }
-        terms
-    }
-
     /// The fields a page earns from its non-test, non-module items. Whole
-    /// names lose the page's own title words; an owned item's whole name
-    /// also enters as `owner::name`. Words also lose terms already
-    /// in its `defined_terms`, and each word lands in one field only: a
-    /// whole name, else a free name's word, else a method's word. Another
-    /// page's title words stay: dropping them hid `onOrderReject` from
+    /// names and words lose the page's own title words; an owned item's
+    /// whole name also enters as `owner::name`; a word that is also a whole
+    /// name scores as the whole name only. Another page's title words stay: dropping them hid `onOrderReject` from
     /// `order reject` on a 2,700-page wiki; `W_TITLE` guards title queries.
-    fn symbol_fields(
-        title_lower: &str,
-        defined_terms: &BTreeSet<String>,
-        items: &[CodeItem],
-    ) -> SymbolFields {
+    fn symbol_fields(title_lower: &str, items: &[CodeItem]) -> SymbolFields {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
-        let keep_word =
-            |w: &String| !title_words.contains(&w.as_str()) && !defined_terms.contains(w);
         let mut f = SymbolFields::default();
         for item in items
             .iter()
@@ -799,19 +719,16 @@ impl Wiki {
             if words.len() > 1 {
                 f.name_sets.insert(words.iter().cloned().collect());
             }
-            let words = words.into_iter().filter(keep_word);
-            if item.kind == CodeItemKind::Method {
-                f.method_words.extend(words);
-            } else {
-                f.words.extend(words);
-            }
+            f.words.extend(
+                words
+                    .into_iter()
+                    .filter(|w| !title_words.contains(&w.as_str())),
+            );
             f.doc_words.extend(Self::lower_words(item.doc.as_deref()));
             f.doc_rest_words
                 .extend(Self::lower_words(item.doc_text.as_deref()));
         }
         f.words.retain(|w| !f.whole.contains(w));
-        f.method_words
-            .retain(|w| !f.whole.contains(w) && !f.words.contains(w));
         f
     }
 
@@ -823,7 +740,6 @@ impl Wiki {
     // `resolve_link`'s word plus its doc put it above the method `resolve`.
     const IW_WHOLE: f64 = 3.5;
     const IW_NAME_WORD: f64 = 2.0;
-    const IW_METHOD_WORD: f64 = 2.0;
     const IW_DOC: f64 = 1.0;
     const IW_DOC_REST: f64 = Self::IW_DOC / 2.0;
     const TEST_ITEM_FACTOR: f64 = 0.5;
@@ -841,11 +757,6 @@ impl Wiki {
         let spelled = words.len() > 1
             && words.iter().cloned().collect::<BTreeSet<_>>()
                 == tokens.iter().flat_map(|t| Self::field_words(t)).collect();
-        let w_word = if item.kind == CodeItemKind::Method {
-            Self::IW_METHOD_WORD
-        } else {
-            Self::IW_NAME_WORD
-        };
         let doc = Self::lower_words(item.doc.as_deref());
         let doc_rest = Self::lower_words(item.doc_text.as_deref());
         let score: f64 = tokens
@@ -855,7 +766,7 @@ impl Wiki {
                 let name = if spelled || *t == whole || *t == qualified {
                     Self::IW_WHOLE
                 } else if words.contains(t) {
-                    w_word
+                    Self::IW_NAME_WORD
                 } else {
                     0.0
                 };
@@ -992,7 +903,6 @@ impl Wiki {
             .summary
             .as_deref()
             .map(|s| Self::field_words(&s.to_lowercase()));
-        let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
         let symbols = self.symbol_fields.get(&e.id);
         // The query's words are one item's name words, in any order.
         let query_words: BTreeSet<String> = raw.iter().flat_map(|t| Self::field_words(t)).collect();
@@ -1052,18 +962,11 @@ impl Wiki {
             }
             // Whole-term equality, never `contains`: `to` must not hit
             // `token_estimate`, `wiki` must not hit `WikiError`.
-            // A whole item name scores `W_SYMBOL` instead of `W_DEFINED`.
-            if symbols.is_some_and(|f| f.whole.contains(t)) {
-                weight += Self::W_SYMBOL;
-            } else if defined_terms.contains(t) {
-                weight += Self::W_DEFINED;
-            }
             if let Some(f) = symbols {
-                if f.words.contains(t) {
+                if f.whole.contains(t) {
+                    weight += Self::W_SYMBOL;
+                } else if f.words.contains(t) {
                     weight += Self::W_SYMBOL_WORD;
-                }
-                if f.method_words.contains(t) {
-                    weight += Self::W_METHOD_WORD;
                 }
                 if Self::field_hit(&f.doc_words, t) {
                     weight += Self::W_SYMBOL_DOC;
@@ -1117,10 +1020,10 @@ impl Wiki {
         (len, Some(candidate))
     }
 
-    /// Case-insensitive tokenized search over name/alias/defined names/summary/section headings/body.
+    /// Case-insensitive tokenized search over name/alias/item names/summary/section headings/body.
     /// Partial matching: a page is a hit if any token matches
     /// any field.
-    /// Name, alias, summary and heading match when every alphanumeric part of the token is a prefix of one of the field's words (`field_hit`); body by substring; defined names by whole term (the lowercased name or one of its words, see `defined_terms`).
+    /// Name, alias, summary and heading match when every alphanumeric part of the token is a prefix of one of the field's words (`field_hit`); body by substring; item names by whole term (the lowercased name or one of its words, see `symbol_fields`).
     ///
     /// Two passes. Pass 1 collects per-page facts and corpus statistics;
     /// pass 2 scores. Per token `t`:
@@ -1140,7 +1043,7 @@ impl Wiki {
     /// Empty/punctuation-only queries return no hits.
     ///
     /// Code pages also score their items' names, method words and docs
-    /// (`symbol_fields`, weights `W_SYMBOL`, `W_SYMBOL_WORD`, `W_METHOD_WORD`,
+    /// (`symbol_fields`, weights `W_SYMBOL`, `W_SYMBOL_WORD`,
     /// `W_SYMBOL_DOC`),
     /// and each returned code page carries its best items as `symbols`
     /// (`expand`), with the same `idf`.
@@ -1601,13 +1504,10 @@ impl Wiki {
 const _: () = assert!(
     Wiki::W_IN_ONE_NAME < Wiki::W_SYMBOL
         && Wiki::W_SYMBOL < Wiki::W_NAME
-        && Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
-        && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC
-        && Wiki::W_SYMBOL_WORD > Wiki::W_SYMBOL_DOC + Wiki::W_SYMBOL_DOC_REST
-        && Wiki::IW_NAME_WORD > Wiki::IW_DOC + Wiki::IW_DOC_REST
+        && Wiki::W_SYMBOL_WORD > Wiki::W_SYMBOL_DOC
+        && Wiki::IW_NAME_WORD > Wiki::IW_DOC
         && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
-        && Wiki::IW_WHOLE > Wiki::IW_METHOD_WORD + Wiki::IW_DOC
 );
 
 #[cfg(test)]
@@ -1703,51 +1603,6 @@ mod tests {
         assert_eq!(Wiki::name_words("walk"), vec!["walk"]);
     }
 
-    #[test]
-    fn defined_terms_keep_full_name_and_words_minus_title_words() {
-        // Word-level self-name skip: the title word `code` goes, the full
-        // name stays (the title never matches the full-name token), the
-        // other word stays.
-        assert_eq!(
-            Wiki::defined_terms("code", &["CodeExtractor".into(), "load".into()], &[]),
-            set(&["codeextractor", "extractor", "load"])
-        );
-        // A name that IS the title word contributes nothing.
-        assert_eq!(
-            Wiki::defined_terms("cache", &["Cache".into()], &[]),
-            set(&[])
-        );
-        // Multi-word title: every title word is skipped.
-        assert_eq!(
-            Wiki::defined_terms(
-                "graph page",
-                &["build_graph".into(), "page_ids".into()],
-                &[]
-            ),
-            set(&["build", "build_graph", "ids", "page_ids"])
-        );
-        assert_eq!(
-            Wiki::defined_terms("hash", &["hash_bytes".into()], &[]),
-            set(&["bytes", "hash_bytes"])
-        );
-    }
-
-    #[test]
-    fn method_names_enter_the_term_set_whole_and_never_word_split() {
-        // `needs_render` must not hand the page the word `render` (the
-        // 2026-09-03 spike measured `render fingerprint` leaving `rewrite`
-        // for `cache` when it did); a name equal to a title word is dropped
-        // like a defined full name.
-        assert_eq!(
-            Wiki::defined_terms(
-                "src query",
-                &[],
-                &["has_page".into(), "needs_render".into(), "query".into()]
-            ),
-            set(&["has_page", "needs_render"])
-        );
-    }
-
     fn item(kind: CodeItemKind, name: &str, doc: Option<&str>, test: bool) -> CodeItem {
         CodeItem {
             kind,
@@ -1789,21 +1644,21 @@ mod tests {
     }
 
     #[test]
-    fn symbol_fields_skip_own_title_defined_terms_tests_and_modules() {
+    fn symbol_fields_skip_own_title_words_tests_and_modules() {
         use CodeItemKind::{Fn, Method, Module};
         let items = [
             // Another page's title word (`summary`) stays.
             item(Fn, "summary_suffix", None, false),
             item(Fn, "render", None, false),
-            // Own title word and a defined term go.
+            // Own title word goes.
             item(Fn, "cache_store", Some("Writes Atomically."), false),
-            // Method: whole name, words in their own field minus name terms.
+            // Method words join the same field; `render` is a whole name.
             item(Method, "needs_render", None, false),
             item(Method, "suffix_of", None, false),
             item(Fn, "zebra", Some("Zebra doc."), true),
             item(Module, "formats", None, false),
         ];
-        let f = Wiki::symbol_fields("cache", &set(&["store"]), &items);
+        let f = Wiki::symbol_fields("cache", &items);
         assert_eq!(
             f.whole,
             set(&[
@@ -1814,8 +1669,7 @@ mod tests {
                 "summary_suffix"
             ])
         );
-        assert_eq!(f.words, set(&["suffix", "summary"]));
-        assert_eq!(f.method_words, set(&["needs", "of"]));
+        assert_eq!(f.words, set(&["needs", "of", "store", "suffix", "summary"]));
         assert_eq!(f.doc_words, ["writes", "atomically"]);
     }
 

@@ -532,11 +532,9 @@ matching:
   `:` split it) is a prefix of one of the field's words — its maximal
   alphanumeric runs — so `write` no longer hits the title `Rewrite`, `id` no
   longer hits `process-wide`, and `wikilink` still hits `wikilinks`. The
-  body hits by substring. Defined-name terms (a top-level definition name
-  from `index.json`, lowercased, or one of its snake/CamelCase words; words
-  equal to one of the page's own title words are skipped) and method names (`methods`,
-  lowercased whole, never word-split) hit by whole term only, so `to` does
-  not hit `token_estimate` and `render` does not hit `needs_render`. Fuller
+  body hits by substring. Item names (`items.json`, lowercased, or one of
+  their snake/CamelCase words) hit by whole term only, so `to` does not hit
+  `token_estimate`. Fuller
   matches are not forced above partial ones by a sort key; IDF does that
   where it matters, by making a rare missing token expensive and a common
   one nearly free.
@@ -544,18 +542,18 @@ matching:
   the `kind` filter. Per token: `idf = ln(1 + (N − df + 0.5)/(df + 0.5))`
   over those pages; body term frequency saturates as
   `tf·(k1+1)/(tf + k1·(1 − b + b·len/avglen))` with `k1 = 1.2`,
-  `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 + defined 2.0 +
-  summary 1.5 + heading 1.0 + body 1.0 × tf')`. Method names share the
-  `defined` weight. Code items add three more page fields: the whole item
-  name, also as `owner::name` (`W_SYMBOL` 2.8, in place of `defined` and
-  below the title weight), the words of item names (`W_SYMBOL_WORD` 2.0,
-  methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
+  `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 +
+  summary 1.5 + heading 1.0 + body 1.0 × tf')`. Code items add three more
+  page fields: the whole item name, also as `owner::name` (`W_SYMBOL` 2.8,
+  below the title weight), else a word of an item name, method or not
+  (`W_SYMBOL_WORD` 2.0), and the words of item doc sentences
   (`W_SYMBOL_DOC` 0.75); a token the first sentence misses but the rest of the
   item's doc (`CodeItem.doc_text`, never shown) has scores half that
   (`W_SYMBOL_DOC_REST`; on item lines `IW_DOC_REST`). Test items (`CodeItem.test`) and module items
-  feed none of them, nor the `defined` and method names that only test
-  items carry, and a word that is already one of the page's own title
-  words or a defined name is skipped; other pages' title words stay. When
+  feed none of them, and a word that is already one of the page's own
+  title words is skipped; other pages' title words stay. The `defined` and
+  `methods` lists in `index.json` do not score: every name on them is an
+  item. When
   the query's words are exactly the title's words, in any order, every
   token adds `W_TITLE` 3.0, so a title query finds its page even where
   other pages' item names share the title's words. When they are exactly
@@ -610,10 +608,8 @@ matching:
   or a file named `test_*`, `*_test.*`, `*_tests.*`), or, for Rust, the item
   sits in a `#[cfg(test)]` module or carries `#[test]` (also
   `#[tokio::test]`). It is stored in `items.json`. Test items stay visible
-  as symbol lines but contribute no page fields, and a `defined` or method
-  name only test items carry is dropped from the page's defined terms
-  (`Wiki::load`), so their names cannot lift their page; body text still
-  counts.
+  as symbol lines but contribute no page fields, so their names cannot
+  lift their page; body text still counts.
 - **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `docs`
   (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
   share it and its error text.
