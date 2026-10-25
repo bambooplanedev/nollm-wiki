@@ -803,3 +803,24 @@ fn setup_codex_leaves_another_wiki_server_alone() {
         out(&a)
     );
 }
+
+#[test]
+fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(!f.root().join("AGENTS.md").exists());
+    assert_eq!(read(&f.root().join("CLAUDE.md")), "# Project rules\n");
+    let o = out(&a);
+    assert!(
+        o.contains("skipped AGENTS.md wiki navigation steps: a new AGENTS.md would hide CLAUDE.md"),
+        "{o}"
+    );
+    assert!(o.contains("wrote Codex wiki server"), "{o}");
+
+    // With AGENTS.md already there, the steps go into it as usual.
+    fs::write(f.root().join("AGENTS.md"), "# Agents\n").unwrap();
+    f.setup(&["--agent", "codex", "--scope", "repo"]).success();
+    assert!(read(&f.root().join("AGENTS.md")).contains("<!-- wiki:navigation -->"));
+}

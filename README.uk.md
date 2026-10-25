@@ -166,7 +166,11 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 памʼяті). Claude Code отримує лише скіл `wiki-memory` з правилами памʼяті: інструкції сервера, де ті
 самі кроки навігації, Claude Code показує й так, а сервер позначає свої інструменти для
 завантаження одразу, а не через `ToolSearch`. Codex не читає ні того, ні того, тож отримує правила
-навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. Агенти визначаються автоматично
+навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. У проєкті з `CLAUDE.md` і без
+`AGENTS.md` setup цей крок пропускає, а не створює `AGENTS.md`: коли є обидва файли, pi читає лише
+`AGENTS.md`, тож перестав би бачити `CLAUDE.md`. Перенесіть `CLAUDE.md` в `AGENTS.md` (Claude Code
+прочитає його через `CLAUDE.md` з рядком `@AGENTS.md`) і запустіть setup знову. Агенти визначаються
+автоматично
 (`.claude/`, `CLAUDE.md` чи `claude` у `PATH`; `.pi/` чи `pi` у `PATH`; тека `.cursor/`), якщо
 `--agent` їх не називає. Codex налаштовується лише тоді, коли його названо: його MCP-конфіг
 глобальний.

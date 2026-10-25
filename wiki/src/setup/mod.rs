@@ -402,9 +402,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     }
                 };
                 let before = path.exists();
-                if r.file_item(root, file, "AGENTS.md wiki navigation steps", false, res)?
-                    && !before
-                {
+                let what = "AGENTS.md wiki navigation steps";
+                // pi, like other agents, reads AGENTS.md instead of CLAUDE.md
+                // when both exist: a new AGENTS.md would hide CLAUDE.md.
+                if !opts.remove && !before && root.join("CLAUDE.md").exists() {
+                    r.skip(
+                        what,
+                        "a new AGENTS.md would hide CLAUDE.md from agents that read only one \
+                         (pi); move CLAUDE.md to AGENTS.md (Claude Code reads it through \
+                         `@AGENTS.md` in CLAUDE.md) and run setup again",
+                    )?;
+                } else if r.file_item(root, file, what, false, res)? && !before {
                     ignore.push(format!("/{file}"));
                 }
                 continue;
