@@ -39,15 +39,28 @@ pub fn walk(
     respect_ignore: bool,
     keep: &dyn Fn(&str) -> bool,
 ) -> Result<Walked, std::io::Error> {
+    Ok(walk_with(
+        root,
+        |b| {
+            b.hidden(respect_ignore)
+                .git_ignore(respect_ignore)
+                .git_global(respect_ignore)
+                .git_exclude(respect_ignore)
+                .ignore(respect_ignore)
+                .parents(respect_ignore);
+        },
+        keep,
+    ))
+}
+
+fn walk_with(
+    root: &Path,
+    rules: impl FnOnce(&mut WalkBuilder),
+    keep: &dyn Fn(&str) -> bool,
+) -> Walked {
     let mut builder = WalkBuilder::new(root);
-    builder
-        .hidden(respect_ignore)
-        .git_ignore(respect_ignore)
-        .git_global(respect_ignore)
-        .git_exclude(respect_ignore)
-        .ignore(respect_ignore)
-        .parents(respect_ignore)
-        .require_git(false);
+    rules(&mut builder);
+    builder.require_git(false);
     // Symlinks are intentionally NOT followed (follow_links defaults to false):
     // following them risks cycles, escaping the input tree, and machine-
     // dependent ordering — all of which would break output determinism.
@@ -93,7 +106,30 @@ pub fn walk(
 
     files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     dirs.sort();
-    Ok(Walked { files, dirs })
+    Walked { files, dirs }
+}
+
+/// Walk a memory folder: every ignore rule off (a memory folder is usually
+/// git-excluded on purpose), hidden files skipped, `memory.md` (any case) left
+/// out because it is the folder's own index. Sorted like [`walk`].
+pub fn walk_memory(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Result<Walked, std::io::Error> {
+    Ok(walk_with(
+        dir,
+        |b| {
+            b.hidden(true)
+                .git_ignore(false)
+                .git_global(false)
+                .git_exclude(false)
+                .ignore(false)
+                .parents(false);
+        },
+        &|p| {
+            !Path::new(p)
+                .file_name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("memory.md"))
+                && keep(p)
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -186,6 +222,24 @@ mod tests {
             held, 5,
             "walk retained bytes for a file it was told to skip: {held}"
         );
+    }
+
+    #[test]
+    fn walk_memory_ignores_git_rules_but_skips_hidden_and_index_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join(".gitignore"), b"a.md\n").unwrap();
+        fs::write(root.join("a.md"), b"a").unwrap();
+        fs::write(root.join("MEMORY.md"), b"i").unwrap();
+        fs::write(root.join("memory.md"), b"i").unwrap();
+        fs::write(root.join("._a.md"), b"j").unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/b.md"), b"b").unwrap();
+
+        let w = walk_memory(root, &all).unwrap();
+        let rels: Vec<_> = w.files.iter().map(|f| f.rel_path.clone()).collect();
+        assert_eq!(rels, vec!["a.md", "sub/b.md"]);
+        assert_eq!(w.dirs, vec![root.to_path_buf(), root.join("sub")]);
     }
 
     #[cfg(unix)]

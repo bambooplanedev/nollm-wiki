@@ -942,3 +942,180 @@ fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
     let third = entries.iter().find(|e| e["id"] == "third").unwrap();
     assert_eq!(third["neighbors_out"], serde_json::json!(["maiak"]));
 }
+
+fn index_entries(output: &std::path::Path) -> Vec<serde_json::Value> {
+    let index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    index["entries"].as_array().unwrap().clone()
+}
+
+#[test]
+fn repo_memory_folder_compiles_flagged_and_project_pages_are_not() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    write(&input, "doc.md", "---\ntitle: Doc\n---\n\nProject doc.\n");
+    write(
+        &input,
+        ".agents/memory/note.md",
+        "---\ntitle: Note\n---\n\nRemember this.\n",
+    );
+    write(&input, ".agents/memory/MEMORY.md", "# Index\n\n- note\n");
+    write(&input, ".agents/memory/memory.md", "# Lower\n");
+    write(&input, ".agents/memory/._n.md", "# Junk\n");
+
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(result.pages_total, 2);
+    let entries = index_entries(&output);
+    let note = entries.iter().find(|e| e["title"] == "Note").unwrap();
+    assert_eq!(note["path"], ".agents/memory/note.md");
+    assert_eq!(note["memory"], true);
+    let doc = entries.iter().find(|e| e["title"] == "Doc").unwrap();
+    assert!(doc.get("memory").is_none());
+    // The flag reaches index.json only, never the page text.
+    let page = fs::read_to_string(output.join("note.md")).unwrap();
+    assert!(!page.contains("memory: true"));
+}
+
+#[test]
+fn memory_folder_excluded_by_git_is_still_compiled() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&input, ".agents/memory/note.md", "# Note\n\nkept\n");
+    write(&input, ".git/info/exclude", ".agents/memory\n");
+    write(&input, ".gitignore", ".agents/\n");
+
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let entries = index_entries(&output);
+    assert!(entries
+        .iter()
+        .any(|e| e["path"] == ".agents/memory/note.md" && e["memory"] == true));
+}
+
+#[test]
+fn external_memory_folder_compiles_with_its_absolute_path() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let external = dir.path().join("ext");
+    let output = dir.path().join("out");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&external, "n.md", "# Ext Note\n\nbody\n");
+
+    let opts = CompileOptions {
+        memory: Some(external.clone()),
+        ..Default::default()
+    };
+    let result = compile(&input, &output, &opts).unwrap();
+    assert_eq!(result.pages_total, 2);
+    let entries = index_entries(&output);
+    let note = entries.iter().find(|e| e["title"] == "Ext Note").unwrap();
+    assert_eq!(
+        note["path"],
+        wiki::memory::display_path(&external.join("n.md"))
+    );
+    assert_eq!(note["memory"], true);
+}
+
+#[test]
+fn memory_folder_given_twice_or_with_no_ignore_yields_each_note_once() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&input, ".agents/memory/note.md", "# Note\n\nbody\n");
+
+    for memory in [None, Some(input.join(".agents/memory"))] {
+        let opts = CompileOptions {
+            respect_ignore: false,
+            memory,
+            ..Default::default()
+        };
+        let result = compile(&input, &output, &opts).unwrap();
+        assert_eq!(result.pages_total, 2);
+        let entries = index_entries(&output);
+        let notes: Vec<_> = entries.iter().filter(|e| e["title"] == "Note").collect();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0]["memory"], true);
+        assert_eq!(notes[0]["path"], ".agents/memory/note.md");
+    }
+}
+
+#[test]
+fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    write(&input, "docs/s.md", "---\ntitle: Setup\n---\n\nProject.\n");
+    write(&input, "docs/l.md", "# Linker\n\nSee [[Setup]].\n");
+    write(
+        &input,
+        ".agents/memory/s.md",
+        "---\ntitle: Setup\n---\n\nNote.\n",
+    );
+
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert_eq!(result.pages_total, 3);
+    let entries = index_entries(&output);
+    let project = entries.iter().find(|e| e["path"] == "docs/s.md").unwrap();
+    assert_eq!(project["id"], "setup");
+    assert_eq!(project["title"], "Setup");
+    let note = entries
+        .iter()
+        .find(|e| e["path"] == ".agents/memory/s.md")
+        .unwrap();
+    assert_ne!(note["id"], "setup");
+    assert!(note["title"].as_str().unwrap().contains("Setup"));
+    let pages = wiki::lint::load_compiled_pages(&output).unwrap();
+    assert!(wiki::lint::lint(&pages).broken_links.is_empty());
+    let linker = fs::read_to_string(output.join("linker.md")).unwrap();
+    assert!(linker.contains("[[setup|Setup]]"), "{linker}");
+}
+
+#[test]
+fn external_note_colliding_with_another_never_gets_the_key_folder_in_its_title() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let external = dir.path().join("0123456789abcdef0123456789abcdef01234567");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&external, "a/n.md", "---\ntitle: Dup\n---\n\nA.\n");
+    write(&external, "b/n.md", "---\ntitle: Dup\n---\n\nB.\n");
+    let opts = CompileOptions {
+        memory: Some(external),
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+    let entries = index_entries(&output);
+    let dups: Vec<_> = entries
+        .iter()
+        .filter(|e| e["title"].as_str().unwrap().contains("Dup"))
+        .collect();
+    assert_eq!(dups.len(), 2);
+    for e in dups {
+        let t = e["title"].as_str().unwrap().to_lowercase();
+        assert!(!t.contains("0123456789abcdef"), "{t}");
+        assert!(
+            e["path"].as_str().unwrap().starts_with('/')
+                || e["path"].as_str().unwrap().contains(':')
+        );
+    }
+}
+
+#[test]
+fn memory_files_join_the_watch_set() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let input = root.join("raw");
+    let output = root.join("out");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&input, ".agents/memory/note.md", "# Note\n\nbody\n");
+    let result = compile(&input, &output, &CompileOptions::default()).unwrap();
+    assert!(result
+        .watch_set
+        .relevant(&input.join(".agents/memory/note.md")));
+    assert!(result
+        .watch_set
+        .relevant(&input.join(".agents/memory/new.md")));
+}

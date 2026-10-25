@@ -30,7 +30,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    unhandled file is never read into memory. `compile_inner` then filters out anything
    under `output` (`is_under`, so a nested output dir can't feed its own
    generated pages back in as sources) before extraction runs. Produces
-   `Vec<SourceFile>`.
+   `Vec<SourceFile>`. Memory folders (`.agents/memory` in the input, plus
+   `CompileOptions.memory`) are walked separately by `walk::walk_memory`:
+   ignore rules off, hidden files and `MEMORY.md` skipped, markdown and text
+   only; their pages carry `memory: true` and, for an external folder,
+   absolute `/` paths.
 2. **Extract** (`formats::Registry`, in parallel via `rayon`) — dispatches
    each file to the `Extractor` registered for its extension and produces an
    `Entity`. Because the input `Vec` was already sorted, `.collect()`ing the
@@ -144,6 +148,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
+| `src/memory.rs` | Where agent memory lives: `REPO_DIR`, the per-user data dir per OS (`data_dir_for`, env-driven), the repo key (`repo_key`: smallest root commit; a shallow clone hashes the git common dir; a repo without commits has no key), `local_dir`, `resolve` and `display_path` for stable external paths. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering; produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
@@ -169,9 +174,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`; `limit` 5 by default)/`neighbors`/`page` tools, plus `lint` when `--tools` names it (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound). |
-| `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search, pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `HINT_LINE_CHARS`; empty when nothing matches. `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
+| `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search plus, when the prompt names a memory note in its title, aliases or summary, one gated memory line (a matching word of 6+ characters, or of 4+ while the note's unboosted score is at least 2x the best code page's); pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `HINT_LINE_CHARS`; empty when nothing matches. `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki`, then per agent (Claude Code, pi) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, or `claude mcp add-json … --scope local`), the `wiki-navigation` skill and the ignore lines; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
+| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki`, creates the memory folder for the scope, then per agent (Claude Code, pi) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, or `claude mcp add-json … --scope local`), the `wiki-navigation` skill (its Memory section rendered with the folder) and the ignore lines; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
@@ -557,8 +562,15 @@ matching:
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
-- Hits sort descending by score (`total_cmp`), then descending by
-  PageRank as the second sort key, then ascending by id.
+- A date written in the query (`query_dates` on the raw text: ISO, `D.MM[.YYYY]`,
+  `<day> <month name>`, `<month name> <day>`) acts as one more token: a memory
+  note whose `updated` is that day (any year when none is given) scores
+  `W_TITLE` for it, with its own `df`/IDF; the words of the date still match
+  as usual. `wiki hint` lets such a hit through its gate (`dated_on`).
+- Hits sort descending by score (`total_cmp`; a memory note's score is
+  multiplied by `MEMORY_BOOST`, ×4), then memory notes before project pages,
+  then among memory notes newest `updated` first, then descending by PageRank,
+  then ascending by id.
 - The searched body text is the rendered page's parsed sections minus
   generated chrome (`Metadata`, `Related`, `Imported by`, `Mentioned in`,
   `Notes`) —

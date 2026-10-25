@@ -846,6 +846,8 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         summary: Some("sum\nmary".into()),
         updated: None,
         score: 1.0,
+        memory: false,
+        superseded_by: None,
         snippet: None,
         symbols: vec![SymbolLine {
             path: "a.rs".into(),
@@ -1224,6 +1226,8 @@ fn search_lines_shows_date_after_path() {
         score: 1.0,
         snippet: None,
         symbols: vec![],
+        memory: false,
+        superseded_by: None,
     };
     assert_eq!(
         wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
@@ -1280,4 +1284,321 @@ fn cyrillic_query_words_match_another_grammatical_form() {
         .search("mcp-сервери", None, 10)
         .iter()
         .any(|h| h.id == "shliuz"));
+}
+
+fn memory_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    for (name, body) in files {
+        let p = input.join(name);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, body).unwrap();
+    }
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+#[test]
+fn memory_boost_lifts_a_note_above_code_with_a_higher_raw_score() {
+    let code = "//! zebra\npub fn zebra() { /* zebra zebra */ }\n";
+    let body = "---\ntitle: Note\n---\n\nOnce a zebra, then filler words follow.\n";
+    let (_d, plain) = memory_fixture(&[("a.rs", code), ("note.md", body)]);
+    let raw = plain.search("zebra", None, 10);
+    assert_eq!(raw[0].id, "a");
+    let raw_note = raw.iter().find(|h| h.id == "note").unwrap().score;
+    let (_d, w) = memory_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
+    let hits = w.search("zebra", None, 10);
+    assert_eq!(hits[0].id, "note");
+    assert!((hits[0].score - 4.0 * raw_note).abs() < 1e-9);
+}
+
+#[test]
+fn equal_scores_order_memory_then_date_then_pagerank_without_a_cycle() {
+    // Same words, so equal scores; pagerank differs by link count.
+    let note = |t: &str, u: &str| format!("---\ntitle: {t}\nupdated: {u}\n---\n\nzebra\n");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &note("Aaa", "2026-01-01")),
+        (".agents/memory/b.md", &note("Bbb", "2026-03-01")),
+        ("c.md", "---\ntitle: Ccc\n---\n\nzebra\n"),
+        ("d.md", "[[Ccc]] [[Ccc]] [[Aaa]]\n"),
+    ]);
+    let ids: Vec<_> = w
+        .search("zebra", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(&ids[..3], ["bbb", "aaa", "ccc"]);
+}
+
+#[test]
+fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
+    let note =
+        |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
+        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
+        (".agents/memory/c.md", &note("Ccc", "")),
+    ]);
+    let ids: Vec<_> = w
+        .search("zebra", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(ids, ["bbb", "aaa", "ccc"]);
+}
+
+#[test]
+fn memory_passes_code_and_docs_filters_but_not_exact_code_kind() {
+    let (_d, w) = memory_fixture(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+    ]);
+    let ids = |f: &str| {
+        let f = KindFilter::parse(f).unwrap();
+        let mut v: Vec<_> = w
+            .search("zebra", Some(&f), 10)
+            .into_iter()
+            .map(|h| h.id)
+            .collect();
+        v.sort();
+        v
+    };
+    assert_eq!(ids("code"), ["a", "note"]);
+    assert_eq!(ids("docs"), ["note"]);
+    assert_eq!(ids("markdown"), ["note"]);
+    assert_eq!(ids("code:rust"), ["a"]);
+}
+
+#[test]
+fn memory_flag_shows_in_json_only_on_memory_hits() {
+    let (_d, w) = memory_fixture(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+    ]);
+    let j: serde_json::Value =
+        serde_json::from_str(&wiki::serve::search_json(w.search("zebra", None, 10))).unwrap();
+    assert_eq!(j[0]["memory"], true);
+    assert!(j[1].get("memory").is_none());
+}
+
+#[test]
+fn index_json_without_memory_still_loads() {
+    let (d, _w) = memory_fixture(&[("a.md", "# A\n\nzebra\n")]);
+    let out = d.path().join("out");
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
+    assert!(v["entries"][0].get("memory").is_none());
+    let w = Wiki::load(&out).unwrap();
+    assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
+}
+
+fn note(title: &str, extra: &str, body: &str) -> String {
+    format!("---\ntitle: {title}\n{extra}---\n\n{body}\n")
+}
+
+fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
+    let v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(d.path().join("out/index.json")).unwrap())
+            .unwrap();
+    v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            (
+                e["id"].as_str().unwrap().to_string(),
+                e.get("superseded_by")
+                    .map(|s| s.as_str().unwrap().to_string()),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn supersedes_marks_a_memory_note_by_title_alias_or_slug_only() {
+    let (d, _w) = memory_fixture(&[
+        (".agents/memory/t.md", &note("Old Title", "", "x")),
+        (".agents/memory/a.md", &note("Aliased", "aliases: [Former Name]\n", "x")),
+        (".agents/memory/s.md", &note("Slugged Note", "", "x")),
+        ("proj.md", &note("Project Page", "", "x")),
+        (
+            ".agents/memory/new.md",
+            &note(
+                "New",
+                "supersedes:\n  - old title\n  - FORMER NAME\n  - slugged_note\n  - Project Page\n  - Nothing Here\n",
+                "x",
+            ),
+        ),
+    ]);
+    let m = superseded_by(&d);
+    for id in ["old_title", "aliased", "slugged_note"] {
+        assert_eq!(m[id].as_deref(), Some("new"), "{id}");
+    }
+    assert_eq!(m["project_page"], None);
+    assert_eq!(m["new"], None);
+}
+
+#[test]
+fn two_superseders_resolve_to_the_smaller_id() {
+    let (d, _w) = memory_fixture(&[
+        (".agents/memory/o.md", &note("Old", "", "x")),
+        (
+            ".agents/memory/z.md",
+            &note("Zed", "supersedes: Old\n", "x"),
+        ),
+        (
+            ".agents/memory/b.md",
+            &note("Bee", "supersedes: [Old]\n", "x"),
+        ),
+    ]);
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("bee"));
+}
+
+#[test]
+fn superseded_note_loses_boost_and_tie_key() {
+    // The old note holds the words in its description, the new one in the body.
+    let old = note("Old", "description: nightly benchmarks nightly\n", "filler");
+    let new = note("New", "supersedes: Old\n", "benchmarks run nightly");
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/old.md", &old),
+        (".agents/memory/new.md", &new),
+    ]);
+    let hits = w.search("nightly benchmarks", None, 10);
+    assert_eq!(hits[0].id, "new");
+    assert_eq!(hits[1].superseded_by.as_deref(), Some("new"));
+    assert_eq!(hits[0].superseded_by, None);
+    // Without the boost the old note's raw score stays unmultiplied.
+    let (_d, plain) = memory_fixture(&[("old.md", &old), ("new.md", &new)]);
+    let raw = plain.search("nightly benchmarks", None, 10);
+    let raw_old = raw.iter().find(|h| h.id == "old").unwrap().score;
+    assert!((hits[1].score - raw_old).abs() < 1e-9, "{}", hits[1].score);
+}
+
+#[test]
+fn superseded_note_does_not_win_the_memory_first_tie() {
+    let same = |t: &str, extra: &str| note(t, extra, "zebra");
+    let (_d, w) = memory_fixture(&[
+        ("c.md", &same("Ccc", "")),
+        (".agents/memory/a.md", &same("Aaa", "")),
+        (".agents/memory/b.md", &same("Bbb", "supersedes: Aaa\n")),
+    ]);
+    let hits = w.search("zebra", None, 10);
+    // Bbb (live memory) first; then the superseded note ties plain code by id.
+    assert_eq!(hits[0].id, "bbb");
+    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids[1..], ["aaa", "ccc"], "{ids:?}");
+}
+
+#[test]
+fn search_output_marks_only_superseded_hits() {
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/old.md", &note("Old", "", "zebra")),
+        (
+            ".agents/memory/new.md",
+            &note("New", "supersedes: Old\n", "zebra"),
+        ),
+    ]);
+    let hits = w.search("zebra", None, 10);
+    let lines = wiki::serve::search_lines(&hits);
+    let line = |id: &str| lines.lines().find(|l| l.starts_with(id)).unwrap();
+    assert!(!line("new  ").contains("superseded"), "{lines}");
+    assert!(line("old  ").ends_with(" (superseded by new)"), "{lines}");
+    let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(hits)).unwrap();
+    assert!(j[0].get("superseded_by").is_none());
+    assert_eq!(j[1]["superseded_by"], "new");
+}
+
+fn journals() -> (tempfile::TempDir, Wiki) {
+    // The day number appears nowhere in the note's text, only in its date.
+    let j = |day: &str, name: &str| {
+        (
+            format!(".agents/memory/journal/2026-10-{day}.md"),
+            format!("---\ntitle: Journal {name}\n---\n\nstand run notes\n"),
+        )
+    };
+    let files = [j("05", "alpha"), j("12", "beta"), j("19", "gamma")];
+    let mut refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    refs.push(("src/stand.rs", "pub fn stand() {}\n"));
+    memory_fixture(&refs)
+}
+
+#[test]
+fn a_date_in_the_query_ranks_the_note_of_that_day_first() {
+    let (_d, w) = journals();
+    for q in [
+        "що сталося зі stand 12 жовтня",
+        "stand October 12",
+        "stand 12.10",
+        "stand 2026-10-12",
+    ] {
+        let hits = w.search(q, None, 10);
+        assert_eq!(hits[0].updated.as_deref(), Some("2026-10-12"), "{q}");
+    }
+    // No date: the three journals tie, newest first.
+    assert_eq!(
+        w.search("stand", None, 10)[0].updated.as_deref(),
+        Some("2026-10-19")
+    );
+}
+
+#[test]
+fn a_date_without_a_year_hits_every_year_newer_first() {
+    let note = |u: &str| format!("---\ntitle: N{u}\nupdated: {u}\n---\n\nstand\n");
+    let (a, b) = (note("2025-10-12"), note("2026-10-12"));
+    let (_d, w) = memory_fixture(&[
+        (".agents/memory/a.md", &a),
+        (".agents/memory/b.md", &b),
+        (".agents/memory/c.md", &note("2026-10-13")),
+    ]);
+    let hits = w.search("12 жовтня", None, 10);
+    let ups: Vec<_> = hits.iter().map(|h| h.updated.clone().unwrap()).collect();
+    assert_eq!(ups, ["2026-10-12", "2025-10-12"]);
+    let hits = w.search("12 жовтня 2025", None, 10);
+    assert_eq!(hits[0].updated.as_deref(), Some("2025-10-12"));
+}
+
+#[test]
+fn a_project_page_with_a_date_in_its_name_is_not_date_matched() {
+    let (_d, w) = memory_fixture(&[(
+        "docs/2026-10-12-spec.md",
+        "---\ntitle: Spec\nupdated: 2026-10-12\n---\n\nplain\n",
+    )]);
+    assert!(w.search("12 жовтня", None, 10).is_empty());
+}
+
+#[test]
+fn a_date_lifts_only_the_notes_it_hits_and_a_missed_date_changes_nothing() {
+    let note = |name: &str, u: &str| {
+        (
+            format!(".agents/memory/{name}.md"),
+            format!("---\ntitle: {name}\nupdated: {u}\n---\n\nstand run\n"),
+        )
+    };
+    let files = [
+        note("alpha", "2026-10-12"),
+        note("beta", "2026-10-13"),
+        note("gamma", "2026-10-14"),
+    ];
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let (_d, w) = memory_fixture(&refs);
+    let scores = |q: &str| -> Vec<(String, f64)> {
+        w.search(q, None, 10)
+            .into_iter()
+            .map(|h| (h.id, h.score))
+            .collect()
+    };
+    let hit = scores("stand 12 жовтня");
+    assert_eq!(hit[0].0, "alpha");
+    assert!(hit[0].1 > hit[1].1);
+    assert!((hit[1].1 - hit[2].1).abs() < 1e-12);
+    // Dated 25 October: nothing; same scores as the non-date "250".
+    assert_eq!(scores("stand 25 жовтня"), scores("stand 250 жовтня"));
 }

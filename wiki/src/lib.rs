@@ -10,6 +10,7 @@ pub mod hint;
 pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
+pub mod memory;
 pub mod model;
 pub mod outline;
 pub mod query;
@@ -23,7 +24,7 @@ use crate::formats::Registry;
 use crate::model::{Entity, LintReport};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WikiError {
@@ -45,6 +46,8 @@ pub struct CompileOptions {
     pub emit_json: bool,
     pub jobs: Option<usize>,
     pub project: Option<String>,
+    /// An extra agent memory folder (absolute), compiled as flagged pages.
+    pub memory: Option<std::path::PathBuf>,
 }
 
 impl Default for CompileOptions {
@@ -55,6 +58,7 @@ impl Default for CompileOptions {
             emit_json: false,
             jobs: None,
             project: None,
+            memory: None,
         }
     }
 }
@@ -151,19 +155,85 @@ fn compile_inner(
     // `--watch` recompile loop).
     let registry = Registry::with_defaults();
     let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?;
+
+    // Memory folders: the repo's `.agents/memory` and the optional extra
+    // folder. Both are walked with every ignore rule off (they are usually
+    // git-excluded on purpose); markdown and text only. The main walk may
+    // reach the in-tree one (`--no-ignore`), so its files are dropped there
+    // and come back only from the memory walk, flagged. One folder given
+    // twice is walked once.
+    let in_tree = input.join(memory::REPO_DIR);
+    let mut roots: Vec<(PathBuf, bool)> = Vec::new();
+    if in_tree.is_dir() {
+        roots.push((in_tree.clone(), true));
+    }
+    if let Some(extra) = opts.memory.as_ref().filter(|d| d.is_dir()) {
+        let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        if !roots.iter().any(|(r, _)| same(r, extra)) {
+            roots.push((extra.clone(), false));
+        }
+    }
+    let is_note = |p: &str| {
+        Path::new(p)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| ["md", "markdown", "txt"].contains(&e.to_ascii_lowercase().as_str()))
+    };
     let files: Vec<_> = walked
         .files
         .into_iter()
         .filter(|sf| !is_under(&sf.abs_path, output))
+        .filter(|sf| !roots.iter().any(|(r, _)| is_under(&sf.abs_path, r)))
         .collect();
+    let mut dirs: Vec<PathBuf> = walked
+        .dirs
+        .into_iter()
+        .filter(|d| !is_under(d, output))
+        .collect();
+    let mut memory_files = Vec::new();
+    let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
+    for (root, in_repo) in &roots {
+        let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p))?;
+        dirs.extend(w.dirs.into_iter().filter(|d| !is_under(d, output)));
+        let abs_root = std::path::absolute(root)?;
+        for mut sf in w
+            .files
+            .into_iter()
+            .filter(|sf| !is_under(&sf.abs_path, output))
+        {
+            sf.rel_path = if *in_repo {
+                format!("{}/{}", memory::REPO_DIR, sf.rel_path)
+            } else {
+                let abs = memory::display_path(&abs_root.join(&sf.rel_path));
+                virtual_paths.insert(abs.clone(), format!("memory/{}", sf.rel_path));
+                abs
+            };
+            memory_files.push(sf);
+        }
+    }
     let watch_set = watch::WatchSet::new(
         input,
-        files.iter().map(|sf| sf.abs_path.clone()),
-        walked.dirs.into_iter().filter(|d| !is_under(d, output)),
-    );
+        files
+            .iter()
+            .chain(&memory_files)
+            .map(|sf| sf.abs_path.clone()),
+        dirs,
+    )
+    .with_memory(std::iter::once(in_tree).chain(opts.memory.clone()));
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
+        .collect();
+    let notes: Vec<Entity> = memory_files
+        .par_iter()
+        .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
+        .map(|mut e| {
+            e.memory = true;
+            e
+        })
         .collect();
 
     // 1b. Qualify names that would otherwise share a slug. An extractor names
@@ -171,12 +241,32 @@ fn compile_inner(
     // this runs here, where every entity is in hand. Ordering is irrelevant to
     // the result — the pass depends on the set of (name, source_path) pairs,
     // not on the order `extracted` arrives in.
+    // Project pages first, alone, so a memory note can never rename one; then
+    // the notes among themselves with the project ids already taken. An
+    // external note is qualified by its virtual `memory/<rel>` path, never by
+    // the absolute key folder; its `source_path` is restored afterwards.
     disambiguate_ids(&mut extracted);
+    let taken: BTreeSet<String> = extracted.iter().map(|e| e.id.clone()).collect();
+    let real_paths: BTreeMap<&String, &String> =
+        virtual_paths.iter().map(|(a, v)| (v, a)).collect();
+    let mut notes = notes;
+    for n in &mut notes {
+        if let Some(v) = virtual_paths.get(&n.source_path) {
+            n.source_path = v.clone();
+        }
+    }
+    disambiguate_taken(&mut notes, &taken);
+    for n in &mut notes {
+        if let Some(abs) = real_paths.get(&n.source_path) {
+            n.source_path = (*abs).clone();
+        }
+    }
+    extracted.extend(notes);
 
-    // 2. Dedup slug collisions deterministically (first by sorted rel_path
-    // wins — `extracted` is already ordered by rel_path from the walk, so a
-    // simple "keep the first insertion" rule is order-stable regardless of
-    // thread count).
+    // 2. Dedup slug collisions deterministically. After disambiguation ids
+    // are unique, so which entity a collision would keep never matters; the
+    // result does not depend on the order `extracted` arrives in (project
+    // files by rel_path, then notes by folder).
     let mut entities: BTreeMap<String, Entity> = BTreeMap::new();
     for e in extracted {
         match entities.get(&e.id) {
@@ -199,6 +289,7 @@ fn compile_inner(
     // final ids. Processes the (already sorted) BTreeMap in key order so the
     // remap is identical across runs/machines/thread counts.
     let mut entities = remap_reserved_names(entities);
+    resolve_supersedes(&mut entities);
     // Needs the final ids and `source_path`s, so it follows the remap.
     formats::extract_cpp::pair_declarations(&mut entities);
 
@@ -554,12 +645,16 @@ fn assign_free_ids(
     state: &LadderState<'_>,
     ordinal: &mut [usize],
     claimed: &mut BTreeSet<String>,
+    fixed: &BTreeSet<String>,
 ) -> bool {
     // Every member of `group` currently shares this exact id (that is what
     // makes them a group) — vacate it once, for the whole group, rather than
     // per member: removing it again for a later member would just be
     // removing whatever a not-yet-processed sibling still has not replaced.
-    claimed.remove(&extracted[group[0]].id);
+    // (A id taken by a fixed entity outside `extracted` stays claimed.)
+    if !fixed.contains(&extracted[group[0]].id) {
+        claimed.remove(&extracted[group[0]].id);
+    }
 
     let mut sorted = group.to_vec();
     sorted.sort_by(|a, b| extracted[*a].source_path.cmp(&extracted[*b].source_path));
@@ -626,6 +721,13 @@ fn assign_free_ids(
 /// qualified page picks up fewer lexical edges. That is the trade against
 /// pages that previously did not exist at all.
 fn disambiguate_ids(extracted: &mut [Entity]) {
+    disambiguate_taken(extracted, &BTreeSet::new());
+}
+
+/// `disambiguate_ids` for entities that must also avoid `taken` ids, which
+/// stay fixed: an entity whose id is taken is treated as colliding, never as
+/// the winner, so it is renamed through the same ladder.
+fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
     let base: Vec<String> = extracted.iter().map(|e| e.name.clone()).collect();
     let disc: Vec<String> = extracted.iter().map(discriminator).collect();
     let key: Vec<(u8, usize)> = extracted
@@ -663,9 +765,15 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
         // groups processed in the same round must not both compute a free id
         // from the round's starting snapshot and land on the same choice.
         let mut claimed: BTreeSet<String> = extracted.iter().map(|e| e.id.clone()).collect();
+        claimed.extend(taken.iter().cloned());
 
         let mut changed = false;
-        for group in by_id.values().filter(|g| g.len() > 1) {
+        for (id, group) in by_id
+            .iter()
+            .filter(|(id, g)| g.len() > 1 || taken.contains(*id))
+        {
+            let group = group.as_slice();
+            let is_taken = taken.contains(id);
             if !force_free_ids {
                 let first_parents = parent_segments(&extracted[group[0]].source_path);
                 let same_dir = group
@@ -685,7 +793,11 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
                     continue;
                 }
 
-                let winner = strict_winner(group, &key);
+                let winner = if is_taken {
+                    None
+                } else {
+                    strict_winner(group, &key)
+                };
                 let mut applied = false;
                 for &i in group {
                     if Some(i) == winner || used_disc[i] || disc[i].is_empty() {
@@ -714,7 +826,7 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
                 depth: &depth,
                 used_disc: &used_disc,
             };
-            if assign_free_ids(group, extracted, &state, &mut ordinal, &mut claimed) {
+            if assign_free_ids(group, extracted, &state, &mut ordinal, &mut claimed, taken) {
                 changed = true;
             }
         }
@@ -732,6 +844,35 @@ fn disambiguate_ids(extracted: &mut [Entity]) {
 
         if force_free_ids {
             return;
+        }
+    }
+}
+
+/// Marks each memory note named by another note's `supersedes` with the
+/// superseder's id. A name matches a note's title or alias ignoring case, or
+/// its id as a slug; project pages are never marked. Several superseders
+/// resolve to the smallest id (ids are visited in sorted order).
+fn resolve_supersedes(entities: &mut BTreeMap<String, Entity>) {
+    let mut marks: BTreeMap<String, String> = BTreeMap::new();
+    for (id, e) in entities.iter().filter(|(_, e)| e.memory) {
+        for name in &e.supersedes {
+            let lower = name.to_lowercase();
+            let slug = crate::model::slugify(name);
+            let target = entities.iter().find(|(tid, t)| {
+                t.memory
+                    && *tid != id
+                    && (**tid == slug
+                        || t.name.to_lowercase() == lower
+                        || t.aliases.iter().any(|a| a.to_lowercase() == lower))
+            });
+            if let Some((tid, _)) = target {
+                marks.entry(tid.clone()).or_insert_with(|| id.clone());
+            }
+        }
+    }
+    for (tid, by) in marks {
+        if let Some(t) = entities.get_mut(&tid) {
+            t.superseded_by = Some(by);
         }
     }
 }
@@ -789,6 +930,9 @@ mod tests {
             tags: vec![],
             created: String::new(),
             updated: String::new(),
+            memory: false,
+            supersedes: Vec::new(),
+            superseded_by: None,
             body: String::new(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,
@@ -1071,7 +1215,14 @@ mod tests {
             depth: &depth,
             used_disc: &used_disc,
         };
-        let changed = assign_free_ids(&[0, 1], &extracted, &state, &mut ordinal, &mut claimed);
+        let changed = assign_free_ids(
+            &[0, 1],
+            &extracted,
+            &state,
+            &mut ordinal,
+            &mut claimed,
+            &BTreeSet::new(),
+        );
 
         assert!(changed);
         assert_eq!(

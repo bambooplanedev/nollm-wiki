@@ -24,6 +24,12 @@ pub(crate) struct Entry {
     pub(crate) summary: Option<String>,
     #[serde(default)]
     pub(crate) updated: Option<String>,
+    /// From an agent memory folder; absent in `index.json` when false.
+    #[serde(default)]
+    pub(crate) memory: bool,
+    /// The id of the note that supersedes this one; absent in `index.json` when unset.
+    #[serde(default)]
+    pub(crate) superseded_by: Option<String>,
     pub(crate) pagerank: f64,
     pub(crate) token_estimate: usize,
     pub(crate) neighbors_out: Vec<String>,
@@ -73,6 +79,173 @@ pub fn tag_filter(arg: &str) -> Option<String> {
     (!t.is_empty()).then_some(t)
 }
 
+/// Multiplies a memory page's final score, so a note outranks code that
+/// matches the same words.
+pub(crate) const MEMORY_BOOST: f64 = 4.0;
+
+/// A calendar date written in a query; `year` is `None` when not given.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct QueryDate {
+    year: Option<u32>,
+    month: u32,
+    day: u32,
+}
+
+/// Month names a query may use (lowercase), each with its month number:
+/// Ukrainian and Russian nominative and genitive, English full and short.
+const MONTH_NAMES: [(u32, &[&str]); 12] = [
+    (
+        1,
+        &["січень", "січня", "январь", "января", "january", "jan"],
+    ),
+    (
+        2,
+        &["лютий", "лютого", "февраль", "февраля", "february", "feb"],
+    ),
+    (3, &["березень", "березня", "март", "марта", "march", "mar"]),
+    (
+        4,
+        &["квітень", "квітня", "апрель", "апреля", "april", "apr"],
+    ),
+    (5, &["травень", "травня", "май", "мая", "may"]),
+    (6, &["червень", "червня", "июнь", "июня", "june", "jun"]),
+    (7, &["липень", "липня", "июль", "июля", "july", "jul"]),
+    (
+        8,
+        &["серпень", "серпня", "август", "августа", "august", "aug"],
+    ),
+    (
+        9,
+        &[
+            "вересень",
+            "вересня",
+            "сентябрь",
+            "сентября",
+            "september",
+            "sep",
+            "sept",
+        ],
+    ),
+    (
+        10,
+        &["жовтень", "жовтня", "октябрь", "октября", "october", "oct"],
+    ),
+    (
+        11,
+        &[
+            "листопад",
+            "листопада",
+            "ноябрь",
+            "ноября",
+            "november",
+            "nov",
+        ],
+    ),
+    (
+        12,
+        &["грудень", "грудня", "декабрь", "декабря", "december", "dec"],
+    ),
+];
+
+impl QueryDate {
+    /// A real calendar day; 29 February passes without a year.
+    fn new(year: Option<u32>, month: u32, day: u32) -> Option<QueryDate> {
+        let leap = year.is_none_or(|y| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
+        let last = match month {
+            2 if leap => 29,
+            2 => 28,
+            4 | 6 | 9 | 11 => 30,
+            1..=12 => 31,
+            _ => 0,
+        };
+        (1..=last)
+            .contains(&day)
+            .then_some(QueryDate { year, month, day })
+    }
+
+    /// Whether `updated` (`YYYY-MM-DD`) is this day.
+    fn matches(&self, updated: &str) -> bool {
+        let mut parts = updated.splitn(3, '-').map(|x| x.parse::<u32>().ok());
+        let (Some(Some(year)), Some(Some(month)), Some(Some(day))) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            return false;
+        };
+        month == self.month && day == self.day && self.year.is_none_or(|y| y == year)
+    }
+}
+
+/// `w` as a number of at most `max_len` ASCII digits.
+fn number(w: Option<&String>, max_len: usize) -> Option<u32> {
+    w.filter(|w| (1..=max_len).contains(&w.len()) && w.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|w| w.parse().ok())
+}
+
+/// `w` as a four-digit year.
+fn year(w: Option<&String>) -> Option<u32> {
+    w.filter(|w| w.len() == 4).and_then(|w| number(Some(w), 4))
+}
+
+/// The date one word writes alone: `YYYY-MM-DD`, `D.MM` or `D.MM.YYYY`.
+fn numeric_date(word: &str) -> Option<QueryDate> {
+    let parts: Vec<&str> = word.split(['.', '-']).collect();
+    if !parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    let num = |k: usize| parts.get(k).and_then(|p| p.parse::<u32>().ok());
+    match (parts.as_slice(), word.contains('-')) {
+        ([y, m, d], true) if [y.len(), m.len(), d.len()] == [4, 2, 2] => {
+            QueryDate::new(num(0), num(1)?, num(2)?)
+        }
+        ([d, m], false) if m.len() == 2 && d.len() == 2 => QueryDate::new(None, num(1)?, num(0)?),
+        ([d, m, y], false) if m.len() == 2 && d.len() == 2 && y.len() == 4 => {
+            QueryDate::new(num(2), num(1)?, num(0)?)
+        }
+        _ => None,
+    }
+}
+
+/// The dates a query writes, deduplicated, in query order: `YYYY-MM-DD`,
+/// `D.MM[.YYYY]` (two-digit month), `<day> <month name> [year]` and
+/// `<month name> <day>[,] [year]`. A month name or a number alone is none.
+pub(crate) fn query_dates(query: &str) -> Vec<QueryDate> {
+    let words: Vec<String> = query
+        .to_lowercase()
+        .split_whitespace()
+        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+        .collect();
+    let mut out: Vec<QueryDate> = Vec::new();
+    for (i, word) in words.iter().enumerate() {
+        let found = if let Some((month, _)) = MONTH_NAMES
+            .iter()
+            .find(|(_, names)| names.contains(&word.as_str()))
+        {
+            let before = i.checked_sub(1).and_then(|j| number(words.get(j), 2));
+            match (before, number(words.get(i + 1), 2)) {
+                (Some(day), _) => QueryDate::new(year(words.get(i + 1)), *month, day),
+                (None, Some(day)) => QueryDate::new(year(words.get(i + 2)), *month, day),
+                _ => None,
+            }
+        } else {
+            numeric_date(word)
+        };
+        if let Some(date) = found {
+            if !out.contains(&date) {
+                out.push(date);
+            }
+        }
+    }
+    out
+}
+
+/// Which pages a search sees: all, none of the memory notes, or only them.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MemoryScope {
+    With,
+    Without,
+    Only,
+}
+
 pub struct Hit {
     pub id: String,
     pub title: String,
@@ -82,6 +255,10 @@ pub struct Hit {
     /// `YYYY-MM-DD` of the page's last change, when known.
     pub updated: Option<String>,
     pub score: f64,
+    /// The page is an agent memory note; its score carries `MEMORY_BOOST`.
+    pub memory: bool,
+    /// The id of the note that supersedes this one; it gets no boost.
+    pub superseded_by: Option<String>,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, defined name, summary, or a
     /// section heading — the summary explains those).
@@ -482,6 +659,39 @@ impl Wiki {
             .all(|p| words.iter().any(|w| w.starts_with(p)))
     }
 
+    /// Whether any query token of `q` (stemmed, as `search` reads it) hits
+    /// the title, an alias or the summary of page `id` by `field_hit`'s
+    /// prefix rule; tokens under `min_len` characters are skipped (`в`, `що`,
+    /// `the` hit nearly every note). The body is not looked at: a hint gates
+    /// on this, because a Ukrainian prompt matches nearly every Ukrainian
+    /// note body.
+    pub(crate) fn names_page(&self, id: &str, q: &str, min_len: usize) -> bool {
+        let Some(e) = self.entries.get(id) else {
+            return false;
+        };
+        let fields = std::iter::once(e.title.as_str())
+            .chain(e.aliases.iter().map(String::as_str))
+            .chain(e.summary.as_deref())
+            .map(|f| Self::field_words(&f.to_lowercase()))
+            .collect::<Vec<_>>();
+        Self::query_tokens(q)
+            .0
+            .iter()
+            .filter(|t| t.chars().count() >= min_len)
+            .any(|t| fields.iter().any(|w| Self::field_hit(w, t)))
+    }
+
+    /// Whether `q` writes a date and page `id` is a memory note dated that day.
+    pub(crate) fn dated_on(&self, id: &str, q: &str) -> bool {
+        let Some(e) = self.entries.get(id).filter(|e| e.memory) else {
+            return false;
+        };
+        let dates = query_dates(q);
+        e.updated
+            .as_deref()
+            .is_some_and(|u| dates.iter().any(|d| d.matches(u)))
+    }
+
     /// The search terms a page earns from its `defined` names — each
     /// lowercased full name plus each of its words, minus the self-name
     /// skip — plus every `methods` name lowercased whole, minus names equal
@@ -728,6 +938,7 @@ impl Wiki {
         e: &'a Entry,
         tokens: &[String],
         raw: &[String],
+        dates: &[QueryDate],
         df: &mut [usize],
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
@@ -821,6 +1032,15 @@ impl Wiki {
             }
             per_token.push((weight, tf));
         }
+        // One synthetic token per query date: a memory note dated that day.
+        for (k, date) in dates.iter().enumerate() {
+            let hit = e.memory && e.updated.as_deref().is_some_and(|u| date.matches(u));
+            if hit {
+                matched = true;
+                df[tokens.len() + k] += 1;
+            }
+            per_token.push((if hit { Self::W_TITLE } else { 0.0 }, 0));
+        }
         if !matched {
             return (len, None);
         }
@@ -881,14 +1101,39 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
+        self.search_scoped(q, kind, tag, limit, MemoryScope::With)
+    }
+
+    /// `search_tagged` over the memory notes only, all but them, or both.
+    /// A memory note passes the `code` and `docs` groups whatever its real
+    /// kind (agents filter by `code`); an exact kind matches its real kind.
+    /// Memory hits' scores are multiplied by `MEMORY_BOOST` (a superseded
+    /// note gets neither the boost nor the tie keys), and of two
+    /// equal-scored notes the later `updated` comes first (dated before
+    /// undated).
+    pub(crate) fn search_scoped(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+        scope: MemoryScope,
+    ) -> Vec<Hit> {
         let (tokens, raw) = Self::query_tokens(q);
+        let dates = query_dates(q);
         let passes = |e: &Entry| {
-            kind.is_none_or(|f| SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)))
-                && tag.is_none_or(|t| {
-                    e.tags
-                        .iter()
-                        .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
-                })
+            (match scope {
+                MemoryScope::With => true,
+                MemoryScope::Without => !e.memory,
+                MemoryScope::Only => e.memory,
+            }) && kind.is_none_or(|f| {
+                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs))
+                    || SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k))
+            }) && tag.is_none_or(|t| {
+                e.tags
+                    .iter()
+                    .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+            })
         };
         if tokens.is_empty() {
             let Some(_) = tag else {
@@ -906,6 +1151,8 @@ impl Wiki {
                     summary: e.summary.clone(),
                     updated: e.updated.clone(),
                     score: 0.0,
+                    memory: e.memory,
+                    superseded_by: e.superseded_by.clone(),
                     snippet: None,
                     symbols: Vec::new(),
                 })
@@ -916,13 +1163,13 @@ impl Wiki {
         // Pass 1: facts per page, statistics over every filtered page.
         let mut n = 0usize;
         let mut total_len = 0usize;
-        let mut df = vec![0usize; tokens.len()];
+        let mut df = vec![0usize; tokens.len() + dates.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
             if !passes(e) {
                 continue;
             }
-            let (len, candidate) = self.candidate(e, &tokens, &raw, &mut df);
+            let (len, candidate) = self.candidate(e, &tokens, &raw, &dates, &mut df);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             n += 1;
@@ -947,7 +1194,7 @@ impl Wiki {
             .into_iter()
             .map(|c| {
                 let norm = c.len as f64 / avglen;
-                let score = c
+                let base: f64 = c
                     .per_token
                     .iter()
                     .zip(&idf)
@@ -958,28 +1205,45 @@ impl Wiki {
                         idf_t * (weight + Self::W_BODY * tf_norm)
                     })
                     .sum();
+                let total = if c.entry.memory && c.entry.superseded_by.is_none() {
+                    base * MEMORY_BOOST
+                } else {
+                    base
+                };
                 let hit = Hit {
                     id: c.entry.id.clone(),
                     title: c.entry.title.clone(),
                     path: c.entry.path.clone(),
                     summary: c.entry.summary.clone(),
                     updated: c.entry.updated.clone(),
-                    score,
+                    score: total,
+                    memory: c.entry.memory,
+                    superseded_by: c.entry.superseded_by.clone(),
                     snippet: c.snippet,
                     symbols: Vec::new(),
                 };
                 (hit, c.entry.pagerank)
             })
             .collect();
+        // Only live notes (not superseded) take the memory tie keys.
+        let live = |h: &Hit| h.memory && h.superseded_by.is_none();
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
+                .then_with(|| live(b).cmp(&live(a)))
+                .then_with(|| {
+                    if live(a) {
+                        b.updated.cmp(&a.updated)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| b_pr.total_cmp(a_pr))
                 .then_with(|| a.id.cmp(&b.id))
         });
         ranked.truncate(limit);
         let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
-        self.expand(&mut hits, &tokens, &idf);
+        self.expand(&mut hits, &tokens, &idf[..tokens.len()]);
         hits
     }
 
@@ -1311,7 +1575,7 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod tests {
-    use super::Wiki;
+    use super::{query_dates, QueryDate, Wiki};
     use crate::model::{CodeItem, CodeItemKind};
     use std::collections::BTreeSet;
 
@@ -1516,5 +1780,61 @@ mod tests {
         assert_eq!(f.words, set(&["suffix", "summary"]));
         assert_eq!(f.method_words, set(&["needs", "of"]));
         assert_eq!(f.doc_words, ["writes", "atomically"]);
+    }
+
+    fn d(year: Option<u32>, month: u32, day: u32) -> QueryDate {
+        QueryDate { year, month, day }
+    }
+
+    #[test]
+    fn query_dates_reads_iso_dotted_and_month_name_forms() {
+        let ok = [
+            ("2026-10-12", d(Some(2026), 10, 12)),
+            ("12.10", d(None, 10, 12)),
+            ("03.10", d(None, 10, 3)),
+            ("12.10.", d(None, 10, 12)),
+            ("12.10.2026", d(Some(2026), 10, 12)),
+            ("12 жовтня", d(None, 10, 12)),
+            ("12 Жовтня 2025", d(Some(2025), 10, 12)),
+            ("жовтень 12", d(None, 10, 12)),
+            ("що сталося 12 жовтня?", d(None, 10, 12)),
+            ("October 12", d(None, 10, 12)),
+            ("October 12, 2026", d(Some(2026), 10, 12)),
+            ("12 oct", d(None, 10, 12)),
+            ("sept 3", d(None, 9, 3)),
+            ("3 марта", d(None, 3, 3)),
+            ("1 января", d(None, 1, 1)),
+            ("29 лютого", d(None, 2, 29)),
+            ("29 feb 2024", d(Some(2024), 2, 29)),
+        ];
+        for (q, want) in ok {
+            assert_eq!(query_dates(q), [want], "{q}");
+        }
+        for q in [
+            "v1.12",
+            "1.2.3",
+            "0.4",
+            "2026",
+            "12",
+            "жовтня",
+            "port 8080",
+            "31 лютого",
+            "29 feb 2023",
+            "october",
+            "32 oct",
+            "2026-02-30",
+            "1.2",
+            "12.13",
+            "3.12",
+            "1.10",
+            "python 3.12",
+            "3.11",
+        ] {
+            assert!(query_dates(q).is_empty(), "{q}");
+        }
+        assert_eq!(
+            query_dates("12.10 and 12 жовтня and 5 oct"),
+            [d(None, 10, 12), d(None, 10, 5)]
+        );
     }
 }

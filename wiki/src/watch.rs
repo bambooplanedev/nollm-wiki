@@ -17,6 +17,8 @@ pub struct WatchSet {
     root: PathBuf,
     files: HashSet<PathBuf>,
     dirs: HashSet<PathBuf>,
+    /// Memory folders, which need not exist yet: anything under one counts.
+    memory: Vec<PathBuf>,
     registry: Registry,
 }
 
@@ -30,8 +32,18 @@ impl WatchSet {
             root: root.to_path_buf(),
             files: files.into_iter().collect(),
             dirs: dirs.into_iter().collect(),
+            memory: Vec::new(),
             registry: Registry::with_defaults(),
         }
+    }
+
+    /// Also count anything under `roots`, and the creation of a root's parent
+    /// (`.agents` for the repo's `.agents/memory`): a hidden tree the walk
+    /// never visits, so a first note there is otherwise invisible.
+    #[must_use]
+    pub fn with_memory(mut self, roots: impl IntoIterator<Item = PathBuf>) -> WatchSet {
+        self.memory.extend(roots);
+        self
     }
 
     /// Would a change at `path` (absolute, canonical) alter what a compile
@@ -39,6 +51,13 @@ impl WatchSet {
     /// and only if a handled file, an ignore file, or a visible directory.
     pub fn relevant(&self, path: &Path) -> bool {
         if self.files.contains(path) || self.dirs.contains(path) {
+            return true;
+        }
+        if self
+            .memory
+            .iter()
+            .any(|m| crate::is_under(path, m) || m.parent() == Some(path))
+        {
             return true;
         }
         if !path.parent().is_some_and(|p| self.dirs.contains(p)) {
@@ -260,5 +279,26 @@ mod tests {
         let (_d, r, w) = compiled();
         std::fs::remove_file(r.join("src/a.rs")).unwrap();
         assert!(w.relevant(&r.join("src/a.rs")));
+    }
+
+    #[test]
+    fn repo_memory_is_relevant_before_it_exists() {
+        let r = PathBuf::from("/proj");
+        let w = WatchSet::new(&r, [], [r.clone()]).with_memory([r.join(".agents/memory")]);
+        assert!(w.relevant(&r.join(".agents")));
+        assert!(w.relevant(&r.join(".agents/memory")));
+        assert!(w.relevant(&r.join(".agents/memory/new.md")));
+        assert!(w.relevant(&r.join(".agents/memory/sub/deep.md")));
+        assert!(!w.relevant(&r.join(".agents/other.md")));
+        assert!(!w.relevant(&r.join(".cache")));
+    }
+
+    #[test]
+    fn external_memory_files_are_relevant() {
+        let (d, _r, w) = compiled();
+        let ext = d.path().canonicalize().unwrap().join("ext");
+        let w = w.with_memory([ext.clone()]);
+        assert!(w.relevant(&ext.join("n.md")));
+        assert!(!w.relevant(&d.path().join("elsewhere/n.md")));
     }
 }

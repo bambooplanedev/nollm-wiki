@@ -171,6 +171,7 @@ wiki compile [OPTIONS] <INPUT> <OUTPUT>
 - `--no-ignore` (off) — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
 - `--emit-json` (off) — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`, `llms.txt`, and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project differently.
+- `--memory <local|DIR>` (none) — also compile an agent memory folder as flagged memory pages: `local` for this repo's per-user folder, or a directory. `<INPUT>/.agents/memory` is always compiled. Without a resolvable folder it warns on stderr and continues.
 - `--watch` (off) — one-shot compile, then keep watching `<INPUT>` and recompile on change. Events are debounced for 150 ms and events under `<OUTPUT>` are ignored; each run reports `recompiled: N pages (M written)` on stderr.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an
@@ -184,7 +185,7 @@ and leaves them in place — delete them or recompile into a clean directory.
 wiki search [OPTIONS] [QUERY]
 ```
 
-- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`).
+- `--kind <k>` (none — all kinds) — filter by kind: `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact `SourceKind`: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`.
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With no query, lists every such page by path. A query or `--tag` is required.
 - `--limit <N>` (`10` with a query; none for a bare `--tag`) — maximum number of hits returned.
 - `--format <lines|json>` (`lines`) — output shape, below.
@@ -299,6 +300,9 @@ wiki serve [OPTIONS]
   compiled wiki directory to serve.
 - `--tools <list>` (`search,page,neighbors`) — the tools to expose,
   comma-separated, from `search`, `page`, `neighbors`, `lint`.
+- `--memory <none|DIR>` — with `--source`, `none` leaves out this repo's local
+  agent memory folder and `DIR` replaces it; a `DIR` that does not exist at
+  start is not watched (the next start picks it up).
 
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).
@@ -466,21 +470,65 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ## Using the wiki as agent memory
 
 An agent can keep its notes as markdown files in a folder the wiki compiles,
-then `search` them before it writes. Put these rules in the agent's
-instructions file:
+then `search` them before it writes. `wiki setup` creates the folder and tells
+the agent about it in the skill it writes:
+
+- **Repo scope** (`--scope repo`): `.agents/memory/` in the project. It is
+  committed, so everyone with the repo sees the notes. `wiki compile` always
+  includes it.
+- **Local scope** (`--scope local`): a folder outside the checkout, in the
+  per-user data dir: `%LOCALAPPDATA%\wiki\memory\<key>` on Windows,
+  `~/Library/Application Support/wiki/memory/<key>` on macOS,
+  `$XDG_DATA_HOME` (else `~/.local/share`)`/wiki/memory/<key>` elsewhere.
+  `<key>` is the repo's root commit, so every worktree and clone of one repo
+  shares it. Nothing backs it up, and it survives `git clean`. A directory
+  that is not a git repo has no local memory.
+
+`serve --source` and `wiki setup` include the local folder automatically. A
+plain `wiki compile . out` does not (so a published site never carries private
+notes); pass `--memory local` for it, or `--memory DIR` for any folder. A plain
+`wiki compile . .wiki` therefore drops local memory from `.wiki` until the
+server recompiles, and `wiki hint` reads `.wiki`. `wiki setup --remove` never
+deletes notes.
+
+Memory pages rank above code (their score is multiplied by 4), pass the
+`code` and `docs` filters of `search`, and are found by the same tools as any
+page. When a prompt names a note in its title, an alias or its summary,
+`wiki hint` adds one `memory: <path> — <summary>` line to its code lines;
+the line needs a prompt word of six or more characters in that match, or a
+word of four or five characters while the note scores at least twice the best
+code page (before the memory boost), or a date in the prompt that is the
+note's `updated` day.
+
+A date in a query finds the memory notes dated that day: `12 жовтня`,
+`October 12`, `12.10`, `2026-10-12` (Ukrainian, Russian and English month
+names; `DD.MM` needs a two-digit day and month; without a year every year matches).
+Project pages are never matched by date.
+
+A note can retire an older one with `supersedes:` in its front matter (a list
+of titles, aliases or ids, in `aliases:` syntax). The older note then gets no
+boost and no memory-first tie order, `search` prints ` (superseded by <id>)`
+after its line (`"superseded_by"` in JSON), and `wiki hint` never shows it. Only
+memory notes are matched, a name that matches nothing is ignored, and with
+several superseders the smallest id is shown.
+
+The skill carries these rules; copy them into the agent's instructions file
+if it has no skill:
 
 ```
-Memory notes live in <folder>, one markdown file per fact or topic.
+Memory notes live in <folder> (.agents/memory, or the local folder setup named), one markdown file per fact or topic.
 - Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
 - Name the file for what it says. The title is the front-matter `title:`,
   else the first `# heading`, else the file name; any script works.
+- A note not written in English needs English `aliases:`: agents search in English.
 - Front matter, all optional: `title:`, `description:` (one line, the search
   summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
-  ignored). A
-  journal note can instead be named `YYYY-MM-DD.md`.
+  ignored).
+- A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
 - Mention a related note by its exact title or alias, or as `[[title]]`.
 - Search before writing. Update the note that exists instead of adding a copy.
-- An index file such as `MEMORY.md` is fine; it shows as an orphan.
+- When a decision changes, update its note. If you write a new note instead, add `supersedes: <old note's title>` to it.
+- `MEMORY.md` is optional and is not searched.
 ```
 
 Cyrillic query words are stemmed, so another grammatical form of a word still

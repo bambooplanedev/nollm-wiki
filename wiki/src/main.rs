@@ -39,6 +39,10 @@ enum Command {
         /// (default: the input directory's basename).
         #[arg(long)]
         project: Option<String>,
+        /// Also compile an agent memory folder as flagged memory pages:
+        /// `local` for this repo's per-user folder, or a directory.
+        #[arg(long, value_name = "local|DIR")]
+        memory: Option<String>,
     },
     Neighbors {
         id: String,
@@ -102,6 +106,11 @@ enum Command {
         /// lint (default: search,page,neighbors).
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
+        /// With `--source`, the agent memory folder to include: `none` for no
+        /// local folder, or a directory instead of it (default: this repo's
+        /// per-user folder).
+        #[arg(long, value_name = "none|DIR", requires = "source")]
+        memory: Option<String>,
     },
     /// Print the code locations for a task text; silent when there is nothing to say.
     Hint {
@@ -169,13 +178,33 @@ fn main() -> Result<()> {
             emit_json,
             watch,
             project,
+            memory,
         } => {
+            let memory_arg = memory;
+            let memory = match memory_arg.as_deref() {
+                None => None,
+                Some("local") => wiki::memory::local_dir(&input)
+                    .map(|d| wiki::memory::resolve(&d))
+                    .transpose()
+                    .context("resolve local memory")?,
+                Some(dir) => Some(
+                    wiki::memory::resolve(std::path::Path::new(dir)).context("resolve --memory")?,
+                ),
+            };
+            if let Some(arg) = &memory_arg {
+                if memory.as_ref().is_none_or(|d| !d.is_dir()) {
+                    eprintln!(
+                        "warning: --memory {arg}: no such memory folder; compiling without it"
+                    );
+                }
+            }
             let opts = CompileOptions {
                 incremental,
                 respect_ignore: !no_ignore,
                 emit_json,
                 jobs: cli.jobs,
                 project,
+                memory,
             };
             if watch {
                 wiki::watch::watch(&input, &output, &opts).context("watch failed")?;
@@ -317,13 +346,24 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Command::Serve { source, dir, tools } => {
+        Command::Serve {
+            source,
+            dir,
+            tools,
+            memory,
+        } => {
             let dir = dir.unwrap_or_else(|| {
                 source
                     .as_ref()
                     .map_or_else(|| "out".into(), |s| s.join(".wiki"))
             });
-            wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref())?;
+            wiki::serve::run(
+                &dir,
+                source.as_deref(),
+                cli.jobs,
+                tools.as_deref(),
+                memory.as_deref(),
+            )?;
         }
         Command::Hint {
             text,

@@ -465,6 +465,12 @@ pub fn search_json(hits: Vec<Hit>) -> String {
             if let Some(u) = h.updated {
                 hit["updated"] = u.into();
             }
+            if h.memory {
+                hit["memory"] = true.into();
+            }
+            if let Some(by) = h.superseded_by {
+                hit["superseded_by"] = by.into();
+            }
             hit
         })
         .collect();
@@ -490,6 +496,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
         out.push_str(&one(&h.title));
         if let Some(s) = &h.summary {
             out.push_str(&format!(" — {}", one(s)));
+        }
+        if let Some(by) = &h.superseded_by {
+            out.push_str(&format!(" (superseded by {by})"));
         }
         out.push('\n');
         for s in &h.symbols {
@@ -521,6 +530,7 @@ pub fn run(
     source: Option<&Path>,
     jobs: Option<usize>,
     tools: Option<&[String]>,
+    memory: Option<&str>,
 ) -> Result<(), WikiError> {
     let tools: Vec<&str> = match tools {
         None => DEFAULT_TOOLS.to_vec(),
@@ -540,12 +550,21 @@ pub fn run(
     };
     let state = match source {
         Some(source) => {
+            // The repo's local folder unless `none`; `DIR` replaces it.
+            let memory = match memory {
+                Some("none") => None,
+                Some(d) => Some(crate::memory::resolve(Path::new(d))?),
+                None => crate::memory::local_dir(source)
+                    .map(|d| crate::memory::resolve(&d))
+                    .transpose()?,
+            };
             let opts = CompileOptions {
                 incremental: true,
                 respect_ignore: true,
                 emit_json: dir.join("graph.json").exists(),
                 jobs,
                 project: None,
+                memory,
             };
             WikiState::live(Live::start(source, dir, opts)?)
         }

@@ -973,3 +973,44 @@ fn mcp_page_full_matches_resource() {
         full
     );
 }
+
+#[test]
+fn serve_source_sees_first_repo_memory_note_and_its_removal() {
+    let project = source_project();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &["--memory", "none"]);
+    initialize(&mut stdin, &stdout);
+    assert!(hit_ids(&search(&mut stdin, &stdout, 2, "wombatnote")).is_empty());
+
+    let mem = project.path().join(".agents/memory");
+    std::fs::create_dir_all(&mem).unwrap();
+    std::fs::write(mem.join("first.md"), "# First\n\nwombatnote\n").unwrap();
+    let ids = hit_ids(&search(&mut stdin, &stdout, 3, "wombatnote"));
+    assert!(ids.iter().any(|id| id.contains("first")), "ids: {ids:?}");
+
+    std::fs::remove_dir_all(project.path().join(".agents")).unwrap();
+    let resp = search(&mut stdin, &stdout, 4, "wombatnote");
+    assert!(hit_ids(&resp).is_empty());
+    assert!(stale_block(&resp).is_none(), "{resp}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_source_watches_an_external_memory_folder() {
+    let project = source_project();
+    let ext = tempfile::tempdir().unwrap();
+    let mem = ext.path().join("mem");
+    std::fs::create_dir_all(&mem).unwrap();
+    std::fs::write(mem.join("a.md"), "# Ext A\n\nplatypusone\n").unwrap();
+    let (mut child, mut stdin, stdout) =
+        spawn_server_source(project.path(), &["--memory", mem.to_str().unwrap()]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "platypusone")).is_empty());
+
+    std::fs::write(mem.join("b.md"), "# Ext B\n\nplatypustwo\n").unwrap();
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 3, "platypustwo")).is_empty());
+
+    drop(stdin);
+    let _ = child.wait();
+}

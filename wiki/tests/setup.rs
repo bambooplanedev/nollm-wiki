@@ -7,6 +7,11 @@ use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 
 const SKILL: &str = include_str!("../src/setup/SKILL.md");
+
+/// The skill setup writes when the memory folder is `dir`.
+fn skill(dir: &str) -> String {
+    SKILL.replace("<memory-dir>", dir)
+}
 const ENTRY: &str = "{\n  \"command\": \"wiki\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
 
 struct Fixture {
@@ -35,7 +40,24 @@ impl Fixture {
             .args(args)
             .current_dir(self.root())
             .env("PATH", self.bin())
+            .env("HOME", self.home())
+            .env("XDG_DATA_HOME", self.home())
+            .env("LOCALAPPDATA", self.home())
             .assert()
+    }
+    fn home(&self) -> PathBuf {
+        self.tmp.path().join("home")
+    }
+    /// Where local memory of the fixture's repo lives (needs real git and a commit).
+    fn local_memory(&self) -> PathBuf {
+        let env = |k: &str| {
+            ["HOME", "XDG_DATA_HOME", "LOCALAPPDATA"]
+                .contains(&k)
+                .then(|| self.home().to_string_lossy().into_owned())
+        };
+        let data = wiki::memory::data_dir_for(std::env::consts::OS, &env).unwrap();
+        data.join("wiki/memory")
+            .join(wiki::memory::repo_key(&self.root()).unwrap())
     }
 }
 
@@ -147,11 +169,11 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
     );
     assert_eq!(
         read(&r.join(".claude/skills/wiki-navigation/SKILL.md")),
-        SKILL
+        skill(".agents/memory")
     );
     assert_eq!(
         read(&r.join(".agents/skills/wiki-navigation/SKILL.md")),
-        SKILL
+        skill(".agents/memory")
     );
     assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".wiki/"));
     assert!(r.join(".wiki/index.json").exists());
@@ -179,7 +201,7 @@ fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     assert_eq!(read(&f.root().join(".mcp.json")), foreign);
     assert_eq!(
         read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md")),
-        SKILL
+        skill(".agents/memory")
     );
     assert!(out(&a).contains("skipped"));
 }
@@ -234,7 +256,11 @@ fn setup_remove_restores_the_project() {
     want.push((f.root().join(".gitignore"), b".wiki/\n".to_vec()));
     want.sort();
     assert_eq!(files(&f.root()), want);
-    assert_eq!(dirs(&f.root()), dirs_before);
+    // The memory folder setup created stays, like any note in it.
+    let mut want_dirs = dirs_before;
+    want_dirs.extend([f.root().join(".agents"), f.root().join(".agents/memory")]);
+    want_dirs.sort();
+    assert_eq!(dirs(&f.root()), want_dirs);
     assert!(f.root().join(".wiki").exists());
     assert!(out(&a).contains("kept the ignore lines and .wiki/"));
 }
@@ -282,7 +308,14 @@ fn real_git(f: &Fixture) {
 
 fn git(dir: &Path, args: &[&str]) {
     let s = std::process::Command::new("git")
-        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
         .args(args)
         .current_dir(dir)
         .status()
@@ -322,6 +355,9 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
             .args(["setup", "--agent", "pi", "--scope", "local"])
             .current_dir(root)
             .env("PATH", f.bin())
+            .env("HOME", f.home())
+            .env("XDG_DATA_HOME", f.home())
+            .env("LOCALAPPDATA", f.home())
             .assert()
             .success();
         assert!(!out(&a).contains("not a git repository"), "{}", out(&a));
@@ -483,4 +519,149 @@ fn setup_hook_remove_keeps_other_hooks() {
     .success();
     assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
     assert!(!r.join(".pi/extensions").exists());
+}
+
+#[test]
+fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
+    let f = fixture(true, true);
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(f.root().join(".agents/memory").is_dir());
+    assert!(out(&a).contains("memory folder"), "{}", out(&a));
+    let text = read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md"));
+    assert!(text.contains("`.agents/memory`"), "{text}");
+    assert!(!text.contains("<memory-dir>"));
+    // Re-running recognises its own skill and the folder.
+    let b = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(
+        out(&b).contains("already set up: memory folder"),
+        "{}",
+        out(&b)
+    );
+}
+
+/// A fixture with real git and a commit, so local memory has a key.
+fn committed() -> Fixture {
+    let f = fixture(true, true);
+    real_git(&f);
+    git(&f.root(), &["add", "."]);
+    git(&f.root(), &["commit", "-q", "-m", "x"]);
+    f
+}
+
+#[test]
+fn setup_local_creates_the_data_dir_folder_compiles_it_and_remove_keeps_it() {
+    let f = committed();
+    let dir = f.local_memory();
+    let note = dir.join("tide.md");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(&note, "# Tide table\n\nHarbour tide notes.\n").unwrap();
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(!f.root().join(".agents/memory").exists());
+    let shown = wiki::memory::display_path(&dir.canonicalize().unwrap());
+    let text = read(&f.root().join(".claude/skills/wiki-navigation/SKILL.md"));
+    assert!(
+        text.contains(&format!("`{}`", wiki::memory::display_path(&dir))),
+        "{text}"
+    );
+    let index = read(&f.root().join(".wiki/index.json"));
+    assert!(index.contains(&format!("{shown}/tide.md")), "{index}");
+    assert!(index.contains("\"memory\": true"), "{index}");
+    assert!(f.claude_log().contains("--scope local"));
+    assert!(out(&a).contains("memory folder"));
+    f.setup(&["--remove", "--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(note.is_file());
+}
+
+#[test]
+fn setup_local_creates_the_empty_folder() {
+    let f = committed();
+    f.setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(f.local_memory().is_dir());
+}
+
+fn no_memory_section(f: &Fixture) {
+    let text = read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md"));
+    assert!(
+        !text.contains("Memory") && !text.contains("<memory-dir>"),
+        "{text}"
+    );
+    assert!(!f.root().join(".agents/memory").exists());
+}
+
+#[test]
+fn setup_local_without_a_git_repo_says_so_and_continues() {
+    let f = fixture(true, true);
+    real_git(&f);
+    fs::remove_dir_all(f.root().join(".git")).unwrap();
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(
+        out(&a).contains("no local memory: not a git repo"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_in_a_repo_with_no_commits_says_so_and_continues() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(
+        out(&a).contains("no local memory: no commits yet"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_without_git_on_path_says_so() {
+    let f = fixture(true, true);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(
+        out(&a).contains("no local memory: git is not on PATH"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_without_a_data_dir_says_so() {
+    let f = committed();
+    let a = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["setup", "--agent", "pi", "--scope", "local"])
+        .current_dir(f.root())
+        .env("PATH", f.bin())
+        .env_remove("HOME")
+        .env_remove("XDG_DATA_HOME")
+        .env_remove("LOCALAPPDATA")
+        .assert()
+        .success();
+    assert!(
+        out(&a).contains("no local memory: no data dir"),
+        "{}",
+        out(&a)
+    );
+    no_memory_section(&f);
+}
+
+#[test]
+fn setup_local_twice_reports_everything_already_there() {
+    let f = committed();
+    let args = ["--agent", "claude", "--scope", "local"];
+    f.setup(&args).success();
+    let o = out(&f.setup(&args).success());
+    assert!(o.contains("already set up: memory folder"), "{o}");
+    assert!(
+        o.contains("already set up: .claude/skills/wiki-navigation/SKILL.md"),
+        "{o}"
+    );
+    assert!(!o.contains("skipped"), "{o}");
 }
