@@ -163,6 +163,11 @@ per question is noise-level: treat single results as anecdotes.
   reverse) reports false broken links.
 - **`large` measures the compiled page** against the default 4000-token
   `neighbors` budget, not the source file's size.
+- **Obsidian sees links, not metadata.** Front matter becomes `## Metadata`
+  bullets (no properties, tags or aliases in Obsidian), a body's own
+  `[[Title]]` links point at file names that do not exist, and a code
+  page's body is not fenced, so Obsidian renders it as Markdown. From the
+  page format; not checked in Obsidian itself.
 
 ## `serve --source` and `--watch`
 
