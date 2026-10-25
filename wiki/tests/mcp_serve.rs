@@ -156,7 +156,11 @@ fn serve_lists_and_calls_tools() {
     let mut sorted = names.clone();
     sorted.sort_unstable();
     // `lint` is left out unless `--tools` names it.
-    assert_eq!(sorted, ["neighbors", "page", "search"], "tools: {names:?}");
+    assert_eq!(
+        sorted,
+        ["callers", "neighbors", "page", "search"],
+        "tools: {names:?}"
+    );
     // Claude Code loads them up front instead of behind `ToolSearch`.
     for t in resp["result"]["tools"].as_array().unwrap() {
         assert_eq!(t["_meta"]["anthropic/alwaysLoad"], true, "{t}");

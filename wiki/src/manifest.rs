@@ -356,7 +356,9 @@ mod tests {
                 twin: None,
                 test: false,
                 calls: Vec::new(),
+                call_lines: Vec::new(),
                 call_sites: Vec::new(),
+                arity: None,
             },
             CodeItem {
                 kind: CodeItemKind::Method,
@@ -371,7 +373,9 @@ mod tests {
                 twin: Some("beta.cpp:2-4".into()),
                 test: true,
                 calls: vec!["beta.rs:1-1".into()],
+                call_lines: Vec::new(),
                 call_sites: Vec::new(),
+                arity: None,
             },
         ];
         // Each item's keys in declaration order, the `None` ones skipped;

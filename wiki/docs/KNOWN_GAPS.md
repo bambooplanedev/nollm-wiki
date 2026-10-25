@@ -59,7 +59,7 @@ per question is noise-level: treat single results as anecdotes.
 - **`wiki hint` shows at most 2 lines per page**, so a third relevant
   symbol in one file is not shown.
 
-## Call chains (`neighbors` with `symbol`)
+## Call chains (`neighbors` with `symbol`, `callers`)
 
 - **Resolution is by name, not by type.** A member call on a variable
   resolves to the methods of that name the caller's files see, else to the
@@ -67,8 +67,15 @@ per question is noise-level: treat single results as anecdotes.
   `TaskRing::size`, `e.what()` can reach a vendored `exception::what`, and
   a call through a base pointer lists whichever of base and overrides are
   visible.
-- **All C++ overloads of a name are listed**; arguments are not matched.
-- **Not seen:** callers (there is no reverse walk), Python module aliases
+- **Argument counts rule out only what cannot fit.** A Rust, Go or Python
+  function whose parameters cannot take a call's arguments is no match
+  (`.map(|x| …)` never reaches a two-parameter `map`). A C++ function is
+  ruled out only by too many arguments, since a default can sit on its
+  other declaration; JS/TS functions and decorated Python functions are
+  never ruled out. So `.get(k)` on a `HashMap` still lists a project
+  `Mapping::get(key)`, and all C++ overloads that can take the count are
+  listed.
+- **Not seen:** Python module aliases
   (`import x as S; S.f()`), functions passed as values (callbacks, function
   pointers, lambdas stored and called later), and calls inside Rust macro
   arguments (`format!("{}", f())`), which tree-sitter keeps as tokens.

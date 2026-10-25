@@ -2,7 +2,7 @@
 
 use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
-    basename, one_line, slugify, title_from_slug, CallSite, CallVia, CodeItem, CodeItemKind,
+    basename, one_line, slugify, title_from_slug, Arity, CallSite, CallVia, CodeItem, CodeItemKind,
     Entity, SourceKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -1003,13 +1003,15 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
         if !matches!(node.kind(), "call_expression" | "call") {
             continue;
         }
-        let Some(site) = node
+        let Some(mut site) = node
             .child_by_field_name("function")
             .and_then(|f| call_site(f, text))
         else {
             continue;
         };
         let line = node.start_position().row + 1;
+        site.args = call_args(node);
+        site.line = line;
         let holder = fns
             .iter()
             .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
@@ -1030,6 +1032,8 @@ fn call_site(f: Node, text: &str) -> Option<CallSite> {
         "identifier" => Some(CallSite {
             name: text_of(f)?.to_string(),
             via: CallVia::Bare,
+            args: None,
+            line: 0,
         }),
         "generic_function" => call_site(field("function")?, text),
         "template_function" => call_site(field("name")?, text),
@@ -1082,10 +1086,142 @@ fn call_site(f: Node, text: &str) -> Option<CallSite> {
             Some(CallSite {
                 name: text_of(name)?.to_string(),
                 via,
+                args: None,
+                line: 0,
             })
         }
         _ => None,
     }
+}
+
+/// How many arguments a call passes; `None` when a spread, splat or pack
+/// expansion hides the count.
+fn call_args(call: Node) -> Option<usize> {
+    let args = call.child_by_field_name("arguments")?;
+    // Python `f(x for x in xs)`: the generator is the one argument.
+    if args.kind() == "generator_expression" {
+        return Some(1);
+    }
+    let mut n = 0;
+    for a in args.named_children(&mut args.walk()) {
+        match a.kind() {
+            "list_splat"
+            | "dictionary_splat"
+            | "spread_element"
+            | "variadic_argument"
+            | "parameter_pack_expansion" => return None,
+            k if k.contains("comment") || k == "attribute_item" => {}
+            _ => n += 1,
+        }
+    }
+    Some(n)
+}
+
+/// The argument counts a function definition accepts, read off its
+/// parameter list. `None` where a count proves nothing: in JS/TS any count
+/// is legal, and a Python decorator other than `staticmethod` or
+/// `classmethod` may change the signature. A C++ function gets no minimum,
+/// since a default can sit on its other declaration alone. A Python method
+/// takes its first parameter as the receiver, whatever its name.
+fn arity_of(def: Node, lang: &str, method: bool, text: &str) -> Option<Arity> {
+    let mut receiver = lang == "go" && def.kind() == "method_declaration";
+    let params = match lang {
+        "rust" | "go" => def.child_by_field_name("parameters")?,
+        "python" => {
+            let decorators: Vec<&str> = def
+                .parent()
+                .filter(|p| p.kind() == "decorated_definition")
+                .map(|p| {
+                    p.named_children(&mut p.walk())
+                        .filter(|c| c.kind() == "decorator")
+                        .filter_map(|c| text.get(c.byte_range()))
+                        .map(|d| d.trim_start_matches('@').trim())
+                        .collect()
+                })
+                .unwrap_or_default();
+            if decorators
+                .iter()
+                .any(|d| !matches!(*d, "staticmethod" | "classmethod"))
+            {
+                return None;
+            }
+            receiver = method && !decorators.contains(&"staticmethod");
+            def.child_by_field_name("parameters")?
+        }
+        "cpp" => cpp_parameters(def)?,
+        _ => return None,
+    };
+    let (mut min, mut max) = (0, Some(0));
+    // A Python receiver is the first parameter of any shape.
+    let mut skip_first = lang == "python" && receiver;
+    for p in params.named_children(&mut params.walk()) {
+        let k = p.kind();
+        if k.contains("comment")
+            || matches!(
+                k,
+                "attribute_item" | "keyword_separator" | "positional_separator"
+            )
+        {
+            continue;
+        }
+        if std::mem::take(&mut skip_first) {
+            continue;
+        }
+        let n = match k {
+            "self_parameter" => {
+                receiver = true;
+                continue;
+            }
+            "variadic_parameter"
+            | "variadic_parameter_declaration"
+            | "list_splat_pattern"
+            | "dictionary_splat_pattern" => {
+                max = None;
+                continue;
+            }
+            // Python `*xs: T` and `**kw: T`.
+            "typed_parameter"
+                if p.named_child(0).is_some_and(|c| {
+                    matches!(c.kind(), "list_splat_pattern" | "dictionary_splat_pattern")
+                }) =>
+            {
+                max = None;
+                continue;
+            }
+            "default_parameter" | "typed_default_parameter" | "optional_parameter_declaration" => {
+                max = max.map(|m| m + 1);
+                continue;
+            }
+            "parameter_declaration" if text.get(p.byte_range()) == Some("void") => 0,
+            // Go `a, b int` declares two.
+            "parameter_declaration" if lang == "go" => p
+                .children_by_field_name("name", &mut p.walk())
+                .count()
+                .max(1),
+            _ => 1,
+        };
+        min += n;
+        max = max.map(|m| m + n);
+    }
+    if lang == "cpp" {
+        min = 0;
+    }
+    Some(Arity { min, max, receiver })
+}
+
+/// A C++ function's parameter list: under its function declarator, through
+/// any pointer or reference declarator wrapping it.
+fn cpp_parameters(def: Node) -> Option<Node> {
+    let mut d = def.child_by_field_name("declarator")?;
+    while d.kind() != "function_declarator" {
+        let mut cursor = d.walk();
+        let inner = d.child_by_field_name("declarator").or_else(|| {
+            d.named_children(&mut cursor)
+                .find(|c| c.kind().ends_with("declarator"))
+        });
+        d = inner?;
+    }
+    d.child_by_field_name("parameters")
 }
 
 /// Whether a definition node is a function, in any grammar this file
@@ -1303,7 +1439,14 @@ fn code_item(
         twin: None,
         test: false,
         calls: Vec::new(),
+        call_lines: Vec::new(),
         call_sites: Vec::new(),
+        arity: match kind {
+            CodeItemKind::Fn | CodeItemKind::Method => {
+                arity_of(def, spec.lang_name, kind == CodeItemKind::Method, text)
+            }
+            _ => None,
+        },
     };
     item.doc_text = raw_doc
         .as_deref()

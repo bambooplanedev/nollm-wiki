@@ -217,7 +217,22 @@ wiki neighbors [OPTIONS] <ID>
 - `--max-nodes <N>` (none — unbounded) — node-count budget for the returned context pack.
 - `--full` (off) — include whole neighbor outlines (code) and page bodies (other pages) instead of one-line summaries. Without it, the modules the target imports or is imported by come first, as outlines when they fit.
 - `--kind <KIND>` (none) — only neighbors of this kind, with the values of `search --kind`.
-- `--symbol <NAME>` (none) — a function on the page (`name` or `Owner::name`): print every function it calls instead, through all levels (or `--depth` of them), one `start-end  kind  Owner::name` line each, grouped by file. Calls are matched by name, so a method called on a value can list every same-named method the caller's file sees.
+- `--symbol <NAME>` (none) — a function on the page (`name` or `Owner::name`): print every function it calls instead, through all levels (or `--depth` of them), one `start-end  kind  Owner::name` line each, grouped by file. Calls are matched by name and argument count, so a method called on a value can list every same-named method the caller's file sees.
+- `--dir <out>` (`out`) — the compiled wiki directory to read.
+
+### `callers`
+
+```
+wiki callers [OPTIONS] <ID> <SYMBOL>
+```
+
+Prints the functions that call function `<SYMBOL>` (`name` or `Owner::name`)
+on page `<ID>`, in the same `start-end  kind  Owner::name` lines grouped by
+file as `neighbors --symbol`, each ending `calls f at L1, L2` with the lines
+that make the call; test code comes last. `<ID>` resolves like `neighbors`.
+
+- `--depth <N>` (`1`) — caller levels: 2 adds the callers' callers.
+- `--max-tokens <N>` (none — unbounded) — ceiling on the output's estimated size (chars/4); the farthest callers are cut first.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
 ### `page`
@@ -298,8 +313,8 @@ wiki serve [OPTIONS]
   with it (see [MCP server](#mcp-server)).
 - `--dir <out>` (`<project>/.wiki` with `--source`, else `out`) — the
   compiled wiki directory to serve.
-- `--tools <list>` (`search,page,neighbors`) — the tools to expose,
-  comma-separated, from `search`, `page`, `neighbors`, `lint`.
+- `--tools <list>` (`search,page,neighbors,callers`) — the tools to expose,
+  comma-separated, from `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` — with `--source`, `none` leaves out this repo's local
   agent memory folder and `DIR` replaces it; a `DIR` that does not exist at
   start is not watched (the next start picks it up).
@@ -423,7 +438,8 @@ source tree. Four artifacts drive that:
   and methods — with `kind`, `name`, `owner`, `signature`, original
   `start_line`/`end_line` (so an agent can read just those lines), `doc`,
   `public` flag, for a paired C++ declaration or definition `twin`, and
-  for a function `calls` (the `path:start-end` of the functions it calls).
+  for a function `calls` (the `path:start-end` of the functions it calls)
+  and `call_lines` (for each, the lines that call it).
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under
@@ -557,8 +573,8 @@ out to the CLI. Client configuration:
 }
 ```
 
-**Tools** (mirroring the CLI subcommands, with two differences: `neighbors`
-and the `page` outline default `max_tokens` to 4000 here, where the CLI leaves
+**Tools** (mirroring the CLI subcommands, with two differences: `neighbors`,
+`callers` and the `page` outline default `max_tokens` to 4000 here, where the CLI leaves
 it unbounded, and `search` defaults `limit` to 5, where the CLI returns 10 —
 an agent calling with defaults should not receive a 30 KB dump, and every hit
 line is re-read on each later turn, while a person passes the flag on purpose;
@@ -570,6 +586,7 @@ tool costs schema tokens on every request.
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, updated, score, snippet, path, symbols}]` (`updated` only when known; `snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context-pack text, or with `symbol` the functions it calls |
+| `callers` | `id` (id, title, or path), `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
@@ -652,9 +669,9 @@ oversights. Measured shortfalls and agent behaviour are listed in
   link a code page: a one-word module name would otherwise draw an edge
   from every English use of the word. This is the core design trade-off,
   not a bug.
-- **Call chains are resolved by name.** `neighbors --symbol` follows
-  call edges matched by name at compile time, within one language, with
-  no type information and no callers query. Code extraction is
+- **Call chains are resolved by name.** `neighbors --symbol` and
+  `callers` follow call edges matched by name and argument count at
+  compile time, within one language, with no type information. Code extraction is
   imports + exported signatures plus each function's line range,
   with Rust signatures owner-qualified
   (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`) and Python
@@ -670,14 +687,14 @@ oversights. Measured shortfalls and agent behaviour are listed in
 - **Text, markdown, and code are the only formats.** There is no PDF,
   OCR, or audio extractor; adding one means adding an `Extractor` (see
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
-- **MCP server is query-only.** `wiki serve` exposes search/neighbors/page
+- **MCP server is query-only.** `wiki serve` exposes search/neighbors/callers/page
   (lint on request) and page resources over stdio (see [MCP server](#mcp-server)); there is
   deliberately no compile-over-MCP tool (`--source` recompiles on file edits,
   not on request) and no HTTP transport.
 - **Graph export is JSON only.** `--emit-json` writes the node-link
   `graph.json`; there is no DOT/GraphML export.
 - **`--watch` covers `compile` only.** The query subcommands (`search`,
-  `neighbors`, `page`, `lint`) have no watch mode.
+  `neighbors`, `callers`, `page`, `lint`) have no watch mode.
 
 ## Links
 

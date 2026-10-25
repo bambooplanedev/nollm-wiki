@@ -796,7 +796,12 @@ fn items_json_round_trips() {
     compile(&input, &out, &CompileOptions::default()).unwrap();
     let json = fs::read_to_string(out.join("items.json")).unwrap();
     let back: BTreeMap<String, Vec<CodeItem>> = serde_json::from_str(&json).unwrap();
-    assert_eq!(back["a"], CodeExtractor.extract("a.rs", src).items);
+    // `arity` serves call matching only and is not written.
+    let mut fresh = CodeExtractor.extract("a.rs", src).items;
+    for i in &mut fresh {
+        i.arity = None;
+    }
+    assert_eq!(back["a"], fresh);
     assert!(back["a"].iter().any(|i| i.test));
     // Only the test module and its fn carry the key.
     assert_eq!(json.matches("\"test\"").count(), 2, "{json}");
