@@ -415,3 +415,274 @@ fn neighbors_defaults_to_a_token_ceiling() {
     drop(stdin);
     let _ = child.wait();
 }
+
+/// Spawn `wiki serve --source <source>` plus `extra` args; same plumbing as
+/// `spawn_server`.
+fn spawn_server_source(
+    source: &std::path::Path,
+    extra: &[&str],
+) -> (Child, ChildStdin, Receiver<String>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
+        .args(["serve", "--source"])
+        .arg(source)
+        .args(extra)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        for line in stdout.lines() {
+            let Ok(line) = line else { break };
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    (child, stdin, rx)
+}
+
+/// A project with one note and one Rust file, not yet compiled.
+fn source_project() -> tempfile::TempDir {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("notes")).unwrap();
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(
+        tmp.path().join("notes/alpha.md"),
+        "# Alpha\n\noldword here\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("src/lib.rs"),
+        "/// Adds.\npub fn add() {}\n",
+    )
+    .unwrap();
+    tmp
+}
+
+fn send_search(stdin: &mut ChildStdin, id: u64, query: &str) {
+    send(
+        stdin,
+        &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
+            "name": "search", "arguments": {"query": query}
+        }}),
+    );
+}
+
+/// Ids of the hits in a `search` response.
+fn hit_ids(resp: &Value) -> Vec<String> {
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let hits: Value = serde_json::from_str(text).unwrap();
+    hits.as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// The `wiki may be stale: …` block of a tool response, if any.
+fn stale_block(resp: &Value) -> Option<String> {
+    resp["result"]["content"]
+        .as_array()?
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .find(|t| t.starts_with("wiki may be stale:"))
+        .map(str::to_string)
+}
+
+fn search(stdin: &mut ChildStdin, stdout: &Receiver<String>, id: u64, query: &str) -> Value {
+    send_search(stdin, id, query);
+    read_response(stdout, id)
+}
+
+#[test]
+fn serve_source_compiles_missing_wiki_and_answers() {
+    let project = source_project();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+
+    let resp = search(&mut stdin, &stdout, 2, "oldword");
+    let ids = hit_ids(&resp);
+    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    assert!(project.path().join(".wiki/index.json").exists());
+    assert_eq!(stale_block(&resp), None);
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_source_catches_up_an_existing_wiki() {
+    let project = source_project();
+    let opts = wiki::CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    wiki::compile(project.path(), &project.path().join(".wiki"), &opts).unwrap();
+    // Edits made while no server ran: the start-up compile must pick them up.
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    std::fs::write(project.path().join("notes/gamma.md"), "# Gamma\n\nquokka\n").unwrap();
+
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    for (id, word) in [(2, "zebrafish"), (3, "quokka")] {
+        let resp = search(&mut stdin, &stdout, id, word);
+        assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+        assert_eq!(stale_block(&resp), None);
+    }
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_source_sees_edit_without_sleep() {
+    let project = source_project();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "zebrafish");
+    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(stale_block(&resp), None);
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_source_sees_file_in_new_subdir() {
+    let project = source_project();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+
+    std::fs::create_dir_all(project.path().join("notes/deep")).unwrap();
+    std::fs::write(
+        project.path().join("notes/deep/beta.md"),
+        "# Beta\n\nquokka\n",
+    )
+    .unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "quokka");
+    let ids = hit_ids(&resp);
+    assert!(ids.iter().any(|id| id.contains("beta")), "ids: {ids:?}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+#[test]
+fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = source_project();
+    let wiki_dir = project.path().join(".wiki");
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+
+    std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "oldword");
+    std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let ids = hit_ids(&resp);
+    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    let stale = stale_block(&resp);
+    assert!(stale.is_some(), "no stale line: {resp}");
+    assert!(
+        !stale.unwrap().contains("recompile still running"),
+        "the compile should have failed, not timed out: {resp}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[cfg(unix)]
+#[test]
+fn serve_source_through_symlink_answers_fresh() {
+    let project = source_project();
+    let links = tempfile::tempdir().unwrap();
+    let link = links.path().join("project");
+    std::os::unix::fs::symlink(project.path(), &link).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server_source(&link, &[]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+
+    std::fs::write(link.join("notes/alpha.md"), "# Alpha\n\nzebrafish here\n").unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "zebrafish");
+    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(stale_block(&resp), None, "a recompile loop would show here");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn concurrent_calls_after_edit_both_fresh() {
+    let project = source_project();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
+    initialize(&mut stdin, &stdout);
+    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    send_search(&mut stdin, 3, "zebrafish");
+    send_search(&mut stdin, 4, "zebrafish");
+    // The calls run concurrently, so their responses come in either order;
+    // `read_response` would drop the other one while looking for its own.
+    let mut responses = std::collections::BTreeMap::new();
+    while responses.len() < 2 {
+        let line = stdout
+            .recv_timeout(RESPONSE_DEADLINE)
+            .expect("both calls must answer");
+        if let Ok(v) = serde_json::from_str::<Value>(line.trim()) {
+            if let Some(id) = v["id"].as_u64() {
+                responses.insert(id, v);
+            }
+        }
+    }
+    for (id, resp) in responses {
+        assert!(!hit_ids(&resp).is_empty(), "call {id} not fresh: {resp}");
+        assert_eq!(stale_block(&resp), None, "call {id}: {resp}");
+    }
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_source_fails_when_first_compile_fails_and_no_wiki() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("not_a_dir.txt");
+    std::fs::write(&file, "x").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
+        .args(["serve", "--source"])
+        .arg(&file)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not_a_dir.txt"), "stderr: {stderr}");
+}

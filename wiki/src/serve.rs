@@ -2,10 +2,11 @@
 //! search/neighbors/lint as tools and pages as resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
+use crate::live::Live;
 use crate::model::SourceKind;
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
-use crate::WikiError;
+use crate::{CompileOptions, WikiError};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -46,18 +47,24 @@ fn fingerprint(dir: &Path) -> std::io::Result<Fingerprint> {
 }
 
 struct Loaded {
-    wiki: Wiki,
+    wiki: Arc<Wiki>,
     fingerprint: Fingerprint,
 }
 
-/// A lazily-reloading handle to a compiled wiki. Each access compares the
-/// current `index.json` fingerprint against the loaded snapshot's and
-/// reloads on change. A failed reload (mid-compile write, malformed index,
-/// deleted file) keeps serving the previous snapshot; the reload is retried
-/// on the next access.
+/// How the served snapshot keeps up with the source.
+enum Freshness {
+    /// Another process compiles; reload when `index.json` changes. A failed
+    /// reload (mid-compile write, malformed index, deleted file) keeps
+    /// serving the previous snapshot and is retried on the next access.
+    Fingerprint(Mutex<Loaded>),
+    /// `serve --source` compiles itself (see [`Live`]).
+    Live(Arc<Live>),
+}
+
+/// A handle to the compiled wiki a server answers from.
 pub(crate) struct WikiState {
     dir: PathBuf,
-    inner: Mutex<Loaded>,
+    freshness: Freshness,
 }
 
 impl WikiState {
@@ -66,35 +73,68 @@ impl WikiState {
         let wiki = Wiki::load(dir)?;
         Ok(WikiState {
             dir: dir.to_path_buf(),
-            inner: Mutex::new(Loaded {
-                wiki,
+            freshness: Freshness::Fingerprint(Mutex::new(Loaded {
+                wiki: Arc::new(wiki),
                 fingerprint: fp,
-            }),
+            })),
         })
+    }
+
+    pub fn live(live: Arc<Live>) -> WikiState {
+        WikiState {
+            dir: live.dir().to_path_buf(),
+            freshness: Freshness::Live(live),
+        }
     }
 
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
-    pub fn with_wiki<T>(&self, f: impl FnOnce(&Wiki) -> T) -> T {
-        let mut guard = self
-            .inner
+    /// The wiki to answer from, and why it may be stale. A live wait runs off
+    /// the MCP runtime thread, so pings and cancels keep working meanwhile.
+    pub async fn snapshot(&self) -> (Arc<Wiki>, Option<String>) {
+        match &self.freshness {
+            Freshness::Fingerprint(inner) => (self.reload(inner), None),
+            Freshness::Live(live) => {
+                let live = Arc::clone(live);
+                tokio::task::spawn_blocking(move || live.fresh())
+                    .await
+                    .expect("freshness wait panicked")
+            }
+        }
+    }
+
+    fn reload(&self, inner: &Mutex<Loaded>) -> Arc<Wiki> {
+        let mut guard = inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Ok(current) = fingerprint(&self.dir) {
             if current != guard.fingerprint {
                 if let Ok(wiki) = Wiki::load(&self.dir) {
                     *guard = Loaded {
-                        wiki,
+                        wiki: Arc::new(wiki),
                         fingerprint: current,
                     };
                 }
                 // Reload failure: keep old snapshot, retry next call.
             }
         }
-        f(&guard.wiki)
+        Arc::clone(&guard.wiki)
     }
+}
+
+/// The line a result carries while the snapshot may be behind the source.
+fn stale_line(reason: &str) -> String {
+    format!("wiki may be stale: {reason}")
+}
+
+/// Append the stale line, if any, as a text block after a tool's own result.
+fn with_stale(mut result: CallToolResult, stale: Option<&str>) -> CallToolResult {
+    if let Some(reason) = stale {
+        result.content.push(ContentBlock::text(stale_line(reason)));
+    }
+    result
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
@@ -146,7 +186,10 @@ impl WikiServer {
     #[tool(
         description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score, snippet}]. Use `neighbors` afterwards to pull a page's full context."
     )]
-    fn search(&self, Parameters(p): Parameters<SearchParams>) -> Result<CallToolResult, McpError> {
+    async fn search(
+        &self,
+        Parameters(p): Parameters<SearchParams>,
+    ) -> Result<CallToolResult, McpError> {
         let kind = match p.kind.as_deref() {
             None => None,
             Some(s) => Some(SourceKind::parse(s).ok_or_else(|| {
@@ -156,37 +199,39 @@ impl WikiServer {
                 )
             })?),
         };
-        let json = self
-            .state
-            .with_wiki(|w| search_json(w.search(&p.query, kind, p.limit.unwrap_or(10))));
-        Ok(CallToolResult::success(vec![ContentBlock::text(json)]))
+        let (wiki, stale) = self.state.snapshot().await;
+        let json = search_json(wiki.search(&p.query, kind, p.limit.unwrap_or(10)));
+        Ok(with_stale(
+            CallToolResult::success(vec![ContentBlock::text(json)]),
+            stale.as_deref(),
+        ))
     }
 
     #[tool(
         description = "Build a budgeted context pack around a page: the page in full, then its graph neighbors ordered by centrality (most important last). Prefer this over reading pages one by one."
     )]
-    fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
+    async fn neighbors(&self, Parameters(p): Parameters<NeighborsParams>) -> CallToolResult {
         let budget = PackBudget {
             max_tokens: Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             max_nodes: p.max_nodes,
             full_neighbors: p.full.unwrap_or(false),
         };
-        let pack = self
-            .state
-            .with_wiki(|w| w.neighbors(&p.id, p.depth.unwrap_or(1), &budget));
-        match pack {
+        let (wiki, stale) = self.state.snapshot().await;
+        let result = match wiki.neighbors(&p.id, p.depth.unwrap_or(1), &budget) {
             Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
             None => CallToolResult::error(vec![ContentBlock::text(format!(
                 "unknown page id {:?} — use the search tool to find valid ids",
                 p.id
             ))]),
-        }
+        };
+        with_stale(result, stale.as_deref())
     }
 
     #[tool(
         description = "Check wiki health: broken wikilinks and orphan pages. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id]}."
     )]
-    fn lint(&self) -> Result<CallToolResult, McpError> {
+    async fn lint(&self) -> Result<CallToolResult, McpError> {
+        let (_, stale) = self.state.snapshot().await;
         let pages = load_compiled_pages(self.state.dir())
             .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
         let r = lint(&pages);
@@ -195,9 +240,10 @@ impl WikiServer {
             "broken_links": r.broken_links,
             "orphans": r.orphans,
         });
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            report.to_string(),
-        )]))
+        Ok(with_stale(
+            CallToolResult::success(vec![ContentBlock::text(report.to_string())]),
+            stale.as_deref(),
+        ))
     }
 }
 
@@ -228,14 +274,12 @@ impl ServerHandler for WikiServer {
             Resource::new("wiki://llms.txt", "llms.txt (compact LLM index)")
                 .with_mime_type("text/plain"),
         ];
-        self.state.with_wiki(|w| {
-            for (id, title) in w.list_pages() {
-                resources.push(
-                    Resource::new(format!("wiki://page/{id}"), title)
-                        .with_mime_type("text/markdown"),
-                );
-            }
-        });
+        let (wiki, _) = self.state.snapshot().await;
+        for (id, title) in wiki.list_pages() {
+            resources.push(
+                Resource::new(format!("wiki://page/{id}"), title).with_mime_type("text/markdown"),
+            );
+        }
         Ok(ListResourcesResult::with_all_items(resources))
     }
 
@@ -245,6 +289,7 @@ impl ServerHandler for WikiServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         let uri = request.uri.as_str();
+        let (wiki, stale) = self.state.snapshot().await;
         let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
         // Only a missing file is "no such resource"; a permission or read
         // error on a file that exists is the server's problem, not the
@@ -263,23 +308,19 @@ impl ServerHandler for WikiServer {
             "wiki://llms.txt" => (read_file("llms.txt")?, "text/plain"),
             _ => {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
-                let page = self.state.with_wiki(|w| {
-                    // Only touch the filesystem for ids the loaded index knows
-                    // about — page ids are slugs `[a-z0-9_]+`, so index
-                    // membership rejects any traversal sequence outright.
-                    if w.has_page(id) {
-                        w.page(id)
-                    } else {
-                        None
-                    }
-                });
+                // Served from memory, keyed by the index's own ids: an id
+                // with a traversal sequence is simply not found.
+                let page = wiki.page(id);
                 (page.ok_or_else(not_found)?, "text/markdown")
             }
         };
-        Ok(ReadResourceResult::new(vec![
-            ResourceContents::text(text, uri).with_mime_type(mime_type)
-        ])
-        .into())
+        let mut contents = vec![ResourceContents::text(text, uri).with_mime_type(mime_type)];
+        if let Some(reason) = stale {
+            contents.push(
+                ResourceContents::text(stale_line(&reason), uri).with_mime_type("text/plain"),
+            );
+        }
+        Ok(ReadResourceResult::new(contents).into())
     }
 }
 
@@ -302,14 +343,27 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.
-pub fn run(dir: &Path) -> Result<(), WikiError> {
-    let state = WikiState::load(dir).map_err(|e| {
-        WikiError::Serve(format!(
-            "{} is not a compiled wiki ({e}) — run `wiki compile <input> {}` first",
-            dir.display(),
-            dir.display()
-        ))
-    })?;
+/// With `source`, the server compiles it into `dir` and keeps recompiling.
+pub fn run(dir: &Path, source: Option<&Path>, jobs: Option<usize>) -> Result<(), WikiError> {
+    let state = match source {
+        Some(source) => {
+            let opts = CompileOptions {
+                incremental: true,
+                respect_ignore: true,
+                emit_json: dir.join("graph.json").exists(),
+                jobs,
+                project: None,
+            };
+            WikiState::live(Live::start(source, dir, opts)?)
+        }
+        None => WikiState::load(dir).map_err(|e| {
+            WikiError::Serve(format!(
+                "{} is not a compiled wiki ({e}) — run `wiki compile <input> {}` first",
+                dir.display(),
+                dir.display()
+            ))
+        })?,
+    };
     let server = WikiServer::new(Arc::new(state));
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -341,6 +395,14 @@ mod tests {
         (tmp, out)
     }
 
+    /// Page count of the snapshot `state` answers from now.
+    fn pages(state: &WikiState) -> usize {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(state.snapshot()).0.list_pages().len()
+    }
+
     #[test]
     fn load_fails_without_index_json() {
         let tmp = tempfile::tempdir().unwrap();
@@ -348,37 +410,37 @@ mod tests {
     }
 
     #[test]
-    fn with_wiki_serves_loaded_snapshot() {
+    fn snapshot_serves_loaded_snapshot() {
         let (_tmp, out) = fixture(3);
         let state = WikiState::load(&out).unwrap();
-        let n = state.with_wiki(|w| w.list_pages().len());
+        let n = pages(&state);
         assert_eq!(n, 3);
     }
 
     #[test]
-    fn with_wiki_reloads_after_recompile() {
+    fn snapshot_reloads_after_recompile() {
         let (tmp, out) = fixture(3);
         let state = WikiState::load(&out).unwrap();
-        assert_eq!(state.with_wiki(|w| w.list_pages().len()), 3);
+        assert_eq!(pages(&state), 3);
 
         // Recompile with more source files -> index.json changes (len differs).
         let raw = tmp.path().join("raw");
         crate::generator::generate_corpus(&raw, 5, 42).unwrap();
         compile(&raw, &out, &CompileOptions::default()).unwrap();
 
-        assert_eq!(state.with_wiki(|w| w.list_pages().len()), 5);
+        assert_eq!(pages(&state), 5);
     }
 
     #[test]
-    fn with_wiki_keeps_old_snapshot_when_reload_fails() {
+    fn snapshot_keeps_old_snapshot_when_reload_fails() {
         let (_tmp, out) = fixture(3);
         let state = WikiState::load(&out).unwrap();
-        assert_eq!(state.with_wiki(|w| w.list_pages().len()), 3);
+        assert_eq!(pages(&state), 3);
 
         // Corrupt index.json (fingerprint changes, load will fail).
         std::fs::write(out.join("index.json"), "{ not json").unwrap();
 
         // Old snapshot still serves.
-        assert_eq!(state.with_wiki(|w| w.list_pages().len()), 3);
+        assert_eq!(pages(&state), 3);
     }
 }

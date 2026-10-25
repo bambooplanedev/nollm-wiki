@@ -10,6 +10,13 @@ pub struct SourceFile {
     pub bytes: Vec<u8>,
 }
 
+/// What a walk reached: the kept files, and every directory it yielded (root
+/// included, sorted). Ignored subtrees are pruned, so they appear in neither.
+pub struct Walked {
+    pub files: Vec<SourceFile>,
+    pub dirs: Vec<PathBuf>,
+}
+
 /// Walk `root` for files. When `respect_ignore` is true, `.gitignore`/`.ignore`
 /// rules (including nested `.gitignore` files, global excludes, and
 /// `.git/info/exclude`), hidden-file rules, and directory-subtree pruning all
@@ -31,7 +38,7 @@ pub fn walk(
     root: &Path,
     respect_ignore: bool,
     keep: &dyn Fn(&str) -> bool,
-) -> Result<Vec<SourceFile>, std::io::Error> {
+) -> Result<Walked, std::io::Error> {
     let mut builder = WalkBuilder::new(root);
     builder
         .hidden(respect_ignore)
@@ -46,6 +53,7 @@ pub fn walk(
     // dependent ordering — all of which would break output determinism.
 
     let mut files = Vec::new();
+    let mut dirs = Vec::new();
     for result in builder.build() {
         // Skip unreadable entries, never abort the walk.
         let Ok(entry) = result else { continue };
@@ -56,6 +64,9 @@ pub fn walk(
             // change the deliberate no-follow policy for known symlinks.
             None => std::fs::metadata(entry.path()).is_ok_and(|m| m.is_file()),
         };
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            dirs.push(entry.path().to_path_buf());
+        }
         if !is_file {
             continue;
         }
@@ -81,7 +92,8 @@ pub fn walk(
     }
 
     files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
-    Ok(files)
+    dirs.sort();
+    Ok(Walked { files, dirs })
 }
 
 #[cfg(test)]
@@ -107,7 +119,7 @@ mod tests {
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
 
-        let files = walk(root, true, &all).unwrap();
+        let files = walk(root, true, &all).unwrap().files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["a.txt", "b.txt", "sub/c.txt"]);
         assert_eq!(files[0].bytes, b"aaa");
@@ -119,7 +131,7 @@ mod tests {
         let root = dir.path();
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
-        let files = walk(root, false, &all).unwrap();
+        let files = walk(root, false, &all).unwrap().files;
         assert!(files.iter().any(|f| f.rel_path == "ignored.txt"));
     }
 
@@ -134,7 +146,7 @@ mod tests {
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
 
-        let files = walk(root, true, &all).unwrap();
+        let files = walk(root, true, &all).unwrap().files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
 
         assert!(rels.contains(&"keep.txt".to_string()));
@@ -164,7 +176,8 @@ mod tests {
         let files = walk(root, true, &|p| {
             Path::new(p).extension() == Some("txt".as_ref())
         })
-        .unwrap();
+        .unwrap()
+        .files;
 
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["notes.txt"]);
@@ -184,7 +197,7 @@ mod tests {
         fs::write(root.join("real.txt"), b"real").unwrap();
         symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
 
-        let files = walk(root, true, &all).unwrap();
+        let files = walk(root, true, &all).unwrap().files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert!(
             rels.contains(&"real.txt".to_string()),
