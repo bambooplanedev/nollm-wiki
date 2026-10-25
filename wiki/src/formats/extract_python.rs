@@ -1,10 +1,7 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention,
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
-use super::code::{
-    default_shape, keep_any_vis, no_header_group, owner_anchor_identity, LangSpec, Lead, Placement,
-    Rank, Shape,
-};
+use super::code::{default_shape, LangSpec, Lead, Placement, Rank, Shape};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
@@ -92,30 +89,26 @@ pub(crate) fn python_shape(def: Node) -> Shape {
     }
 }
 
-pub(crate) fn python_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "python",
-        language: tree_sitter_python::LANGUAGE.into(),
-        // The grammar has no notion of "public"; capture every def/class
-        // and drop names starting with `_` in name_filter (PEP 8 convention).
-        //
-        // `from .models import X` and `from . import X` need separate
-        // patterns. In the second, `relative_import` is just an
-        // `import_prefix`, so its text is a lone `.` and
-        // `graph::ImportResolver` — which resolves every non-empty segment
-        // of a split on `.` — finds no segment to resolve. The anchor `.`
-        // after `(import_prefix)` constrains it to be the last named
-        // child, which is exactly what separates the two families; without
-        // it, `from .models import Article, FeedSource` would also emit
-        // `Article` and `FeedSource` as imports.
-        //
-        // Known gap: the bare-prefix family loses its level, so
-        // `from . import x`, `from .. import x`, and `import x` all render
-        // as `x`. The graph is unaffected — the dropped level is not a
-        // resolvable segment. `from . import *` and
-        // `from __future__ import x`
-        // capture nothing; neither resolves to a page.
-        query_src: r#"
+// The grammar has no notion of "public"; capture every def/class
+// and drop names starting with `_` in name_filter (PEP 8 convention).
+//
+// `from .models import X` and `from . import X` need separate
+// patterns. In the second, `relative_import` is just an
+// `import_prefix`, so its text is a lone `.` and
+// `graph::ImportResolver` — which resolves every non-empty segment
+// of a split on `.` — finds no segment to resolve. The anchor `.`
+// after `(import_prefix)` constrains it to be the last named
+// child, which is exactly what separates the two families; without
+// it, `from .models import Article, FeedSource` would also emit
+// `Article` and `FeedSource` as imports.
+//
+// Known gap: the bare-prefix family loses its level, so
+// `from . import x`, `from .. import x`, and `import x` all render
+// as `x`. The graph is unaffected — the dropped level is not a
+// resolvable segment. `from . import *` and
+// `from __future__ import x`
+// capture nothing; neither resolves to a page.
+const QUERY: &str = r#"
                 ; One pattern covers module constants AND class fields:
                 ; tree-sitter matches at any depth, so a second class-scoped
                 ; pattern would fire on the same nodes and emit every field twice.
@@ -135,20 +128,20 @@ pub(crate) fn python_spec() -> LangSpec {
                 (import_from_statement module_name: (relative_import (dotted_name)) @import)
                 (import_from_statement module_name: (relative_import (import_prefix) .) name: (dotted_name) @import)
                 (import_from_statement module_name: (relative_import (import_prefix) .) name: (aliased_import name: (dotted_name) @import))
-            "#,
+            "#;
+
+pub(crate) fn python_spec() -> LangSpec {
+    LangSpec {
         name_filter: keep_python_public,
-        vis_filter: keep_any_vis,
         strip_trailing: &[':', '='],
         placement: python_placement,
-        owner_sep: ".",
         export_set: python_all,
         join_continuations: true,
         sig_start: python_sig_start,
-        owner_anchor: owner_anchor_identity,
-        header_group: no_header_group,
         item_lead: python_lead,
         body_doc: python_body_doc,
-        query_gates_visibility: false,
+        shape: python_shape,
+        ..LangSpec::base("python", tree_sitter_python::LANGUAGE.into(), QUERY)
     }
 }
 

@@ -1,9 +1,8 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    cpp_doc_line, default_cut, ext_of, keep_all, keep_any_vis, module_stem, no_body_doc,
-    no_export_set, no_header_group, plain_comment_text, source_rank, LangSpec, Lead, Placement,
-    Rank, Shape,
+    cpp_doc_line, default_cut, ext_of, module_stem, plain_comment_text, source_rank, LangSpec,
+    Lead, Placement, Rank, Shape,
 };
 use crate::model::{CodeItem, CodeItemKind, Entity};
 use std::collections::BTreeMap;
@@ -134,32 +133,25 @@ const QUERY: &str = r"
 
 pub(crate) fn cpp_spec() -> LangSpec {
     LangSpec {
-        lang_name: "cpp",
-        language: tree_sitter_cpp::LANGUAGE.into(),
-        query_src: QUERY,
-        name_filter: keep_all,
-        // Everything visible is extracted, private members included. Gating on
+        // `vis_filter` stays at the base default: everything visible is
+        // extracted, private members included. Gating on
         // `access_specifier` would be inconsistent — an out-of-line
         // `void OrderBook::rebuild_()` carries no visible specifier and would
         // be kept anyway — and a sticky previous-sibling scan would default to
         // private and drop every member nested in a `template_declaration` or
         // a `preproc_ifdef`, neither of which has a sibling specifier in the
         // `field_declaration_list`.
-        vis_filter: keep_any_vis,
         // `OrderBook() = default;` renders whole: `default_method_clause` is
         // not the `body` field, so no cut applies. `declaration` and
         // `field_declaration` also carry their `;`.
         strip_trailing: &[';'],
         placement: cpp_placement,
         owner_sep: "::",
-        export_set: no_export_set,
-        join_continuations: false,
         sig_start: cpp_sig_start,
         owner_anchor: cpp_owner_anchor,
-        header_group: no_header_group,
         item_lead: cpp_lead,
-        body_doc: no_body_doc,
-        query_gates_visibility: false,
+        shape: cpp_shape,
+        ..LangSpec::base("cpp", tree_sitter_cpp::LANGUAGE.into(), QUERY)
     }
 }
 

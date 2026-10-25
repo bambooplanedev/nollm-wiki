@@ -1,9 +1,6 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
-use super::code::{
-    default_shape, keep_all, no_body_doc, no_export_set, owner_anchor_identity, sig_start_identity,
-    LangSpec, Lead, Placement, Rank, Shape,
-};
+use super::code::{default_shape, LangSpec, Lead, Placement, Rank, Shape};
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -135,10 +132,7 @@ fn rust_placement(def: Node, text: &str) -> Placement {
     if !rust_module_level(def) {
         return Placement::Rejected;
     }
-    match rust_owner(def, text) {
-        Some(owner) => Placement::Scoped(vec![owner]),
-        None => Placement::Scoped(Vec::new()),
-    }
+    Placement::Scoped(rust_owner(def, text).into_iter().collect())
 }
 
 /// A trait impl rendered as an owner, in Rust's own disambiguation syntax:
@@ -237,18 +231,14 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
     }
 }
 
-pub(crate) fn rust_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "rust",
-        language: tree_sitter_rust::LANGUAGE.into(),
-        // Requiring `(visibility_modifier)` excludes private items
-        // structurally; `vis_filter` then drops the restricted forms
-        // (`pub(crate)` and friends) that the node kind also covers.
-        // The trait-impl patterns deliberately capture no `@vis`: rustc
-        // rejects a visibility modifier there, and those items are public
-        // through the trait. The trait-declaration patterns gate on the
-        // trait's own visibility instead of the method's.
-        query_src: r"
+// Requiring `(visibility_modifier)` excludes private items
+// structurally; `vis_filter` then drops the restricted forms
+// (`pub(crate)` and friends) that the node kind also covers.
+// The trait-impl patterns deliberately capture no `@vis`: rustc
+// rejects a visibility modifier there, and those items are public
+// through the trait. The trait-declaration patterns gate on the
+// trait's own visibility instead of the method's.
+const QUERY: &str = r"
                 (function_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (enum_item (visibility_modifier) @vis name: (type_identifier) @name) @def
@@ -281,22 +271,21 @@ pub(crate) fn rust_spec() -> LangSpec {
                 (trait_item name: (type_identifier) @name) @item
                 (union_item name: (type_identifier) @name) @item
                 (type_item name: (type_identifier) @name) @item
-            ",
-        name_filter: keep_all,
+            ";
+
+pub(crate) fn rust_spec() -> LangSpec {
+    LangSpec {
         vis_filter: keep_bare_pub,
         strip_trailing: &[';', '=', '{'],
         placement: rust_placement,
         owner_sep: "::",
-        export_set: no_export_set,
-        join_continuations: false,
-        sig_start: sig_start_identity,
-        owner_anchor: owner_anchor_identity,
         header_group: rust_header_group,
         item_lead: rust_lead,
-        body_doc: no_body_doc,
-        // Every public item also matches a @def pattern above, whose gate
+        // Every public item also matches a @def pattern in `QUERY`, whose gate
         // decides it; an @item-only match is private or restricted.
         query_gates_visibility: true,
+        shape: rust_shape,
+        ..LangSpec::base("rust", tree_sitter_rust::LANGUAGE.into(), QUERY)
     }
 }
 

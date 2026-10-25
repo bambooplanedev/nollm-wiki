@@ -89,6 +89,39 @@ pub(crate) struct LangSpec {
     /// also matches a @def pattern, and that match's flag wins). False
     /// makes an @item-only match run `should_keep` itself.
     pub(crate) query_gates_visibility: bool,
+    /// What a captured definition is and where its signature stops. Vue and
+    /// Svelte inherit their script language's hook.
+    pub(crate) shape: fn(Node) -> Shape,
+}
+
+impl LangSpec {
+    /// A spec with every hook at its no-op default: a language lists only
+    /// what it overrides and spreads `..LangSpec::base(..)` for the rest.
+    pub(crate) fn base(
+        lang_name: &'static str,
+        language: Language,
+        query_src: &'static str,
+    ) -> Self {
+        LangSpec {
+            lang_name,
+            language,
+            query_src,
+            name_filter: keep_all,
+            vis_filter: keep_any_vis,
+            strip_trailing: &[],
+            placement: |_, _| Placement::Scoped(Vec::new()),
+            owner_sep: ".",
+            export_set: no_export_set,
+            join_continuations: false,
+            sig_start: sig_start_identity,
+            owner_anchor: owner_anchor_identity,
+            header_group: no_header_group,
+            item_lead: |_, _| Lead::Stop,
+            body_doc: no_body_doc,
+            query_gates_visibility: false,
+            shape: default_shape,
+        }
+    }
 }
 
 /// See `LangSpec::item_lead`.
@@ -205,35 +238,35 @@ pub(crate) fn plain_doc(
 }
 
 /// `body_doc` for a language with no in-body doc convention.
-pub(crate) fn no_body_doc(_: Node, _: &str) -> Option<String> {
+fn no_body_doc(_: Node, _: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn sig_start_identity(def: Node) -> Node {
+fn sig_start_identity(def: Node) -> Node {
     def
 }
 
 /// `owner_anchor` for a language whose declarations never write their own
 /// qualifier: the owner is spliced in at the name node itself.
-pub(crate) fn owner_anchor_identity(name: Node) -> Node {
+fn owner_anchor_identity(name: Node) -> Node {
     name
 }
 
-pub(crate) fn keep_all(_name: &str) -> bool {
+fn keep_all(_name: &str) -> bool {
     true
 }
 
-pub(crate) fn keep_any_vis(_vis: &str) -> bool {
+fn keep_any_vis(_vis: &str) -> bool {
     true
 }
 
-pub(crate) fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
+fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
     None
 }
 
 /// Only Rust emits a `@def` without a `@name` (the trait-impl header pattern),
 /// so every other language never reaches this.
-pub(crate) fn no_header_group(_def: Node, _text: &str) -> Option<String> {
+fn no_header_group(_def: Node, _text: &str) -> Option<String> {
     None
 }
 
@@ -265,23 +298,6 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_spec(),
         _ => return None,
     })
-}
-
-/// The per-language `Shape` hook. Kept beside `lang_for_ext` rather than as a
-/// `LangSpec` field so that adding this seam needed no edit to the specs,
-/// which spell every field out literally. Vue and Svelte never reach it: their
-/// script is extracted under its own `js`/`ts`/`jsx`/`tsx` extension.
-///
-/// Everything this dispatches to lives in the language's own module.
-fn shape_for(ext: &str) -> fn(Node) -> Shape {
-    match ext {
-        "rs" => super::extract_rust::rust_shape,
-        "py" => super::extract_python::python_shape,
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_shape,
-        "go" => super::extract_simple::go_shape,
-        "js" | "ts" | "jsx" | "tsx" => super::extract_simple::ecma_shape,
-        _ => default_shape,
-    }
 }
 
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
@@ -821,7 +837,6 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         item: query.capture_index_for_name("item"),
     };
     let exports = (spec.export_set)(&tree, text);
-    let shape_of = shape_for(ext);
 
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
@@ -851,7 +866,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
             let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
-            let shape = shape_of(def);
+            let shape = (spec.shape)(def);
             if keep {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
@@ -883,7 +898,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
             let public = !spec.query_gates_visibility
                 && should_keep(None, &chain, name_text, exports.as_ref(), &spec);
-            let shape = shape_of(def);
+            let shape = (spec.shape)(def);
             merge_item(
                 &mut items,
                 code_item(def, parts.name, &chain, public, text, &spec, &shape),

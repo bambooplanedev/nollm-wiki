@@ -2,9 +2,7 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    default_shape, is_function, keep_all, keep_any_vis, no_body_doc, no_export_set,
-    no_header_group, owner_anchor_identity, plain_comment_text, LangSpec, Lead, Placement, Rank,
-    Shape,
+    default_shape, is_function, plain_comment_text, LangSpec, Lead, Placement, Rank, Shape,
 };
 use tree_sitter::{Language, Node};
 
@@ -16,25 +14,17 @@ fn keep_go_exported(name: &str) -> bool {
 /// name carries; everything else is shared here.
 fn ecma_spec(lang_name: &'static str, language: Language, query_src: &'static str) -> LangSpec {
     LangSpec {
-        lang_name,
-        language,
-        query_src,
-        name_filter: keep_all,
-        vis_filter: keep_any_vis,
         // `const twice = …` is cut at its value, which leaves the `=`.
         strip_trailing: &['='],
         placement: ecma_placement,
         owner_sep: ".",
-        export_set: no_export_set,
-        join_continuations: false,
         sig_start: ecma_sig_start,
-        owner_anchor: owner_anchor_identity,
-        header_group: no_header_group,
         item_lead: ecma_lead,
-        body_doc: no_body_doc,
         // The query has no per-member visibility, so a method of an exported
         // class reads private: a known gap. Only an `export` @def is public.
         query_gates_visibility: true,
+        shape: ecma_shape,
+        ..LangSpec::base(lang_name, language, query_src)
     }
 }
 
@@ -159,38 +149,31 @@ fn ecma_lead(node: Node, text: &str) -> Lead {
     }
 }
 
-pub(crate) fn go_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "go",
-        language: tree_sitter_go::LANGUAGE.into(),
-        // Go has no `export` keyword; "exported" means the identifier's
-        // first rune is uppercase. The query can't express that, so it
-        // captures every func/type and name_filter drops the unexported ones.
-        // A spec's names are matched without their `name` field: the grammar
-        // puts the field on the commas of `const B, C = 2, 3` too, so the
-        // field form never reaches `C`. A spec's only direct `identifier`
-        // children are its names (a type is a `type_identifier`).
-        query_src: r"
+// Go has no `export` keyword; "exported" means the identifier's
+// first rune is uppercase. The query can't express that, so it
+// captures every func/type and name_filter drops the unexported ones.
+// A spec's names are matched without their `name` field: the grammar
+// puts the field on the commas of `const B, C = 2, 3` too, so the
+// field form never reaches `C`. A spec's only direct `identifier`
+// children are its names (a type is a `type_identifier`).
+const QUERY: &str = r"
                 (function_declaration name: (identifier) @name) @def
                 (type_declaration (type_spec name: (type_identifier) @name)) @def
                 (method_declaration name: (field_identifier) @name) @item
                 (const_spec (identifier) @name) @item
                 (var_spec (identifier) @name) @item
                 (import_spec path: (interpreted_string_literal) @import)
-            ",
+            ";
+
+pub(crate) fn go_spec() -> LangSpec {
+    LangSpec {
         name_filter: keep_go_exported,
-        vis_filter: keep_any_vis,
-        strip_trailing: &[],
         placement: go_placement,
         owner_sep: "",
-        export_set: no_export_set,
-        join_continuations: false,
         sig_start: go_sig_start,
-        owner_anchor: owner_anchor_identity,
-        header_group: no_header_group,
         item_lead: go_lead,
-        body_doc: no_body_doc,
-        query_gates_visibility: false,
+        shape: go_shape,
+        ..LangSpec::base("go", tree_sitter_go::LANGUAGE.into(), QUERY)
     }
 }
 
