@@ -279,6 +279,18 @@ pub struct LintReport {
     pub large: Vec<(String, usize)>,
 }
 
+/// Days in `month` (0 for a month outside 1..=12); no `year` counts as a leap year.
+pub(crate) fn days_in_month(year: Option<u32>, month: u32) -> u32 {
+    let leap = year.is_none_or(|y| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
+    match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => 0,
+    }
+}
+
 /// The last `/`-separated segment of `path`.
 pub(crate) fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)

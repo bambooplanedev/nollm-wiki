@@ -5,7 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
-use crate::model::{CodeItem, CodeItemKind, KindFilter, SourceKind};
+use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -155,15 +155,7 @@ const MONTH_NAMES: [(u32, &[&str]); 12] = [
 impl QueryDate {
     /// A real calendar day; 29 February passes without a year.
     fn new(year: Option<u32>, month: u32, day: u32) -> Option<QueryDate> {
-        let leap = year.is_none_or(|y| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
-        let last = match month {
-            2 if leap => 29,
-            2 => 28,
-            4 | 6 | 9 | 11 => 30,
-            1..=12 => 31,
-            _ => 0,
-        };
-        (1..=last)
+        (1..=days_in_month(year, month))
             .contains(&day)
             .then_some(QueryDate { year, month, day })
     }

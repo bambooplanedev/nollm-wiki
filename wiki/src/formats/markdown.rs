@@ -1,7 +1,7 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
 use crate::formats::{derive_name_from_path, summarize, Extractor};
-use crate::model::{basename, slugify, Entity, SourceKind};
+use crate::model::{basename, days_in_month, slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
 
@@ -117,14 +117,9 @@ fn leading_date(s: &str) -> Option<String> {
         return None;
     }
     let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let len = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => 28 + u32::from(leap),
-        _ => return None,
-    };
-    (1..=len).contains(&day).then(|| date.to_string())
+    (1..=days_in_month(Some(year), month))
+        .contains(&day)
+        .then(|| date.to_string())
 }
 
 /// Value of a top-level `key:` line; indented lines belong to some other key.
