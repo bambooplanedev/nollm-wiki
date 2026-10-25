@@ -6,6 +6,8 @@ use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
 
+mod common;
+
 #[test]
 fn compile_then_search_cli() {
     let dir = tempdir().unwrap();
@@ -199,23 +201,10 @@ fn generate_cli_creates_files() {
     assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 5);
 }
 
-/// seed-42 corpus compiled into `<dir>/out`; returns the tempdir.
-fn compile_seed_corpus() -> tempfile::TempDir {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    wiki::generator::generate_corpus(&input, 12, 42).unwrap();
-    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
-    dir
-}
-
 #[test]
 fn neighbors_cli_prints_a_pack() {
-    let dir = compile_seed_corpus();
-    let output = dir.path().join("out");
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
-    let entry = &index["entries"][0];
+    let (_dir, output) = common::seed_corpus(12);
+    let entry = &common::index(&output)["entries"][0];
     let id = entry["id"].as_str().unwrap();
     let title = entry["title"].as_str().unwrap();
 
@@ -243,13 +232,10 @@ fn neighbors_cli_prints_a_pack() {
 
 #[test]
 fn lint_cli_reports_a_real_broken_link() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha mentions Beta.\n").unwrap();
-    fs::write(input.join("beta.txt"), "# Beta\n\nBeta content.\n").unwrap();
-    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n"),
+        ("beta.txt", "# Beta\n\nBeta content.\n"),
+    ]);
 
     // `## Notes` is rendered last (rewrite::render_page), so appending lands
     // the link inside the one human-owned section — a legitimate hand edit,
@@ -321,21 +307,10 @@ fn lint_cli_reports_a_page_too_large_for_a_neighbors_pack() {
 
 #[test]
 fn search_cli_accepts_valid_kinds() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("guide.txt"),
-        "# Guide\n\nThe zebra lives in prose.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("zoo.rs"),
-        "//! zebra module\npub fn zebra() {}\n",
-    )
-    .unwrap();
-    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("guide.txt", "# Guide\n\nThe zebra lives in prose.\n"),
+        ("zoo.rs", "//! zebra module\npub fn zebra() {}\n"),
+    ]);
     let search = |kind: &str| {
         Command::cargo_bin("wiki")
             .unwrap()
@@ -365,13 +340,10 @@ fn search_cli_accepts_valid_kinds() {
 
 #[test]
 fn search_cli_tag_lists_and_filters() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("a.md"), "---\ntags: [mem]\n---\n# A\n\nzebra\n").unwrap();
-    fs::write(input.join("b.md"), "# B\n\nzebra\n").unwrap();
-    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("a.md", "---\ntags: [mem]\n---\n# A\n\nzebra\n"),
+        ("b.md", "# B\n\nzebra\n"),
+    ]);
     let search = |args: &[&str]| {
         Command::cargo_bin("wiki")
             .unwrap()
@@ -469,12 +441,7 @@ fn watch_recompiles_on_change() {
 
 #[test]
 fn cli_search_prints_the_same_lines_as_mcp() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("lib.rs"), "/// Adds.\npub fn add() {}\n").unwrap();
-    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[("lib.rs", "/// Adds.\npub fn add() {}\n")]);
     let run = |extra: &[&str]| {
         let mut args = vec!["search", "add", "--dir", output.to_str().unwrap()];
         args.extend(extra);
@@ -579,11 +546,7 @@ fn compile_memory_flag_takes_a_dir_or_local() {
             .success();
     };
     let titles = |out: &std::path::Path| -> Vec<String> {
-        let v: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-        v["entries"]
-            .as_array()
-            .unwrap()
+        common::index_entries(out)
             .iter()
             .map(|e| e["title"].as_str().unwrap().to_string())
             .collect()
@@ -640,14 +603,8 @@ fn compile_memory_dir_with_dotdot_gives_the_same_page_path() {
             .arg(memory)
             .assert()
             .success();
-        let v: serde_json::Value =
-            serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-        let e = v["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["title"] == "Ext Note")
-            .unwrap();
+        let entries = common::index_entries(&out);
+        let e = entries.iter().find(|e| e["title"] == "Ext Note").unwrap();
         e["path"].as_str().unwrap().to_string()
     };
     let plain = path_of("o1", &ext);
