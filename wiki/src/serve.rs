@@ -11,9 +11,9 @@ use crate::{CompileOptions, WikiError};
 use rmcp::handler::server::router::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ListResourcesResult, PaginatedRequestParams,
-    ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
-    ResourceContents, ServerCapabilities, ServerInfo,
+    CallToolResult, ContentBlock, Implementation, ListResourcesResult, MetaObject,
+    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
+    Resource, ResourceContents, ServerCapabilities, ServerInfo,
 };
 use rmcp::service::RequestContext;
 use rmcp::transport::stdio;
@@ -31,6 +31,20 @@ pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 /// Hits the `search` tool returns when the caller omits `limit` (the CLI
 /// keeps 10): every hit line is re-read on every later turn of the agent.
 pub const DEFAULT_SEARCH_LIMIT: usize = 5;
+
+/// What the client shows the model at session start (Claude Code does; pi
+/// does not, so pi gets the same steps from its skill). Claude Code's skill
+/// carries only the memory rules: a navigation skill cost one turn per task.
+pub const INSTRUCTIONS: &str =
+    "Map of this project. To find code, call `search` with the words of \
+what you are looking for and `kind: \"code\"`; each symbol line is \
+`path:start-end  name  signature`. Read only those lines with your file tool: \
+the ranges are exact, do not re-derive them with grep. `page` with a path \
+lists a module's symbols with their lines; `neighbors` with a path and \
+`symbol` lists every function that one calls, with its lines. If search finds \
+nothing relevant, try other words (a name, an abbreviation) before grep. \
+Paths are relative to the project root; line ranges are 1-based and \
+inclusive. Pages are also resources under wiki://page/<id>.";
 
 /// Every tool the server has.
 pub const TOOLS: [&str; 4] = ["search", "page", "neighbors", "lint"];
@@ -218,6 +232,13 @@ impl WikiServer {
         for name in TOOLS.iter().filter(|t| !tools.contains(t)) {
             tool_router.remove_route(name);
         }
+        // Claude Code otherwise defers MCP tools behind a `ToolSearch`
+        // call: one more turn before the first search (46 of 48 field runs).
+        for route in tool_router.map.values_mut() {
+            let mut meta = MetaObject::new();
+            meta.0.insert("anthropic/alwaysLoad".into(), true.into());
+            route.attr.meta = Some(meta);
+        }
         Self { state, tool_router }
     }
 
@@ -341,13 +362,7 @@ impl ServerHandler for WikiServer {
             .build();
         ServerInfo::new(capabilities)
             .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-                "Map of this project. Find code with `search` (symbols with \
-                 path:start-end) and `page` (a module's outline), then read only \
-                 those lines with your file tool. `neighbors` shows linked pages, or with `symbol` what a function calls. \
-                 Paths are relative to the project root; line ranges are 1-based \
-                 and inclusive. Pages are also resources under wiki://page/<id>.",
-            )
+            .with_instructions(INSTRUCTIONS)
     }
 
     async fn list_resources(

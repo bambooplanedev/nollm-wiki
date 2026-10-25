@@ -12,6 +12,15 @@ use std::process::Command;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/wiki-navigation";
+/// Claude Code's skill: the Memory section of `SKILL.md` only. Claude Code
+/// shows the server instructions, which carry the navigation steps; a
+/// navigation skill cost a turn per task there.
+const MEMORY_SKILL_DIR: &str = "skills/wiki-memory";
+const MEMORY_SKILL_HEAD: &str = "---
+name: wiki-memory
+description: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.
+---
+";
 const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
 /// The command the agents run.
@@ -251,6 +260,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         _ => SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR),
     };
     let skill_text = skill_text.as_str();
+    let memory_skill = skill_text
+        .split_once("\n# Memory\n")
+        .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"));
     if !opts.remove {
         let folder = match (&local_memory, local) {
             (Some(d), true) => Some(d.clone()),
@@ -308,7 +320,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             Agent::Claude => ("claude", false),
             Agent::Pi => ("pi", true),
         };
-        let skill = Path::new(if pi { ".agents" } else { ".claude" }).join(SKILL_DIR);
+        let (skill, text) = if pi {
+            (Path::new(".agents").join(SKILL_DIR), Some(skill_text))
+        } else {
+            (
+                Path::new(".claude").join(MEMORY_SKILL_DIR),
+                memory_skill.as_deref(),
+            )
+        };
         // MCP
         if pi || !local {
             let (file, value) = if pi {
@@ -334,17 +353,32 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             r.item("Claude Code local wiki server", false, Ok(o))?;
         }
         // Skill
-        let file = skill.join("SKILL.md");
-        let res = || {
-            if opts.remove {
-                edit::remove_file(root, &root.join(&file), skill_text)
-            } else {
-                edit::write_file(&root.join(&file), skill_text)
+        if let Some(text) = text {
+            let file = skill.join("SKILL.md");
+            let res = || {
+                if opts.remove {
+                    edit::remove_file(root, &root.join(&file), text)
+                } else {
+                    edit::write_file(&root.join(&file), text)
+                }
+            };
+            let what = format!("{} skill for {name}", file.display());
+            if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
+                ignore.push(format!("/{}/", skill.display()));
             }
-        };
-        let what = format!("{} skill for {name}", file.display());
-        if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
-            ignore.push(format!("/{}/", skill.display()));
+        }
+        // The navigation skill an earlier setup wrote for Claude Code, if
+        // untouched (and, in local scope, not tracked by git).
+        let old = Path::new(".claude").join(SKILL_DIR).join("SKILL.md");
+        let old_file = old.to_string_lossy();
+        if !pi
+            && std::fs::read_to_string(root.join(&old)).is_ok_and(|t| t == skill_text)
+            && !(r.guard_tracked && tracked(root, &old_file))
+        {
+            edit::remove_file(root, &root.join(&old), skill_text)?;
+            r.line(&format!(
+                "removed {old_file}: the server instructions carry its steps"
+            ))?;
         }
         // Hook (`--remove` always looks, so it undoes a hook installed earlier)
         if opts.hook || opts.remove {

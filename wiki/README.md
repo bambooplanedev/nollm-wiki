@@ -335,12 +335,17 @@ wiki setup [--agent claude,pi] [--scope repo|local] [--hook] [--remove]
 
 Run in the project root. Compiles `.` into `.wiki`, then installs what makes
 Claude Code and pi use the wiki on their own: the MCP server (`wiki serve
---source .`) and a `wiki-navigation` skill. Agents are detected (`.claude/`,
+--source .`) and a skill. pi gets the `wiki-navigation` skill (how to find
+code, and the memory rules). Claude Code gets only a `wiki-memory` skill with
+the memory rules: it shows the server's instructions, which carry the same
+navigation steps, and the server marks its tools to load up front instead of
+behind a `ToolSearch` call. A `.claude/skills/wiki-navigation/SKILL.md` that an
+earlier setup wrote, unchanged, is removed. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`) unless
 `--agent` names them.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`,
-  `.pi/mcp.json`, `.claude/skills/wiki-navigation/SKILL.md`,
+  `.pi/mcp.json`, `.claude/skills/wiki-memory/SKILL.md`,
   `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
   `wiki` must be on `PATH`; setup warns when it is not.
 - `--scope local` — this checkout only (also written as `wiki`, with the same
@@ -471,7 +476,7 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 
 An agent can keep its notes as markdown files in a folder the wiki compiles,
 then `search` them before it writes. `wiki setup` creates the folder and tells
-the agent about it in the skill it writes:
+the agent about it in the skill it writes (no folder, no Claude Code skill):
 
 - **Repo scope** (`--scope repo`): `.agents/memory/` in the project. It is
   committed, so everyone with the repo sees the notes. `wiki compile` always

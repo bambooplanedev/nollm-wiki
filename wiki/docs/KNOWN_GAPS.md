@@ -18,16 +18,22 @@ per question is noise-level: treat single results as anecdotes.
   skills, gets ENOENT, and falls back to `find`/`grep`. It also picks a
   competing skill (`systematic-debugging`) for a "where is" question.
   Anything the model must know only from the skill is at risk.
-- **Whole-file reads after a hit.** `search` returns `path:start-end`, yet
+- **Whole-file reads after a hit (pi, 12B).** `search` returns `path:start-end`, yet
   the model reads the whole file (about 51 KB per read, 3–6 reads a run)
   and re-derives end lines with `grep`. This, not the wiki call, is what
-  runs out the 300 s cap and the context.
+  runs out the 300 s cap and the context. Haiku in Claude Code read the given
+  range in 57 of 58 reads.
 - **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
   questions that ask for a call path. `symbol` is named only in the skill
   and the tool description; see the previous point.
 - **The hook trades tools for hints.** With `wiki setup --hook` the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search.
+- **Claude Code agents grep more without the navigation skill.** Over 24
+  Haiku runs on the project above, tools loaded up front and no skill gave 48
+  Grep/Glob calls against 20 for the skill setup with deferred tools, yet a
+  median 5 turns against 7.5 and 138K input tokens against 174K, so setup no
+  longer installs that skill for Claude Code.
 - **pi does not show MCP server instructions** for `direct` servers (pi
   1.3.0); only tool names, descriptions and parameter docs reach the model.
 - **pi loads project files only after trust**: `.pi/mcp.json` and project
