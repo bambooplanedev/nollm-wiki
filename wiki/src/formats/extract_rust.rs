@@ -328,10 +328,11 @@ fn rust_lead(node: Node, text: &str) -> Lead {
 ///
 /// `Rewritten` carries the tree of the ORIGINAL text: items are extracted
 /// from it, so their lines stay true to the file even past a stripped
-/// module.
+/// module. It also carries the stripped modules' 1-based inclusive line
+/// ranges in that original text.
 pub(crate) enum Stripped {
     Unchanged(Tree),
-    Rewritten(String, Tree),
+    Rewritten(String, Tree, Vec<(usize, usize)>),
 }
 
 /// Remove `#[cfg(test)]`-annotated `mod` items from Rust source, replacing
@@ -377,6 +378,11 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
         return Some(Stripped::Unchanged(tree));
     }
     spans.sort_by_key(|s| s.0);
+    let line_of = |byte: usize| text[..byte].matches('\n').count() + 1;
+    let ranges = spans
+        .iter()
+        .map(|&(start, end, _)| (line_of(start), line_of(end)))
+        .collect();
 
     let mut out = String::with_capacity(text.len());
     let mut pos = 0;
@@ -398,7 +404,21 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
         pos = end;
     }
     out.push_str(&text[pos..]);
-    Some(Stripped::Rewritten(out, tree))
+    Some(Stripped::Rewritten(out, tree, ranges))
+}
+
+/// Whether the attributes above the item starting at 1-based `start_line`
+/// include `#[test]` or `#[tokio::test]`. Doc comments may sit between them.
+pub(crate) fn has_test_attribute(text: &str, start_line: usize) -> bool {
+    text.lines()
+        .skip(start_line - 1)
+        .map(str::trim_start)
+        .take_while(|l| l.starts_with("#[") || l.starts_with("//"))
+        .any(|l| {
+            ["#[test]", "#[tokio::test]", "#[tokio::test("]
+                .iter()
+                .any(|a| l.starts_with(a))
+        })
 }
 
 #[cfg(test)]

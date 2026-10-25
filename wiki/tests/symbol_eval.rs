@@ -17,19 +17,22 @@
 //! only the `tune` split may inform them. The split is pinned by
 //! `held_out_is_every_third_case_per_class`.
 //!
-//! Until symbol hits exist, a case is scored by the expected symbol's *file*:
-//! `file_rank` is the first hit whose source path equals the case's path.
+//! A case is scored by its file and by its symbol: `file_rank` is the first
+//! hit whose source path equals the case's path; `symbol_rank` is the position
+//! of the expected `(path, symbol)` among the response's symbol lines in
+//! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
-//! The `tokens` column charges the MCP tool's default search response (today
-//! `search_json` at limit 10). The step that changes the default renderer or
-//! limit must swap it here and quote both numbers.
+//! The `tokens` column charges the MCP tool's default search response
+//! (`search_lines` at limit 10); `tokens_json` in the footers charges the
+//! `format: "json"` response (`search_json`). The step that changes the
+//! default renderer or limit must swap it here and quote both numbers.
 
 use regex::Regex;
 use std::fmt::Write as _;
 use std::path::Path;
 use wiki::manifest::token_estimate;
 use wiki::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::serve::{search_json, DEFAULT_NEIGHBORS_MAX_TOKENS};
+use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS};
 
 #[path = "common/corpus.rs"]
 mod corpus;
@@ -43,7 +46,20 @@ enum Class {
     NameWords,
     DocOnly,
     Stopwords,
+    MethodSplit,
+    V7,
+    TestTarget,
 }
+
+const CLASSES: &[Class] = &[
+    Class::Name,
+    Class::NameWords,
+    Class::DocOnly,
+    Class::Stopwords,
+    Class::MethodSplit,
+    Class::V7,
+    Class::TestTarget,
+];
 
 struct Case {
     query: &'static str,
@@ -239,6 +255,183 @@ const CASES: &[Case] = &[
         Class::Stopwords,
         false,
     ),
+    case(
+        "needs render",
+        "src/cache.rs",
+        "needs_render",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "retain ids",
+        "src/cache.rs",
+        "retain_ids",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "with defaults",
+        "src/formats/mod.rs",
+        "with_defaults",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "resolve segment",
+        "src/graph.rs",
+        "resolve_segment",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "resolve include",
+        "src/graph.rs",
+        "resolve_include",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "has page",
+        "src/query.rs",
+        "has_page",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "list pages",
+        "src/query.rs",
+        "list_pages",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "content text",
+        "src/query.rs",
+        "content_text",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "name words",
+        "src/query.rs",
+        "name_words",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "field words",
+        "src/query.rs",
+        "field_words",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "field hit",
+        "src/query.rs",
+        "field_hit",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "defined terms",
+        "src/query.rs",
+        "defined_terms",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "bfs neighborhood",
+        "src/query.rs",
+        "bfs_neighborhood",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "pagerank of",
+        "src/query.rs",
+        "pagerank_of",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "with wiki",
+        "src/serve.rs",
+        "with_wiki",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "list resources",
+        "src/serve.rs",
+        "list_resources",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "read resource",
+        "src/serve.rs",
+        "read_resource",
+        Class::MethodSplit,
+        false,
+    ),
+    case(
+        "next u64",
+        "src/generator.rs",
+        "next_u64",
+        Class::MethodSplit,
+        true,
+    ),
+    case(
+        "render fingerprint",
+        "src/rewrite.rs",
+        "render_fingerprint",
+        Class::V7,
+        false,
+    ),
+    case(
+        "render page",
+        "src/rewrite.rs",
+        "render_page",
+        Class::V7,
+        false,
+    ),
+    case(
+        "render index json",
+        "src/manifest.rs",
+        "render_index_json",
+        Class::V7,
+        true,
+    ),
+    case(
+        "render span",
+        "src/formats/code.rs",
+        "render_span",
+        Class::V7,
+        false,
+    ),
+    case("resolve", "src/graph.rs", "resolve", Class::V7, false),
+    case("render", "src/rewrite.rs", "render_page", Class::V7, true),
+    case(
+        "a stray backtick does not re pair later lines",
+        "src/rewrite.rs",
+        "a_stray_backtick_does_not_re_pair_later_lines",
+        Class::TestTarget,
+        false,
+    ),
+    case(
+        "pagerank is deterministic and sums to about one",
+        "src/graph.rs",
+        "pagerank_is_deterministic_and_sums_to_about_one",
+        Class::TestTarget,
+        false,
+    ),
+    case(
+        "stale page files lists orphaned on disk only",
+        "src/lib.rs",
+        "stale_page_files_lists_orphaned_on_disk_only",
+        Class::TestTarget,
+        true,
+    ),
 ];
 
 fn corpus_dir() -> std::path::PathBuf {
@@ -349,12 +542,7 @@ fn doc_only_queries_do_not_match_the_symbol_name() {
 
 #[test]
 fn held_out_is_every_third_case_per_class() {
-    for class in [
-        Class::Name,
-        Class::NameWords,
-        Class::DocOnly,
-        Class::Stopwords,
-    ] {
+    for &class in CLASSES {
         assert!(
             CASES.iter().any(|c| c.class == class),
             "{class:?} has no cases"
@@ -395,20 +583,38 @@ fn id_paths(out: &Path) -> std::collections::BTreeMap<String, String> {
         .collect()
 }
 
-/// Per-split aggregates: `(file_hit@1, file_hit@3, mrr@10, mean tokens, n)`.
+/// Per-split aggregates: `(file_hit@1, file_hit@3, mrr@10, symbol_hit@3,
+/// mean tokens, n)`.
 #[derive(Default)]
 struct Agg {
     h1: f64,
     h3: f64,
     mrr: f64,
+    s3: f64,
     tokens: f64,
+    tokens_json: f64,
     n: f64,
 }
 
+/// Whether a symbol rank counts as `symbol_hit@3`.
+fn symbol_hit3(rank: Option<usize>) -> bool {
+    rank.is_some_and(|r| r <= 3)
+}
+
 impl Agg {
-    fn add(&mut self, rank: Option<usize>, tokens: usize) {
+    fn add(
+        &mut self,
+        rank: Option<usize>,
+        symbol_rank: Option<usize>,
+        tokens: usize,
+        tokens_json: usize,
+    ) {
         self.n += 1.0;
         self.tokens += tokens as f64;
+        self.tokens_json += tokens_json as f64;
+        if symbol_hit3(symbol_rank) {
+            self.s3 += 1.0;
+        }
         if let Some(r) = rank {
             self.mrr += 1.0 / r as f64;
             if r == 1 {
@@ -422,7 +628,7 @@ impl Agg {
 
     fn footer(&self, name: &str) -> String {
         format!(
-            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} tokens={:.1}\n",
+            "{name:<5} file_hit@1={}/{} ({:.4}) file_hit@3={}/{} ({:.4}) mrr@10={:.4} symbol_hit@3={}/{} ({:.4}) tokens={:.1} tokens_json={:.1}\n",
             self.h1,
             self.n,
             self.h1 / self.n,
@@ -430,7 +636,11 @@ impl Agg {
             self.n,
             self.h3 / self.n,
             self.mrr / self.n,
+            self.s3,
+            self.n,
+            self.s3 / self.n,
             self.tokens / self.n,
+            self.tokens_json / self.n,
         )
     }
 }
@@ -441,28 +651,43 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     let mut table = String::new();
     writeln!(
         table,
-        "{:<46}{:<11}{:<6}{:>10}{:>8}  top1_path",
-        "query", "class", "split", "file_rank", "tokens"
+        "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  top1_path",
+        "query", "class", "split", "file_rank", "symbol_rank", "tokens"
     )
     .unwrap();
-    writeln!(table, "{}", "-".repeat(100)).unwrap();
+    writeln!(table, "{}", "-".repeat(112)).unwrap();
 
     let (mut tune, mut held) = (Agg::default(), Agg::default());
+    let mut ranks: Vec<(Class, Option<usize>, Option<usize>)> = Vec::new();
     for c in CASES {
         let hits = wiki.search(c.query, None, 10);
-        let hit_paths: Vec<&str> = hits.iter().map(|h| paths[&h.id].as_str()).collect();
-        let rank = hit_paths.iter().position(|p| *p == c.path).map(|i| i + 1);
-        let tokens = token_estimate(&search_json(hits));
-        (if c.held_out { &mut held } else { &mut tune }).add(rank, tokens);
+        let rank = hits.iter().position(|h| h.path == c.path).map(|i| i + 1);
+        // The symbol line's name is `owner::name`; the label is the bare name.
+        let symbol_rank = hits
+            .iter()
+            .flat_map(|h| &h.symbols)
+            .position(|s| s.path == c.path && s.name.rsplit("::").next() == Some(c.symbol))
+            .map(|i| i + 1);
+        let top1 = hits.first().map_or("-".to_string(), |h| h.path.clone());
+        let tokens = token_estimate(&search_lines(&hits));
+        let tokens_json = token_estimate(&search_json(hits));
+        (if c.held_out { &mut held } else { &mut tune }).add(
+            rank,
+            symbol_rank,
+            tokens,
+            tokens_json,
+        );
+        ranks.push((c.class, rank, symbol_rank));
+        let show = |r: Option<usize>| r.map_or("-".to_string(), |r| r.to_string());
         writeln!(
             table,
-            "{:<46}{:<11}{:<6}{:>10}{:>8}  {}",
+            "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  {top1}",
             c.query,
             format!("{:?}", c.class),
             split(c.held_out),
-            rank.map_or("-".to_string(), |r| r.to_string()),
+            show(rank),
+            show(symbol_rank),
             tokens,
-            hit_paths.first().copied().unwrap_or("-"),
         )
         .unwrap();
     }
@@ -470,6 +695,20 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     writeln!(table).unwrap();
     table.push_str(&tune.footer("tune"));
     table.push_str(&held.footer("held"));
+    for class in CLASSES {
+        let of: Vec<_> = ranks.iter().filter(|(c, _, _)| c == class).collect();
+        let h3 = of
+            .iter()
+            .filter(|(_, r, _)| r.is_some_and(|r| r <= 3))
+            .count();
+        let s3 = of.iter().filter(|(_, _, s)| symbol_hit3(*s)).count();
+        let n = of.len();
+        writeln!(
+            table,
+            "class {class:?}: file_hit@3={h3}/{n} symbol_hit@3={s3}/{n}"
+        )
+        .unwrap();
+    }
 
     let code_id = paths
         .iter()
@@ -510,8 +749,12 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
 
 // Floors, exact fractions of case counts. Never transcribe from the `{:.4}`
 // table (it rounds). Ratchet them in the commit that accepts an improvement.
-const MIN_FILE_HIT3_TUNE: f64 = 16.0 / 17.0;
-const MIN_FILE_HIT3_HELD: f64 = 7.0 / 8.0;
+// Every class counts since step 4 (the floors were reset when the method,
+// V7 and test-target classes joined the splits).
+const MIN_FILE_HIT3_TUNE: f64 = 1.0; // 35/35
+const MIN_FILE_HIT3_HELD: f64 = 16.0 / 17.0;
+const MIN_SYMBOL_HIT3_TUNE: f64 = 1.0; // 35/35
+const MIN_SYMBOL_HIT3_HELD: f64 = 16.0 / 17.0;
 const MIN_TITLE_AS_QUERY: f64 = 27.0 / 28.0;
 
 /// Slack on the floor comparisons (accumulated-sum ULP noise), as in `eval.rs`.
@@ -533,6 +776,14 @@ fn symbol_retrieval() {
     assert!(
         held.h3 / held.n >= MIN_FILE_HIT3_HELD - FLOOR_EPS,
         "held file_hit@3 regressed below {MIN_FILE_HIT3_HELD}\n{table}"
+    );
+    assert!(
+        tune.s3 / tune.n >= MIN_SYMBOL_HIT3_TUNE - FLOOR_EPS,
+        "tune symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_TUNE}\n{table}"
+    );
+    assert!(
+        held.s3 / held.n >= MIN_SYMBOL_HIT3_HELD - FLOOR_EPS,
+        "held symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_HELD}\n{table}"
     );
 
     assert!(

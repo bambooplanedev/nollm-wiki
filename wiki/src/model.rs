@@ -13,9 +13,6 @@ pub enum SourceKind {
 }
 
 impl SourceKind {
-    /// The kinds `parse` accepts, for user-facing error text.
-    pub const EXPECTED: &'static str = "text, markdown, or code:<lang>";
-
     pub fn label(&self) -> String {
         match self {
             SourceKind::Text => "text".into(),
@@ -31,6 +28,38 @@ impl SourceKind {
             other => other.strip_prefix("code:").map(|lang| SourceKind::Code {
                 lang: lang.to_string(),
             }),
+        }
+    }
+}
+
+/// What `search` and the CLI/MCP `kind` key accept: one exact kind, or the
+/// `code` / `docs` groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum KindFilter {
+    Exact(SourceKind),
+    /// Every `code:<lang>`.
+    Code,
+    /// `markdown` and `text`.
+    Docs,
+}
+
+impl KindFilter {
+    /// The values `parse` accepts, for user-facing error text.
+    pub const EXPECTED: &'static str = "code, docs, text, markdown, or code:<lang>";
+
+    pub fn parse(s: &str) -> Option<KindFilter> {
+        match s {
+            "code" => Some(KindFilter::Code),
+            "docs" => Some(KindFilter::Docs),
+            other => SourceKind::parse(other).map(KindFilter::Exact),
+        }
+    }
+
+    pub fn matches(&self, k: &SourceKind) -> bool {
+        match self {
+            KindFilter::Exact(x) => x == k,
+            KindFilter::Code => matches!(k, SourceKind::Code { .. }),
+            KindFilter::Docs => matches!(k, SourceKind::Text | SourceKind::Markdown),
         }
     }
 }
@@ -100,7 +129,7 @@ pub struct Entity {
 }
 
 /// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CodeItemKind {
     /// A free function.
@@ -118,7 +147,7 @@ pub enum CodeItemKind {
 
 /// One definition of a code page and where it lives. Field order is the
 /// `items.json` key order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CodeItem {
     pub kind: CodeItemKind,
     /// The name as the source writes it.
@@ -128,7 +157,9 @@ pub struct CodeItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
     /// The one-line signature as the source reads it, with no owner spliced
-    /// in, so it can be searched for in the file.
+    /// in, so it can be searched for in the file. Exception: each C++
+    /// declarator of a shared declaration gets its own signature, which may
+    /// not appear verbatim (`int a, *b;` gives `b` the signature `int *b`).
     pub signature: String,
     /// 1-based, inclusive, in the original file: from the first attached doc
     /// comment or attribute line to the item's last line.
@@ -143,6 +174,33 @@ pub struct CodeItem {
     /// known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub twin: Option<String>,
+    /// Whether the item is test code: in a test file (`is_test_path`), inside
+    /// a Rust `#[cfg(test)]` module, or a Rust `#[test]` function. Search
+    /// shows such items but does not let them lift their page.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub test: bool,
+}
+
+impl CodeItem {
+    /// `owner::name`, or `name` when the item has no owner: how search
+    /// prints the item, and a whole-name match for it.
+    pub fn qualified_name(&self) -> String {
+        match &self.owner {
+            Some(o) => format!("{o}::{}", self.name),
+            None => self.name.clone(),
+        }
+    }
+}
+
+/// Whether `rel_path` is a test file in any language: a path component
+/// `tests`, or a file name `test_*`, `*_test.*`, `*_tests.*`.
+pub fn is_test_path(rel_path: &str) -> bool {
+    let mut parts = rel_path.split('/');
+    let name = parts.next_back().unwrap_or("");
+    let stem = name.split('.').next().unwrap_or("");
+    parts.any(|c| c == "tests")
+        || name.starts_with("test_")
+        || (name.contains('.') && (stem.ends_with("_test") || stem.ends_with("_tests")))
 }
 
 #[derive(Default, Clone, Debug)]

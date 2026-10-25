@@ -39,31 +39,21 @@ use tree_sitter::Node;
 /// at the end: a namespace- or file-scope variable is an item (kind `value`),
 /// never an export. `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
-/// `default_cut` finds no `body` field: the whole declaration would render
-/// three times over, with the owner spliced at a different offset each time. A
-/// struct's layout stays visible in the page's `## Body`, which renders the
-/// source verbatim.
+/// `default_cut` finds no `body` field. An item's signature is then the
+/// declaration's specifiers plus that declarator's own text (`int a`, `int *b`,
+/// `int f()`, `int *g()`; see `shared_declaration_signature`), while the
+/// `## Exports` line still renders the whole declaration with the owner spliced
+/// in. A struct's layout stays visible in the page's `## Body`, which renders
+/// the source verbatim.
 ///
-/// The same `multiple` shape recurs for FUNCTIONS, where it is not filtered
-/// out: `class B { int f(), *g(); };` is one `field_declaration` with two
-/// declarators, so the query emits two matches over that one node, and
-/// `default_cut` again finds no `body` field. Both matches render the WHOLE
-/// declaration — `int f(), *g()` — with the owner spliced at a different
-/// offset in each, rather than each declarator's own slice. Pre-existing and
-/// rare; documented, not fixed.
-///
-/// The same sharing reaches `Entity::methods` for this shape too:
-/// `extract_code`'s widened `is_function` check (`code.rs`) reads
-/// `def.child_by_field_name("declarator")`, which — because that field is
-/// `multiple` — always returns the FIRST declarator on the shared node,
-/// regardless of which of the two matches (and which `@name`) is being
-/// classified. Harmless in practice now that the check descends a wrapper
-/// (`is_function_declarator`): for `int *g(), f();` the first declarator is a
-/// `pointer_declarator` around a `function_declarator`, so both matches
-/// classify as functions and both `g` and `f` reach `methods`, which is the
-/// right answer. It stays a latent mis-read — a declaration mixing a function
-/// and a data declarator would classify both alike — and, like the rendering
-/// above, is pre-existing and rare: documented, not fixed.
+/// `Entity::methods` shares the node too: `extract_code`'s `is_function` check
+/// reads `def.child_by_field_name("declarator")`, which, because that field is
+/// `multiple`, always returns the FIRST declarator on the shared node. For
+/// `int *g(), f();` that is a wrapper around a `function_declarator`, so both
+/// matches classify as functions and both reach `methods`, which is the right
+/// answer. It stays a latent mis-read (a declaration mixing a function and a
+/// data declarator would classify both alike), pre-existing and rare:
+/// documented, not fixed.
 ///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
 ///   * declarator nesting beyond ONE wrapper — the six wrapper patterns reach
@@ -953,13 +943,14 @@ mod tests {
     }
 
     #[test]
-    fn a_multi_declarator_variable_renders_whole_for_each_name() {
+    fn a_multi_declarator_variable_renders_its_own_declarator_for_each_name() {
         let e = CodeExtractor.extract("app.h", "int a = 1, b = 2;\n");
         assert_eq!(
             item_lines(&e.items),
             vec!["1-1 value a pub", "1-1 value b pub"]
         );
-        assert!(e.items.iter().all(|i| i.signature == "int a = 1, b = 2"));
+        let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+        assert_eq!(sigs, vec!["int a = 1", "int b = 2"]);
     }
 
     #[test]

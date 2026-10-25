@@ -190,3 +190,27 @@ fn two_impl_files_with_one_stem_pair_nothing() {
         assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
     }
 }
+
+fn sig_of(items: &[serde_json::Value], owner: Option<&str>, name: &str) -> String {
+    let it = items
+        .iter()
+        .find(|i| i["name"] == name && i.get("owner").and_then(|o| o.as_str()) == owner)
+        .unwrap_or_else(|| panic!("no item {name} in {items:#?}"));
+    it["signature"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn cpp_multi_declarator_values_get_own_signatures() {
+    let idx = compile_with_items(&[("v.cpp", "int a, *b;\n")]);
+    let items = items_of(&idx, "v.cpp");
+    assert_eq!(sig_of(&items, None, "a"), "int a");
+    assert_eq!(sig_of(&items, None, "b"), "int *b");
+}
+
+#[test]
+fn cpp_multi_declarator_methods_get_own_signatures() {
+    let idx = compile_with_items(&[("b.h", "class B { int f(), *g(); };\n")]);
+    let items = items_of(&idx, "b.h");
+    assert_eq!(sig_of(&items, Some("B"), "f"), "int f()");
+    assert_eq!(sig_of(&items, Some("B"), "g"), "int *g()");
+}

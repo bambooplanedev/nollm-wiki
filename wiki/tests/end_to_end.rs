@@ -872,3 +872,22 @@ fn two_plain_compiles_prune_a_page_whose_source_was_deleted() {
     );
     assert!(output.join("keep.md").exists(), "the live page must remain");
 }
+
+#[test]
+fn items_json_round_trips() {
+    use std::collections::BTreeMap;
+    use wiki::formats::{CodeExtractor, Extractor};
+    use wiki::model::CodeItem;
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("in");
+    let src = "pub fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
+    write(&input, "a.rs", src);
+    let out = dir.path().join("out");
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let json = fs::read_to_string(out.join("items.json")).unwrap();
+    let back: BTreeMap<String, Vec<CodeItem>> = serde_json::from_str(&json).unwrap();
+    assert_eq!(back["a"], CodeExtractor.extract("a.rs", src).items);
+    assert!(back["a"].iter().any(|i| i.test));
+    // Only the test module and its fn carry the key.
+    assert_eq!(json.matches("\"test\"").count(), 2, "{json}");
+}

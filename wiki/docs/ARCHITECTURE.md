@@ -140,19 +140,19 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
 | `src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. |
-| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
+| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), `CodeItem` (with the `test` flag) and `is_test_path()`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single ASCII-fold pass (lowercase, alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank; `orphan_ids()`. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
-| `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
-| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search`/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
+| `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (page hits with symbol lines) and `neighbors()` (context-pack) queries, with `resolve_id()` mapping an id, title or path to a page, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
+| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`)/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound). |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
 | `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
-| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search`, `lint`, `serve`, `generate`. |
+| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `search` (`--kind`, `--format lines|json`), `lint`, `serve`, `generate`. |
 
 **The `extract_*.rs` names are two words on purpose, not tidiness.** Page
 titles are derived from file stems and are inputs to both the graph and
@@ -475,8 +475,10 @@ observe a page this run wrote.
 
 ## Query internals
 
-`Wiki::load` (`src/query.rs`) reads only `index.json` — metadata plus
-adjacency; page bodies are read on demand from `<id>.md`.
+`Wiki::load` (`src/query.rs`) reads `index.json` — metadata plus adjacency —
+and `items.json` (each code page's items, absent for older wikis); page
+bodies are read on demand from `<id>.md`. From the items it builds the
+per-page symbol fields below.
 
 **Search** (`Wiki::search`) is case-insensitive, tokenized, with partial
 matching:
@@ -504,8 +506,14 @@ matching:
   `tf·(k1+1)/(tf + k1·(1 − b + b·len/avglen))` with `k1 = 1.2`,
   `b = 0.75`; the token's contribution is `idf × (name 3.0 + alias 2.0 + defined 2.0 +
   summary 1.5 + heading 1.0 + body 1.0 × tf')`. Method names share the
-  `defined` weight. Field weights are not
-  length-normalised, and `tf'` stays below the name weight, so a title
+  `defined` weight. Code items add three more page fields: the whole item
+  name, also as `owner::name` (`W_SYMBOL` 2.8, in place of `defined` and
+  below the title weight), the words of item names (`W_SYMBOL_WORD` 2.0,
+  methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
+  (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and module items
+  feed none of them, nor the `defined` and method names that only test
+  items carry, and a word that is already a title word or defined name is
+  skipped. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
@@ -521,11 +529,49 @@ matching:
   of the content.
 - Hits whose body matched carry a `snippet`: a deterministic excerpt
   around the earliest token occurrence (60 chars of context per side,
-  whitespace runs collapsed, `…` on truncated edges). Title/alias/
-  summary/heading-only hits have `snippet: None` — the summary explains
-  those.
+  whitespace runs collapsed, `…` on truncated edges, comment markers such
+  as `//`, `///`, `*` and `#` dropped when they stand as whole tokens).
+  Title/alias/summary/heading-only hits have `snippet: None` — the summary
+  explains those.
+- **Symbol expansion** (`expand`) runs after the sort and `limit` cut, on
+  the surviving code hits only. Each item of a hit page (modules excluded)
+  scores per token `idf × (name + doc)`: whole name or `owner::name` 3.5
+  (`IW_WHOLE`), a name word 2.0, a doc word 1.0; test items are scaled by 0.5
+  (`TEST_ITEM_FACTOR`). A whole-name match outranks any word match even
+  with a doc match (a compile-time assert pins it). Per page the top 3
+  (`SYMBOLS_PER_PAGE`) distinct items are kept, ties by line; across the
+  response a line must score at least 0.3 (`MIN_REL_SYMBOL`) of the best
+  line. Page score and order are not changed by expansion. A `SymbolLine`
+  carries `path`, the 1-based inclusive line range, `owner::name`, the
+  signature, and the doc, which is dropped when an earlier line of the
+  same page shows the same one. C++ gives each declarator of a shared
+  declaration its own signature, which therefore may not be verbatim in
+  the file.
+- **The test flag.** `CodeItem.test` is set at extraction (`formats/code.rs`):
+  the file is a test path (`model::is_test_path`: a `tests` path component,
+  or a file named `test_*`, `*_test.*`, `*_tests.*`), or, for Rust, the item
+  sits in a `#[cfg(test)]` module or carries `#[test]` (also
+  `#[tokio::test]`). It is stored in `items.json`. Test items stay visible
+  as symbol lines but contribute no page fields, and a `defined` or method
+  name only test items carry is dropped from the page's defined terms
+  (`Wiki::load`), so their names cannot lift their page; body text still
+  counts.
+- **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `docs`
+  (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
+  share it and its error text.
+- **Output.** `serve::search_lines` renders the default line format (page
+  line `id  path  title — summary`, indented symbol lines
+  `path:start-end  name  signature  — doc`, or the snippet for a page
+  without symbols; `no matches` when nothing hit); `serve::search_json`
+  renders the JSON form. The MCP `format` parameter and the CLI
+  `--format` choose between them; `lines` is the default for both.
 
-**Neighbors** (`Wiki::neighbors`) BFS-collects ids to `depth` hops over
+**Neighbors** (`Wiki::neighbors`) takes a page id; both the CLI and the
+MCP tool first pass what the caller typed through `Wiki::resolve_id`, which
+accepts an exact id, a title (ignoring case), the slug of the argument, or
+the one page whose source path equals it or ends with `/<arg>`. A failure
+lists up to 5 closest ids (the pages an ambiguous path matched, else ids
+or titles sharing a word). It BFS-collects ids to `depth` hops over
 both edge directions, then builds a budgeted context pack:
 
 - `--max-tokens` is a hard ceiling on the pack's estimated size, using
@@ -810,13 +856,20 @@ unknown; and the names of one multi-declarator statement share its range.
     table, which rounds.
 - **Symbol eval:** `tests/symbol_eval.rs` — the symbol-level retrieval
   harness. Compiles the frozen corpus in `tests/.symbol_corpus/` (this
-  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 25
-  labelled queries (Name, NameWords, DocOnly, Stopwords) through
-  `Wiki::search`. Until symbol hits exist, a case is scored by the expected
-  symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
-  tokens, per split), gating on `file_hit@3` floors before snapshotting the
-  table; it also records the `neighbors` pack size without asserting it, and
-  the title-as-query count is floored (27/28).
+  crate's own `src/`, `docs/ARCHITECTURE.md` and `README.md`) and scores 52
+  labelled queries (Name, NameWords, DocOnly, Stopwords, MethodSplit, V7,
+  TestTarget) through `Wiki::search`. A case names the expected
+  `(path, symbol)` and is scored twice: `file_rank` is the first hit on the
+  expected path, `symbol_rank` the position of the expected symbol among the
+  response's symbol lines in output order. Per split (`tune`/`held`) it
+  reports `file_hit@1`, `file_hit@3`, `mrr@10`, `symbol_hit@3` (symbol rank
+  at most 3), and mean response tokens: `tokens` charges the default
+  response (`search_lines`, limit 10), `tokens_json` the `format: "json"`
+  response (`search_json`). Gates, checked before the snapshot: `file_hit@3`
+  and `symbol_hit@3` floors per split (tune 35/35, held 16/17) and the
+  title-as-query count (27/28). The `neighbors` pack size is recorded
+  without being asserted. A step that changes the default renderer or limit
+  swaps it in the harness and quotes both token numbers.
 
   **The corpus is frozen on 2026-10-22 at `a81a332` (the crate's sources as of
   `7209ee2`; the SHAs may dangle after a squash, `SYMBOL_CORPUS_HASH` is the

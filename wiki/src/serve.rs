@@ -3,7 +3,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::SourceKind;
+use crate::model::KindFilter;
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -145,17 +145,20 @@ pub(crate) struct SearchParams {
     /// and method names by whole term, body by substring. A page matching
     /// any one token is a hit; rare tokens weigh far more than common ones.
     pub query: String,
-    /// Filter by source kind: `text`, `markdown`, or `code:<lang>`
-    /// (e.g. `code:rust`).
+    /// Filter by source kind: the groups `code` and `docs`, or one exact
+    /// kind: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
     pub kind: Option<String>,
     /// Maximum number of hits (default 10).
     pub limit: Option<usize>,
+    /// Output format: `lines` (default) or `json`.
+    pub format: Option<String>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
 #[schemars(crate = "rmcp::schemars")]
 pub(crate) struct NeighborsParams {
-    /// Page id (slug) to build the context pack around.
+    /// The page to build the context pack around: its id, its title, or its
+    /// source path (a path suffix works when only one page ends with it).
     pub id: String,
     /// BFS hop count from the target page (default 1).
     pub depth: Option<usize>,
@@ -184,7 +187,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword. Returns matching pages as JSON: [{id, title, summary, score, snippet}]. Use `neighbors` afterwards to pull a page's full context."
+        description = "Search the wiki for pages by keyword. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `neighbors` afterwards to pull a page's full context."
     )]
     async fn search(
         &self,
@@ -192,17 +195,32 @@ impl WikiServer {
     ) -> Result<CallToolResult, McpError> {
         let kind = match p.kind.as_deref() {
             None => None,
-            Some(s) => Some(SourceKind::parse(s).ok_or_else(|| {
+            Some(s) => Some(KindFilter::parse(s).ok_or_else(|| {
                 McpError::invalid_params(
-                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED),
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED),
                     None,
                 )
             })?),
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let json = search_json(wiki.search(&p.query, kind, p.limit.unwrap_or(10)));
+        let json = match p.format.as_deref() {
+            None | Some("lines") => false,
+            Some("json") => true,
+            Some(f) => {
+                return Err(McpError::invalid_params(
+                    format!("unknown format {f:?}; expected lines or json"),
+                    None,
+                ))
+            }
+        };
+        let hits = wiki.search(&p.query, kind.as_ref(), p.limit.unwrap_or(10));
+        let text = if json {
+            search_json(hits)
+        } else {
+            search_lines(&hits)
+        };
         Ok(with_stale(
-            CallToolResult::success(vec![ContentBlock::text(json)]),
+            CallToolResult::success(vec![ContentBlock::text(text)]),
             stale.as_deref(),
         ))
     }
@@ -217,12 +235,16 @@ impl WikiServer {
             full_neighbors: p.full.unwrap_or(false),
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let result = match wiki.neighbors(&p.id, p.depth.unwrap_or(1), &budget) {
-            Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
-            None => CallToolResult::error(vec![ContentBlock::text(format!(
-                "unknown page id {:?} — use the search tool to find valid ids",
-                p.id
-            ))]),
+        let result = match wiki.resolve_id(&p.id) {
+            Ok(id) => match wiki.neighbors(&id, p.depth.unwrap_or(1), &budget) {
+                Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
+                None => CallToolResult::error(vec![ContentBlock::text(
+                    crate::query::unknown_page(&p.id, &[]),
+                )]),
+            },
+            Err(near) => CallToolResult::error(vec![ContentBlock::text(
+                crate::query::unknown_page(&p.id, &near),
+            )]),
         };
         with_stale(result, stale.as_deref())
     }
@@ -259,7 +281,9 @@ impl ServerHandler for WikiServer {
             .with_instructions(
                 "Query interface to a compiled wiki. Start with `search` to find \
                  page ids, then `neighbors` to pull a budgeted context pack around \
-                 a page. Pages are also exposed as resources under wiki://page/<id>.",
+                 a page. Pages are also exposed as resources under wiki://page/<id>. \
+                 Paths in results are relative to the compiled project root; line \
+                 ranges are 1-based and inclusive.",
             )
     }
 
@@ -324,22 +348,76 @@ impl ServerHandler for WikiServer {
     }
 }
 
-/// Render search hits as the JSON array the `search` tool returns:
-/// `[{id, title, summary, score, snippet}]`.
+/// Render search hits as the JSON array `search` returns with
+/// `format: "json"`: `[{id, title, summary, score, snippet, path, symbols}]`.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()
         .map(|h| {
+            let symbols: Vec<_> = h
+                .symbols
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "path": s.path,
+                        "start_line": s.start_line,
+                        "end_line": s.end_line,
+                        "name": s.name,
+                        "signature": s.signature,
+                        "doc": s.doc,
+                    })
+                })
+                .collect();
             serde_json::json!({
                 "id": h.id,
                 "title": h.title,
                 "summary": h.summary,
                 "score": h.score,
                 "snippet": h.snippet,
+                "path": h.path,
+                "symbols": symbols,
             })
         })
         .collect();
     serde_json::Value::Array(hits).to_string()
+}
+
+/// Render search hits as the default line output: `id  path  title — summary`
+/// per page, then one `  path:start-end  name  signature  — doc` line per
+/// symbol, or the snippet (four-space indent) when the page has no symbols.
+/// No hits render as one `no matches` line.
+pub fn search_lines(hits: &[Hit]) -> String {
+    if hits.is_empty() {
+        return "no matches\n".to_string();
+    }
+    // Fields are one-line text; collapse any newline or tab they carry.
+    let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::new();
+    for h in hits {
+        out.push_str(&format!("{}  {}  {}", h.id, h.path, one(&h.title)));
+        if let Some(s) = &h.summary {
+            out.push_str(&format!(" — {}", one(s)));
+        }
+        out.push('\n');
+        for s in &h.symbols {
+            out.push_str(&format!(
+                "  {}:{}-{}  {}  {}",
+                s.path,
+                s.start_line,
+                s.end_line,
+                s.name,
+                one(&s.signature)
+            ));
+            if let Some(d) = &s.doc {
+                out.push_str(&format!("  — {}", one(d)));
+            }
+            out.push('\n');
+        }
+        if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
+            out.push_str(&format!("    {}\n", one(sn)));
+        }
+    }
+    out
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.

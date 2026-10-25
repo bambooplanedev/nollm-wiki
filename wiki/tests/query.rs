@@ -2,7 +2,7 @@
 
 use std::fs;
 use tempfile::tempdir;
-use wiki::model::SourceKind;
+use wiki::model::{KindFilter, SourceKind};
 use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
@@ -441,15 +441,15 @@ fn search_kind_filter_restricts_to_that_kind() {
         |hits: Vec<wiki::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
 
     assert_eq!(
-        ids(w.search("zebra", Some(SourceKind::Text), 10)),
+        ids(w.search("zebra", Some(&KindFilter::Exact(SourceKind::Text)), 10)),
         ["guide"]
     );
     assert_eq!(
         ids(w.search(
             "zebra",
-            Some(SourceKind::Code {
+            Some(&KindFilter::Exact(SourceKind::Code {
                 lang: "rust".into()
-            }),
+            })),
             10
         )),
         ["zoo"]
@@ -495,4 +495,424 @@ fn neighbors_depth_two_reaches_the_second_hop() {
     );
     // Non-full neighbor blocks are `## Title (id)` + summary.
     assert!(two.text.contains("## Gamma (gamma)"), "pack: {}", two.text);
+}
+
+fn kind_fixture() -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("a.rs"), "//! zebra\npub fn zebra() {}\n").unwrap();
+    fs::write(input.join("b.cpp"), "// zebra\nint zebra() { return 0; }\n").unwrap();
+    fs::write(input.join("c.md"), "# C\n\nzebra in markdown.\n").unwrap();
+    fs::write(input.join("d.txt"), "# D\n\nzebra in text.\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+fn ids_for(w: &Wiki, f: &str) -> Vec<String> {
+    let f = KindFilter::parse(f).unwrap();
+    let mut v: Vec<String> = w
+        .search("zebra", Some(&f), 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn kind_code_group_returns_only_code() {
+    let (_d, w) = kind_fixture();
+    // a.rs and b.cpp are the code pages; c.md and d.txt must not appear.
+    assert_eq!(ids_for(&w, "code"), ["a", "b"]);
+}
+
+#[test]
+fn kind_docs_group_returns_only_docs() {
+    let (_d, w) = kind_fixture();
+    assert_eq!(ids_for(&w, "docs"), ["c", "d"]);
+}
+
+#[test]
+fn kind_exact_code_rust_still_works() {
+    let (_d, w) = kind_fixture();
+    assert_eq!(ids_for(&w, "code:rust"), ["a"]);
+    assert_eq!(ids_for(&w, "markdown"), ["c"]);
+    assert!(KindFilter::parse("nope").is_none());
+}
+
+#[test]
+fn search_without_items_json_has_no_symbol_lines() {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("lib.rs"), "pub fn alpha_beta() {}\n").unwrap();
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+
+    let wiki = Wiki::load(&out).unwrap();
+    let ids: Vec<String> = wiki.list_pages().into_iter().map(|(id, _)| id).collect();
+    assert!(ids.iter().any(|id| !wiki.items(id).is_empty()));
+
+    for bad in [None, Some("not json")] {
+        match bad {
+            None => fs::remove_file(out.join("items.json")).unwrap(),
+            Some(s) => fs::write(out.join("items.json"), s).unwrap(),
+        }
+        let wiki = Wiki::load(&out).unwrap();
+        assert!(ids.iter().all(|id| wiki.items(id).is_empty()));
+    }
+}
+
+/// Compiles `files` (relative path, contents) and loads the wiki.
+fn code_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    for (path, text) in files {
+        let p = input.join(path);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&out).unwrap();
+    (dir, w)
+}
+
+/// Every symbol line of a response in output order: `(path, start, end, name)`.
+fn symbol_lines(hits: &[wiki::query::Hit]) -> Vec<(String, usize, usize, String)> {
+    hits.iter()
+        .flat_map(|h| &h.symbols)
+        .map(|s| (s.path.clone(), s.start_line, s.end_line, s.name.clone()))
+        .collect()
+}
+
+#[test]
+fn private_fn_is_found_by_name_with_its_lines() {
+    let (_d, w) = code_fixture(&[("src/a.rs", "fn helper_thing() {}\n")]);
+    let hits = w.search("helper_thing", None, 10);
+    let a = hits.iter().find(|h| h.id == "a").expect("page a is a hit");
+    assert_eq!(a.path, "src/a.rs");
+    assert_eq!(
+        symbol_lines(std::slice::from_ref(a)),
+        [("src/a.rs".to_string(), 1, 1, "helper_thing".to_string())]
+    );
+}
+
+#[test]
+fn method_is_found_by_split_words() {
+    let (_d, w) = code_fixture(&[
+        (
+            "src/s.rs",
+            "pub struct S;\nimpl S {\n    fn on_order_reject(&self) {}\n}\n",
+        ),
+        ("src/other.rs", "pub fn unrelated() {}\n"),
+    ]);
+    let lines = symbol_lines(&w.search("order reject", None, 10));
+    assert_eq!(
+        lines.first(),
+        Some(&(
+            "src/s.rs".to_string(),
+            3,
+            3,
+            "S::on_order_reject".to_string()
+        )),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn module_items_never_show() {
+    let (_d, w) = code_fixture(&[
+        ("src/lib.rs", "mod formats;\npub fn list_formats() {}\n"),
+        ("src/formats.rs", "pub fn formats_all() {}\n"),
+    ]);
+    let lines = symbol_lines(&w.search("formats", None, 10));
+    assert!(!lines.is_empty(), "the fns still show");
+    assert!(lines.iter().all(|l| l.3 != "formats"), "{lines:?}");
+}
+
+#[test]
+fn test_items_do_not_lift_a_page_but_still_show() {
+    // `aa` says the words more often, so a lifted test fn would put it first.
+    let (_d, w) = code_fixture(&[
+        ("src/zz.rs", "fn zebra_walk() {}\n"),
+        (
+            "tests/aa.rs",
+            "#[test]\nfn zebra_walk_works() {\n    zebra_walk();\n    zebra_walk();\n}\n",
+        ),
+    ]);
+    let hits = w.search("zebra walk", None, 10);
+    let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids, ["zz", "aa"]);
+    let test_line = &hits[1].symbols;
+    assert_eq!(test_line.len(), 1, "the test fn still shows");
+    assert_eq!(test_line[0].name, "zebra_walk_works");
+    assert!(test_line[0].test);
+}
+
+#[test]
+fn symbol_lines_are_unique_per_page() {
+    // Overloads in a header and their definitions in the `.cpp` twin: one
+    // line per item, every line on its own page's path, a doc shown once.
+    let (_d, w) = code_fixture(&[
+        (
+            "src/fsm.h",
+            "class Fsm {\npublic:\n    /// Handles an order reject.\n    void onOrderReject();\n    /// Handles an order reject.\n    void onOrderReject(int code);\n};\n",
+        ),
+        (
+            "src/fsm.cpp",
+            "#include \"fsm.h\"\nvoid Fsm::onOrderReject() {}\nvoid Fsm::onOrderReject(int code) {}\n",
+        ),
+    ]);
+    let hits = w.search("order reject", None, 10);
+    assert!(
+        hits.iter().any(|h| h.symbols.len() == 2),
+        "both overloads show"
+    );
+    for h in &hits {
+        let keys: std::collections::BTreeSet<_> =
+            symbol_lines(std::slice::from_ref(h)).into_iter().collect();
+        assert_eq!(
+            keys.len(),
+            h.symbols.len(),
+            "duplicate lines under {}",
+            h.id
+        );
+        assert!(h.symbols.iter().all(|s| s.path == h.path));
+        let docs: Vec<&str> = h.symbols.iter().filter_map(|s| s.doc.as_deref()).collect();
+        let unique: std::collections::BTreeSet<_> = docs.iter().collect();
+        assert_eq!(unique.len(), docs.len(), "a doc repeats under {}", h.id);
+    }
+}
+
+#[test]
+fn weak_lines_are_cut_response_wide() {
+    // `other` matches one token by doc only: below 0.3 of the best line in
+    // the response, though it is the best line of its own page.
+    let (_d, w) = code_fixture(&[
+        ("src/a.rs", "pub fn zebra_quokka() {}\n"),
+        ("src/b.rs", "/// Mentions quokka.\nfn other() {}\n"),
+    ]);
+    let hits = w.search("zebra quokka", None, 10);
+    assert!(hits.iter().any(|h| h.id == "b"), "b is still a page hit");
+    let names: Vec<String> = symbol_lines(&hits).into_iter().map(|l| l.3).collect();
+    assert_eq!(names, ["zebra_quokka"]);
+}
+
+#[test]
+fn whole_name_outranks_an_earlier_word_match() {
+    // `resolve_link` matches `resolve` by a word and sits first in the file;
+    // the method named exactly `resolve` must still be the first line.
+    let (_d, w) = code_fixture(&[(
+        "src/g.rs",
+        "fn resolve_link() {}\npub struct G;\nimpl G {\n    fn resolve(&self) {}\n}\n",
+    )]);
+    let lines = symbol_lines(&w.search("resolve", None, 10));
+    assert_eq!(
+        lines.first(),
+        Some(&("src/g.rs".to_string(), 4, 4, "G::resolve".to_string())),
+        "{lines:?}"
+    );
+}
+
+/// A C++ header declaring `onOrderReject` (no doc), a test file that mocks
+/// it and names a test after it, a dispatch site and a docs spec. Before
+/// test-only names left `defined_terms`, the test page ranked first.
+fn fsm_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        (
+            "src/core_parcel_sorter.h",
+            "#pragma once\n/// Parcel sorting machine.\nclass ParcelSorter {\npublic:\n    void onOrderReject(int code);\n    void onFill(int qty);\n};\n",
+        ),
+        (
+            "tests/test_fsm.cpp",
+            "#include \"../src/core_parcel_sorter.h\"\nclass MockFsm : public ParcelSorter {\npublic:\n    void onOrderReject(int code) { rejects++; }\n    int rejects = 0;\n};\nvoid test_order_reject_counts() {\n    MockFsm m;\n    m.onOrderReject(1);\n    m.onOrderReject(2);\n}\n",
+        ),
+        (
+            "src/dispatch.cpp",
+            "#include \"core_parcel_sorter.h\"\nvoid dispatch(ParcelSorter& f, int ev) {\n    if (ev == 3) f.onOrderReject(ev);\n}\n",
+        ),
+        (
+            "docs/spec.md",
+            "# Fsm spec\n\nAn order reject halts the strategy until the next order.\n",
+        ),
+    ])
+}
+
+#[test]
+fn test_only_names_do_not_lift_a_cpp_test_page() {
+    let (_d, w) = fsm_fixture();
+    let hits = w.search("order reject", None, 10);
+    let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+    let rank = |id: &str| ids.iter().position(|i| *i == id);
+    let (def, test) = (rank("core_parcel_sorter"), rank("test_fsm"));
+    assert!(def.is_some() && test.is_some() && def < test, "{ids:?}");
+    let lines = symbol_lines(&hits);
+    assert_eq!(
+        lines.first(),
+        Some(&(
+            "src/core_parcel_sorter.h".to_string(),
+            5,
+            5,
+            "ParcelSorter::onOrderReject".to_string()
+        )),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn owner_qualified_token_finds_the_method() {
+    let (_d, w) = fsm_fixture();
+    let lines = symbol_lines(&w.search("ParcelSorter::onOrderReject", None, 10));
+    assert_eq!(
+        lines.first(),
+        Some(&(
+            "src/core_parcel_sorter.h".to_string(),
+            5,
+            5,
+            "ParcelSorter::onOrderReject".to_string()
+        )),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn search_lines_says_no_matches_when_empty() {
+    assert_eq!(wiki::serve::search_lines(&[]), "no matches\n");
+}
+
+#[test]
+fn snippet_drops_comment_markers() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("a.rs"),
+        "//! Foo bar\n/// Foo baz\npub fn f() {}\n",
+    )
+    .unwrap();
+    fs::write(input.join("b.py"), "# Foo qux\ndef g(): pass\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("foo", None, 10);
+    assert_eq!(hits.len(), 2);
+    for h in hits {
+        let s = h.snippet.unwrap();
+        assert!(s.starts_with("Foo "), "snippet: {s}");
+        assert!(!s.contains("//") && !s.contains('#'), "snippet: {s}");
+    }
+}
+
+#[test]
+fn snippet_keeps_markers_that_are_content() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("a.txt"),
+        "# T\nintro\n#include zork.h\n#[derive(Debug)] zork\n*ptr = zork;\n*note* zork\n",
+    )
+    .unwrap();
+    fs::write(input.join("c.txt"), "# C\n/*\n * Zork block\n */\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    let hits = w.search("zork", None, 10);
+    let snips: Vec<String> = hits.into_iter().filter_map(|h| h.snippet).collect();
+    let all = snips.join("\n");
+    for kept in [
+        "#include zork.h",
+        "#[derive(Debug)]",
+        "*ptr = zork",
+        "*note* zork",
+    ] {
+        assert!(all.contains(kept), "{kept} lost: {all}");
+    }
+    assert!(
+        all.contains("Zork block") && !all.contains("* Zork"),
+        "{all}"
+    );
+}
+
+#[test]
+fn search_lines_keeps_one_line_per_hit_and_symbol() {
+    use wiki::query::{Hit, SymbolLine};
+    let hit = Hit {
+        id: "a".into(),
+        title: "Ti\ntle\tx".into(),
+        path: "a.rs".into(),
+        summary: Some("sum\nmary".into()),
+        score: 1.0,
+        snippet: None,
+        symbols: vec![SymbolLine {
+            path: "a.rs".into(),
+            start_line: 1,
+            end_line: 2,
+            name: "f".into(),
+            signature: "fn f(\n)".into(),
+            doc: Some("do\tc\nline".into()),
+            test: false,
+        }],
+    };
+    let out = wiki::serve::search_lines(&[hit]);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "a  a.rs  Ti tle x — sum mary",
+            "  a.rs:1-2  f  fn f( )  — do c line"
+        ]
+    );
+}
+
+/// `(id, title)` of the page whose path is `path`.
+fn id_title(w: &Wiki, path: &str) -> (String, String) {
+    let h = w
+        .search("zebra", None, 50)
+        .into_iter()
+        .find(|h| h.path == path)
+        .unwrap_or_else(|| panic!("no page at {path}"));
+    (h.id, h.title)
+}
+
+fn resolve_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        ("src/manager.cpp", "// zebra\nint zebra() { return 1; }\n"),
+        ("a/mod.rs", "//! zebra\npub fn zebra() {}\n"),
+        ("b/mod.rs", "//! zebra\npub fn zebra_two() {}\n"),
+    ])
+}
+
+#[test]
+fn title_resolves_to_id() {
+    let (_d, w) = resolve_fixture();
+    let (id, title) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id(&title.to_uppercase()), Ok(id.clone()));
+    assert_eq!(w.resolve_id(&id), Ok(id));
+}
+
+#[test]
+fn slug_of_title_resolves() {
+    let (_d, w) = resolve_fixture();
+    let (id, _) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id(&id.replace('_', " ").to_uppercase()), Ok(id));
+}
+
+#[test]
+fn unique_path_suffix_resolves() {
+    let (_d, w) = resolve_fixture();
+    let (id, _) = id_title(&w, "src/manager.cpp");
+    assert_eq!(w.resolve_id("manager.cpp"), Ok(id.clone()));
+    assert_eq!(w.resolve_id("src/manager.cpp"), Ok(id));
+}
+
+#[test]
+fn ambiguous_path_suffix_lists_candidates() {
+    let (_d, w) = resolve_fixture();
+    let (a, _) = id_title(&w, "a/mod.rs");
+    let (b, _) = id_title(&w, "b/mod.rs");
+    let err = w.resolve_id("mod.rs").unwrap_err();
+    assert!(err.contains(&a) && err.contains(&b), "{err:?}");
 }

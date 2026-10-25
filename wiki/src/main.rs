@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use wiki::generator::generate_corpus;
-use wiki::model::SourceKind;
+use wiki::model::KindFilter;
 use wiki::query::{PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
@@ -58,6 +58,9 @@ enum Command {
         kind: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
+        /// Output format: `lines` or `json`.
+        #[arg(long, value_parser = ["lines", "json"], default_value = "lines")]
+        format: String,
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
@@ -132,32 +135,32 @@ fn main() -> Result<()> {
                 max_tokens,
                 full_neighbors: full,
             };
-            let pack = w.neighbors(&id, depth, &budget).context("unknown id")?;
+            let rid = w
+                .resolve_id(&id)
+                .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
+                .context("unknown id")?;
+            let pack = w.neighbors(&rid, depth, &budget).context("unknown id")?;
             println!("{}", pack.text);
         }
         Command::Search {
             query,
             kind,
             limit,
+            format,
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
             let kind = match kind.as_deref() {
                 None => None,
-                Some(s) => Some(SourceKind::parse(s).with_context(|| {
-                    format!("unknown kind {s:?}; expected {}", SourceKind::EXPECTED)
+                Some(s) => Some(KindFilter::parse(s).with_context(|| {
+                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
                 })?),
             };
-            for hit in w.search(&query, kind, limit) {
-                println!(
-                    "{}\t{}\t{}",
-                    hit.id,
-                    hit.title,
-                    hit.summary.unwrap_or_default()
-                );
-                if let Some(s) = &hit.snippet {
-                    println!("    {s}");
-                }
+            let hits = w.search(&query, kind.as_ref(), limit);
+            if format == "json" {
+                println!("{}", wiki::serve::search_json(hits));
+            } else {
+                print!("{}", wiki::serve::search_lines(&hits));
             }
         }
         Command::Lint { dir } => {

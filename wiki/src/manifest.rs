@@ -306,6 +306,7 @@ mod tests {
                 doc: None,
                 public: true,
                 twin: None,
+                test: false,
             },
             CodeItem {
                 kind: CodeItemKind::Method,
@@ -317,6 +318,7 @@ mod tests {
                 doc: Some("Builds.".into()),
                 public: false,
                 twin: Some("beta.cpp:2-4".into()),
+                test: true,
             },
         ];
         // Each item's keys in declaration order, the `None` ones skipped;
@@ -326,7 +328,7 @@ mod tests {
             concat!(
                 r#"{"beta":["#,
                 r#"{"kind":"fn","name":"build_beta","signature":"pub fn build_beta()","start_line":1,"end_line":1,"public":true},"#,
-                r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4"}]}"#
+                r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4","test":true}]}"#
             )
         );
     }

@@ -5,7 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
-use crate::model::SourceKind;
+use crate::model::{CodeItem, CodeItemKind, KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -16,18 +16,23 @@ struct Entry {
     title: String,
     kind: String,
     aliases: Vec<String>,
+    /// Source path relative to the compile input.
+    #[serde(default)]
+    path: String,
     summary: Option<String>,
     pagerank: f64,
     token_estimate: usize,
     neighbors_out: Vec<String>,
     neighbors_in: Vec<String>,
-    /// Top-level definition names (`ManifestEntry::defined`). Defaulted so
+    /// Top-level definition names (`ManifestEntry::defined`), minus those
+    /// only test items carry (dropped in `Wiki::load`). Defaulted so
     /// an `index.json` written by a compiler older than this field still
     /// loads: `serve` reads wikis it did not compile.
     #[serde(default)]
     defined: Vec<String>,
-    /// Method names (`ManifestEntry::methods`). Defaulted for the same
-    /// reason as `defined`: an older `index.json` has no such key.
+    /// Method names (`ManifestEntry::methods`), minus test-only ones like
+    /// `defined`. Defaulted for the same reason as `defined`: an older
+    /// `index.json` has no such key.
     #[serde(default)]
     methods: Vec<String>,
 }
@@ -37,15 +42,76 @@ struct IndexFile {
     entries: Vec<Entry>,
 }
 
+/// The error for an id `resolve_id` could not place; `near` are its candidates.
+pub fn unknown_page(arg: &str, near: &[String]) -> String {
+    let closest = if near.is_empty() {
+        String::new()
+    } else {
+        format!("; closest: {}", near.join(", "))
+    };
+    format!("unknown page {arg:?}{closest} — use search to find ids")
+}
+
 pub struct Hit {
     pub id: String,
     pub title: String,
+    /// The page's source path, relative to the compile input.
+    pub path: String,
     pub summary: Option<String>,
     pub score: f64,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, defined name, summary, or a
     /// section heading — the summary explains those).
     pub snippet: Option<String>,
+    /// The page's best-matching code items, best first; empty for docs pages
+    /// and for code pages that matched without any item.
+    pub symbols: Vec<SymbolLine>,
+}
+
+/// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
+/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
+/// marker counts only when whitespace or the line end follows it, so
+/// `#include`, `#[derive]`, `*ptr` and `*note*` stay intact.
+fn strip_comment_marker(line: &str) -> &str {
+    let l = line.trim_start();
+    let marker_end = |r: &str| r.is_empty() || r.starts_with(char::is_whitespace);
+    for m in ["//!", "///", "//", "/**", "/*", "*/", "*"] {
+        if let Some(r) = l.strip_prefix(m).filter(|r| marker_end(r)) {
+            return r;
+        }
+    }
+    match l.trim_start_matches('#') {
+        r if r.len() < l.len() && marker_end(r) => r,
+        _ => l,
+    }
+}
+
+/// One code item shown under its page's hit.
+pub struct SymbolLine {
+    pub path: String,
+    /// 1-based, inclusive, in the original file.
+    pub start_line: usize,
+    pub end_line: usize,
+    /// `owner::name`, or `name` when the item has no owner.
+    pub name: String,
+    pub signature: String,
+    /// `None` also when an earlier line of the same page shows the same doc.
+    pub doc: Option<String>,
+    pub test: bool,
+}
+
+/// The search fields a page earns from its items (`Wiki::symbol_fields`),
+/// built once in `Wiki::load`.
+#[derive(Default)]
+struct SymbolFields {
+    /// Whole item names, lowercased, each also as `owner::name`.
+    whole: BTreeSet<String>,
+    /// Words of non-method names, none of them in `whole`.
+    words: BTreeSet<String>,
+    /// Words of method names, none of them in `whole` or `words`.
+    method_words: BTreeSet<String>,
+    /// Words of the items' docs.
+    doc_words: Vec<String>,
 }
 
 #[derive(Default)]
@@ -84,17 +150,23 @@ pub struct Wiki {
     /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`
     /// is a snapshot: later changes to the files on disk do not reach it.
     bodies: BTreeMap<String, String>,
+    /// Code items per page, read once from `items.json`; empty when that file
+    /// is missing or invalid (older wikis).
+    items: BTreeMap<String, Vec<CodeItem>>,
+    /// Per page with items: the fields `symbol_fields` builds from them.
+    symbol_fields: BTreeMap<String, SymbolFields>,
 }
 
 impl Wiki {
     /// Load a compiled output directory: reads `index.json` for metadata +
     /// adjacency and reads every page body from `<id>.md` once; a page whose
-    /// file is missing has no body.
+    /// file is missing has no body. `items.json` is read the same way: missing
+    /// or invalid means no items.
     pub fn load(dir: &Path) -> Result<Wiki, std::io::Error> {
         let text = std::fs::read_to_string(dir.join("index.json"))?;
         let index: IndexFile = serde_json::from_str(&text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let entries: BTreeMap<String, Entry> = index
+        let mut entries: BTreeMap<String, Entry> = index
             .entries
             .into_iter()
             .map(|e| (e.id.clone(), e))
@@ -106,7 +178,50 @@ impl Wiki {
                 Some((id.clone(), body))
             })
             .collect();
-        Ok(Wiki { entries, bodies })
+        let items: BTreeMap<String, Vec<CodeItem>> =
+            std::fs::read_to_string(dir.join("items.json"))
+                .ok()
+                .and_then(|t| serde_json::from_str(&t).ok())
+                .unwrap_or_default();
+        // A `defined` or `methods` name that only test items carry earns its
+        // page nothing: C++ and Go list test fns and mock methods there too.
+        for e in entries.values_mut() {
+            let Some(items) = items.get(&e.id) else {
+                continue;
+            };
+            // `any` first: a name no item carries is kept.
+            let test_only = |n: &String| {
+                items.iter().any(|i| i.name == *n && i.test)
+                    && items.iter().all(|i| i.name != *n || i.test)
+            };
+            e.defined.retain(|n| !test_only(n));
+            e.methods.retain(|n| !test_only(n));
+        }
+        let all_title_words: BTreeSet<String> = entries
+            .values()
+            .flat_map(|e| Self::field_words(&e.title.to_lowercase()))
+            .collect();
+        let symbol_fields = entries
+            .values()
+            .filter_map(|e| {
+                let items = items.get(&e.id)?;
+                let title = e.title.to_lowercase();
+                let defined = Self::defined_terms(&title, &e.defined, &e.methods);
+                let f = Self::symbol_fields(&title, &defined, &all_title_words, items);
+                Some((e.id.clone(), f))
+            })
+            .collect();
+        Ok(Wiki {
+            entries,
+            bodies,
+            items,
+            symbol_fields,
+        })
+    }
+
+    /// A page's code items, as compiled; empty when it has none.
+    pub fn items(&self, id: &str) -> &[CodeItem] {
+        self.items.get(id).map_or(&[], Vec::as_slice)
     }
 
     /// A page's rendered Markdown body by id, as it was when loaded.
@@ -152,10 +267,25 @@ impl Wiki {
     const W_ALIAS: f64 = 2.0;
     // `W_DEFINED` (2026-09-02 defined-names design): equal to `W_ALIAS`,
     // above `W_SUMMARY`, below `W_NAME`, so a page whose title is the query
-    // still beats a page that merely defines a same-named item. Measured on
-    // the 547-query live set: own-title hits unchanged at 35/37, 26 flips
-    // better / 6 worse; 1.5 moved fewer definer queries, 2.5 added a worse row.
+    // still beats a page that merely defines a same-named item; `W_SYMBOL`,
+    // which replaces it for an item's whole name, stays below `W_NAME` too.
+    // Measured on the 547-query live set: own-title hits unchanged at 35/37,
+    // 26 flips better / 6 worse; 1.5 moved fewer definer queries, 2.5 added
+    // a worse row.
     const W_DEFINED: f64 = 2.0;
+    // Page fields from code items (`symbol_fields`), private and method
+    // items included, test and module items never. A whole item name
+    // scores `W_SYMBOL` in place of `W_DEFINED`, above every word weight
+    // plus the doc weight and below `W_NAME` (both checked at compile time
+    // below), so a page naming the query beats a page whose names merely
+    // contain it, and a page titled by the query beats both. Tuned on the
+    // symbol eval's `tune` split (2026-10-23): `W_SYMBOL_DOC` 0.5 → 0.75
+    // moved a doc query to file@1; 1.0 cost a title query. `W_SYMBOL` 3.0 →
+    // 2.8 restored the `W_NAME` rule and moved no eval rank.
+    const W_SYMBOL: f64 = 2.8;
+    const W_SYMBOL_WORD: f64 = 2.0;
+    const W_METHOD_WORD: f64 = 2.0;
+    const W_SYMBOL_DOC: f64 = 0.75;
     const W_SUMMARY: f64 = 1.5;
     const W_HEADING: f64 = 1.0;
     const W_BODY: f64 = 1.0;
@@ -302,6 +432,134 @@ impl Wiki {
         terms
     }
 
+    /// The fields a page earns from its non-test, non-module items. Whole
+    /// names lose the page's own title words; an owned item's whole name
+    /// also enters as `owner::name`. Words also lose terms already
+    /// in its `defined_terms` and any page's title word (`summary_suffix`
+    /// stole the title query `Summary`), and each word lands in one field
+    /// only: a whole name, else a free name's word, else a method's word.
+    fn symbol_fields(
+        title_lower: &str,
+        defined_terms: &BTreeSet<String>,
+        all_title_words: &BTreeSet<String>,
+        items: &[CodeItem],
+    ) -> SymbolFields {
+        let title_words: Vec<&str> = title_lower.split_whitespace().collect();
+        let keep_word = |w: &String| {
+            !title_words.contains(&w.as_str())
+                && !defined_terms.contains(w)
+                && !all_title_words.contains(w)
+        };
+        let mut f = SymbolFields::default();
+        for item in items
+            .iter()
+            .filter(|i| !i.test && i.kind != CodeItemKind::Module)
+        {
+            let whole = item.name.to_lowercase();
+            if !title_words.contains(&whole.as_str()) {
+                f.whole.insert(whole);
+            }
+            if item.owner.is_some() {
+                f.whole.insert(item.qualified_name().to_lowercase());
+            }
+            let words = Self::name_words(&item.name).into_iter().filter(keep_word);
+            if item.kind == CodeItemKind::Method {
+                f.method_words.extend(words);
+            } else {
+                f.words.extend(words);
+            }
+            if let Some(doc) = &item.doc {
+                f.doc_words.extend(Self::field_words(&doc.to_lowercase()));
+            }
+        }
+        f.words.retain(|w| !f.whole.contains(w));
+        f.method_words
+            .retain(|w| !f.whole.contains(w) && !f.words.contains(w));
+        f
+    }
+
+    // Item scores for the symbol lines under a hit: per query token,
+    // `idf · (whole name or name word) + idf · doc`, test items scaled down.
+    // A whole-name match outranks any word match, even one whose item also
+    // matches by doc (checked at compile time below): at 2.5, graph.rs
+    // `resolve_link`'s word plus its doc put it above the method `resolve`.
+    const IW_WHOLE: f64 = 3.5;
+    const IW_NAME_WORD: f64 = 2.0;
+    const IW_METHOD_WORD: f64 = 2.0;
+    const IW_DOC: f64 = 1.0;
+    const TEST_ITEM_FACTOR: f64 = 0.5;
+    /// Symbol lines per page at most.
+    const SYMBOLS_PER_PAGE: usize = 3;
+    /// A line is shown only if it scores at least this share of the best line
+    /// in the whole response.
+    const MIN_REL_SYMBOL: f64 = 0.3;
+
+    fn item_score(item: &CodeItem, tokens: &[String], idf: &[f64]) -> f64 {
+        let whole = item.name.to_lowercase();
+        let qualified = item.qualified_name().to_lowercase();
+        let words = Self::name_words(&item.name);
+        let w_word = if item.kind == CodeItemKind::Method {
+            Self::IW_METHOD_WORD
+        } else {
+            Self::IW_NAME_WORD
+        };
+        let doc = item
+            .doc
+            .as_deref()
+            .map(|d| Self::field_words(&d.to_lowercase()))
+            .unwrap_or_default();
+        let score: f64 = tokens
+            .iter()
+            .zip(idf)
+            .map(|(t, &idf_t)| {
+                let name = if *t == whole || *t == qualified {
+                    Self::IW_WHOLE
+                } else if words.contains(t) {
+                    w_word
+                } else {
+                    0.0
+                };
+                let doc = if !doc.is_empty() && Self::field_hit(&doc, t) {
+                    Self::IW_DOC
+                } else {
+                    0.0
+                };
+                idf_t * (name + doc)
+            })
+            .sum();
+        if item.test {
+            score * Self::TEST_ITEM_FACTOR
+        } else {
+            score
+        }
+    }
+
+    /// A code page's best items for `tokens`, best first (ties by line),
+    /// one per `(start, end, owner::name)`, at most `SYMBOLS_PER_PAGE`.
+    fn page_symbols<'a>(
+        &'a self,
+        id: &str,
+        tokens: &[String],
+        idf: &[f64],
+    ) -> Vec<(f64, &'a CodeItem)> {
+        let mut scored: Vec<(f64, &CodeItem)> = self
+            .items(id)
+            .iter()
+            .filter(|i| i.kind != CodeItemKind::Module)
+            .map(|i| (Self::item_score(i, tokens, idf), i))
+            .filter(|(s, _)| *s > 0.0)
+            .collect();
+        scored.sort_by(|(a, x), (b, y)| {
+            b.total_cmp(a)
+                .then_with(|| x.start_line.cmp(&y.start_line))
+                .then_with(|| x.name.cmp(&y.name))
+        });
+        let mut seen = BTreeSet::new();
+        scored.retain(|(_, i)| seen.insert((i.start_line, i.end_line, &i.owner, &i.name)));
+        scored.truncate(Self::SYMBOLS_PER_PAGE);
+        scored
+    }
+
     const SNIPPET_CONTEXT_CHARS: usize = 60;
 
     /// Excerpt around the earliest occurrence of any query token in the
@@ -350,7 +608,8 @@ impl Wiki {
         let (w_start, w_end) = (start - before, end + after);
 
         let mut s = content[w_start..w_end]
-            .split_whitespace()
+            .lines()
+            .flat_map(|l| strip_comment_marker(l).split_whitespace())
             .collect::<Vec<_>>()
             .join(" ");
         if w_start > 0 {
@@ -384,6 +643,7 @@ impl Wiki {
             .as_deref()
             .map(|s| Self::field_words(&s.to_lowercase()));
         let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
+        let symbols = self.symbol_fields.get(&e.id);
         let page = self.page(&e.id).unwrap_or_default();
         let sections = crate::rewrite::parse_sections(&page);
         let headings: Vec<String> = sections
@@ -414,8 +674,22 @@ impl Wiki {
             }
             // Whole-term equality, never `contains`: `to` must not hit
             // `token_estimate`, `wiki` must not hit `WikiError`.
-            if defined_terms.contains(t) {
+            // A whole item name scores `W_SYMBOL` instead of `W_DEFINED`.
+            if symbols.is_some_and(|f| f.whole.contains(t)) {
+                weight += Self::W_SYMBOL;
+            } else if defined_terms.contains(t) {
                 weight += Self::W_DEFINED;
+            }
+            if let Some(f) = symbols {
+                if f.words.contains(t) {
+                    weight += Self::W_SYMBOL_WORD;
+                }
+                if f.method_words.contains(t) {
+                    weight += Self::W_METHOD_WORD;
+                }
+                if Self::field_hit(&f.doc_words, t) {
+                    weight += Self::W_SYMBOL_DOC;
+                }
             }
             if summary_words
                 .as_deref()
@@ -475,12 +749,17 @@ impl Wiki {
     /// any volume of body text on the same token. Sorted by score desc,
     /// then pagerank desc, then id asc; truncated to `limit`.
     /// Empty/punctuation-only queries return no hits.
-    pub fn search(&self, q: &str, kind: Option<SourceKind>, limit: usize) -> Vec<Hit> {
+    ///
+    /// Code pages also score their items' names, method words and docs
+    /// (`symbol_fields`, weights `W_SYMBOL`, `W_SYMBOL_WORD`, `W_METHOD_WORD`,
+    /// `W_SYMBOL_DOC`),
+    /// and each returned code page carries its best items as `symbols`
+    /// (`expand`), with the same `idf`.
+    pub fn search(&self, q: &str, kind: Option<&KindFilter>, limit: usize) -> Vec<Hit> {
         let tokens = Self::tokenize(q);
         if tokens.is_empty() {
             return Vec::new();
         }
-        let kind_label = kind.map(|k| k.label());
 
         // Pass 1: facts per page, statistics over every filtered page.
         let mut n = 0usize;
@@ -488,8 +767,8 @@ impl Wiki {
         let mut df = vec![0usize; tokens.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
-            if let Some(k) = &kind_label {
-                if &e.kind != k {
+            if let Some(f) = kind {
+                if !SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k)) {
                     continue;
                 }
             }
@@ -532,9 +811,11 @@ impl Wiki {
                 let hit = Hit {
                     id: c.entry.id.clone(),
                     title: c.entry.title.clone(),
+                    path: c.entry.path.clone(),
                     summary: c.entry.summary.clone(),
                     score,
                     snippet: c.snippet,
+                    symbols: Vec::new(),
                 };
                 (hit, c.entry.pagerank)
             })
@@ -546,7 +827,48 @@ impl Wiki {
                 .then_with(|| a.id.cmp(&b.id))
         });
         ranked.truncate(limit);
-        ranked.into_iter().map(|(hit, _)| hit).collect()
+        let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
+        self.expand(&mut hits, &tokens, &idf);
+        hits
+    }
+
+    /// Gives each code hit its symbol lines (`page_symbols`), keeping only
+    /// lines at or above `MIN_REL_SYMBOL` of the response's best line.
+    fn expand(&self, hits: &mut [Hit], tokens: &[String], idf: &[f64]) {
+        let per_hit: Vec<Vec<(f64, &CodeItem)>> = hits
+            .iter()
+            .map(|h| {
+                let code = self.entries.get(&h.id).is_some_and(|e| {
+                    SourceKind::parse(&e.kind).is_some_and(|k| KindFilter::Code.matches(&k))
+                });
+                if code {
+                    self.page_symbols(&h.id, tokens, idf)
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        let best = per_hit
+            .iter()
+            .flatten()
+            .map(|(s, _)| *s)
+            .fold(0.0, f64::max);
+        for (hit, lines) in hits.iter_mut().zip(per_hit) {
+            let mut docs = BTreeSet::new();
+            hit.symbols = lines
+                .into_iter()
+                .filter(|(s, _)| *s >= Self::MIN_REL_SYMBOL * best)
+                .map(|(_, i)| SymbolLine {
+                    path: hit.path.clone(),
+                    start_line: i.start_line,
+                    end_line: i.end_line,
+                    name: i.qualified_name(),
+                    signature: i.signature.clone(),
+                    doc: i.doc.clone().filter(|d| docs.insert(d.clone())),
+                    test: i.test,
+                })
+                .collect();
+        }
     }
 
     /// Ids within `depth` hops of `id` along either edge direction,
@@ -577,6 +899,58 @@ impl Wiki {
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {
         self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
+    /// Resolves what a caller typed to a page id: an exact id, a title
+    /// (ignoring case), the slug of `arg`, or the one page whose source path
+    /// is `arg` or ends with `/arg`. Otherwise up to 5 candidate ids, sorted: the
+    /// several pages that path matched, else ids sharing a lowercase word with `arg`.
+    pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
+        if self.entries.contains_key(arg) {
+            return Ok(arg.to_string());
+        }
+        let by = |f: &dyn Fn(&Entry) -> bool| {
+            let mut m = self.entries.values().filter(|e| f(e));
+            match (m.next(), m.next()) {
+                (Some(e), None) => Some(e.id.clone()),
+                _ => None,
+            }
+        };
+        if let Some(id) = by(&|e| e.title.eq_ignore_ascii_case(arg)) {
+            return Ok(id);
+        }
+        let slug = crate::model::slugify(arg);
+        if self.entries.contains_key(&slug) {
+            return Ok(slug);
+        }
+        let suffix = format!("/{arg}");
+        let by_path: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| e.path == arg || e.path.ends_with(&suffix))
+            .map(|e| e.id.clone())
+            .collect();
+        if let [id] = by_path.as_slice() {
+            return Ok(id.clone());
+        }
+        if !by_path.is_empty() {
+            return Err(by_path.into_iter().take(5).collect());
+        }
+        let words = |s: &str| -> BTreeSet<String> {
+            s.split(|c: char| !c.is_alphanumeric())
+                .filter(|w| !w.is_empty())
+                .map(str::to_lowercase)
+                .collect()
+        };
+        let want = words(arg);
+        // BTreeMap iteration is already sorted by id.
+        Err(self
+            .entries
+            .values()
+            .filter(|e| !want.is_disjoint(&words(&e.id)) || !want.is_disjoint(&words(&e.title)))
+            .map(|e| e.id.clone())
+            .take(5)
+            .collect())
     }
 
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
@@ -698,9 +1072,22 @@ impl Wiki {
     }
 }
 
+// A whole-name match must outrank any word match, on the page and on the
+// line, even when the word's side also matches by doc; a title match must
+// outrank a whole-name match.
+const _: () = assert!(
+    Wiki::W_SYMBOL < Wiki::W_NAME
+        && Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
+        && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
+        && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC
+        && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
+        && Wiki::IW_WHOLE > Wiki::IW_METHOD_WORD + Wiki::IW_DOC
+);
+
 #[cfg(test)]
 mod tests {
     use super::Wiki;
+    use crate::model::{CodeItem, CodeItemKind};
     use std::collections::BTreeSet;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
@@ -803,5 +1190,56 @@ mod tests {
             ),
             set(&["has_page", "needs_render"])
         );
+    }
+
+    fn item(kind: CodeItemKind, name: &str, doc: Option<&str>, test: bool) -> CodeItem {
+        CodeItem {
+            kind,
+            name: name.into(),
+            owner: None,
+            signature: String::new(),
+            start_line: 1,
+            end_line: 1,
+            doc: doc.map(Into::into),
+            public: false,
+            twin: None,
+            test,
+        }
+    }
+
+    #[test]
+    fn symbol_fields_skip_titles_defined_terms_tests_and_modules() {
+        use CodeItemKind::{Fn, Method, Module};
+        let items = [
+            // Another page's title word goes unless it is the whole name.
+            item(Fn, "summary_suffix", None, false),
+            item(Fn, "render", None, false),
+            // Own title word and a defined term go.
+            item(Fn, "cache_store", Some("Writes Atomically."), false),
+            // Method: whole name, words in their own field minus name terms.
+            item(Method, "needs_render", None, false),
+            item(Method, "suffix_of", None, false),
+            item(Fn, "zebra", Some("Zebra doc."), true),
+            item(Module, "formats", None, false),
+        ];
+        let f = Wiki::symbol_fields(
+            "cache",
+            &set(&["store"]),
+            &set(&["cache", "render", "summary"]),
+            &items,
+        );
+        assert_eq!(
+            f.whole,
+            set(&[
+                "cache_store",
+                "needs_render",
+                "render",
+                "suffix_of",
+                "summary_suffix"
+            ])
+        );
+        assert_eq!(f.words, set(&["suffix"]));
+        assert_eq!(f.method_words, set(&["needs", "of"]));
+        assert_eq!(f.doc_words, ["writes", "atomically"]);
     }
 }
