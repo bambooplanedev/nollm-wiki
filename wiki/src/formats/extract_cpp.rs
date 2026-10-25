@@ -347,6 +347,10 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// whose `default_method_clause` is likewise a plain child, and it must render
 /// WHOLE: `= default` is the declaration's entire content.
 ///
+/// A `declaration` is a value by its FIRST declarator, not by the pattern that
+/// matched it: `int x, f();` reaches `@def` through `f` yet is a value, as
+/// `is_function` reads only the first declarator.
+///
 /// A variable declaration (an `@item` only, never an export) is a value: it
 /// stops at its `=` and re-appends the value within `VALUE_BUDGET`, so a
 /// lookup table's initializer never becomes its signature. A brace or paren

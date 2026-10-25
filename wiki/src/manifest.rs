@@ -30,6 +30,9 @@ pub struct ManifestEntry {
 #[derive(Serialize)]
 pub struct Manifest {
     pub project: String,
+    /// The compile input directory's own name (canonicalized, so `.` names
+    /// it too): an absolute path resolves to a page only through it.
+    pub root: String,
     pub entries: Vec<ManifestEntry>,
 }
 
@@ -39,6 +42,7 @@ pub fn token_estimate(text: &str) -> usize {
 
 pub fn build_manifest(
     project: &str,
+    root: &str,
     entities: &BTreeMap<String, Entity>,
     graph: &Graph,
 ) -> Manifest {
@@ -73,6 +77,7 @@ pub fn build_manifest(
         .collect();
     Manifest {
         project: project.to_string(),
+        root: root.to_string(),
         entries,
     }
 }
@@ -153,6 +158,8 @@ tree first — start here.\n\n\
 - All pages: `index.md` (human) / `index.json` (machine catalog: id, title, kind, summary, degree, neighbors).\n\
 - Machine map for tools: `llms.txt`.\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
+- Code symbols with their line ranges: `items.json` (keyed by page id).\n\
+- A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
 - Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Referenced By / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
@@ -213,7 +220,7 @@ mod tests {
     #[test]
     fn manifest_has_sorted_entries_with_degrees() {
         let (ents, g) = setup();
-        let m = build_manifest("proj", &ents, &g);
+        let m = build_manifest("proj", "", &ents, &g);
         assert_eq!(m.entries[0].id, "alpha");
         assert_eq!(m.entries[0].degree_out, 1);
         assert_eq!(m.entries[1].degree_in, 1); // beta referenced by alpha
@@ -222,17 +229,19 @@ mod tests {
     #[test]
     fn index_json_is_valid_json_and_llms_txt_has_h1() {
         let (ents, g) = setup();
-        let m = build_manifest("My Project", &ents, &g);
+        let m = build_manifest("My Project", "", &ents, &g);
         let json = render_index_json(&m);
         let _v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(render_llms_txt(&m).starts_with("# My Project"));
-        assert!(render_agents_md("My Project").contains("index.json"));
+        let agents = render_agents_md("My Project");
+        assert!(agents.contains("index.json"));
+        assert!(agents.contains("items.json") && agents.contains("wiki page"));
     }
 
     #[test]
     fn a_page_without_a_summary_ends_its_index_lines_cleanly() {
         let (ents, g) = setup();
-        let m = build_manifest("proj", &ents, &g);
+        let m = build_manifest("proj", "", &ents, &g);
         let llms = render_llms_txt(&m);
         let md = render_index_md(&m);
         assert!(
@@ -268,7 +277,7 @@ mod tests {
         let alpha_e = ents.get_mut("alpha").unwrap();
         alpha_e.defined = vec!["Alpha".into(), "build_alpha".into()];
         alpha_e.methods = vec!["build".into()];
-        let m = build_manifest("My Project", &ents, &g);
+        let m = build_manifest("My Project", "", &ents, &g);
         let json = render_index_json(&m);
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         let alpha = &v["entries"][0];

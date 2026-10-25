@@ -732,6 +732,20 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
         pack.text.contains(OVER_BUDGET_NOTE),
     )
     .unwrap();
+    let outline = wiki
+        .outline(&code_id, Some(DEFAULT_NEIGHBORS_MAX_TOKENS))
+        .expect("id came from the compiled index");
+    let cut = outline
+        .lines()
+        .last()
+        .and_then(|l| l.strip_prefix("… "))
+        .unwrap_or("none");
+    writeln!(
+        table,
+        "page outline code.rs: tokens={} cut={cut}",
+        token_estimate(&outline),
+    )
+    .unwrap();
 
     // Recorded, not asserted: this is the self-hosted code the design names.
     let pages = wiki.list_pages();

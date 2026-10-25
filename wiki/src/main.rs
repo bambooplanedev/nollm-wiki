@@ -1,4 +1,4 @@
-//! CLI entry point for `wiki`: compile, search, neighbors, lint, serve, and generate subcommands.
+//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, and generate subcommands.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -49,6 +49,16 @@ enum Command {
         max_nodes: Option<usize>,
         #[arg(long)]
         full: bool,
+        #[arg(long, default_value = "out")]
+        dir: PathBuf,
+    },
+    /// Print a page's outline, or with `--full` the whole page.
+    Page {
+        id: String,
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
+        max_tokens: Option<usize>,
         #[arg(long, default_value = "out")]
         dir: PathBuf,
     },
@@ -141,6 +151,22 @@ fn main() -> Result<()> {
                 .context("unknown id")?;
             let pack = w.neighbors(&rid, depth, &budget).context("unknown id")?;
             println!("{}", pack.text);
+        }
+        Command::Page {
+            id,
+            full,
+            max_tokens,
+            dir,
+        } => {
+            let w = Wiki::load(&dir).context("load wiki")?;
+            let rid = w
+                .resolve_id(&id)
+                .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
+                .context("unknown id")?;
+            print!(
+                "{}",
+                w.page_text(&rid, full, max_tokens).context("unknown id")?
+            );
         }
         Command::Search {
             query,

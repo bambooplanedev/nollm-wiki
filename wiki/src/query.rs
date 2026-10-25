@@ -11,34 +11,37 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 #[derive(Deserialize)]
-struct Entry {
-    id: String,
-    title: String,
-    kind: String,
-    aliases: Vec<String>,
+pub(crate) struct Entry {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) aliases: Vec<String>,
     /// Source path relative to the compile input.
     #[serde(default)]
-    path: String,
-    summary: Option<String>,
-    pagerank: f64,
-    token_estimate: usize,
-    neighbors_out: Vec<String>,
-    neighbors_in: Vec<String>,
+    pub(crate) path: String,
+    pub(crate) summary: Option<String>,
+    pub(crate) pagerank: f64,
+    pub(crate) token_estimate: usize,
+    pub(crate) neighbors_out: Vec<String>,
+    pub(crate) neighbors_in: Vec<String>,
     /// Top-level definition names (`ManifestEntry::defined`), minus those
     /// only test items carry (dropped in `Wiki::load`). Defaulted so
     /// an `index.json` written by a compiler older than this field still
     /// loads: `serve` reads wikis it did not compile.
     #[serde(default)]
-    defined: Vec<String>,
+    pub(crate) defined: Vec<String>,
     /// Method names (`ManifestEntry::methods`), minus test-only ones like
     /// `defined`. Defaulted for the same reason as `defined`: an older
     /// `index.json` has no such key.
     #[serde(default)]
-    methods: Vec<String>,
+    pub(crate) methods: Vec<String>,
 }
 
 #[derive(Deserialize)]
 struct IndexFile {
+    /// `Manifest::root`; empty for an `index.json` older than the field.
+    #[serde(default)]
+    root: String,
     entries: Vec<Entry>,
 }
 
@@ -146,6 +149,8 @@ struct Candidate<'a> {
 /// `Default` is the empty wiki: what `serve --source` holds before its first compile.
 #[derive(Default)]
 pub struct Wiki {
+    /// The compile input directory's name (`Manifest::root`), or empty.
+    root: String,
     entries: BTreeMap<String, Entry>,
     /// Rendered Markdown per page, read once in `load` so a loaded `Wiki`
     /// is a snapshot: later changes to the files on disk do not reach it.
@@ -212,6 +217,7 @@ impl Wiki {
             })
             .collect();
         Ok(Wiki {
+            root: index.root,
             entries,
             bodies,
             items,
@@ -227,6 +233,11 @@ impl Wiki {
     /// A page's rendered Markdown body by id, as it was when loaded.
     pub fn page(&self, id: &str) -> Option<String> {
         self.bodies.get(id).cloned()
+    }
+
+    /// A page's index entry by exact id.
+    pub(crate) fn entry(&self, id: &str) -> Option<&Entry> {
+        self.entries.get(id)
     }
 
     /// Whether `id` is a page in the loaded index. Used by the MCP server to
@@ -902,9 +913,13 @@ impl Wiki {
     }
 
     /// Resolves what a caller typed to a page id: an exact id, a title
-    /// (ignoring case), the slug of `arg`, or the one page whose source path
-    /// is `arg` or ends with `/arg`. Otherwise up to 5 candidate ids, sorted: the
-    /// several pages that path matched, else ids sharing a lowercase word with `arg`.
+    /// (ignoring case), the slug of `arg`, then `arg` as a path (`\` read as
+    /// `/`, one leading `./` dropped): the page whose source path is it, the
+    /// one page whose path ends with `/arg`, or the page with the longest path
+    /// that `arg` ends with as `/{root}/{path}` (an absolute path under the
+    /// compiled directory; none when the wiki has no `root`). Otherwise up to
+    /// 5 candidate ids, sorted: the several pages that suffix matched, else
+    /// ids sharing a lowercase word with `arg`.
     pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
         if self.entries.contains_key(arg) {
             return Ok(arg.to_string());
@@ -923,11 +938,16 @@ impl Wiki {
         if self.entries.contains_key(&slug) {
             return Ok(slug);
         }
-        let suffix = format!("/{arg}");
+        let norm = arg.replace('\\', "/");
+        let norm = norm.strip_prefix("./").unwrap_or(&norm);
+        if let Some(id) = by(&|e| e.path == norm) {
+            return Ok(id);
+        }
+        let suffix = format!("/{norm}");
         let by_path: Vec<String> = self
             .entries
             .values()
-            .filter(|e| e.path == arg || e.path.ends_with(&suffix))
+            .filter(|e| e.path.ends_with(&suffix))
             .map(|e| e.id.clone())
             .collect();
         if let [id] = by_path.as_slice() {
@@ -935,6 +955,17 @@ impl Wiki {
         }
         if !by_path.is_empty() {
             return Err(by_path.into_iter().take(5).collect());
+        }
+        // A longer path such as an absolute one, `…/{root}/{path}`: the
+        // longest such page path. Without a root (an older wiki) nothing is.
+        if let Some(e) = self
+            .entries
+            .values()
+            .filter(|e| !self.root.is_empty() && !e.path.is_empty())
+            .filter(|e| norm.ends_with(&format!("/{}/{}", self.root, e.path)))
+            .max_by_key(|e| e.path.len())
+        {
+            return Ok(e.id.clone());
         }
         let words = |s: &str| -> BTreeSet<String> {
             s.split(|c: char| !c.is_alphanumeric())

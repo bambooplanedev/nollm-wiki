@@ -151,6 +151,36 @@ fn compile_project_flag_names_the_manifest() {
         .stderr(contains("unexpected argument '--verbose'"));
 }
 
+/// `root` is the input directory's own name even for `compile .`, where
+/// `project` falls back to `wiki`; `page` matches absolute paths against it.
+#[test]
+fn compile_dot_records_the_directory_name_as_root() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(input.join("src/alpha.rs"), "pub fn alpha() {}\n").unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(&input)
+        .args(["compile", ".", "out"])
+        .assert()
+        .success();
+
+    let index = fs::read_to_string(input.join("out/index.json")).unwrap();
+    assert!(
+        index.contains("\"project\": \"wiki\",\n  \"root\": \"raw\","),
+        "{index}"
+    );
+    let abs = input.join("src/alpha.rs");
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(&input)
+        .args(["page", abs.to_str().unwrap(), "--dir", "out"])
+        .assert()
+        .success()
+        .stdout(contains("src/alpha.rs  code:rust"));
+}
+
 #[test]
 fn generate_cli_creates_files() {
     let dir = tempdir().unwrap();
@@ -421,4 +451,36 @@ fn cli_search_prints_the_same_lines_as_mcp() {
     assert!(serde_json::from_str::<serde_json::Value>(&json)
         .unwrap()
         .is_array());
+}
+
+#[test]
+fn cli_page_prints_the_same_text_as_page_text() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(input.join("src/lib.rs"), "/// Adds.\npub fn add() {}\n").unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let w = wiki::query::Wiki::load(&output).unwrap();
+    let run = |args: &[&str]| {
+        let o = Command::cargo_bin("wiki")
+            .unwrap()
+            .arg("page")
+            .args(args)
+            .args(["--dir", output.to_str().unwrap()])
+            .assert()
+            .success();
+        String::from_utf8(o.get_output().stdout.clone()).unwrap()
+    };
+    assert_eq!(run(&["lib"]), w.page_text("lib", false, None).unwrap());
+    assert_eq!(
+        run(&["./src/lib.rs", "--full"]),
+        w.page_text("lib", true, None).unwrap()
+    );
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", "nope", "--dir", output.to_str().unwrap()])
+        .assert()
+        .failure()
+        .stderr(contains("unknown page"));
 }

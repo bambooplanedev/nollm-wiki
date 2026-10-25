@@ -9,6 +9,7 @@ pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
 pub mod model;
+pub mod outline;
 pub mod query;
 pub mod rewrite;
 pub mod serve;
@@ -301,7 +302,12 @@ fn compile_inner(
     }
 
     // 6. Manifest artifacts.
-    let man = manifest::build_manifest(&project, &entities, &graph);
+    let root = input
+        .canonicalize()
+        .ok()
+        .and_then(|p| Some(p.file_name()?.to_string_lossy().to_string()))
+        .unwrap_or_default();
+    let man = manifest::build_manifest(&project, &root, &entities, &graph);
     // Ahead of `index.json`, whose change is what tells `serve` to reload,
     // so a reload never pairs a new index with the previous items.
     rewrite::write_atomic(
@@ -367,6 +373,8 @@ pub(crate) fn is_under(path: &Path, dir: &Path) -> bool {
 /// Base names (case-insensitive) reserved for manifest artifacts written
 /// alongside pages: `index.md`/`index.json`, `llms.txt`, `AGENTS.md`, and
 /// (with `--emit-json`) `graph.json`.
+/// `items` is not reserved: a page with id `items` writes `items.md`, which
+/// does not collide with `items.json`.
 const RESERVED_MANIFEST_NAMES: [&str; 4] = ["index", "llms", "agents", "graph"];
 
 fn is_reserved_manifest_name(id: &str) -> bool {

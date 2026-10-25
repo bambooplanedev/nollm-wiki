@@ -115,6 +115,7 @@ fn serve_lists_and_calls_tools() {
     assert!(names.contains(&"search"), "tools: {names:?}");
     assert!(names.contains(&"neighbors"), "tools: {names:?}");
     assert!(names.contains(&"lint"), "tools: {names:?}");
+    assert!(names.contains(&"page"), "tools: {names:?}");
 
     // tools/call search — seed-42 corpus contains gradient_descent
     send(
@@ -753,4 +754,94 @@ fn mcp_neighbors_unknown_id_names_candidates() {
     assert_eq!(resp["result"]["isError"], true);
     let text = resp["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains(&id), "no candidate {id}: {text}");
+}
+
+/// Call tool `page` and return `(isError, text)`.
+fn page(
+    stdin: &mut ChildStdin,
+    stdout: &Receiver<String>,
+    id: u64,
+    args: &Value,
+) -> (bool, String) {
+    send(
+        stdin,
+        &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
+            "name": "page", "arguments": args}}),
+    );
+    let resp = read_response(stdout, id);
+    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    (resp["result"]["isError"] == json!(true), text.to_string())
+}
+
+/// Compiled project whose `src/big.rs` has 600 documented fns; returns the
+/// project dir, the output dir and the big page's id.
+fn big_project() -> (tempfile::TempDir, std::path::PathBuf, String) {
+    let src = source_project();
+    let mut body = String::new();
+    for i in 0..600 {
+        body += &format!("/// Does thing number {i}.\npub fn thing_{i}() {{}}\n");
+    }
+    std::fs::write(src.path().join("src/big.rs"), body).unwrap();
+    let out = src.path().join("out");
+    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    let id = wiki::query::Wiki::load(&out)
+        .unwrap()
+        .resolve_id("src/big.rs")
+        .unwrap();
+    (src, out, id)
+}
+
+#[test]
+fn mcp_page_defaults_to_a_budgeted_outline() {
+    let (_src, out, id) = big_project();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let (err, text) = page(&mut stdin, &stdout, 2, &json!({"id": id}));
+    assert!(!err);
+    assert!(text.chars().count() / 4 <= 4000, "{} chars", text.len());
+    assert!(text.lines().last().unwrap().starts_with("… "), "{text}");
+    let all = page(
+        &mut stdin,
+        &stdout,
+        3,
+        &json!({"id": id, "max_tokens": 100_000}),
+    )
+    .1;
+    child.kill().ok();
+    assert!(!all.contains("… "), "marker in unbudgeted outline");
+    assert!(all.contains("thing_599"));
+}
+
+#[test]
+fn mcp_page_resolves_a_path_and_reports_unknown() {
+    let (_src, out, _id) = big_project();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let (err, text) = page(&mut stdin, &stdout, 2, &json!({"id": "./src/lib.rs"}));
+    assert!(!err, "{text}");
+    assert!(text.contains("add"), "{text}");
+    let (err, text) = page(&mut stdin, &stdout, 3, &json!({"id": "nope"}));
+    child.kill().ok();
+    assert!(err);
+    assert!(text.contains("unknown page"), "{text}");
+}
+
+#[test]
+fn mcp_page_full_matches_resource() {
+    let (_src, out, id) = big_project();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let (err, full) = page(&mut stdin, &stdout, 2, &json!({"id": id, "full": true}));
+    assert!(!err);
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read",
+            "params": {"uri": format!("wiki://page/{id}")}}),
+    );
+    let resp = read_response(&stdout, 3);
+    child.kill().ok();
+    assert_eq!(
+        resp["result"]["contents"][0]["text"].as_str().unwrap(),
+        full
+    );
 }

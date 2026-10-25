@@ -67,4 +67,5 @@ class MethodSplit: file_hit@3=17/18 symbol_hit@3=17/18
 class V7: file_hit@3=6/6 symbol_hit@3=6/6
 class TestTarget: file_hit@3=3/3 symbol_hit@3=3/3
 neighbors code.rs: tokens=648 target_degraded=true
+page outline code.rs: tokens=2433 cut=none
 title_as_query: 27/28

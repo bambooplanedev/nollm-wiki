@@ -132,7 +132,10 @@ fn items_of(
         .unwrap_or_else(|| panic!("no page {path} in {index:#}"))["id"]
         .as_str()
         .unwrap();
-    items[id].as_array().cloned().unwrap_or_default()
+    items[id]
+        .as_array()
+        .cloned()
+        .unwrap_or_else(|| panic!("no items for {path}"))
 }
 
 #[test]

@@ -916,3 +916,50 @@ fn ambiguous_path_suffix_lists_candidates() {
     let err = w.resolve_id("mod.rs").unwrap_err();
     assert!(err.contains(&a) && err.contains(&b), "{err:?}");
 }
+
+fn readme_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        ("README.md", "# Root zebra\n\nzebra root.\n"),
+        ("docs/README.md", "# Docs zebra\n\nzebra docs.\n"),
+        ("src/lib.rs", "//! zebra\npub fn zebra() {}\n"),
+    ])
+}
+
+#[test]
+fn exact_path_beats_suffix() {
+    let (_d, w) = readme_fixture();
+    let (root, _) = id_title(&w, "README.md");
+    let (docs, _) = id_title(&w, "docs/README.md");
+    assert_eq!(w.resolve_id("README.md"), Ok(root));
+    assert_eq!(w.resolve_id("docs/README.md"), Ok(docs));
+}
+
+#[test]
+fn absolute_and_normalised_paths_resolve() {
+    let (_d, w) = readme_fixture();
+    let (root, _) = id_title(&w, "README.md");
+    let (docs, _) = id_title(&w, "docs/README.md");
+    // `code_fixture` compiles a directory named `raw`.
+    for arg in [
+        "./docs/README.md",
+        "docs\\README.md",
+        "/home/u/raw/docs/README.md",
+    ] {
+        assert_eq!(w.resolve_id(arg), Ok(docs.clone()), "{arg}");
+    }
+    assert_eq!(w.resolve_id("/home/u/raw/src/lib.rs"), Ok("lib".into()));
+    assert_eq!(w.resolve_id("/home/u/raw/README.md"), Ok(root));
+    assert!(w.resolve_id("/home/u/other.rs").is_err());
+}
+
+#[test]
+fn a_path_under_another_root_does_not_resolve() {
+    let (_d, w) = readme_fixture();
+    for arg in [
+        "/home/u/proj/src/lib.rs",
+        "/some/other/proj/README.md",
+        "/home/u/raw/x/src/lib.rs",
+    ] {
+        assert!(w.resolve_id(arg).is_err(), "{arg}");
+    }
+}
