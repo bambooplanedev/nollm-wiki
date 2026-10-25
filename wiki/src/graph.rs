@@ -495,6 +495,7 @@ mod tests {
             aliases: vec![],
             tags: vec![],
             created: String::new(),
+            updated: String::new(),
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,

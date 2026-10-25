@@ -844,6 +844,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         title: "Ti\ntle\tx".into(),
         path: "a.rs".into(),
         summary: Some("sum\nmary".into()),
+        updated: None,
         score: 1.0,
         snippet: None,
         symbols: vec![SymbolLine {
@@ -1196,4 +1197,87 @@ fn a_header_declaration_stands_for_its_definition() {
         w.calls(&header, "A::run", None, None).unwrap(),
         "calls from A::run  src/a.h:7-7, src/a.cpp:2-2 — 2 functions in 2 files\nsrc/a.cpp\n  3-3  method  A::step\nsrc/a.h\n  3-3  method  Base::log\n"
     );
+}
+
+#[test]
+fn index_json_without_updated_still_loads() {
+    let dir = build();
+    let path = dir.path().join("out").join("index.json");
+    let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(v["entries"][0].get("updated").is_none());
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    assert!(w
+        .search("beta", None, 10)
+        .iter()
+        .all(|h| h.updated.is_none()));
+}
+
+#[test]
+fn search_lines_shows_date_after_path() {
+    use wiki::query::Hit;
+    let hit = |updated: Option<&str>| Hit {
+        id: "a".into(),
+        title: "Title".into(),
+        path: "a.md".into(),
+        summary: Some("sum".into()),
+        updated: updated.map(String::from),
+        score: 1.0,
+        snippet: None,
+        symbols: vec![],
+    };
+    assert_eq!(
+        wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
+        "a  a.md  2026-10-23  Title — sum\n"
+    );
+    assert_eq!(
+        wiki::serve::search_lines(&[hit(None)]),
+        "a  a.md  Title — sum\n"
+    );
+    let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(vec![
+        hit(Some("2026-10-23")),
+        hit(None),
+    ]))
+    .unwrap();
+    assert_eq!(j[0]["updated"], "2026-10-23");
+    assert!(j[1].get("updated").is_none());
+}
+
+#[test]
+fn title_resolves_case_insensitively_in_any_script() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("note.md"),
+        "---\ntitle: Морський Маяк\n---\n\nBody.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let wiki = Wiki::load(&output).unwrap();
+    assert_eq!(wiki.resolve_id("морський маяк").unwrap(), "morskyi_maiak");
+    assert_eq!(wiki.resolve_id("МОРСЬКИЙ МАЯК").unwrap(), "morskyi_maiak");
+}
+
+#[test]
+fn cyrillic_query_words_match_another_grammatical_form() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("a.md"), "# Плани агента\n\nНотатка.\n").unwrap();
+    fs::write(input.join("b.md"), "# Плани агентів\n\nНотатка.\n").unwrap();
+    fs::write(input.join("c.md"), "# Ринок\n\nОгляд конкурентів.\n").unwrap();
+    fs::write(input.join("d.md"), "# Шлюз\n\nПідключає mcp-сервер.\n").unwrap();
+    compile(&input, &dir.path().join("out"), &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    // The whole-title bonus compares the words as typed.
+    assert_eq!(w.search("плани агентів", None, 10)[0].id, "plany_ahentiv");
+    assert!(w
+        .search("конкуренти", None, 10)
+        .iter()
+        .any(|h| h.id == "rynok"));
+    assert!(w
+        .search("mcp-сервери", None, 10)
+        .iter()
+        .any(|h| h.id == "shliuz"));
 }

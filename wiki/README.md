@@ -42,7 +42,7 @@ Wrote 12 files to demo_raw
 
 $ ./target/release/wiki compile demo_raw demo_wiki --incremental --emit-json
 Compiled 12 pages (12 written) -> demo_wiki
-Lint: 0 broken links, 1 orphans
+Lint: 0 broken links, 1 orphans, 0 large
 
 $ ./target/release/wiki search gradient --dir demo_wiki
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
@@ -90,7 +90,7 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 
 
 $ ./target/release/wiki lint --dir demo_wiki
-Linted 12 pages: 0 broken links, 1 orphans
+Linted 12 pages: 0 broken links, 1 orphans, 0 large
   orphan: embedding_layer
 ```
 
@@ -190,7 +190,7 @@ wiki search [OPTIONS] [QUERY]
 - `--format <lines|json>` (`lines`) — output shape, below.
 - `--dir <out>` (`out`) — the compiled wiki directory to read.
 
-The default `lines` output is one line per page, `id  path  title — summary`.
+The default `lines` output is one line per page, `id  path  [date  ]title — summary` (the date is the page's `updated`, shown when known).
 Under a code page, up to 3 indented lines name its matching symbols,
 `  path:start-end  name  signature  — doc` (1-based, inclusive line range;
 `name` is `Owner::name` for methods; `doc` is left out when empty or already
@@ -200,7 +200,7 @@ A page without symbol lines gets its body snippet on a four-space-indented
 line instead, with comment markers (`//`, `///`, `#`, …) dropped. A C++
 declaration that declares several names shows one signature per name, which
 may not appear verbatim in the file. `--format json` prints
-`[{id, title, summary, score, snippet, path, symbols}]`, where each symbol is
+`[{id, title, summary, updated, score, snippet, path, symbols}]` (`updated` only when the page's date is known), where each symbol is
 `{path, start_line, end_line, name, signature, doc}`.
 
 ### `neighbors`
@@ -276,14 +276,16 @@ with `… truncated at ~B of ~N tokens`.
 wiki lint [OPTIONS]
 ```
 
-- `--dir <out>` (`out`) — the compiled wiki directory to check for broken links and orphan pages.
+- `--dir <out>` (`out`) — the compiled wiki directory to check for broken links, orphan pages and pages too large for a default `neighbors` pack.
 
-Prints the counts, then one `  broken: <page> -> "<link>"` or `  orphan: <id>`
-line per offender. `[[links]]` inside fenced blocks or inline code are not
-counted, and the `## Body` of a code page is skipped entirely: it is verbatim
-source, where a wikilink is a string literal or a comment, not a link. Exits
-1 when any broken link is found, so `lint` can gate a build; orphans alone
-exit 0.
+Prints the counts, then one `  broken: <page> -> "<link>"`, `  orphan: <id>` or
+`  large: <id> (<n> tokens)` line per offender. A page is large when it is over
+4000 tokens with the pack separator, so `neighbors` would degrade it to a
+summary; code pages are not checked. `[[links]]` inside fenced blocks or
+inline code are not counted, and the `## Body` of a code page is skipped
+entirely: it is verbatim source, where a wikilink is a string literal or a
+comment, not a link. Exits 1 when any broken link is found, so `lint` can
+gate a build; orphans alone exit 0.
 
 ### `serve`
 
@@ -394,7 +396,7 @@ source tree. Four artifacts drive that:
 
 - **`index.json`** — the machine catalog. Top level is `{ project, root, entries: [...] }`,
   where `root` is the compiled directory's own name (even for `compile .`);
-  each entry has: `id`, `title`, `kind`, `aliases`, `tags`, `path`, `page`, `summary`
+  each entry has: `id`, `title`, `kind`, `aliases`, `tags`, `updated` (present only when the page has a date), `path`, `page`, `summary`
   (`null` when none could be derived — a code file with no doc comment and
   no exported item), `degree_in`, `degree_out`, `pagerank`, `token_estimate`,
   `neighbors_out`, `neighbors_in` (edge targets and sources; what makes an
@@ -461,6 +463,31 @@ Layer Normalization builds directly on the ideas behind Gradient Descent.
 Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ```
 
+## Using the wiki as agent memory
+
+An agent can keep its notes as markdown files in a folder the wiki compiles,
+then `search` them before it writes. Put these rules in the agent's
+instructions file:
+
+```
+Memory notes live in <folder>, one markdown file per fact or topic.
+- Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
+- Name the file for what it says. The title is the front-matter `title:`,
+  else the first `# heading`, else the file name; any script works.
+- Front matter, all optional: `title:`, `description:` (one line, the search
+  summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
+  ignored). A
+  journal note can instead be named `YYYY-MM-DD.md`.
+- Mention a related note by its exact title or alias, or as `[[title]]`.
+- Search before writing. Update the note that exists instead of adding a copy.
+- An index file such as `MEMORY.md` is fine; it shows as an orphan.
+```
+
+Cyrillic query words are stemmed, so another grammatical form of a word still
+matches, and a Cyrillic title gets a transliterated id (`Морський маяк`
+becomes `morskyi_maiak`). See [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md)
+for the limits.
+
 ## MCP server
 
 Or run `wiki setup` in the project: it writes this configuration (and a skill) for Claude Code and pi.
@@ -488,10 +515,10 @@ tool costs schema tokens on every request.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, updated, score, snippet, path, symbols}]` (`updated` only when known; `snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context-pack text, or with `symbol` the functions it calls |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
-| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans}` |
+| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
 `wiki://index` (`index.json`) and `wiki://llms.txt`.
@@ -558,7 +585,8 @@ make this guarantee hold.
 ## Limitations & roadmap
 
 Deliberate scope cuts, recorded so they read as decisions rather than
-oversights:
+oversights. Measured shortfalls and agent behaviour are listed in
+[`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md).
 
 - **Linking is lexical.** No LLM, embeddings, or semantic matching at
   generation time. A text or markdown page is linked when a name or alias
@@ -571,9 +599,11 @@ oversights:
   link a code page: a one-word module name would otherwise draw an edge
   from every English use of the word. This is the core design trade-off,
   not a bug.
-- **No call graph.** `find_definition` / `callers`-style queries need
-  cross-file name resolution, which is not built. Code extraction is
-  imports + exported signatures only, with Rust signatures owner-qualified
+- **Call chains are resolved by name.** `neighbors --symbol` follows
+  call edges matched by name at compile time, within one language, with
+  no type information and no callers query. Code extraction is
+  imports + exported signatures plus each function's line range,
+  with Rust signatures owner-qualified
   (`pub fn Wiki::search(…)`, `fn <X as Trait>::method(…)`) and Python
   signatures owner-qualified through the full class chain and carrying
   their decorators (`def Article.Inner.deep(self) -> None`,
@@ -583,7 +613,7 @@ oversights:
   unannotated Python assignment truncates it with `…`. `#[cfg(test)]`
   modules are omitted from `## Body` and replaced with a
   `// [tests omitted: …]` marker.
-- **Markdown front matter** may carry `aliases:` and `tags:`, written `a, b`, `[a, b]` or a YAML block list (`key:` then `  - a` lines). Tags are lowercased with any `#` stripped, and show on the page and in `index.json`.
+- **Markdown front matter** may carry `aliases:` and `tags:`, written `a, b`, `[a, b]` or a YAML block list (`key:` then `  - a` lines). Tags are lowercased with any `#` stripped, and show on the page and in `index.json`. A markdown page's date is read from `updated`, `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name starting `YYYY-MM-DD`; the value's leading `YYYY-MM-DD` is kept.
 - **Text, markdown, and code are the only formats.** There is no PDF,
   OCR, or audio extractor; adding one means adding an `Extractor` (see
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
@@ -598,5 +628,7 @@ oversights:
 
 ## Links
 
+- [`docs/KNOWN_GAPS.md`](docs/KNOWN_GAPS.md) — where results fall short
+  and what agents do with the wiki.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — pipeline internals,
   module map, determinism rules, and how to extend the compiler.

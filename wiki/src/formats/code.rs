@@ -469,6 +469,7 @@ impl Extractor for CodeExtractor {
             aliases: Vec::new(),
             tags: Vec::new(),
             created: String::new(),
+            updated: String::new(),
             body: source,
             source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },

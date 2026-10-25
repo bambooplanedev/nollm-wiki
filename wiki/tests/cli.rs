@@ -287,8 +287,36 @@ fn lint_cli_exits_zero_with_only_orphans() {
         .args(["lint", "--dir", output.to_str().unwrap()])
         .assert()
         .code(0)
-        .stdout(contains("0 broken links, 1 orphans"))
+        .stdout(contains("0 broken links, 1 orphans, 0 large"))
         .stdout(contains("  orphan: alpha\n"));
+}
+
+#[test]
+fn lint_cli_reports_a_page_too_large_for_a_neighbors_pack() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(
+        input.join("big.md"),
+        format!("# Big\n\n{}\n", "word ".repeat(4000)),
+    )
+    .unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), output.to_str().unwrap()])
+        .assert()
+        .success();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["lint", "--dir", output.to_str().unwrap()])
+        .assert()
+        .code(0)
+        .stdout(contains(
+            "Linted 1 pages: 0 broken links, 1 orphans, 1 large",
+        ))
+        .stdout(contains("  large: big ("))
+        .stdout(contains(" tokens)\n"));
 }
 
 #[test]

@@ -14,6 +14,8 @@ pub struct ManifestEntry {
     pub path: String,
     pub page: String,
     pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated: Option<String>,
     pub degree_in: usize,
     pub degree_out: usize,
     pub pagerank: f64,
@@ -76,6 +78,7 @@ pub fn build_manifest(
                 path: e.source_path.clone(),
                 page: format!("{id}.md"),
                 summary: e.summary.clone(),
+                updated: Some(e.updated.clone()).filter(|u| !u.is_empty()),
                 degree_in: inc.len(),
                 degree_out: out.len(),
                 pagerank: *graph.pagerank.get(id).unwrap_or(&0.0),
@@ -208,6 +211,7 @@ mod tests {
             aliases: vec![],
             tags: vec![],
             created: String::new(),
+            updated: String::new(),
             body: body.into(),
             source_path: format!("{id}.txt"),
             kind: SourceKind::Text,
@@ -366,5 +370,16 @@ mod tests {
                 r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4","test":true,"calls":["beta.rs:1-1"]}]}"#
             )
         );
+    }
+
+    #[test]
+    fn index_entry_has_updated_only_when_known() {
+        let (mut ents, _) = setup();
+        ents.get_mut("alpha").unwrap().updated = "2026-10-23".into();
+        let g = build_graph(&ents);
+        let v: serde_json::Value =
+            serde_json::from_str(&render_index_json(&build_manifest("p", "", &ents, &g))).unwrap();
+        assert_eq!(v["entries"][0]["updated"], "2026-10-23");
+        assert!(v["entries"][1].get("updated").is_none());
     }
 }

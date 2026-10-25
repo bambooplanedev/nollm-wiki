@@ -71,6 +71,8 @@ pub struct Entity {
     pub aliases: Vec<String>,
     pub tags: Vec<String>,
     pub created: String,
+    /// `YYYY-MM-DD` of the last change, or empty when the source gives none.
+    pub updated: String,
     pub body: String,
     pub source_path: String,
     pub kind: SourceKind,
@@ -259,6 +261,8 @@ pub struct LintReport {
     pub total_pages: usize,
     pub broken_links: Vec<(String, String)>,
     pub orphans: Vec<String>,
+    /// Pages (id, tokens) too big for a default `neighbors` pack, sorted by id.
+    pub large: Vec<(String, usize)>,
 }
 
 /// Capitalize each whitespace-separated word and lowercase the rest of it.
@@ -279,24 +283,114 @@ pub(crate) fn title_case(s: &str) -> String {
         .join(" ")
 }
 
-/// A filesystem/URL-clean id: lowercase, every run of non-`[a-z0-9]` collapsed
-/// to a single `_`, no leading/trailing `_`. A name that is entirely non-alnum
-/// falls back to a deterministic `page_<hash>` so it is never empty (and never
-/// silently dropped by slug dedup). Uses `char::to_ascii_lowercase` (ASCII-only,
-/// no Unicode case-expansion) and a single pass (no `String::replace` loop).
+/// Ascii spelling of one lowercase char: Ukrainian (KMU 2010, position
+/// independent) and Russian Cyrillic, plus Latin-1 / Extended-A letters folded
+/// to their base letters. `None` for anything else; `Some("")` for a letter
+/// that vanishes (soft and hard signs).
+#[allow(clippy::match_same_arms)] // a table: Cyrillic and Latin rows stay apart
+fn fold_char(c: char) -> Option<&'static str> {
+    Some(match c {
+        'а' => "a",
+        'б' => "b",
+        'в' => "v",
+        'г' => "h",
+        'ґ' => "g",
+        'д' => "d",
+        'е' | 'э' | 'ё' => "e",
+        'є' => "ie",
+        'ж' => "zh",
+        'з' => "z",
+        'и' | 'ы' => "y",
+        'і' | 'ї' | 'й' => "i",
+        'к' => "k",
+        'л' => "l",
+        'м' => "m",
+        'н' => "n",
+        'о' => "o",
+        'п' => "p",
+        'р' => "r",
+        'с' => "s",
+        'т' => "t",
+        'у' => "u",
+        'ф' => "f",
+        'х' => "kh",
+        'ц' => "ts",
+        'ч' => "ch",
+        'ш' => "sh",
+        'щ' => "shch",
+        'ь' | 'ъ' => "",
+        'ю' => "iu",
+        'я' => "ia",
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
+        'æ' => "ae",
+        'ç' | 'ć' | 'ĉ' | 'ċ' | 'č' => "c",
+        'ď' | 'đ' | 'ð' => "d",
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ĕ' | 'ė' | 'ę' | 'ě' => "e",
+        'ĝ' | 'ğ' | 'ġ' | 'ģ' => "g",
+        'ĥ' | 'ħ' => "h",
+        'ì' | 'í' | 'î' | 'ï' | 'ĩ' | 'ī' | 'ĭ' | 'į' | 'ı' => "i",
+        'ĳ' => "ij",
+        'ĵ' => "j",
+        'ķ' | 'ĸ' => "k",
+        'ĺ' | 'ļ' | 'ľ' | 'ŀ' | 'ł' => "l",
+        'ñ' | 'ń' | 'ņ' | 'ň' | 'ŉ' | 'ŋ' => "n",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ŏ' | 'ő' => "o",
+        'œ' => "oe",
+        'ŕ' | 'ŗ' | 'ř' => "r",
+        'ś' | 'ŝ' | 'ş' | 'š' | 'ſ' => "s",
+        'ß' => "ss",
+        'ţ' | 'ť' | 'ŧ' => "t",
+        'þ' => "th",
+        'ù' | 'ú' | 'û' | 'ü' | 'ũ' | 'ū' | 'ŭ' | 'ů' | 'ű' | 'ų' => "u",
+        'ŵ' => "w",
+        'ý' | 'ÿ' | 'ŷ' => "y",
+        'ź' | 'ż' | 'ž' => "z",
+        _ => return None,
+    })
+}
+
+/// A filesystem/URL-clean id: lowercase, Cyrillic transliterated and Latin
+/// diacritics folded to ascii (see `fold_char`), every run of other characters
+/// collapsed to a single `_`, no leading/trailing `_`. An apostrophe between
+/// two Cyrillic letters and a combining mark vanish without a separator. A name
+/// with no letter or digit left falls back to a deterministic `page_<hash>` so
+/// it is never empty (and never silently dropped by slug dedup). Single pass.
 pub fn slugify(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let cyrillic = |c: Option<&char>| c.is_some_and(|c| ('\u{400}'..='\u{4FF}').contains(c));
     let mut out = String::with_capacity(name.len());
     let mut pending_sep = false;
-    for c in name.chars() {
-        let c = c.to_ascii_lowercase();
-        if c.is_ascii_alphanumeric() {
+    for (i, &orig) in chars.iter().enumerate() {
+        if matches!(orig, '\'' | '\u{2019}' | '\u{2BC}')
+            && i > 0
+            && cyrillic(chars.get(i - 1))
+            && cyrillic(chars.get(i + 1))
+        {
+            continue;
+        }
+        for lc in orig.to_lowercase() {
+            if ('\u{300}'..='\u{36F}').contains(&lc) {
+                continue; // combining mark, also from the lowercase of 'İ'
+            }
+            let mut buf = [0; 4];
+            let folded = if lc == 'и' && chars.get(i + 1) == Some(&'\u{306}') {
+                "i" // `й` written as `и` + combining breve
+            } else if lc.is_ascii_alphanumeric() {
+                &*lc.encode_utf8(&mut buf)
+            } else if let Some(f) = fold_char(lc) {
+                f
+            } else {
+                pending_sep = true; // a run of other chars → at most one '_', added lazily
+                continue;
+            };
+            if folded.is_empty() {
+                continue;
+            }
             if pending_sep && !out.is_empty() {
                 out.push('_');
             }
-            out.push(c);
+            out.push_str(folded);
             pending_sep = false;
-        } else {
-            pending_sep = true; // a run of non-alnum → at most one '_', added lazily
         }
     }
     if out.is_empty() {
@@ -337,14 +431,64 @@ mod tests {
         assert_eq!(slugify("a  --  b"), "a_b");
         assert_eq!(slugify("  →Foo→  "), "foo");
         assert_eq!(slugify("Rate: 5&6"), "rate_5_6");
-        assert_eq!(slugify("café"), "caf");
+        assert_eq!(slugify("café"), "cafe");
         // A `|` in a title MUST fold away — the id is both the `<id>.md`
         // filename and the `[[id|display]]` link target, and a pipe in either
         // would break Task 1's split-on-`|` resolution (Task 1 review finding).
         assert_eq!(slugify("Chapter 1 | Overview"), "chapter_1_overview");
-        // 'İ' (U+0130) is non-ASCII; ASCII-only lowercasing leaves it, then it
-        // folds to a single leading separator that is suppressed.
-        assert_eq!(slugify("İstanbul"), "stanbul");
+        // 'İ' lowercases to `i` plus a combining dot, which is dropped.
+        assert_eq!(slugify("İstanbul"), "istanbul");
+    }
+
+    #[test]
+    fn slugify_treats_decomposed_short_i_like_precomposed() {
+        // `й` written as `и` + combining breve, as macOS tools write file names.
+        assert_eq!(slugify("Морськии\u{306} маяк"), "morskyi_maiak");
+        assert_eq!(slugify("МОРСЬКИИ\u{306} МАЯК"), "morskyi_maiak");
+    }
+
+    #[test]
+    fn slugify_transliterates_cyrillic() {
+        for (name, id) in [
+            ("Морський маяк", "morskyi_maiak"),
+            ("Щука й Їжак", "shchuka_i_izhak"),
+            ("Ґанок", "ganok"),
+            ("Юля", "iulia"),
+            ("Єва", "ieva"),
+            ("Хата", "khata"),
+            ("Цех", "tsekh"),
+            ("Жук", "zhuk"),
+            ("Чашка", "chashka"),
+            ("Объём", "obem"),
+            ("Мыло", "mylo"),
+            ("Эхо", "ekho"),
+            ("MCP-сервер v2", "mcp_server_v2"),
+        ] {
+            assert_eq!(slugify(name), id, "{name}");
+        }
+    }
+
+    #[test]
+    fn slugify_drops_apostrophes_between_cyrillic_letters_only() {
+        for name in ["пам'ять", "пам’ять", "памʼять", "'пам'ять'"] {
+            assert_eq!(slugify(name), "pamiat", "{name}");
+        }
+        assert_eq!(slugify("don't"), "don_t");
+        assert_eq!(slugify("Пам'ять агента"), "pamiat_ahenta");
+    }
+
+    #[test]
+    fn slugify_folds_latin_diacritics() {
+        assert_eq!(slugify("Straße"), "strasse");
+        assert_eq!(slugify("Łódź"), "lodz");
+        assert_eq!(slugify("Ærø"), "aero");
+        assert_eq!(slugify("naïve"), "naive");
+    }
+
+    #[test]
+    fn slugify_without_letters_falls_back_to_hash() {
+        assert!(slugify("—").starts_with("page_"));
+        assert!(slugify("ьъ").starts_with("page_"));
     }
 
     #[test]
