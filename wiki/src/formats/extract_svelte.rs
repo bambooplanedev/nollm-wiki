@@ -33,7 +33,7 @@ pub(crate) fn svelte_script(source: &str) -> ScriptView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -127,5 +127,14 @@ mod tests {
         assert_eq!(a.symbols, b.symbols);
         assert_eq!(a.imports, b.imports);
         assert_eq!(a.summary, b.summary);
+    }
+
+    #[test]
+    fn svelte_items_count_lines_from_the_top_of_the_file() {
+        let e = CodeExtractor.extract(
+            "B.svelte",
+            "<h1>x</h1>\n<script>\n  function inc() {}\n</script>\n",
+        );
+        assert_eq!(item_lines(&e.items), vec!["3-3 fn inc priv"]);
     }
 }

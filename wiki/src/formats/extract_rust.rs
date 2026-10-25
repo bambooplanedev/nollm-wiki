@@ -1,8 +1,8 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
 use super::code::{
-    default_shape, keep_all, no_export_set, owner_anchor_identity, sig_start_identity, LangSpec,
-    Placement, Rank, Shape,
+    default_shape, keep_all, no_body_doc, no_export_set, owner_anchor_identity, sig_start_identity,
+    LangSpec, Lead, Placement, Rank, Shape,
 };
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
@@ -271,6 +271,16 @@ pub(crate) fn rust_spec() -> LangSpec {
                 (trait_item (visibility_modifier) @vis body: (declaration_list (function_signature_item name: (identifier) @name) @def))
                 (trait_item (visibility_modifier) @vis body: (declaration_list (function_item name: (identifier) @name) @def))
                 (use_declaration argument: (_) @import)
+                (function_item name: (identifier) @name) @item
+                (function_signature_item name: (identifier) @name) @item
+                (const_item name: (identifier) @name) @item
+                (static_item name: (identifier) @name) @item
+                (mod_item name: (identifier) @name) @item
+                (struct_item name: (type_identifier) @name) @item
+                (enum_item name: (type_identifier) @name) @item
+                (trait_item name: (type_identifier) @name) @item
+                (union_item name: (type_identifier) @name) @item
+                (type_item name: (type_identifier) @name) @item
             ",
         name_filter: keep_all,
         vis_filter: keep_bare_pub,
@@ -282,6 +292,28 @@ pub(crate) fn rust_spec() -> LangSpec {
         sig_start: sig_start_identity,
         owner_anchor: owner_anchor_identity,
         header_group: rust_header_group,
+        item_lead: rust_lead,
+        body_doc: no_body_doc,
+        // Every public item also matches a @def pattern above, whose gate
+        // decides it; an @item-only match is private or restricted.
+        query_gates_visibility: true,
+    }
+}
+
+/// A Rust item's leads: its attributes, and its `///` outer doc lines.
+/// `////` is a plain comment by rustc's own rule, and `//!` documents the
+/// enclosing module, not the next item, so both stop the walk.
+fn rust_lead(node: Node, text: &str) -> Lead {
+    match node.kind() {
+        "attribute_item" => Lead::Attr,
+        "line_comment" => match text
+            .get(node.byte_range())
+            .and_then(|t| t.strip_prefix("///"))
+        {
+            Some(doc) if !doc.starts_with('/') => Lead::Doc(doc.trim().to_string()),
+            _ => Lead::Stop,
+        },
+        _ => Lead::Stop,
     }
 }
 
@@ -293,9 +325,13 @@ pub(crate) fn rust_spec() -> LangSpec {
 /// real crate files: 131 (77%) have no `#[cfg(test)]` module and reach this
 /// arm. The other 23% must reparse — splicing changes the text, and no tree
 /// survives an edit to its own source.
+///
+/// `Rewritten` carries the tree of the ORIGINAL text: items are extracted
+/// from it, so their lines stay true to the file even past a stripped
+/// module.
 pub(crate) enum Stripped {
     Unchanged(Tree),
-    Rewritten(String),
+    Rewritten(String, Tree),
 }
 
 /// Remove `#[cfg(test)]`-annotated `mod` items from Rust source, replacing
@@ -362,12 +398,12 @@ pub(crate) fn strip_rust_test_modules(text: &str) -> Option<Stripped> {
         pos = end;
     }
     out.push_str(&text[pos..]);
-    Some(Stripped::Rewritten(out))
+    Some(Stripped::Rewritten(out, tree))
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -811,6 +847,103 @@ mod tests {
             !e.symbols.iter().any(|s| s.contains("hidden")),
             "function-local item leaked: {:?}",
             e.symbols
+        );
+    }
+
+    #[test]
+    fn items_include_private_fns_and_methods_with_doc_and_attribute_lines() {
+        let src = "/// Adds one.\n#[inline]\npub fn add(x: u8) -> u8 {\n    x + 1\n}\n\nfn helper() {}\n\npub struct S;\nimpl S {\n    /// Builds it.\n    fn new() -> S {\n        S\n    }\n}\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-5 fn add pub",
+                "7-7 fn helper priv",
+                "9-9 type S pub",
+                "11-14 method S::new priv",
+            ]
+        );
+        let add = &e.items[0];
+        assert_eq!(add.signature, "pub fn add(x: u8) -> u8");
+        assert_eq!(add.doc.as_deref(), Some("Adds one."));
+        assert_eq!(e.items[3].signature, "fn new() -> S");
+        assert_eq!(e.items[3].doc.as_deref(), Some("Builds it."));
+        // exports untouched: still public-only
+        assert_has(&e.symbols, "pub fn add(x: u8) -> u8");
+        assert_lacks(&e.symbols, "helper");
+        assert_lacks(&e.symbols, "new");
+    }
+
+    #[test]
+    fn items_after_a_mid_file_test_module_keep_their_original_lines() {
+        let src = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    pub fn helper() {}\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        // `helper` is bare `pub`, but its module is stripped from `## Exports`,
+        // so it must not read as public either.
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-1 fn a pub",
+                "2-7 module tests priv",
+                "4-4 fn helper priv",
+                "5-6 fn t priv",
+                "8-8 fn b pub",
+            ]
+        );
+        assert_lacks(&e.symbols, "helper");
+        assert!(e.body.contains("[tests omitted: mod tests"));
+        assert_lacks(&e.symbols, "fn t");
+    }
+
+    #[test]
+    fn a_doc_comment_parted_by_a_blank_line_or_plain_comment_is_not_attached() {
+        let src = "/// Lost.\n\nfn a() {}\n/// Also lost.\n// plain\nfn b() {}\n//// Not doc.\nfn c() {}\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["3-3 fn a priv", "6-6 fn b priv", "8-8 fn c priv"]
+        );
+        assert!(e.items.iter().all(|i| i.doc.is_none()));
+    }
+
+    #[test]
+    fn item_doc_is_the_first_sentence_joined_across_lines_and_capped() {
+        let src = format!(
+            "/// Splits the input into\n/// words. Then more.\nfn split() {{}}\n/// {}\nfn long() {{}}\n",
+            "word ".repeat(60)
+        );
+        let e = CodeExtractor.extract("m.rs", &src);
+        assert_eq!(
+            e.items[0].doc.as_deref(),
+            Some("Splits the input into words.")
+        );
+        let long = e.items[1].doc.as_deref().unwrap();
+        assert_eq!(long.chars().count(), 120);
+        assert!(long.ends_with('…'));
+    }
+
+    #[test]
+    fn a_type_alias_is_a_type_item_like_in_every_other_language() {
+        let src = "pub type Id = u64;\ntype Local = u8;\npub const N: u8 = 1;\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-1 type Id pub", "2-2 type Local priv", "3-3 value N pub"]
+        );
+    }
+
+    #[test]
+    fn the_existing_gate_decides_public_for_restricted_and_trait_impl_items() {
+        let src =
+            "pub(crate) fn c() {}\nstruct T;\nimpl Display for T {\n    fn fmt(&self) {}\n}\n";
+        let e = CodeExtractor.extract("m.rs", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-1 fn c priv",
+                "2-2 type T priv",
+                "4-4 method <T as Display>::fmt pub",
+            ]
         );
     }
 }

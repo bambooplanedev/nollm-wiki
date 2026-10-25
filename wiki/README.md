@@ -109,6 +109,7 @@ gradient_descent.md
 graph.json
 index.json
 index.md
+items.json
 layer_normalization.md
 learning_rate_schedule.md
 llms.txt
@@ -246,6 +247,7 @@ Synthetic corpus generator, useful for demos and reproducing bug reports.
 |---|---|---|
 | `<id>.md` | One cross-linked Markdown page per source entity | Humans + agents |
 | `index.json` | Machine-readable manifest: entries + adjacency + centrality | Agents / tooling |
+| `items.json` | Each code page's items with their original line ranges | Agents / tooling |
 | `index.md` | Human-readable index page | Humans |
 | `llms.txt` | Compact LLM-oriented index | LLMs |
 | `AGENTS.md` | Agent-usage guide for the compiled wiki | Agents |
@@ -255,7 +257,7 @@ Synthetic corpus generator, useful for demos and reproducing bug reports.
 ## Using the wiki from an agent
 
 A compiled wiki is meant to be read by an agent instead of re-crawling the
-source tree. Three artifacts drive that:
+source tree. Four artifacts drive that:
 
 - **`index.json`** — the machine catalog. Top level is `{ project, entries: [...] }`;
   each entry has: `id`, `title`, `kind`, `aliases`, `path`, `page`, `summary`
@@ -267,6 +269,12 @@ source tree. Three artifacts drive that:
   functions, types, constants — in original case; empty for non-code pages),
   `methods` (the page's inherent-impl and trait-declaration method names, in
   original case; trait-impl methods are excluded; empty for non-code pages).
+- **`items.json`** — the code map, kept out of `index.json` so the catalog
+  stays small. One compact object keyed by page id (code pages with at
+  least one item); each value lists the page's items — its top-level items
+  and methods — with `kind`, `name`, `owner`, `signature`, original
+  `start_line`/`end_line` (so an agent can read just those lines), `doc`,
+  `public` flag and, for a paired C++ declaration or definition, `twin`.
 - **`llms.txt`** — a compact, human- and LLM-readable index with one-line
   summaries, meant to be pasted into a prompt or skimmed cheaply. Pages at
   or above the median PageRank go under `## Docs`, the rest under

@@ -1,9 +1,11 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    default_cut, keep_all, keep_any_vis, no_export_set, no_header_group, LangSpec, Placement, Rank,
-    Shape,
+    cpp_doc_line, default_cut, ext_of, keep_all, keep_any_vis, module_stem, no_body_doc,
+    no_export_set, no_header_group, source_rank, LangSpec, Lead, Placement, Rank, Shape,
 };
+use crate::model::{CodeItem, CodeItemKind, Entity};
+use std::collections::BTreeMap;
 use tree_sitter::Node;
 
 /// Every capture shape a definition's name can take. The general `(_)` form
@@ -33,7 +35,9 @@ use tree_sitter::Node;
 /// cannot know the name is the class's), destructors and operators.
 ///
 /// Types and functions are indexed; DATA is not — no member variables, no
-/// file-scope globals or constants. `field_declaration.declarator` is
+/// file-scope globals or constants. The one exception is the `@item` pattern
+/// at the end: a namespace- or file-scope variable is an item (kind `value`),
+/// never an export. `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
 /// `default_cut` finds no `body` field: the whole declaration would render
 /// three times over, with the owner spliced at a different offset each time. A
@@ -123,6 +127,17 @@ const QUERY: &str = r"
 (alias_declaration name: (type_identifier) @name) @def
 (type_definition   declarator: (type_identifier) @name) @def
 
+(declaration declarator: [
+  (identifier) @name
+  (pointer_declarator declarator: (identifier) @name)
+  (reference_declarator (identifier) @name)
+  (array_declarator declarator: (identifier) @name)
+  (init_declarator declarator: [
+    (identifier) @name
+    (pointer_declarator declarator: (identifier) @name)
+    (reference_declarator (identifier) @name)
+    (array_declarator declarator: (identifier) @name)])]) @item
+
 (preproc_include path: (_) @import)
 ";
 
@@ -151,7 +166,57 @@ pub(crate) fn cpp_spec() -> LangSpec {
         sig_start: cpp_sig_start,
         owner_anchor: cpp_owner_anchor,
         header_group: no_header_group,
+        item_lead: cpp_lead,
+        body_doc: no_body_doc,
+        query_gates_visibility: false,
     }
+}
+
+/// One line of a C++ comment as doc text, tracking whether `in_block` is inside
+/// a still-open Doxygen block (`/**` or `/*!` not yet closed by `*/`): the only
+/// context where a bare `*` continuation is doc content, since a plain
+/// `/* ... */` license block continues the same way. Shared by the file-summary
+/// scan and by item docs, so there is one copy of the tracking.
+pub(crate) fn cpp_doc_step(line: &str, in_block: &mut bool) -> Option<String> {
+    let opens = line.starts_with("/**") || line.starts_with("/*!");
+    let inside = *in_block || opens;
+    let result = cpp_doc_line(line, inside);
+    *in_block = inside && !line.contains("*/");
+    result
+}
+
+/// The doc text of one C++ comment node, or `None` when it is not a Doxygen
+/// comment or says nothing.
+fn cpp_comment_doc(comment: &str) -> Option<String> {
+    let mut in_block = false;
+    let lines: Vec<String> = comment
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| cpp_doc_step(l, &mut in_block))
+        .filter(|l| !l.is_empty())
+        .collect();
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// A Doxygen comment directly above an item is its doc; anything else ends the
+/// walk. A member-trailing doc (`///<`, `//!<`, `/**<`, `/*!<`) documents the
+/// member BEFORE it even on a line of its own, so it ends the walk too. Every
+/// C++ item is `public: true`, because the spec keeps all visibilities (see
+/// `vis_filter`).
+fn cpp_lead(node: Node, text: &str) -> Lead {
+    let Some(comment) = text
+        .get(node.byte_range())
+        .filter(|_| node.kind() == "comment")
+    else {
+        return Lead::Stop;
+    };
+    if ["///<", "//!<", "/**<", "/*!<"]
+        .iter()
+        .any(|m| comment.starts_with(m))
+    {
+        return Lead::Stop;
+    }
+    cpp_comment_doc(comment).map_or(Lead::Stop, Lead::Doc)
 }
 
 /// Climb to the enclosing `template_declaration`, nested ones included, so a
@@ -291,7 +356,30 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// Nothing else is cut. `OrderBook() = default;` is a `function_definition`
 /// whose `default_method_clause` is likewise a plain child, and it must render
 /// WHOLE: `= default` is the declaration's entire content.
+///
+/// A variable declaration (an `@item` only, never an export) is a value: it
+/// stops at its `=` and re-appends the value within `VALUE_BUDGET`, so a
+/// lookup table's initializer never becomes its signature. A brace or paren
+/// initializer has no `=`, so it is cut and not re-appended. `int a = 1, b;`
+/// renders whole: each name's item shares the one node, and a cut at the
+/// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
+    let declarator = def.child_by_field_name("declarator");
+    if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
+        let single = def
+            .children_by_field_name("declarator", &mut def.walk())
+            .count()
+            == 1;
+        let init = declarator.filter(|d| single && d.kind() == "init_declarator");
+        let eq = init.and_then(|d| d.children(&mut d.walk()).find(|c| c.kind() == "="));
+        let value = init.and_then(|d| d.child_by_field_name("value"));
+        return Shape {
+            rank: Rank::Value,
+            cut: eq.or(value),
+            value: eq.and(value),
+            has_type: true,
+        };
+    }
     let mut cursor = def.walk();
     // Bound before the struct literal: the child iterator borrows `cursor`,
     // and inside the literal that borrow would outlive it.
@@ -338,8 +426,90 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
         .any(|c| c.kind() == "function_declarator")
 }
 
+/// The `(owner, name)` keys that occur exactly once among `items`, with the
+/// index of their item. Overloads share a key, so they drop out here.
+fn unique_keys(items: &[CodeItem]) -> BTreeMap<(Option<&str>, &str), usize> {
+    let mut seen: BTreeMap<(Option<&str>, &str), Option<usize>> = BTreeMap::new();
+    for (i, it) in items.iter().enumerate() {
+        if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+            seen.entry((it.owner.as_deref(), it.name.as_str()))
+                .and_modify(|v| *v = None)
+                .or_insert(Some(i));
+        }
+    }
+    seen.into_iter()
+        .filter_map(|(k, v)| v.map(|i| (k, i)))
+        .collect()
+}
+
+/// Pairs a header's declarations with the definitions in the one `.cpp` that
+/// implements it: the doc usually sits on the declaration, so the definition
+/// inherits it, and each side's `twin` names the other's lines. Only a
+/// group with exactly one implementation file and a unique lowest-rank header
+/// pairs, and only keys unique on both sides: a wrong pairing is worse than
+/// none, so overloads and ambiguous groups stay untouched.
+pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (id, e) in entities.iter() {
+        let sp = e.source_path.as_str();
+        if matches!(
+            ext_of(sp).as_str(),
+            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h"
+        ) {
+            groups.entry(module_stem(sp)).or_default().push(id);
+        }
+    }
+    let mut pairs: Vec<(String, usize, String, usize)> = Vec::new();
+    for ids in groups.values() {
+        let impls: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| source_rank(&entities[*id].source_path) == 2)
+            .collect();
+        let Some(min) = ids
+            .iter()
+            .map(|id| source_rank(&entities[*id].source_path))
+            .min()
+            .filter(|r| *r < 2)
+        else {
+            continue;
+        };
+        let headers: Vec<&str> = ids
+            .iter()
+            .copied()
+            .filter(|id| source_rank(&entities[*id].source_path) == min)
+            .collect();
+        let ([imp], [hdr]) = (impls.as_slice(), headers.as_slice()) else {
+            continue;
+        };
+        let (h, c) = (&entities[*hdr].items, &entities[*imp].items);
+        let cu = unique_keys(c);
+        for (key, hi) in unique_keys(h) {
+            if let Some(&ci) = cu.get(&key) {
+                pairs.push(((*hdr).to_string(), hi, (*imp).to_string(), ci));
+            }
+        }
+    }
+    for (hid, hi, cid, ci) in pairs {
+        let span = |e: &Entity, i: usize| {
+            let it = &e.items[i];
+            format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
+        };
+        let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
+        let doc = entities[&hid].items[hi].doc.clone();
+        let h_item = &mut entities.get_mut(&hid).unwrap().items[hi];
+        h_item.twin = Some(c_span);
+        let c_item = &mut entities.get_mut(&cid).unwrap().items[ci];
+        c_item.twin = Some(h_span);
+        if c_item.doc.is_none() {
+            c_item.doc = doc;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::formats::code::testutil::item_lines;
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -726,5 +896,102 @@ mod tests {
             "/* Copyright (c) 2026 Acme.\n * All rights reserved.\n */\n/// Maintains the book.\nclass F {};\n",
         );
         assert_eq!(s.as_deref(), Some("Maintains the book."), "got {s:?}");
+    }
+
+    #[test]
+    fn cpp_items_take_doxygen_docs_and_skip_plain_comments() {
+        let src = "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n  // plain\n  int size() const;\n};\n/** Frees all. */\nvoid reset();\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-7 type Book pub",
+                "3-4 method Book::apply pub",
+                "6-6 method Book::size pub",
+                "8-9 fn reset pub",
+            ]
+        );
+        assert_eq!(e.items[1].doc.as_deref(), Some("Applies an order."));
+        assert_eq!(e.items[2].doc, None);
+        assert_eq!(e.items[3].doc.as_deref(), Some("Frees all."));
+    }
+
+    #[test]
+    fn namespace_scope_variables_are_value_items_but_not_exports() {
+        let table = (1..=30)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let src = format!("namespace app {{\n/// The count.\nint g_count;\nstatic const int K = 3;\nconstexpr int N = 4;\ninline constexpr const char* kName = \"x\";\nint table[] = {{{table}}};\n}}\nclass B {{\n  int a;\n  static constexpr int M = 1;\n}};\nvoid f() {{\n  int local = 0;\n}}\n");
+        let e = CodeExtractor.extract("app.h", &src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "2-3 value g_count pub",
+                "4-4 value K pub",
+                "5-5 value N pub",
+                "6-6 value kName pub",
+                "7-7 value table pub",
+                "9-12 type B pub",
+                "13-15 fn f pub",
+            ]
+        );
+        let sigs: Vec<&str> = e.items[..5].iter().map(|i| i.signature.as_str()).collect();
+        assert_eq!(
+            sigs,
+            vec![
+                "int g_count",
+                "static const int K = 3",
+                "constexpr int N = 4",
+                "inline constexpr const char* kName = \"x\"",
+                "int table[]",
+            ]
+        );
+        assert_eq!(e.items[0].doc.as_deref(), Some("The count."));
+        assert_eq!(e.symbols, vec!["class B", "void f()"]);
+        assert_eq!(e.defined, vec!["B", "f"]);
+    }
+
+    #[test]
+    fn a_multi_declarator_variable_renders_whole_for_each_name() {
+        let e = CodeExtractor.extract("app.h", "int a = 1, b = 2;\n");
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-1 value a pub", "1-1 value b pub"]
+        );
+        assert!(e.items.iter().all(|i| i.signature == "int a = 1, b = 2"));
+    }
+
+    #[test]
+    fn a_multi_line_doxygen_block_attaches_and_a_plain_block_does_not() {
+        let src = "/**\n * Applies an order\n * to the book. More text.\n */\nvoid apply(int o);\n/* plain block */\nvoid reset();\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec!["1-5 fn apply pub", "7-7 fn reset pub"]
+        );
+        assert_eq!(
+            e.items[0].doc.as_deref(),
+            Some("Applies an order to the book.")
+        );
+        assert_eq!(e.items[1].doc, None);
+    }
+
+    #[test]
+    fn a_trailing_member_doc_never_documents_the_next_item() {
+        let src = "class Book {\n  int size_; ///< Number of orders.\n  void apply(int o);\n  int count; //!< Count.\n  /** Resets everything. */\n  void reset();\n  int x;\n  ///< The x.\n  void clear();\n};\n";
+        let e = CodeExtractor.extract("book.h", src);
+        assert_eq!(
+            item_lines(&e.items),
+            vec![
+                "1-10 type Book pub",
+                "3-3 method Book::apply pub",
+                "5-6 method Book::reset pub",
+                "9-9 method Book::clear pub",
+            ]
+        );
+        assert_eq!(e.items[1].doc, None);
+        assert_eq!(e.items[2].doc.as_deref(), Some("Resets everything."));
+        assert_eq!(e.items[3].doc, None);
     }
 }

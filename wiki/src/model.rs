@@ -58,19 +58,91 @@ pub struct Entity {
     /// defined-names design).
     pub defined: Vec<String>,
     /// Names of the page's methods: `ItemKind::Member` items whose node is a
-    /// function (`function_item`, `function_signature_item`,
-    /// `function_definition`) and whose owner is not a trait impl, exactly
-    /// as the `@name` capture reads them — original case, no owner. Sorted,
+    /// function (`code::is_function`) and whose owner is not a trait impl,
+    /// exactly as the `@name` capture reads them — original case, no owner. Sorted,
     /// deduplicated. Empty for non-code pages. Inherent-impl and
     /// trait-declaration methods are in; trait-impl methods
     /// (`Default::default`, `Extractor::extract` on the implementing page)
     /// are out by owner, never by text (see the 2026-09-03 prefix-match and
     /// methods design). Python class methods are included
     /// (`function_definition`). JS/TS/Go pages always carry an empty list:
-    /// their method node kinds aren't in the checked set, a scope limit,
-    /// not a fact about the file. Search matches these whole, never
-    /// word-split.
+    /// their queries match methods only as `@item`s, never as kept member
+    /// `@def`s, so none reaches this list — a scope limit, not a fact about
+    /// the file. Search matches these whole, never word-split.
     pub methods: Vec<String>,
+    /// The top-level items and methods of a code page, private ones and
+    /// tests included, with the lines each spans in the original source
+    /// file, so an agent can read just those lines. Sorted by
+    /// `(start_line, end_line, name)`. Empty for non-code pages. Written to
+    /// `items.json`, not `index.json`.
+    ///
+    /// Covered: functions and methods; types (struct, class, enum, trait,
+    /// interface, union, type alias, exported macro); Rust `mod`s; and
+    /// top-level values — Rust `const`/`static`, Python module assignments,
+    /// C++ namespace-scope variables, Go package-level `const`/`var` (one
+    /// item per name, each grouped spec with its own lines), and JS/TS
+    /// top-level variables that hold no function. Not items: fields,
+    /// variants, associated consts and types, impl headers, function-local
+    /// definitions.
+    ///
+    /// `public` applies the gate `## Exports` uses. Where the query itself is
+    /// that gate (Rust, JS/TS), an item no export pattern matches reads
+    /// `false`.
+    ///
+    /// Known gaps: a Rust `macro_rules!` without `#[macro_export]` is not an
+    /// item, because `rust_placement` rejects it before visibility is known;
+    /// nor is a function in a Rust `extern` block. A JS/TS method of an
+    /// exported class, or an exported variable, reads `public: false`: the
+    /// query has no pattern that exports it. An object-literal or
+    /// anonymous-class method is a free `fn`, its owner unknown. The names
+    /// of one multi-declarator statement (`int a = 1, b;`) share its range.
+    pub items: Vec<CodeItem>,
+}
+
+/// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CodeItemKind {
+    /// A free function.
+    Fn,
+    /// A function with an owner: an `impl` or class method, a trait method.
+    Method,
+    /// A struct, class, enum, trait, interface, union, type alias, or
+    /// exported macro.
+    Type,
+    /// A constant, static, or module-level variable.
+    Value,
+    /// A module declaration.
+    Module,
+}
+
+/// One definition of a code page and where it lives. Field order is the
+/// `items.json` key order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct CodeItem {
+    pub kind: CodeItemKind,
+    /// The name as the source writes it.
+    pub name: String,
+    /// The enclosing scopes, joined the way the language's signatures join
+    /// them (`Wiki`, `<T as Display>`, `Outer.Inner`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    /// The one-line signature as the source reads it, with no owner spliced
+    /// in, so it can be searched for in the file.
+    pub signature: String,
+    /// 1-based, inclusive, in the original file: from the first attached doc
+    /// comment or attribute line to the item's last line.
+    pub start_line: usize,
+    pub end_line: usize,
+    /// The first sentence of the item's own doc comment, capped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<String>,
+    /// Whether the item is part of the page's export surface (`symbols`).
+    pub public: bool,
+    /// The `path` of the file holding this item's other half, when one is
+    /// known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub twin: Option<String>,
 }
 
 #[derive(Default, Clone, Debug)]

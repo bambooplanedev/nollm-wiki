@@ -18,8 +18,9 @@ src/walk.rs           src/formats/            src/lib.rs             src/graph.r
 
 SourceFile     →      Entity        →         BTreeMap<id,        →  Graph             →  pages (String)     →   Manifest            →  LintReport
 (sorted by                                     Entity>                (edges + pagerank)   + .wiki/cache.json      + index.json/.md,
- rel_path)                                                                                  fingerprints            llms.txt, AGENTS.md,
-                                                                                                                     graph.json (--emit-json)
+ rel_path)                                                                                  fingerprints            items.json, llms.txt,
+                                                                                                                     AGENTS.md, graph.json
+                                                                                                                     (--emit-json)
 ```
 
 1. **Walk** (`walk::walk`) — recursively lists `input`, respecting
@@ -49,7 +50,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    then runs, after disambiguation has produced final, already-unique ids: any
    id that happens to equal a reserved manifest base name (`index`, `llms`,
    `agents`, `graph`) is rewritten to `<id>_page`, `<id>_page_2`, ..., with a
-   warning on stderr. Produces `BTreeMap<String, Entity>`.
+   warning on stderr. Finally `extract_cpp::pair_declarations` pairs each C++
+   header's declarations with the definitions in its one implementation file:
+   the definition inherits the doc and both items' `twin` name the other's
+   lines; overloads and ambiguous groups stay unpaired. Produces
+   `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links three ways. Mention edges: entity bodies are scanned for other
    entities' names and aliases (the phrase index); a candidate whose target
@@ -92,7 +97,23 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    [Incremental build](#incremental-build)).
 6. **Manifest** (`manifest::build_manifest`) — builds `index.json`,
    `index.md`, `llms.txt`, `AGENTS.md`, and (with `--emit-json`)
-   `graph.json` from the final entity map and graph.
+   `graph.json` from the final entity map and graph, and
+   `manifest::render_items_json` writes the `items.json` sidecar (before
+   `index.json`, whose change triggers `serve`'s reload). Items live beside
+   the catalog, not in it, because they outweigh it several times over and
+   `index.json` is served whole as `wiki://index`. `items.json` is one
+   compact object keyed by page id, in id order, holding only code pages
+   with at least one item; each value lists that page's items, one object
+   per item, keys in this order — `kind` (`fn`, `method`, `type` for a
+   struct, class, enum, trait, interface, union, exported macro or type
+   alias in every language, `value` for a constant, static or module-level
+   variable, `module`), `name`, `owner` (omitted when free), `signature` (as
+   the source reads it, no owner spliced in), `start_line`, `end_line`
+   (1-based, inclusive, in the original file, from the first attached doc
+   or attribute line), `doc` (the doc comment's first sentence, at most 120
+   chars; omitted when none), `public` (whether it is in `## Exports`), and
+   `twin` (`path:start-end` of a paired C++ declaration or definition;
+   omitted when none).
 7. **Lint** (`lint::lint`) — checks the in-memory rendered `pages` map for
    broken `[[links]]` and orphaned pages; no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
@@ -123,7 +144,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
-| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
+| `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link and orphan-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir for `search()` and `neighbors()` (context-pack) queries, plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search`/`neighbors`/`lint` tools and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources; `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes, keeping the last good snapshot if a reload fails. |
@@ -676,6 +697,43 @@ is a line comment, so code following the module's closing brace on the same
 line would otherwise be commented out. `#[cfg(test)]` on a non-`mod` item is
 still not stripped.
 
+**Items are every top-level item and method, not the export surface.** A
+language's query marks definitions that may be private with `@item` beside
+its `@def` patterns; a match yields an item from either, deduplicated on
+the `@name` node so a `pub fn` matched by both is one item. `public` is the
+`@def` match's `should_keep` result, so it agrees with `## Exports` exactly;
+an `@item`-only match is private where the `@def` patterns already gate
+visibility (Rust, JS/TS), and runs `should_keep` itself elsewhere. Covered:
+functions and methods, types (`type` aliases included, in every language),
+Rust `mod`s, and top-level values — Rust `const`/`static`, Python module
+assignments, C++ namespace-scope variables, Go package-level `const`/`var`
+(one item per name; a spec in a `const ( … )` group has its own lines and
+doc), and JS/TS top-level variables that hold no function. Values are
+`@item`-only, so `## Exports`, `defined` and `methods` never see them.
+Fields, variants, associated consts and types, impl headers and
+function-local definitions are not items. An item's range climbs from its
+signature node over the contiguous leads directly above it
+(`LangSpec::item_lead`: Rust attributes and `///` lines, Doxygen comments,
+JSDoc blocks, Go `//` lines, with Go directives such as `//go:generate`
+kept in the range but out of the doc), stopping at a blank line, at a lead
+that trails code on its own line (`int n; ///< Count.`), or at anything
+else, so a stray doc comment never stretches it. A C++ member-trailing doc
+(`///<`, `//!<`, `/**<`, `/*!<`) stops the climb even on a line of its own:
+it documents the member before it.
+Items of a Rust file with a test module come from a second pass over the
+**unstripped** text and its tree (`Stripped::Rewritten` carries it), so
+their lines are the file's and test functions are items too, while
+`## Exports` and the body still come from the stripped text. Such an item
+stays `public` only if the stripped pass has it as public too, so a bare
+`pub fn` inside the test module reads private, as `## Exports` has it.
+
+Known gaps: a private `macro_rules!` is not an item (`rust_placement`
+rejects it before visibility is known), nor is a function in a Rust
+`extern` block; a JS/TS method of an exported class, or an exported
+variable, reads `public: false` because no export pattern matches it; an
+object-literal or anonymous-class method is a free `fn`, its owner
+unknown; and the names of one multi-declarator statement share its range.
+
 ## Testing
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
@@ -755,8 +813,8 @@ still not stripped.
   `Wiki::search`. Until symbol hits exist, a case is scored by the expected
   symbol's *file* (`file_hit@1`, `file_hit@3`, `mrr@10`, mean `search_json`
   tokens, per split), gating on `file_hit@3` floors before snapshotting the
-  table; it also records a `neighbors` pack size and the title-as-query count
-  without asserting them.
+  table; it also records the `neighbors` pack size without asserting it, and
+  the title-as-query count is floored (27/28).
 
   **The corpus is frozen on 2026-10-22 at `a81a332` (the crate's sources as of
   `7209ee2`; the SHAs may dangle after a squash, `SYMBOL_CORPUS_HASH` is the

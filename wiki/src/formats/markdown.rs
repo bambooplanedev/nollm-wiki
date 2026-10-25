@@ -41,6 +41,7 @@ impl Extractor for MarkdownExtractor {
             imports: Vec::new(),
             defined: Vec::new(),
             methods: Vec::new(),
+            items: Vec::new(),
         }
     }
 }

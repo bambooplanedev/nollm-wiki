@@ -182,7 +182,9 @@ fn compile_inner(
     // Runs after slug dedup so graph/render/manifest/lint all see the same,
     // final ids. Processes the (already sorted) BTreeMap in key order so the
     // remap is identical across runs/machines/thread counts.
-    let entities = remap_reserved_names(entities);
+    let mut entities = remap_reserved_names(entities);
+    // Needs the final ids and `source_path`s, so it follows the remap.
+    formats::extract_cpp::pair_declarations(&mut entities);
 
     // 3. Graph.
     let graph = graph::build_graph(&entities);
@@ -290,6 +292,12 @@ fn compile_inner(
 
     // 6. Manifest artifacts.
     let man = manifest::build_manifest(&project, &entities, &graph);
+    // Ahead of `index.json`, whose change is what tells `serve` to reload,
+    // so a reload never pairs a new index with the previous items.
+    rewrite::write_atomic(
+        &output.join("items.json"),
+        &manifest::render_items_json(&entities),
+    )?;
     rewrite::write_atomic(
         &output.join("index.json"),
         &manifest::render_index_json(&man),
@@ -762,6 +770,7 @@ mod tests {
             imports: vec![],
             defined: vec![],
             methods: vec![],
+            items: vec![],
         }
     }
 

@@ -1,6 +1,11 @@
 use std::fs;
 
 fn compile_tree(files: &[(&str, &str)]) -> serde_json::Value {
+    compile_with_items(files).0
+}
+
+/// The compiled `index.json` and its `items.json` sidecar.
+fn compile_with_items(files: &[(&str, &str)]) -> (serde_json::Value, serde_json::Value) {
     let src = tempfile::tempdir().unwrap();
     let out = tempfile::tempdir().unwrap();
     for (path, body) in files {
@@ -9,7 +14,10 @@ fn compile_tree(files: &[(&str, &str)]) -> serde_json::Value {
         fs::write(p, body).unwrap();
     }
     wiki::compile(src.path(), out.path(), &wiki::CompileOptions::default()).unwrap();
-    serde_json::from_str(&fs::read_to_string(out.path().join("index.json")).unwrap()).unwrap()
+    let read = |name: &str| {
+        serde_json::from_str(&fs::read_to_string(out.path().join(name)).unwrap()).unwrap()
+    };
+    (read("index.json"), read("items.json"))
 }
 
 fn neighbors_out<'a>(index: &'a serde_json::Value, id: &str) -> Vec<&'a str> {
@@ -110,4 +118,75 @@ fn a_free_function_declared_and_defined_still_resolves_by_name() {
         out.contains(&"tick"),
         "by_defined went dead for a free function: {out:?}"
     );
+}
+
+fn items_of(
+    (index, items): &(serde_json::Value, serde_json::Value),
+    path: &str,
+) -> Vec<serde_json::Value> {
+    let id = index["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["path"] == path)
+        .unwrap_or_else(|| panic!("no page {path} in {index:#}"))["id"]
+        .as_str()
+        .unwrap();
+    items[id].as_array().cloned().unwrap_or_default()
+}
+
+#[test]
+fn a_definition_inherits_the_declaration_doc_and_both_point_at_each_other() {
+    let idx = compile_with_items(&[
+        (
+            "include/book.h",
+            "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n};\n",
+        ),
+        (
+            "src/book.cpp",
+            "#include \"book.h\"\nvoid Book::apply(int o) {\n  (void)o;\n}\n",
+        ),
+    ]);
+    let h = items_of(&idx, "include/book.h");
+    let apply_h = h.iter().find(|i| i["name"] == "apply").unwrap();
+    assert_eq!(apply_h["twin"], "src/book.cpp:2-4");
+    let c = items_of(&idx, "src/book.cpp");
+    let apply_c = c.iter().find(|i| i["name"] == "apply").unwrap();
+    assert_eq!(apply_c["owner"], "Book");
+    assert_eq!(apply_c["doc"], "Applies an order.");
+    assert_eq!(apply_c["twin"], "include/book.h:3-4");
+}
+
+#[test]
+fn overloads_are_left_unpaired() {
+    let idx = compile_with_items(&[
+        ("book.h", "class Book {\npublic:\n  /// Int.\n  void apply(int o);\n  void apply(double o);\n};\n"),
+        ("book.cpp", "void Book::apply(int o) {}\nvoid Book::apply(double o) {}\n"),
+    ]);
+    for path in ["book.h", "book.cpp"] {
+        let items = items_of(&idx, path);
+        assert_eq!(
+            items.iter().filter(|i| i["name"] == "apply").count(),
+            2,
+            "{path}"
+        );
+        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
+    }
+    assert!(items_of(&idx, "book.cpp")
+        .iter()
+        .all(|i| i.get("doc").is_none()));
+}
+
+#[test]
+fn two_impl_files_with_one_stem_pair_nothing() {
+    let idx = compile_with_items(&[
+        ("a/book.h", "/// Doc.\nvoid run();\n"),
+        ("a/book.cpp", "void run() {}\n"),
+        ("b/book.cpp", "void run() {}\n"),
+    ]);
+    for path in ["a/book.h", "a/book.cpp", "b/book.cpp"] {
+        let items = items_of(&idx, path);
+        assert!(items.iter().any(|i| i["name"] == "run"), "{path}");
+        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
+    }
 }

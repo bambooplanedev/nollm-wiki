@@ -485,6 +485,7 @@ mod tests {
             imports: vec![],
             defined: vec![],
             methods: vec![],
+            items: vec![],
         }
     }
     fn map(v: Vec<Entity>) -> BTreeMap<String, Entity> {

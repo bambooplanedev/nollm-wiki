@@ -60,13 +60,13 @@ pub struct ContextPack {
     pub included: Vec<String>,
 }
 
-/// What `Wiki::search` learns about one page in its first pass. Scores
-/// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
-/// held until every page has been seen; the page text itself is not.
 /// The phrase a degraded target block carries when a page's body does not
 /// fit the pack's token budget. Tests assert on it; keep it in one place.
 pub const OVER_BUDGET_NOTE: &str = "exceeds the budget";
 
+/// What `Wiki::search` learns about one page in its first pass. Scores
+/// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
+/// held until every page has been seen; the page text itself is not.
 struct Candidate<'a> {
     entry: &'a Entry,
     /// Per query token, in query order: (summed field weights, body
@@ -562,6 +562,14 @@ impl Wiki {
         seen
     }
 
+    /// Between the blocks of a context pack.
+    const SEPARATOR: &str = "\n\n---\n\n";
+
+    /// Pagerank of `id`, or 0 for an id the index does not know.
+    fn pagerank_of(&self, id: &str) -> f64 {
+        self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
     /// context pack: target first, neighbors ordered ascending by pagerank
     /// (highest-centrality lands last — "lost in the middle").
@@ -582,14 +590,6 @@ impl Wiki {
     /// centrality neighbor beats several lighter lower-centrality ones; see
     /// `full_neighbors_max_tokens_prefers_centrality_over_packing`.
     /// Neighbors get summary blocks unless `full_neighbors` is set.
-    /// Between the blocks of a context pack.
-    const SEPARATOR: &str = "\n\n---\n\n";
-
-    /// Pagerank of `id`, or 0 for an id the index does not know.
-    fn pagerank_of(&self, id: &str) -> f64 {
-        self.entries.get(id).map_or(0.0, |e| e.pagerank)
-    }
-
     pub fn neighbors(&self, id: &str, depth: usize, budget: &PackBudget) -> Option<ContextPack> {
         let target = self.entries.get(id)?;
 
