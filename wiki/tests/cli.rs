@@ -336,6 +336,40 @@ fn search_cli_accepts_valid_kinds() {
 }
 
 #[test]
+fn search_cli_tag_lists_and_filters() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("a.md"), "---\ntags: [mem]\n---\n# A\n\nzebra\n").unwrap();
+    fs::write(input.join("b.md"), "# B\n\nzebra\n").unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let search = |args: &[&str]| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .arg("search")
+            .args(args)
+            .args(["--dir", output.to_str().unwrap()])
+            .assert()
+    };
+
+    search(&["--tag", "mem"])
+        .success()
+        .stdout(contains("a  "))
+        .stdout(contains("b  ").not());
+    search(&["zebra", "--tag", "#MEM"])
+        .success()
+        .stdout(contains("a  "))
+        .stdout(contains("b  ").not());
+    search(&[])
+        .failure()
+        .stderr(contains("search needs a query or --tag"));
+    search(&["--tag", "#"])
+        .failure()
+        .stderr(contains("empty tag"));
+}
+
+#[test]
 fn unknown_kind_lists_groups() {
     let dir = compile_seed_corpus();
     let out = dir.path().join("out");

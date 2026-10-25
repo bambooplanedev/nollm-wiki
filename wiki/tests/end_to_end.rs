@@ -891,3 +891,25 @@ fn items_json_round_trips() {
     // Only the test module and its fn carry the key.
     assert_eq!(json.matches("\"test\"").count(), 2, "{json}");
 }
+
+#[test]
+fn incremental_compile_rerenders_on_tag_edit() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    let opts = CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    write(&input, "n.md", "---\ntags: [a]\n---\n# N\nbody\n");
+    compile(&input, &output, &opts).unwrap();
+    assert!(fs::read_to_string(output.join("n.md"))
+        .unwrap()
+        .contains("- tags: a"));
+    write(&input, "n.md", "---\ntags: [b]\n---\n# N\nbody\n");
+    compile(&input, &output, &opts).unwrap();
+    assert!(fs::read_to_string(output.join("n.md"))
+        .unwrap()
+        .contains("- tags: b"));
+}

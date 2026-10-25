@@ -10,6 +10,7 @@ pub struct ManifestEntry {
     pub title: String,
     pub kind: String,
     pub aliases: Vec<String>,
+    pub tags: Vec<String>,
     pub path: String,
     pub page: String,
     pub summary: Option<String>,
@@ -61,6 +62,7 @@ pub fn build_manifest(
                 title: e.name.clone(),
                 kind: e.kind.label(),
                 aliases: e.aliases.clone(),
+                tags: e.tags.clone(),
                 path: e.source_path.clone(),
                 page: format!("{id}.md"),
                 summary: e.summary.clone(),
@@ -191,6 +193,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             aliases: vec![],
+            tags: vec![],
             created: String::new(),
             body: body.into(),
             source_path: format!("{id}.txt"),
@@ -292,6 +295,10 @@ mod tests {
         // Key order in the pretty output: neighbors_in < defined < methods,
         // so `methods` is the last key of every entry.
         let a_text = &json[json.find("\"id\": \"alpha\"").unwrap()..];
+        let pos_aliases = a_text.find("\"aliases\"").unwrap();
+        let pos_tags = a_text.find("\"tags\"").unwrap();
+        let pos_path = a_text.find("\"path\"").unwrap();
+        assert!(pos_aliases < pos_tags && pos_tags < pos_path, "{json}");
         let pos_neighbors_in = a_text.find("\"neighbors_in\"").unwrap();
         let pos_defined = a_text.find("\"defined\"").unwrap();
         let pos_methods = a_text.find("\"methods\"").unwrap();

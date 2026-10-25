@@ -148,7 +148,10 @@ pub(crate) struct SearchParams {
     /// Filter by source kind: the groups `code` and `docs`, or one exact
     /// kind: `text`, `markdown`, or `code:<lang>` (e.g. `code:rust`).
     pub kind: Option<String>,
-    /// Maximum number of hits (default 10).
+    /// Only pages carrying this tag; `a` also matches `a/b`. With an empty
+    /// query, lists every such page.
+    pub tag: Option<String>,
+    /// Maximum number of hits (default 10 with a query; none for a tag-only listing).
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
@@ -198,7 +201,7 @@ impl WikiServer {
     }
 
     #[tool(
-        description = "Search the wiki for pages by keyword. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `page` for a module's outline."
+        description = "Search the wiki for pages by keyword, or list pages by tag. Returns one line per page (`id  path  title — summary`) with indented `path:start-end  name  signature  — doc` lines for matching code symbols; `format: json` returns JSON. Use `page` for a module's outline."
     )]
     async fn search(
         &self,
@@ -213,6 +216,13 @@ impl WikiServer {
                 )
             })?),
         };
+        let tag = match p.tag.as_deref() {
+            None => None,
+            Some(s) => Some(
+                crate::query::tag_filter(s)
+                    .ok_or_else(|| McpError::invalid_params(format!("empty tag {s:?}"), None))?,
+            ),
+        };
         let (wiki, stale) = self.state.snapshot().await;
         let json = match p.format.as_deref() {
             None | Some("lines") => false,
@@ -224,7 +234,7 @@ impl WikiServer {
                 ))
             }
         };
-        let hits = wiki.search(&p.query, kind.as_ref(), p.limit.unwrap_or(10));
+        let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), p.limit);
         let text = if json {
             search_json(hits)
         } else {

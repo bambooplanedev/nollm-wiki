@@ -367,6 +367,7 @@ impl Extractor for CodeExtractor {
             id: slugify(&name),
             name,
             aliases: Vec::new(),
+            tags: Vec::new(),
             created: String::new(),
             body: source,
             source_path: String::new(),

@@ -3,7 +3,7 @@
 use std::fs;
 use tempfile::tempdir;
 use wiki::model::{KindFilter, SourceKind};
-use wiki::query::{PackBudget, Wiki};
+use wiki::query::{tag_filter, PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
 fn build() -> tempfile::TempDir {
@@ -962,4 +962,89 @@ fn a_path_under_another_root_does_not_resolve() {
     ] {
         assert!(w.resolve_id(arg).is_err(), "{arg}");
     }
+}
+
+#[test]
+fn index_json_without_tags_still_loads() {
+    let dir = build();
+    let path = dir.path().join("out").join("index.json");
+    let mut v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for e in v["entries"].as_array_mut().unwrap() {
+        e.as_object_mut().unwrap().remove("tags");
+    }
+    fs::write(&path, serde_json::to_string(&v).unwrap()).unwrap();
+    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    assert!(!w.search("beta", None, 10).is_empty());
+}
+
+fn build_tag_corpus() -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(&input).unwrap();
+    for i in 1..=12 {
+        let body = format!("---\ntags: [project/wiki]\n---\n# N{i}\n\nquokka page.\n");
+        fs::write(input.join(format!("n{i}.md")), body).unwrap();
+    }
+    fs::write(
+        input.join("root.md"),
+        "---\ntags: [Project]\n---\n# Root\n\nquokka page.\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("other.md"),
+        "---\ntags: [projects]\n---\n# Other\n\nquokka page.\n",
+    )
+    .unwrap();
+    fs::write(input.join("z.rs"), "//! quokka\npub fn z() {}\n").unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+#[test]
+fn tag_only_lists_every_tagged_page_in_path_order() {
+    let (_d, w) = build_tag_corpus();
+    let hits = w.search_tagged("", None, Some("project"), None);
+    let paths: Vec<_> = hits.iter().map(|h| h.path.as_str()).collect();
+    assert_eq!(hits.len(), 13);
+    assert!(paths.windows(2).all(|p| p[0] <= p[1]));
+    assert!(hits.iter().all(|h| h.score == 0.0 && h.snippet.is_none()));
+    assert_eq!(w.search_tagged("", None, Some("project"), Some(3)).len(), 3);
+}
+
+#[test]
+fn tag_filters_a_query_and_combines_with_kind() {
+    let (_d, w) = build_tag_corpus();
+    let hits = w.search_tagged("quokka", None, Some("project"), Some(50));
+    assert_eq!(hits.len(), 13);
+    assert!(hits.iter().all(|h| std::path::Path::new(&h.path)
+        .extension()
+        .is_some_and(|e| e == "md")
+        && h.path != "other.md"));
+    let code = KindFilter::parse("code").unwrap();
+    assert!(w
+        .search_tagged("quokka", Some(&code), Some("project"), None)
+        .is_empty());
+}
+
+#[test]
+fn tag_filter_normalizes_and_rejects_empty() {
+    assert_eq!(tag_filter(" #Project/ "), Some("project".into()));
+    assert_eq!(tag_filter("##deep"), Some("deep".into()));
+    assert_eq!(tag_filter("# deep"), Some("deep".into()));
+    assert_eq!(tag_filter("deep//"), Some("deep".into()));
+    assert_eq!(tag_filter("#"), None);
+    assert_eq!(tag_filter(""), None);
+}
+
+#[test]
+fn punctuation_query_with_tag_is_the_listing() {
+    let (_d, w) = build_tag_corpus();
+    assert_eq!(
+        w.search_tagged("!!!", None, Some("project"), None).len(),
+        13
+    );
+    assert!(w.search("!!!", None, 10).is_empty());
 }

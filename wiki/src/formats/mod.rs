@@ -37,6 +37,19 @@ pub(crate) fn derive_name_from_path(rel_path: &str) -> String {
     crate::model::title_case(&stem.replace(['_', '-'], " "))
 }
 
+/// Front-matter tags as stored: `#` stripped, trimmed, lowercased, empties
+/// dropped, duplicates removed keeping the first-seen order.
+pub fn normalize_tags(raw: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in raw {
+        let t = t.trim().trim_start_matches('#').trim().to_lowercase();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
+}
+
 /// Every extractor turns already-decoded text into a semantic `Entity`.
 /// `source_path` and `content_hash` are filled by the `Registry`, not the extractor.
 pub trait Extractor: Send + Sync {
