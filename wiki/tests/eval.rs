@@ -98,16 +98,6 @@ const CHROME_SECTIONS: [&str; 6] = [
 /// pass for any page.
 const MIN_TOKEN_CHARS: usize = 4;
 
-/// Queries exempt from the majority-coverage guard: deliberate minimal
-/// repros for a specific fix, whose whole point is a word the target page
-/// does not contain (e.g. a stemming case like `wikilinks` against a page
-/// that only has `wikilink`). Empty today. Adding an entry is a claim that
-/// the label is a known-unreachable target, not an oversight.
-///
-/// The guard this exempts from is narrower than "unreachable target": see
-/// `covers_majority`'s doc comment for what it actually checks and does not.
-const EXEMPT: &[&str] = &[];
-
 /// The searchable content of a rendered page: every section except the
 /// generated chrome, lowercased.
 fn searchable_content(page: &str) -> String {
@@ -225,16 +215,12 @@ fn every_label_names_a_page_that_could_answer_it() {
             wiki.has_page(expected),
             "label `{query}` expects page `{expected}`, which does not exist",
         );
-        if EXEMPT.contains(query) {
-            continue;
-        }
         let page = wiki.page(expected).expect("has_page just succeeded");
         assert!(
             covers_majority(query, &searchable_content(&page)),
             "label `{query}` -> `{expected}`: fewer than half its tokens \
              appear in that page's searchable content, so the page is not \
-             the answer. Fix the label, or add the query to EXEMPT if it is \
-             a deliberate minimal repro.",
+             the answer. Fix the label.",
         );
     }
 }

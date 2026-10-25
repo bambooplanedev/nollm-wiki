@@ -34,12 +34,8 @@ pub struct Walked {
 /// `keep` decides, from the relative path alone, whether a file is worth
 /// reading. It is consulted *before* the file is opened, which is the whole
 /// point: see the note at the read site below.
-pub fn walk(
-    root: &Path,
-    respect_ignore: bool,
-    keep: &dyn Fn(&str) -> bool,
-) -> Result<Walked, std::io::Error> {
-    Ok(walk_with(
+pub fn walk(root: &Path, respect_ignore: bool, keep: &dyn Fn(&str) -> bool) -> Walked {
+    walk_with(
         root,
         |b| {
             b.hidden(respect_ignore)
@@ -50,7 +46,7 @@ pub fn walk(
                 .parents(respect_ignore);
         },
         keep,
-    ))
+    )
 }
 
 fn walk_with(
@@ -112,8 +108,8 @@ fn walk_with(
 /// Walk a memory folder: every ignore rule off (a memory folder is usually
 /// git-excluded on purpose), hidden files skipped, `memory.md` (any case) left
 /// out because it is the folder's own index. Sorted like [`walk`].
-pub fn walk_memory(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Result<Walked, std::io::Error> {
-    Ok(walk_with(
+pub fn walk_memory(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Walked {
+    walk_with(
         dir,
         |b| {
             b.hidden(true)
@@ -129,7 +125,7 @@ pub fn walk_memory(dir: &Path, keep: &dyn Fn(&str) -> bool) -> Result<Walked, st
                 .is_some_and(|n| n.eq_ignore_ascii_case("memory.md"))
                 && keep(p)
         },
-    ))
+    )
 }
 
 #[cfg(test)]
@@ -155,7 +151,7 @@ mod tests {
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
 
-        let files = walk(root, true, &all).unwrap().files;
+        let files = walk(root, true, &all).files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["a.txt", "b.txt", "sub/c.txt"]);
         assert_eq!(files[0].bytes, b"aaa");
@@ -167,7 +163,7 @@ mod tests {
         let root = dir.path();
         fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
         fs::write(root.join("ignored.txt"), b"nope").unwrap();
-        let files = walk(root, false, &all).unwrap().files;
+        let files = walk(root, false, &all).files;
         assert!(files.iter().any(|f| f.rel_path == "ignored.txt"));
     }
 
@@ -182,7 +178,7 @@ mod tests {
         fs::create_dir_all(root.join(".git")).unwrap();
         fs::write(root.join(".git/HEAD"), b"ref: refs/heads/main").unwrap();
 
-        let files = walk(root, true, &all).unwrap().files;
+        let files = walk(root, true, &all).files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
 
         assert!(rels.contains(&"keep.txt".to_string()));
@@ -212,7 +208,6 @@ mod tests {
         let files = walk(root, true, &|p| {
             Path::new(p).extension() == Some("txt".as_ref())
         })
-        .unwrap()
         .files;
 
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
@@ -236,7 +231,7 @@ mod tests {
         fs::create_dir(root.join("sub")).unwrap();
         fs::write(root.join("sub/b.md"), b"b").unwrap();
 
-        let w = walk_memory(root, &all).unwrap();
+        let w = walk_memory(root, &all);
         let rels: Vec<_> = w.files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["a.md", "sub/b.md"]);
         assert_eq!(w.dirs, vec![root.to_path_buf(), root.join("sub")]);
@@ -251,7 +246,7 @@ mod tests {
         fs::write(root.join("real.txt"), b"real").unwrap();
         symlink(root.join("real.txt"), root.join("link.txt")).unwrap();
 
-        let files = walk(root, true, &all).unwrap().files;
+        let files = walk(root, true, &all).files;
         let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
         assert!(
             rels.contains(&"real.txt".to_string()),

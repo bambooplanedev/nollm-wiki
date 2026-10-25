@@ -4,7 +4,6 @@ use crate::hash::{combine, to_hex};
 use crate::model::{Edges, Entity, SourceKind};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -155,16 +154,12 @@ pub(crate) fn read_notes_from(path: &Path) -> String {
     let Ok(text) = std::fs::read_to_string(path) else {
         return String::new();
     };
-    let notes = parse_sections(&text)
-        .get("Notes")
-        .cloned()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let sections = parse_sections(&text);
+    let notes = sections.get("Notes").map_or("", |s| s.trim());
     if notes == NOTES_PLACEHOLDER {
         String::new()
     } else {
-        notes
+        notes.to_string()
     }
 }
 
@@ -208,17 +203,18 @@ pub(crate) fn page_source_index(output: &Path) -> BTreeMap<String, BTreeSet<Path
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Some(meta) = parse_sections(&text).get("Metadata").cloned() else {
+        let sections = parse_sections(&text);
+        let Some(meta) = sections.get("Metadata") else {
             continue;
         };
-        for line in meta.lines() {
-            if let Some(src) = line.trim().strip_prefix("- source: ") {
-                index
-                    .entry(src.trim().to_string())
-                    .or_default()
-                    .insert(path.clone());
-                break;
-            }
+        if let Some(src) = meta
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("- source: "))
+        {
+            index
+                .entry(src.trim().to_string())
+                .or_default()
+                .insert(path.clone());
         }
     }
     index
@@ -405,12 +401,7 @@ pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = std::path::PathBuf::from(tmp);
-    {
-        let f = std::fs::File::create(&tmp)?;
-        let mut w = std::io::BufWriter::new(f);
-        w.write_all(content.as_bytes())?;
-        w.flush()?;
-    }
+    std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, path)
 }
 

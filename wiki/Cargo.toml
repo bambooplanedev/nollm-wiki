@@ -34,7 +34,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-go = "0.25"
 tree-sitter-cpp = "0.23"
 rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemars"] }
-tokio = { version = "1", features = ["rt", "io-std", "macros"] }
+tokio = { version = "1", features = ["rt"] }
 
 [dev-dependencies]
 insta = "1"

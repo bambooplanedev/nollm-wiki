@@ -17,13 +17,14 @@ pub fn load_compiled_pages(dir: &std::path::Path) -> std::io::Result<BTreeMap<St
     let mut pages = BTreeMap::new();
     for entry in std::fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                if stem == "index" || stem == "AGENTS" {
-                    continue;
-                }
-                pages.insert(stem.to_string(), std::fs::read_to_string(&path)?);
-            }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if stem != "index" && stem != "AGENTS" {
+            pages.insert(stem.to_string(), std::fs::read_to_string(&path)?);
         }
     }
     Ok(pages)
@@ -32,13 +33,13 @@ pub fn load_compiled_pages(dir: &std::path::Path) -> std::io::Result<BTreeMap<St
 /// The slug side of a wikilink capture: everything before the first `|`
 /// (`[[target|display]]`). A bare `[[x]]` returns `x`.
 fn link_target(inner: &str) -> &str {
-    inner.split('|').next().unwrap_or(inner)
+    inner.split_once('|').map_or(inner, |(target, _)| target)
 }
 
 /// The human-readable side of a wikilink capture: everything after the last `|`
 /// (or the whole capture if there is no `|`). Used for broken-link reports.
 fn link_display(inner: &str) -> &str {
-    inner.rsplit('|').next().unwrap_or(inner)
+    inner.rsplit_once('|').map_or(inner, |(_, display)| display)
 }
 
 /// Whether a rendered page's `## Metadata` says `- kind: code:<lang>`.
@@ -51,7 +52,6 @@ fn is_code_page(sections: &BTreeMap<String, String>) -> bool {
 
 /// `pages`: page id -> rendered markdown. Purely in-memory (no disk re-read).
 pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
-    let known: std::collections::BTreeSet<&String> = pages.keys().collect();
     let mut incoming: BTreeMap<String, usize> = pages.keys().map(|k| (k.clone(), 0)).collect();
     let mut broken_links = Vec::new();
     let mut large = Vec::new();
@@ -62,7 +62,8 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         // budget with it is degraded to a summary; code pages are exempt
         // (their outline is the intended view).
         let tokens = (text.chars().count() + Wiki::SEPARATOR.chars().count()) / 4;
-        if !is_code_page(&sections) && tokens > crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS {
+        let is_code = is_code_page(&sections);
+        if !is_code && tokens > crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS {
             large.push((id.clone(), tokens));
         }
         // Scan a code mask, not the raw page: a `[[slug|Name]]` written as a
@@ -72,14 +73,12 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         // dropped before the scan. Text and markdown bodies are scanned — a
         // wikilink there is the author's, and a broken one is the point.
         let scan: Cow<str> = match sections.get("Body") {
-            Some(body) if is_code_page(&sections) && !body.is_empty() => {
-                text.replacen(body.as_str(), "", 1).into()
-            }
+            Some(body) if is_code && !body.is_empty() => text.replacen(body.as_str(), "", 1).into(),
             _ => text.into(),
         };
         for cap in LINK.captures_iter(&mask_code(&scan)) {
             let inner = &cap[1];
-            if !known.contains(&slugify(link_target(inner))) {
+            if !pages.contains_key(&slugify(link_target(inner))) {
                 broken_links.push((id.clone(), link_display(inner).to_string()));
             }
         }
@@ -94,12 +93,11 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         }
     }
 
-    let mut orphans: Vec<String> = incoming
+    let orphans: Vec<String> = incoming
         .into_iter()
         .filter(|(_, c)| *c == 0)
         .map(|(id, _)| id)
         .collect();
-    orphans.sort();
     LintReport {
         total_pages: pages.len(),
         broken_links,

@@ -154,7 +154,7 @@ fn compile_inner(
     // generated pages back in as sources (which would also self-trigger a
     // `--watch` recompile loop).
     let registry = Registry::with_defaults();
-    let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p))?;
+    let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p));
 
     // Memory folders: the repo's `.agents/memory` and the optional extra
     // folder. Both are walked with every ignore rule off (they are usually
@@ -196,7 +196,7 @@ fn compile_inner(
     let mut memory_files = Vec::new();
     let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
     for (root, in_repo) in &roots {
-        let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p))?;
+        let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p));
         dirs.extend(w.dirs.into_iter().filter(|d| !is_under(d, output)));
         let abs_root = std::path::absolute(root)?;
         for mut sf in w

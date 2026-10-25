@@ -162,12 +162,6 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         .keys()
         .map(|k| (k.clone(), Edges::default()))
         .collect();
-    if entities.is_empty() {
-        return Graph {
-            edges,
-            pagerank: BTreeMap::new(),
-        };
-    }
     let index = build_phrase_index(entities);
     let by_path: BTreeMap<&str, &str> = entities
         .iter()
@@ -438,15 +432,6 @@ fn local_crate_root(source_path: &str) -> Option<&str> {
     parts.next()
 }
 
-pub fn orphan_ids(graph: &Graph) -> Vec<String> {
-    graph
-        .edges
-        .iter()
-        .filter(|(_, e)| e.incoming.is_empty())
-        .map(|(id, _)| id.clone())
-        .collect()
-}
-
 /// Deterministic `PageRank`: fixed 40 iterations, damping 0.85, `BTree` node order.
 fn pagerank(edges: &BTreeMap<String, Edges>) -> BTreeMap<String, f64> {
     let n = edges.len();
@@ -644,19 +629,6 @@ mod tests {
         let trip = ent("trip", "Trip", "We saw a naïve painting.");
         let g = build_graph(&map(vec![ve, trip]));
         assert!(!g.edges["trip"].outgoing.contains("ve"));
-    }
-
-    #[test]
-    fn orphans_have_zero_incoming() {
-        let g = build_graph(&map(vec![
-            ent("a", "Alpha", "mentions Beta"),
-            ent("b", "Beta", "nothing"),
-            ent("c", "Gamma", "nothing"),
-        ]));
-        let o = orphan_ids(&g);
-        assert!(o.contains(&"c".to_string()));
-        assert!(o.contains(&"a".to_string()));
-        assert!(!o.contains(&"b".to_string()));
     }
 
     #[test]

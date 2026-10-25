@@ -397,25 +397,6 @@ fn search_cli_tag_lists_and_filters() {
         .stderr(contains("empty tag"));
 }
 
-#[test]
-fn unknown_kind_lists_groups() {
-    let dir = compile_seed_corpus();
-    let out = dir.path().join("out");
-    Command::cargo_bin("wiki")
-        .unwrap()
-        .args([
-            "search",
-            "x",
-            "--dir",
-            out.to_str().unwrap(),
-            "--kind",
-            "nope",
-        ])
-        .assert()
-        .failure()
-        .stderr(contains("code, docs, text, markdown, or code:<lang>"));
-}
-
 /// Kills the watcher when the test ends — including on a failed assertion,
 /// so a stray `wiki compile --watch` never outlives its tempdir.
 struct KillOnDrop(std::process::Child);

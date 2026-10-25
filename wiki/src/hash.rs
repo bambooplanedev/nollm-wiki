@@ -9,11 +9,7 @@ pub fn hash_str(s: &str) -> [u8; 32] {
 }
 
 pub fn to_hex(h: &[u8; 32]) -> String {
-    let mut out = String::with_capacity(64);
-    for b in h {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
+    blake3::Hash::from_bytes(*h).to_hex().to_string()
 }
 
 /// Order-sensitive hash over a sequence of byte parts, with a length prefix per
