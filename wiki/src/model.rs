@@ -145,6 +145,19 @@ pub struct Entity {
     pub items: Vec<CodeItem>,
 }
 
+impl CodeItemKind {
+    /// The serde name, as `items.json` and the outline print it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CodeItemKind::Fn => "fn",
+            CodeItemKind::Method => "method",
+            CodeItemKind::Type => "type",
+            CodeItemKind::Value => "value",
+            CodeItemKind::Module => "module",
+        }
+    }
+}
+
 /// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -233,6 +246,11 @@ pub enum CallVia {
 }
 
 impl CodeItem {
+    /// `path:start-end`, the item's lines in its source file.
+    pub fn span(&self, path: &str) -> String {
+        format!("{path}:{}-{}", self.start_line, self.end_line)
+    }
+
     /// `owner::name`, or `name` when the item has no owner: how search
     /// prints the item, and a whole-name match for it.
     pub fn qualified_name(&self) -> String {
@@ -455,6 +473,19 @@ pub fn normalize_path(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn code_item_kind_names_match_serde() {
+        for k in [
+            CodeItemKind::Fn,
+            CodeItemKind::Method,
+            CodeItemKind::Type,
+            CodeItemKind::Value,
+            CodeItemKind::Module,
+        ] {
+            assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
+        }
+    }
 
     #[test]
     fn slugify_lowercases_and_replaces_separators() {

@@ -30,10 +30,6 @@ fn family(e: &Entity) -> &str {
     }
 }
 
-fn span(e: &Entity, it: &CodeItem) -> String {
-    format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
-}
-
 /// A function item: (page, item) indexes into `Index::pages`.
 type FnRef = (usize, usize);
 
@@ -74,7 +70,7 @@ impl<'a> Index<'a> {
                 }
                 if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
                     by_name.entry(&it.name).or_default().push((p, i));
-                    by_span.insert(span(e, it), (p, i));
+                    by_span.insert(it.span(&e.source_path), (p, i));
                 }
             }
         }
@@ -230,7 +226,7 @@ pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph) {
                 .iter()
                 .flat_map(|site| index.resolve(site, own, p, &sees))
                 .filter(|&c| c != (p, i))
-                .map(|c| span(index.pages[c.0], index.item(c)))
+                .map(|c| index.item(c).span(&index.pages[c.0].source_path))
                 .collect();
             resolved.push((p, i, calls.into_iter().collect()));
         }
@@ -282,16 +278,12 @@ impl Wiki {
         }
         let by_span: BTreeMap<String, (&str, &CodeItem)> = self
             .code_items()
-            .flat_map(|(p, items)| {
-                items
-                    .iter()
-                    .map(move |it| (format!("{p}:{}-{}", it.start_line, it.end_line), (p, it)))
-            })
+            .flat_map(|(p, items)| items.iter().map(move |it| (it.span(p), (p, it))))
             .collect();
         // A declaration's calls are its definition's, so both are roots.
         let mut root_spans: Vec<String> = Vec::new();
         for it in &roots {
-            let own = format!("{path}:{}-{}", it.start_line, it.end_line);
+            let own = it.span(path);
             for s in std::iter::once(own).chain(it.twin.clone()) {
                 if !root_spans.contains(&s) {
                     root_spans.push(s);
@@ -342,13 +334,11 @@ impl Wiki {
                     .collect();
                 lines.sort_by_key(|it| (it.start_line, it.end_line));
                 for it in lines {
-                    // The serde name, as the outline prints it.
-                    let kind = serde_json::to_value(it.kind).unwrap_or_default();
                     out.push(format!(
                         "  {}-{}  {}{}  {}",
                         it.start_line,
                         it.end_line,
-                        kind.as_str().unwrap_or_default(),
+                        it.kind.as_str(),
                         if it.test { " [test]" } else { "" },
                         it.qualified_name()
                     ));

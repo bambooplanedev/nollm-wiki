@@ -1858,7 +1858,6 @@ pub(crate) mod testutil {
         items
             .iter()
             .map(|i| {
-                let kind = serde_json::to_value(i.kind).expect("a unit variant serializes");
                 let name = match &i.owner {
                     Some(owner) => format!("{owner}::{}", i.name),
                     None => i.name.clone(),
@@ -1868,7 +1867,7 @@ pub(crate) mod testutil {
                     "{}-{} {} {name} {vis}",
                     i.start_line,
                     i.end_line,
-                    kind.as_str().unwrap_or_default()
+                    i.kind.as_str()
                 )
             })
             .collect()

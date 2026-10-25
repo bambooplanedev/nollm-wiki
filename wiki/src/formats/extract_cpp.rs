@@ -540,10 +540,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
         }
     }
     for (hid, hi, cid, ci) in pairs {
-        let span = |e: &Entity, i: usize| {
-            let it = &e.items[i];
-            format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
-        };
+        let span = |e: &Entity, i: usize| e.items[i].span(&e.source_path);
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
         let h_doc = &entities[&hid].items[hi];
         let (doc, doc_text) = (h_doc.doc.clone(), h_doc.doc_text.clone());

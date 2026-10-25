@@ -281,14 +281,12 @@ fn render(o: &Outline, keep: &Keep) -> String {
                     out.extend(owner.map(|o| format!("{o}:")));
                     run = owner;
                 }
-                // The serde name, so the outline says what `items.json` says.
-                let kind = serde_json::to_value(it.kind).unwrap_or_default();
                 let mut line = format!(
                     "{}{}-{}  {}{}  {}",
                     if owner.is_some() { "  " } else { "" },
                     it.start_line,
                     it.end_line,
-                    kind.as_str().unwrap_or_default(),
+                    it.kind.as_str(),
                     if it.test { " [test]" } else { "" },
                     one_line(&it.signature),
                 );
