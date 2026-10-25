@@ -1,10 +1,7 @@
 //! Python extraction: PEP 8 leading-underscore visibility convention,
 //! `__all__` as the authoritative override, and AST-verified module docstring
 //! extraction.
-use super::code::{
-    default_shape, keep_any_vis, no_header_group, owner_anchor_identity, LangSpec, Lead, Placement,
-    Rank, Shape,
-};
+use super::code::{default_shape, LangSpec, Lead, Placement, Rank, Shape};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Query, QueryCursor, StreamingIterator, Tree};
@@ -50,13 +47,12 @@ pub(crate) fn validate_queries() {
 /// list (`@pytest.mark.parametrize("a,b", [(1, 2), …])`) is spliced in full.
 ///
 /// A comment between the decorator and the definition (`@dataclass  # noqa`)
-/// used to be spliced in with it. `render_span` drops comment nodes, so that
-/// risk is closed.
+/// is not spliced in: `render_span` drops comment nodes.
 ///
 /// An assignment climbs to its `expression_statement`, which starts at the
 /// same byte: the statement, not the assignment, is the sibling of a `#`
 /// comment above it.
-pub(crate) fn python_sig_start(def: Node) -> Node {
+fn python_sig_start(def: Node) -> Node {
     match def.parent() {
         Some(p) if matches!(p.kind(), "decorated_definition" | "expression_statement") => p,
         _ => def,
@@ -92,30 +88,26 @@ pub(crate) fn python_shape(def: Node) -> Shape {
     }
 }
 
-pub(crate) fn python_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "python",
-        language: tree_sitter_python::LANGUAGE.into(),
-        // The grammar has no notion of "public"; capture every def/class
-        // and drop names starting with `_` in name_filter (PEP 8 convention).
-        //
-        // `from .models import X` and `from . import X` need separate
-        // patterns. In the second, `relative_import` is just an
-        // `import_prefix`, so its text is a lone `.` and
-        // `graph::ImportResolver` — which resolves every non-empty segment
-        // of a split on `.` — finds no segment to resolve. The anchor `.`
-        // after `(import_prefix)` constrains it to be the last named
-        // child, which is exactly what separates the two families; without
-        // it, `from .models import Article, FeedSource` would also emit
-        // `Article` and `FeedSource` as imports.
-        //
-        // Known gap: the bare-prefix family loses its level, so
-        // `from . import x`, `from .. import x`, and `import x` all render
-        // as `x`. The graph is unaffected — the dropped level is not a
-        // resolvable segment. `from . import *` and
-        // `from __future__ import x`
-        // capture nothing; neither resolves to a page.
-        query_src: r#"
+// The grammar has no notion of "public"; capture every def/class
+// and drop names starting with `_` in name_filter (PEP 8 convention).
+//
+// `from .models import X` and `from . import X` need separate
+// patterns. In the second, `relative_import` is just an
+// `import_prefix`, so its text is a lone `.` and
+// `graph::ImportResolver` — which resolves every non-empty segment
+// of a split on `.` — finds no segment to resolve. The anchor `.`
+// after `(import_prefix)` constrains it to be the last named
+// child, which is exactly what separates the two families; without
+// it, `from .models import Article, FeedSource` would also emit
+// `Article` and `FeedSource` as imports.
+//
+// Known gap: the bare-prefix family loses its level, so
+// `from . import x`, `from .. import x`, and `import x` all render
+// as `x`. The graph is unaffected — the dropped level is not a
+// resolvable segment. `from . import *` and
+// `from __future__ import x`
+// capture nothing; neither resolves to a page.
+const QUERY: &str = r#"
                 ; One pattern covers module constants AND class fields:
                 ; tree-sitter matches at any depth, so a second class-scoped
                 ; pattern would fire on the same nodes and emit every field twice.
@@ -135,20 +127,20 @@ pub(crate) fn python_spec() -> LangSpec {
                 (import_from_statement module_name: (relative_import (dotted_name)) @import)
                 (import_from_statement module_name: (relative_import (import_prefix) .) name: (dotted_name) @import)
                 (import_from_statement module_name: (relative_import (import_prefix) .) name: (aliased_import name: (dotted_name) @import))
-            "#,
+            "#;
+
+pub(crate) fn python_spec() -> LangSpec {
+    LangSpec {
         name_filter: keep_python_public,
-        vis_filter: keep_any_vis,
         strip_trailing: &[':', '='],
         placement: python_placement,
-        owner_sep: ".",
         export_set: python_all,
         join_continuations: true,
         sig_start: python_sig_start,
-        owner_anchor: owner_anchor_identity,
-        header_group: no_header_group,
         item_lead: python_lead,
         body_doc: python_body_doc,
-        query_gates_visibility: false,
+        shape: python_shape,
+        ..LangSpec::base("python", tree_sitter_python::LANGUAGE.into(), QUERY)
     }
 }
 
@@ -186,7 +178,7 @@ fn python_lead(node: Node, text: &str) -> Lead {
 /// The two conventions fail in opposite directions: a new node kind that can
 /// host a definition is silently admitted here and would be silently rejected
 /// by Rust's rule. A tree-sitter bump must be reviewed under both.
-pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
+fn python_placement(def: Node, text: &str) -> Placement {
     let mut chain: Vec<String> = Vec::new();
     let mut node = def;
     while let Some(parent) = node.parent() {
@@ -234,16 +226,14 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
 /// statements, not just literal assignments: `__all__ = ["a"]` followed later
 /// by `__all__ += ["b"]` must fall back to the convention (the augmented
 /// assignment is last and isn't a literal assignment), even though the most
-/// recent *literal* assignment looks well-formed on its own — reading only
-/// literal assignments and ignoring everything between them is exactly the
-/// defect this cycle exists to close. Among literal assignments alone,
-/// last-wins is unchanged: when a module reassigns `__all__` to a literal list
+/// recent *literal* assignment looks well-formed on its own. Among literal
+/// assignments alone, last wins: when a module reassigns `__all__` to a literal list
 /// more than once with nothing else touching it in between, only the last one
 /// governs.
 ///
 /// Names listed but not defined in this file (the `__init__.py` re-export
 /// case) match no captured definition and simply have no effect.
-pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
+fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     let query = &*ALL_QUERY;
     let lhs_idx = query.capture_index_for_name("lhs");
     let rhs_idx = query.capture_index_for_name("rhs");
@@ -306,18 +296,9 @@ pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     Some(names)
 }
 
-/// A Python module-level docstring: the first non-comment top-level
-/// statement, if it is a bare string expression, with its opening paragraph
-/// returned. Handles both single-line (`"""Doc."""`) and
-/// multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
-/// `string_content` node rather than assuming the doc text is on line 1.
-pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
-    docstring_paragraph(tree.root_node(), text)
-}
-
 /// A def's or class's docstring: the first non-comment statement of its
 /// `body`, when it is a string.
-pub(crate) fn python_body_doc(def: Node, text: &str) -> Option<String> {
+fn python_body_doc(def: Node, text: &str) -> Option<String> {
     if !matches!(def.kind(), "function_definition" | "class_definition") {
         return None;
     }
@@ -325,8 +306,11 @@ pub(crate) fn python_body_doc(def: Node, text: &str) -> Option<String> {
 }
 
 /// The opening paragraph of `block`'s leading string statement, shared by a
-/// module (its root) and a def (its `body`).
-fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
+/// module (its root) and a def (its `body`): the first non-comment statement,
+/// if it is a bare string expression. Handles both single-line (`"""Doc."""`)
+/// and multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
+/// `string_content` node rather than assuming the doc text is on line 1.
+pub(crate) fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
     let mut cursor = block.walk();
     let first_stmt = block
         .children(&mut cursor)
@@ -356,7 +340,7 @@ fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -385,7 +369,7 @@ mod tests {
         let src = "\"\"\"\nTop docstring.\n\"\"\"\nimport os\nfrom graph import build\ndef extract_all(d):\n    pass\ndef _private():\n    pass\n";
         let e = CodeExtractor.extract("extractor.py", src);
         assert_has(&e.symbols, "def extract_all(d)");
-        assert!(!e.symbols.iter().any(|s| s.contains("_private")));
+        assert_lacks(&e.symbols, "_private");
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert!(e.imports.iter().any(|i| i.contains("os")));
         assert_eq!(e.summary.as_deref(), Some("Top docstring."));
@@ -497,11 +481,8 @@ mod tests {
             "a private class must not export its methods: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "class Public"),
-            "extraction must still be happening at all: {:?}",
-            e.symbols
-        );
+        // extraction must still be happening at all
+        assert_has(&e.symbols, "class Public");
         assert_has(&e.symbols, "def Public.run(self) -> None");
     }
 
@@ -553,11 +534,8 @@ mod tests {
         assert_lacks(&e.symbols, "NotListed");
         assert_lacks(&e.symbols, "not_listed");
         assert_lacks(&e.symbols, "HIDDEN_CONST");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("_hidden")),
-            "__all__ says nothing about what is public inside a class: {:?}",
-            e.symbols
-        );
+        // __all__ says nothing about what is public inside a class
+        assert_lacks(&e.symbols, "_hidden");
     }
 
     #[test]
@@ -569,11 +547,8 @@ mod tests {
         // `__all__` here instead of being replaced by it.
         let src = "__all__ = [\"_private_api\", \"__version__\", \"Public\"]\n\n__version__ = \"1.0\"\n\ndef _private_api() -> int:\n    return 1\n\nclass Public:\n    def _hidden(self) -> None:\n        pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def _private_api() -> int"),
-            "__all__ must be able to export a free underscore-prefixed name: {:?}",
-            e.symbols
-        );
+        // __all__ must be able to export a free underscore-prefixed name
+        assert_has(&e.symbols, "def _private_api() -> int");
         assert_has(&e.symbols, "__version__ = \"1.0\"");
         assert_has(&e.symbols, "class Public");
         assert!(
@@ -586,9 +561,8 @@ mod tests {
 
     #[test]
     fn without_all_the_underscore_convention_still_hides_a_free_name() {
-        // Guards against an overcorrection of the fix above: with no `__all__`
-        // at all, `exports` is `None` and the convention must still apply to
-        // a free item's own name exactly as before.
+        // Counterpart of the test above: with no `__all__` at all, `exports`
+        // is `None` and the convention must still apply to a free item's own name.
         let src =
             "def _private_api() -> int:\n    return 1\n\ndef public_api() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
@@ -601,11 +575,8 @@ mod tests {
         let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "a non-literal __all__ must not gate anything: {:?}",
-            e.symbols
-        );
+        // a non-literal __all__ must not gate anything
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -613,11 +584,8 @@ mod tests {
         let src =
             "x = 1\n__all__ = [f\"a{x}\", \"b\"]\n\ndef b():\n    pass\n\ndef c():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def c()"),
-            "an f-string element must invalidate __all__, falling back to the convention: {:?}",
-            e.symbols
-        );
+        // an f-string element must invalidate __all__, falling back to the convention
+        assert_has(&e.symbols, "def c()");
     }
 
     #[test]
@@ -644,11 +612,8 @@ mod tests {
         let src = "__all__ = [\"base_name\"]\n__all__ += [\"added_name\"]\n\ndef base_name() -> int:\n    return 1\n\ndef added_name() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def base_name() -> int");
-        assert!(
-            e.symbols.iter().any(|s| s == "def added_name() -> int"),
-            "`__all__ +=` must fall back to the convention, not keep the stale literal: {:?}",
-            e.symbols
-        );
+        // `__all__ +=` must fall back to the convention, not keep the stale literal
+        assert_has(&e.symbols, "def added_name() -> int");
     }
 
     #[test]
@@ -662,11 +627,8 @@ mod tests {
             "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = compute()\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "a non-literal reassignment must fall back to the convention: {:?}",
-            e.symbols
-        );
+        // a non-literal reassignment must fall back to the convention
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -674,11 +636,8 @@ mod tests {
         let src = "__all__ = [\"a\"]\n__all__.extend([\"b\"])\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "__all__.extend(...) must fall back to the convention: {:?}",
-            e.symbols
-        );
+        // __all__.extend(...) must fall back to the convention
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -766,8 +725,8 @@ mod tests {
 
     #[test]
     fn a_comment_between_a_decorator_and_its_definition_is_dropped() {
-        // Previously documented on `python_sig_start` as an accepted risk:
-        // the decorator span reaches the definition, so the comment came too.
+        // The decorator span reaches the definition, so the comment sits
+        // inside it and must be dropped by `render_span`.
         let src = "@dataclass  # noqa: D101\nclass Article:\n    title: str\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "@dataclass class Article");
@@ -777,7 +736,7 @@ mod tests {
     #[test]
     fn a_comment_inside_a_retained_value_is_dropped() {
         // The value is rendered through the same path as the head, so a
-        // comment inside it was spliced in the same way.
+        // comment inside it must be dropped the same way.
         let src = "CONFIG = {  # inline\n    \"a\": 1,\n}\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
@@ -824,8 +783,8 @@ mod tests {
 
     #[test]
     fn python_unannotated_assignment_renders_its_value_once() {
-        // `signature_cut` no longer stops short of an unannotated value, so the
-        // head must not still carry it: `MAX_IDS = 2000 = 2000` is the failure.
+        // `signature_cut` leaves an unannotated value to the join, so the
+        // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
         let src = "MAX_IDS = 2000\n";
         let e = CodeExtractor.extract("state.py", src);
         assert_has(&e.symbols, "MAX_IDS = 2000");
@@ -839,9 +798,8 @@ mod tests {
     #[test]
     fn python_assignment_without_spaces_is_normalized_and_budgeted() {
         // The ` = ` is emitted by the join now, never copied from source, so a
-        // no-space assignment renders like every sibling. Previously
-        // `truncate_value`'s `sig.find(" = ")` missed this line entirely and
-        // the budget was bypassed however long the value was.
+        // no-space assignment renders like every sibling and the budget
+        // applies however long the value is.
         let long = "y".repeat(200);
         let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);
@@ -863,11 +821,8 @@ mod tests {
         let src = format!("BIG: str = \"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);
         assert_has(&e.symbols, "BIG: str");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains('…')),
-            "annotated must omit, not truncate: {:?}",
-            e.symbols
-        );
+        // annotated must omit, not truncate
+        assert_lacks(&e.symbols, "…");
     }
 
     #[test]
@@ -928,18 +883,11 @@ mod tests {
         assert_eq!(e.items[1].doc.as_deref(), Some("Slug for the url."));
     }
 
-    /// The `(doc, start_line)` of the item named `name` in `src`.
-    fn doc_of(src: &str, name: &str) -> (Option<String>, usize) {
-        let e = CodeExtractor.extract("a.py", src);
-        let item = e.items.iter().find(|i| i.name == name).unwrap();
-        (item.doc.clone(), item.start_line)
-    }
-
     #[test]
     fn python_hash_comment_is_a_doc() {
         let src = "x = 1\n# Wait longer than w_min counts as a stall.\nW_MIN_DEFAULT_S = 5\n";
         assert_eq!(
-            doc_of(src, "W_MIN_DEFAULT_S"),
+            doc_of("a.py", src, "W_MIN_DEFAULT_S"),
             (Some("Wait longer than w_min counts as a stall.".into()), 2)
         );
     }
@@ -948,7 +896,7 @@ mod tests {
     fn a_sphinx_attribute_comment_drops_its_colon() {
         let src = "x = 1\n#: Sphinx attribute doc.\nLIMIT = 5\n";
         assert_eq!(
-            doc_of(src, "LIMIT"),
+            doc_of("a.py", src, "LIMIT"),
             (Some("Sphinx attribute doc.".into()), 2)
         );
     }
@@ -956,9 +904,9 @@ mod tests {
     #[test]
     fn python_docstring_wins_over_hash_comment() {
         let src = "x = 1\n# note\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
-        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
+        assert_eq!(doc_of("a.py", src, "f"), (Some("Real doc.".into()), 3));
         let src =
             "x = 1\n# Builds the frame for each caller.\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
-        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
+        assert_eq!(doc_of("a.py", src, "f"), (Some("Real doc.".into()), 3));
     }
 }

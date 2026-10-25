@@ -11,15 +11,18 @@
 //! The block scanner is shared with `extract_svelte`, whose components have
 //! the same shape with a different idea of which top-level elements are
 //! markup.
-use super::code::LangSpec;
+use super::code::{default_shape, LangSpec};
 use super::extract_simple::js_spec;
 use std::ops::Range;
 
 /// A `<script>` with no `lang` is JavaScript, extracted under the `vue` key
 /// itself so the registry entry is the one a plain-JS component really uses.
+/// Its definitions take `default_shape`, not the JS hook, so a component's
+/// `const` reads `type` where the same line in a `.js` file reads `value`.
 pub(crate) fn vue_spec() -> LangSpec {
     LangSpec {
         lang_name: "vue",
+        shape: default_shape,
         ..js_spec()
     }
 }
@@ -341,7 +344,9 @@ fn attr_value<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{
+        assert_deterministic, assert_has, assert_lacks, item_lines,
+    };
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -391,6 +396,17 @@ mod tests {
         let e = CodeExtractor.extract("Store.vue", src);
         assert_has(&e.symbols, "export class Store");
         assert_eq!(e.imports, vec!["./api.js"]);
+    }
+
+    #[test]
+    fn a_plain_js_component_keeps_the_default_shape() {
+        let src = "<script>\nexport const LIMIT = 5;\n</script>\n";
+        let e = CodeExtractor.extract("Card.vue", src);
+        let limit = e.items.iter().find(|i| i.name == "LIMIT").unwrap();
+        assert_eq!(limit.kind, crate::model::CodeItemKind::Type);
+        let e = CodeExtractor.extract("Box.svelte", src);
+        let limit = e.items.iter().find(|i| i.name == "LIMIT").unwrap();
+        assert_eq!(limit.kind, crate::model::CodeItemKind::Type);
     }
 
     #[test]
@@ -460,11 +476,7 @@ mod tests {
 
     #[test]
     fn extraction_is_deterministic() {
-        let a = CodeExtractor.extract("ProductCard.vue", SFC);
-        let b = CodeExtractor.extract("ProductCard.vue", SFC);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
+        assert_deterministic("ProductCard.vue", SFC);
     }
 
     #[test]

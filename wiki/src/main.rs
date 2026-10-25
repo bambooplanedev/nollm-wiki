@@ -178,9 +178,8 @@ fn main() -> Result<()> {
             emit_json,
             watch,
             project,
-            memory,
+            memory: memory_arg,
         } => {
-            let memory_arg = memory;
             let memory = match memory_arg.as_deref() {
                 None => None,
                 Some("local") => wiki::memory::local_dir(&input)
@@ -235,12 +234,11 @@ fn main() -> Result<()> {
             dir,
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
-            let kind = match kind.as_deref() {
-                None => None,
-                Some(s) => Some(KindFilter::parse(s).with_context(|| {
-                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
-                })?),
-            };
+            let kind = kind
+                .as_deref()
+                .map(KindFilter::parse_arg)
+                .transpose()
+                .map_err(anyhow::Error::msg)?;
             let budget = PackBudget {
                 max_nodes,
                 max_tokens,
@@ -248,8 +246,8 @@ fn main() -> Result<()> {
                 kind,
             };
             let rid = w
-                .resolve_id(&id)
-                .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
+                .resolve(&id)
+                .map_err(anyhow::Error::msg)
                 .context("unknown id")?;
             if let Some(symbol) = symbol {
                 let text = w
@@ -271,8 +269,8 @@ fn main() -> Result<()> {
         } => {
             let w = Wiki::load(&dir).context("load wiki")?;
             let rid = w
-                .resolve_id(&id)
-                .map_err(|near| anyhow::anyhow!(wiki::query::unknown_page(&id, &near)))
+                .resolve(&id)
+                .map_err(anyhow::Error::msg)
                 .context("unknown id")?;
             print!(
                 "{}",
@@ -290,19 +288,17 @@ fn main() -> Result<()> {
             if query.is_none() && tag.is_none() {
                 anyhow::bail!("search needs a query or --tag");
             }
-            let tag = match tag.as_deref() {
-                None => None,
-                Some(s) => {
-                    Some(wiki::query::tag_filter(s).with_context(|| format!("empty tag {s:?}"))?)
-                }
-            };
+            let tag = tag
+                .as_deref()
+                .map(wiki::query::tag_arg)
+                .transpose()
+                .map_err(anyhow::Error::msg)?;
             let w = Wiki::load(&dir).context("load wiki")?;
-            let kind = match kind.as_deref() {
-                None => None,
-                Some(s) => Some(KindFilter::parse(s).with_context(|| {
-                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED)
-                })?),
-            };
+            let kind = kind
+                .as_deref()
+                .map(KindFilter::parse_arg)
+                .transpose()
+                .map_err(anyhow::Error::msg)?;
             let hits = w.search_tagged(
                 query.as_deref().unwrap_or(""),
                 kind.as_ref(),
@@ -376,10 +372,10 @@ fn main() -> Result<()> {
                 if std::io::Read::read_to_string(&mut std::io::stdin(), &mut json).is_err() {
                     return Ok(());
                 }
-                match wiki::hint::prompt_from_hook_json(&json) {
-                    Some(t) => t,
-                    None => return Ok(()),
-                }
+                let Some(t) = wiki::hint::prompt_from_hook_json(&json) else {
+                    return Ok(());
+                };
+                t
             } else {
                 text.context("hint needs TEXT or --claude-hook")?
             };
@@ -399,10 +395,7 @@ fn main() -> Result<()> {
             hook,
             remove,
         } => {
-            let scope = match scope {
-                Some(s) => s,
-                None => ask_scope()?,
-            };
+            let scope = scope.map_or_else(ask_scope, Ok)?;
             let opts = SetupOptions {
                 agents: agent,
                 scope,

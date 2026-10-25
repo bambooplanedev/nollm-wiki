@@ -48,7 +48,7 @@ fn is_doc_tag(line: &str) -> bool {
 /// the line break. A tag line ends the paragraph: a `@brief` with no period
 /// would otherwise run on into the `@param` lines under it. A list item ends
 /// it too, and a list's summary is its first item, not the whole list joined.
-fn first_real_sentence(text: &str) -> Option<String> {
+pub(crate) fn first_real_sentence(text: &str) -> Option<String> {
     let mut lines = text.lines().map(str::trim);
     let first = lines.find(|l| !l.is_empty() && !l.starts_with('#') && !is_boilerplate(l))?;
     let first = list_item_text(first).unwrap_or(first);

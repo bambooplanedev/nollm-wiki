@@ -14,6 +14,7 @@ pub mod text;
 
 pub use code::CodeExtractor;
 pub use markdown::MarkdownExtractor;
+pub(crate) use summary::first_real_sentence;
 pub use summary::summarize;
 pub use text::TextExtractor;
 
@@ -25,29 +26,12 @@ use std::sync::Arc;
 /// A page name derived from the file path: the basename's stem, with `_` and
 /// `-` turned into spaces, title-cased.
 ///
-/// Shared by `CodeExtractor`, `MarkdownExtractor`, and `TextExtractor`, which
-/// each carried a private copy. The copies had already drifted — markdown's replaced only
-/// `_`, so `my-notes.md` rendered "My-notes" while `my-code.rs` rendered
-/// "My Code". Cosmetic (both slugify to one id, and the phrase index
-/// tokenizes them identically), but it is the drift a verbatim duplicate
-/// invites.
+/// Shared by `CodeExtractor`, `MarkdownExtractor`, and `TextExtractor` so
+/// `my-notes.md` and `my-code.rs` both title-case their `-` and `_`.
 pub(crate) fn derive_name_from_path(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = crate::model::basename(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
-    crate::model::title_case(&stem.replace(['_', '-'], " "))
-}
-
-/// Front-matter tags as stored: `#` stripped, trimmed, lowercased, empties
-/// dropped, duplicates removed keeping the first-seen order.
-pub fn normalize_tags(raw: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for t in raw {
-        let t = t.trim().trim_start_matches('#').trim().to_lowercase();
-        if !t.is_empty() && !out.contains(&t) {
-            out.push(t);
-        }
-    }
-    out
+    crate::model::title_from_slug(stem)
 }
 
 /// Every extractor turns already-decoded text into a semantic `Entity`.

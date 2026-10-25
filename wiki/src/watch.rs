@@ -71,7 +71,7 @@ impl WatchSet {
     }
 }
 
-pub fn recompile_once(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), WikiError> {
+fn recompile_once(input: &Path, output: &Path, opts: &CompileOptions) -> Result<(), WikiError> {
     let r = compile(input, output, opts)?;
     eprintln!(
         "recompiled: {} pages ({} written)",

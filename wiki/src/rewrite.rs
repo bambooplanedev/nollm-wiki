@@ -4,7 +4,6 @@ use crate::hash::{combine, to_hex};
 use crate::model::{Edges, Entity, SourceKind};
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -155,16 +154,12 @@ pub(crate) fn read_notes_from(path: &Path) -> String {
     let Ok(text) = std::fs::read_to_string(path) else {
         return String::new();
     };
-    let notes = parse_sections(&text)
-        .get("Notes")
-        .cloned()
-        .unwrap_or_default()
-        .trim()
-        .to_string();
+    let sections = parse_sections(&text);
+    let notes = sections.get("Notes").map_or("", |s| s.trim());
     if notes == NOTES_PLACEHOLDER {
         String::new()
     } else {
-        notes
+        notes.to_string()
     }
 }
 
@@ -208,17 +203,18 @@ pub(crate) fn page_source_index(output: &Path) -> BTreeMap<String, BTreeSet<Path
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Some(meta) = parse_sections(&text).get("Metadata").cloned() else {
+        let sections = parse_sections(&text);
+        let Some(meta) = sections.get("Metadata") else {
             continue;
         };
-        for line in meta.lines() {
-            if let Some(src) = line.trim().strip_prefix("- source: ") {
-                index
-                    .entry(src.trim().to_string())
-                    .or_default()
-                    .insert(path.clone());
-                break;
-            }
+        if let Some(src) = meta
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("- source: "))
+        {
+            index
+                .entry(src.trim().to_string())
+                .or_default()
+                .insert(path.clone());
         }
     }
     index
@@ -295,53 +291,36 @@ pub fn render_page(
         to_hex(&entity.content_hash)
     ));
 
-    // Related (omit if empty)
-    let related: Vec<String> = edges
-        .outgoing
-        .iter()
-        .filter_map(|id| link_name(id, entities))
-        .collect();
-    if !related.is_empty() {
-        out.push_str("## Related\n");
-        for l in &related {
-            out.push_str(&format!("- {l}\n"));
-        }
-        out.push('\n');
-    }
-
-    // Incoming edges, importers apart from the rest (each omitted if empty)
-    for (heading, imported) in [("Imported by", true), ("Mentioned in", false)] {
-        let refby: Vec<String> = edges
-            .incoming
+    // Each list section is omitted if empty.
+    list_section(
+        &mut out,
+        "Related",
+        edges
+            .outgoing
             .iter()
-            .filter(|id| edges.imported_by.contains(*id) == imported)
-            .filter_map(|id| link_name(id, entities))
-            .collect();
-        if !refby.is_empty() {
-            out.push_str(&format!("## {heading}\n"));
-            for l in &refby {
-                out.push_str(&format!("- {l}\n"));
-            }
-            out.push('\n');
-        }
+            .filter_map(|id| link_name(id, entities)),
+    );
+    // Incoming edges, importers apart from the rest
+    for (heading, imported) in [("Imported by", true), ("Mentioned in", false)] {
+        list_section(
+            &mut out,
+            heading,
+            edges
+                .incoming
+                .iter()
+                .filter(|id| edges.imported_by.contains(*id) == imported)
+                .filter_map(|id| link_name(id, entities)),
+        );
     }
 
     // Code-only sections
     if let SourceKind::Code { .. } = entity.kind {
-        if !entity.symbols.is_empty() {
-            out.push_str("## Exports\n");
-            for s in &entity.symbols {
-                out.push_str(&format!("- `{s}`\n"));
-            }
-            out.push('\n');
-        }
-        if !entity.imports.is_empty() {
-            out.push_str("## Imports\n");
-            for i in &entity.imports {
-                out.push_str(&format!("- {i}\n"));
-            }
-            out.push('\n');
-        }
+        list_section(
+            &mut out,
+            "Exports",
+            entity.symbols.iter().map(|s| format!("`{s}`")),
+        );
+        list_section(&mut out, "Imports", entity.imports.iter().cloned());
     }
 
     // Body (omit if empty)
@@ -353,15 +332,28 @@ pub fn render_page(
 
     // Notes (human-owned, always present so there is a home for hand edits)
     out.push_str("## Notes\n");
-    if preserved_notes.trim().is_empty() {
-        out.push_str(NOTES_PLACEHOLDER);
-        out.push('\n');
+    let notes = preserved_notes.trim();
+    out.push_str(if notes.is_empty() {
+        NOTES_PLACEHOLDER
     } else {
-        out.push_str(preserved_notes.trim());
-        out.push('\n');
-    }
+        notes
+    });
+    out.push('\n');
 
     out
+}
+
+/// `## heading` and one `- item` line each, then a blank line; nothing when `items` is empty.
+fn list_section(out: &mut String, heading: &str, items: impl IntoIterator<Item = String>) {
+    let mut items = items.into_iter().peekable();
+    if items.peek().is_none() {
+        return;
+    }
+    out.push_str(&format!("## {heading}\n"));
+    for item in items {
+        out.push_str(&format!("- {item}\n"));
+    }
+    out.push('\n');
 }
 
 pub(crate) fn render_fingerprint(
@@ -404,13 +396,8 @@ pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    let tmp = std::path::PathBuf::from(tmp);
-    {
-        let f = std::fs::File::create(&tmp)?;
-        let mut w = std::io::BufWriter::new(f);
-        w.write_all(content.as_bytes())?;
-        w.flush()?;
-    }
+    let tmp = PathBuf::from(tmp);
+    std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, path)
 }
 
@@ -424,8 +411,8 @@ mod tests {
     #[test]
     fn fenced_example_headings_do_not_overwrite_real_sections() {
         // A page whose body shows an example rendered wiki page — exactly what
-        // this project's own README does. Before the mask, the fenced `## Body`
-        // won (BTreeMap insert is last-write-wins) and the real body was lost.
+        // this project's own README does. Unmasked, the fenced `## Body`
+        // would win (BTreeMap insert is last-write-wins) and the real body be lost.
         let page = "## Body\nthe real body\n\n```\n## Body\nexample body\n```\n";
         let sections = parse_sections(page);
         assert_eq!(sections.len(), 1);
@@ -487,23 +474,10 @@ mod tests {
         Entity {
             id: id.into(),
             name: name.into(),
-            aliases: vec![],
-            tags: vec![],
             created: "2026-01-01".into(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
-            kind: SourceKind::Text,
-            content_hash: [0u8; 32],
-            summary: None,
-            symbols: vec![],
-            imports: vec![],
-            defined: vec![],
-            methods: vec![],
-            items: vec![],
+            ..Entity::default()
         }
     }
     fn map(v: Vec<Entity>) -> BTreeMap<String, Entity> {

@@ -7,17 +7,14 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 
+mod common;
+
 /// How long a single response may take before the test fails instead of
 /// hanging the whole `cargo test` run on a server that never answers.
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(10);
 
 fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
-    let tmp = tempfile::tempdir().unwrap();
-    let raw = tmp.path().join("raw");
-    let out = tmp.path().join("out");
-    wiki::generator::generate_corpus(&raw, 12, 42).unwrap();
-    wiki::compile(&raw, &out, &wiki::CompileOptions::default()).unwrap();
-    (tmp, out)
+    common::seed_corpus(12)
 }
 
 /// Spawn `wiki serve` and hand back its stdin plus a channel of stdout
@@ -33,9 +30,18 @@ fn spawn_server_with(
     dir: &std::path::Path,
     extra: &[&str],
 ) -> (Child, ChildStdin, Receiver<String>) {
+    spawn("--dir", dir, extra)
+}
+
+/// Spawn `wiki serve <flag> <path>` plus `extra` args.
+fn spawn(
+    flag: &str,
+    path: &std::path::Path,
+    extra: &[&str],
+) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
-        .args(["serve", "--dir"])
-        .arg(dir)
+        .args(["serve", flag])
+        .arg(path)
         .args(extra)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -86,6 +92,31 @@ fn read_response(stdout: &Receiver<String>, id: u64) -> Value {
     }
 }
 
+fn send_call(stdin: &mut ChildStdin, id: u64, tool: &str, args: &Value) {
+    send(
+        stdin,
+        &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
+            "name": tool, "arguments": args}}),
+    );
+}
+
+/// `tools/call` and wait for its response.
+fn call(
+    stdin: &mut ChildStdin,
+    stdout: &Receiver<String>,
+    id: u64,
+    tool: &str,
+    args: &Value,
+) -> Value {
+    send_call(stdin, id, tool, args);
+    read_response(stdout, id)
+}
+
+/// The text of a `tools/call` response.
+fn text_of(resp: &Value) -> &str {
+    resp["result"]["content"][0]["text"].as_str().unwrap()
+}
+
 fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     send(
         stdin,
@@ -127,35 +158,35 @@ fn serve_lists_and_calls_tools() {
     assert_eq!(sorted, ["neighbors", "page", "search"], "tools: {names:?}");
 
     // tools/call search — seed-42 corpus contains gradient_descent
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": "gradient"}
-        }}),
+        &stdout,
+        3,
+        "search",
+        &json!({"query": "gradient"}),
     );
-    let resp = read_response(&stdout, 3);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.contains("gradient_descent"), "search result: {text}");
 
     // tools/call neighbors
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
-            "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 800}
-        }}),
+        &stdout,
+        4,
+        "neighbors",
+        &json!({"id": "gradient_descent", "max_tokens": 800}),
     );
-    let resp = read_response(&stdout, 4);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
 
     // tools/call neighbors with unknown id -> tool error result
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
-            "name": "neighbors", "arguments": {"id": "no_such_page"}
-        }}),
+        &stdout,
+        5,
+        "neighbors",
+        &json!({"id": "no_such_page"}),
     );
-    let resp = read_response(&stdout, 5);
     assert_eq!(resp["result"]["isError"], json!(true));
 
     drop(stdin); // close stdin -> server exits
@@ -181,26 +212,20 @@ fn serve_tools_flag_picks_the_tools() {
     names.sort_unstable();
     assert_eq!(names, ["lint", "search"]);
 
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-            "name": "lint", "arguments": {}
-        }}),
-    );
-    let resp = read_response(&stdout, 3);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let resp = call(&mut stdin, &stdout, 3, "lint", &json!({}));
+    let text = text_of(&resp);
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
     assert_eq!(report["large"], json!([]));
 
     // A tool left out is not callable.
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
-            "name": "page", "arguments": {"id": "gradient_descent"}
-        }}),
+        &stdout,
+        4,
+        "page",
+        &json!({"id": "gradient_descent"}),
     );
-    let resp = read_response(&stdout, 4);
     assert!(
         resp.get("error").is_some() || resp["result"]["isError"] == json!(true),
         "resp: {resp}"
@@ -227,14 +252,8 @@ fn mcp_search_returns_five_hits_unless_asked() {
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
     let count = |stdin: &mut ChildStdin, id: u64, args: Value| {
-        send(
-            stdin,
-            &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
-                "name": "search", "arguments": args}}),
-        );
-        let resp = read_response(&stdout, id);
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        serde_json::from_str::<Value>(text)
+        let resp = call(stdin, &stdout, id, "search", &args);
+        serde_json::from_str::<Value>(text_of(&resp))
             .unwrap()
             .as_array()
             .unwrap()
@@ -373,13 +392,14 @@ fn search_hits_include_snippet_field() {
     let (_tmp, out) = compile_fixture();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": "gradient", "format": "json"}}}),
+        &stdout,
+        7,
+        "search",
+        &json!({"query": "gradient", "format": "json"}),
     );
-    let resp = read_response(&stdout, 7);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     let hits: Value = serde_json::from_str(text).unwrap();
     let arr = hits.as_array().expect("hits array");
     assert!(!arr.is_empty());
@@ -396,17 +416,9 @@ fn search_text(args: &Value) -> String {
     wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
-            "name": "search", "arguments": args}}),
-    );
-    let resp = read_response(&stdout, 9);
+    let resp = call(&mut stdin, &stdout, 9, "search", args);
     child.kill().ok();
-    resp["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .to_string()
+    text_of(&resp).to_string()
 }
 
 #[test]
@@ -422,14 +434,15 @@ fn mcp_search_tag_only_lists_pages() {
     wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": "", "tag": "mem"}}}),
+        &stdout,
+        9,
+        "search",
+        &json!({"query": "", "tag": "mem"}),
     );
-    let resp = read_response(&stdout, 9);
     child.kill().ok();
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.contains("tagged  "), "text: {text}");
     assert!(!text.contains("plain  "), "text: {text}");
 }
@@ -469,13 +482,13 @@ fn serve_reports_bad_params_and_survives() {
     // (a) An unknown kind is rejected inside the handler with
     // `McpError::invalid_params`, which rmcp surfaces as a JSON-RPC error
     // (not an `isError` result).
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"kind": "bogus", "query": "x"}
-        }}),
+        &stdout,
+        2,
+        "search",
+        &json!({"kind": "bogus", "query": "x"}),
     );
-    let resp = read_response(&stdout, 2);
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
     let msg = resp["error"]["message"].as_str().unwrap();
     assert!(
@@ -485,51 +498,39 @@ fn serve_reports_bad_params_and_survives() {
     assert!(resp.get("result").is_none(), "got: {resp}");
 
     // An empty tag is rejected the same way.
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": "x", "tag": "#"}
-        }}),
+        &stdout,
+        7,
+        "search",
+        &json!({"query": "x", "tag": "#"}),
     );
-    let resp = read_response(&stdout, 7);
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
     let msg = resp["error"]["message"].as_str().unwrap();
     assert!(msg.contains("empty tag"), "message: {msg}");
 
     // (b) A missing required field fails parameter deserialization, which
     // rmcp reports as a tool error result naming the field.
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
-            "name": "search", "arguments": {}
-        }}),
-    );
-    let resp = read_response(&stdout, 3);
+    let resp = call(&mut stdin, &stdout, 3, "search", &json!({}));
     assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.contains("query"), "text: {text}");
 
     // (c) Unknown tool name -> JSON-RPC invalid params.
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
-            "name": "nope", "arguments": {}
-        }}),
-    );
-    let resp = read_response(&stdout, 4);
+    let resp = call(&mut stdin, &stdout, 4, "nope", &json!({}));
     assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
 
     // (d) A budget the target's own page cannot fit degrades the target
     // block instead of failing.
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
-            "name": "neighbors", "arguments": {"id": "gradient_descent", "max_tokens": 1}
-        }}),
+        &stdout,
+        5,
+        "neighbors",
+        &json!({"id": "gradient_descent", "max_tokens": 1}),
     );
-    let resp = read_response(&stdout, 5);
     assert_eq!(resp["result"]["isError"], json!(false), "got: {resp}");
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.contains(wiki::query::OVER_BUDGET_NOTE), "pack: {text}");
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
 
@@ -567,14 +568,8 @@ fn neighbors_defaults_to_a_token_ceiling() {
 
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
-            "name": "neighbors", "arguments": {"id": "huge"}
-        }}),
-    );
-    let resp = read_response(&stdout, 2);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let resp = call(&mut stdin, &stdout, 2, "neighbors", &json!({"id": "huge"}));
+    let text = text_of(&resp);
     assert!(
         text.chars().count() / 4 <= wiki::serve::DEFAULT_NEIGHBORS_MAX_TOKENS,
         "defaults-only pack exceeds the default ceiling: {} chars",
@@ -589,33 +584,12 @@ fn neighbors_defaults_to_a_token_ceiling() {
     let _ = child.wait();
 }
 
-/// Spawn `wiki serve --source <source>` plus `extra` args; same plumbing as
-/// `spawn_server`.
+/// Spawn `wiki serve --source <source>` plus `extra` args.
 fn spawn_server_source(
     source: &std::path::Path,
     extra: &[&str],
 ) -> (Child, ChildStdin, Receiver<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
-        .args(["serve", "--source"])
-        .arg(source)
-        .args(extra)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap();
-    let stdin = child.stdin.take().unwrap();
-    let stdout = BufReader::new(child.stdout.take().unwrap());
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
-        for line in stdout.lines() {
-            let Ok(line) = line else { break };
-            if tx.send(line).is_err() {
-                break;
-            }
-        }
-    });
-    (child, stdin, rx)
+    spawn("--source", source, extra)
 }
 
 /// A project with one note and one Rust file, not yet compiled.
@@ -637,17 +611,17 @@ fn source_project() -> tempfile::TempDir {
 }
 
 fn send_search(stdin: &mut ChildStdin, id: u64, query: &str) {
-    send(
+    send_call(
         stdin,
-        &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
-            "name": "search", "arguments": {"query": query, "format": "json"}
-        }}),
+        id,
+        "search",
+        &json!({"query": query, "format": "json"}),
     );
 }
 
 /// Ids of the hits in a `search` response.
 fn hit_ids(resp: &Value) -> Vec<String> {
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(resp);
     let hits: Value = serde_json::from_str(text).unwrap();
     hits.as_array()
         .unwrap()
@@ -872,15 +846,16 @@ fn mcp_neighbors_unknown_id_names_candidates() {
         .id;
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
-    send(
+    let resp = call(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {
-            "name": "neighbors", "arguments": {"id": "lib.rs nonsense"}}}),
+        &stdout,
+        9,
+        "neighbors",
+        &json!({"id": "lib.rs nonsense"}),
     );
-    let resp = read_response(&stdout, 9);
     child.kill().ok();
     assert_eq!(resp["result"]["isError"], true);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+    let text = text_of(&resp);
     assert!(text.contains(&id), "no candidate {id}: {text}");
 }
 
@@ -891,14 +866,11 @@ fn page(
     id: u64,
     args: &Value,
 ) -> (bool, String) {
-    send(
-        stdin,
-        &json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {
-            "name": "page", "arguments": args}}),
-    );
-    let resp = read_response(stdout, id);
-    let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-    (resp["result"]["isError"] == json!(true), text.to_string())
+    let resp = call(stdin, stdout, id, "page", args);
+    (
+        resp["result"]["isError"] == json!(true),
+        text_of(&resp).to_string(),
+    )
 }
 
 /// Compiled project whose `src/big.rs` has 600 documented fns; returns the

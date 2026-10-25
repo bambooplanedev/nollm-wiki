@@ -1,8 +1,8 @@
 //! Manifest and index rendering: the page index (JSON and markdown), the llms-txt and AGENTS files, the graph export, and the per-page token estimate.
 
-use crate::model::{CodeItem, Entity, Graph};
+use crate::model::{CodeItem, Edges, Entity, Graph};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Serialize)]
 pub struct ManifestEntry {
@@ -51,6 +51,21 @@ pub fn token_estimate(text: &str) -> usize {
     text.chars().count() / 4
 }
 
+/// The largest `n` in `0..=max` for which `fits(n)` holds, by bisection; `0` when none does.
+/// `fits` must be monotone (true up to a point, false after) and is never asked about `0`.
+pub(crate) fn largest_fit(max: usize, fits: impl Fn(usize) -> bool) -> usize {
+    let (mut lo, mut hi) = (0, max);
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    lo
+}
+
 pub fn build_manifest(
     project: &str,
     root: &str,
@@ -61,18 +76,13 @@ pub fn build_manifest(
         .iter()
         .map(|(id, e)| {
             let edges = graph.edges.get(id);
-            let out: Vec<String> = edges
-                .map(|x| x.outgoing.iter().cloned().collect())
-                .unwrap_or_default();
-            let inc: Vec<String> = edges
-                .map(|x| x.incoming.iter().cloned().collect())
-                .unwrap_or_default();
-            let imports_out: Vec<String> = edges
-                .map(|x| x.imports.iter().cloned().collect())
-                .unwrap_or_default();
-            let imports_in: Vec<String> = edges
-                .map(|x| x.imported_by.iter().cloned().collect())
-                .unwrap_or_default();
+            let list = |f: fn(&Edges) -> &BTreeSet<String>| -> Vec<String> {
+                edges
+                    .map(|x| f(x).iter().cloned().collect())
+                    .unwrap_or_default()
+            };
+            let (out, inc) = (list(|x| &x.outgoing), list(|x| &x.incoming));
+            let (imports_out, imports_in) = (list(|x| &x.imports), list(|x| &x.imported_by));
             ManifestEntry {
                 id: id.clone(),
                 title: e.name.clone(),
@@ -208,29 +218,16 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
 mod tests {
     use super::*;
     use crate::graph::build_graph;
-    use crate::model::{CodeItemKind, SourceKind};
+    use crate::model::CodeItemKind;
 
     fn ent(id: &str, name: &str, body: &str, summary: Option<&str>) -> Entity {
         Entity {
             id: id.into(),
             name: name.into(),
-            aliases: vec![],
-            tags: vec![],
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
-            kind: SourceKind::Text,
-            content_hash: [0u8; 32],
             summary: summary.map(String::from),
-            symbols: vec![],
-            imports: vec![],
-            defined: vec![],
-            methods: vec![],
-            items: vec![],
+            ..Entity::default()
         }
     }
 
@@ -280,6 +277,14 @@ mod tests {
         assert!(llms.contains("- [Beta](beta.md)\n"), "{llms}");
         assert!(md.contains("(in 1, out 0)\n"), "{md}");
         assert!(!llms.contains(": \n") && !md.contains(": \n"));
+    }
+
+    #[test]
+    fn largest_fit_finds_the_boundary() {
+        assert_eq!(largest_fit(10, |n| n <= 6), 6);
+        assert_eq!(largest_fit(10, |_| true), 10);
+        assert_eq!(largest_fit(10, |_| false), 0);
+        assert_eq!(largest_fit(0, |_| true), 0);
     }
 
     #[test]

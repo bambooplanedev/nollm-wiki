@@ -6,8 +6,8 @@
 //! into text with some categories cut and a cap on item lines, which is how a
 //! token budget shrinks it.
 
-use crate::manifest::token_estimate;
-use crate::model::{CodeItem, SourceKind};
+use crate::manifest::{largest_fit, token_estimate};
+use crate::model::{one_line, CodeItem, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
 
@@ -193,10 +193,7 @@ fn budget(o: &Outline, full: String, max: usize) -> String {
         render(o, &Keep { lines: n, ..keep }) + &marker(&dropped, Some(more))
     };
     // Each line makes the text longer, so the counts that fit are a prefix.
-    let n = (1..starts.len())
-        .collect::<Vec<_>>()
-        .partition_point(|&n| fits(&ceiling(n)));
-    ceiling(n)
+    ceiling(largest_fit(starts.len() - 1, |n| fits(&ceiling(n))))
 }
 
 /// Reads page `id`'s entry, items and rendered markdown into an `Outline`.
@@ -263,11 +260,6 @@ fn heading(line: &str) -> Option<(usize, String)> {
     ((1..=6).contains(&level) && spaced).then(|| (level, text.trim().to_string()))
 }
 
-/// `s` with every whitespace run, newlines included, collapsed to one space.
-fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 /// The outline text with only what `keep` keeps; ends with a newline.
 fn render(o: &Outline, keep: &Keep) -> String {
     let mut out = o.header.clone();
@@ -286,14 +278,12 @@ fn render(o: &Outline, keep: &Keep) -> String {
                     out.extend(owner.map(|o| format!("{o}:")));
                     run = owner;
                 }
-                // The serde name, so the outline says what `items.json` says.
-                let kind = serde_json::to_value(it.kind).unwrap_or_default();
                 let mut line = format!(
                     "{}{}-{}  {}{}  {}",
                     if owner.is_some() { "  " } else { "" },
                     it.start_line,
                     it.end_line,
-                    kind.as_str().unwrap_or_default(),
+                    it.kind.as_str(),
                     if it.test { " [test]" } else { "" },
                     one_line(&it.signature),
                 );

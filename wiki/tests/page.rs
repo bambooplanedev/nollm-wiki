@@ -1,10 +1,10 @@
 //! `Wiki::outline`: a page's module map, one line per code symbol, against a compiled fixture.
 
 use std::fs;
-use tempfile::tempdir;
 use wiki::manifest::token_estimate;
 use wiki::query::Wiki;
-use wiki::{compile, CompileOptions};
+
+mod common;
 
 const LIB_RS: &str = "//! Adds numbers.
 use std::fmt;
@@ -46,8 +46,6 @@ fn tests_30() -> String {
 
 /// Compiles the fixture into `<dir>/out` and loads it.
 fn fixture() -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
     let (big, all_tests) = (big_rs(), tests_30());
     let files = [
         ("src/big.rs", big.as_str()),
@@ -75,14 +73,7 @@ fn fixture() -> (tempfile::TempDir, Wiki) {
             "import os\n## Imports\n# - fake\ndef f():\n    pass\n",
         ),
     ];
-    for (path, text) in files {
-        let p = input.join(path);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, text).unwrap();
-    }
-    compile(&input, &out, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&out).unwrap();
-    (dir, w)
+    common::compiled_wiki(&files)
 }
 
 fn outline(w: &Wiki, id: &str) -> String {
@@ -203,6 +194,12 @@ fn marker(text: &str) -> Option<&str> {
     text.lines().last().filter(|l| l.starts_with("… "))
 }
 
+/// The `N` of a marker's `pass max_tokens: N for all`.
+fn marker_tokens(marker: &str) -> usize {
+    let n = marker.split("pass max_tokens: ").nth(1).unwrap();
+    n.strip_suffix(" for all").unwrap().parse().unwrap()
+}
+
 /// The header lines of a page with imports: every line before `imports:`.
 fn header(full: &str) -> String {
     full.lines()
@@ -254,9 +251,7 @@ fn marker_budget_returns_the_full_outline() {
     let full = outline(&w, "big");
     for (_, text) in sweep(&w, "big") {
         if let Some(m) = marker(&text) {
-            let t = m.split("pass max_tokens: ").nth(1).unwrap();
-            let t: usize = t.strip_suffix(" for all").unwrap().parse().unwrap();
-            assert_eq!(w.outline("big", Some(t)).unwrap(), full);
+            assert_eq!(w.outline("big", Some(marker_tokens(m))).unwrap(), full);
         }
     }
 }
@@ -322,8 +317,7 @@ fn full_marker_budget_returns_the_whole_outline() {
     for max in 20..150 {
         let t = w.page_text("lib", true, Some(max)).unwrap();
         let Some(m) = marker(&t) else { continue };
-        let n = m.split("pass max_tokens: ").nth(1).unwrap();
-        let n: usize = n.strip_suffix(" for all").unwrap().parse().unwrap();
+        let n = marker_tokens(m);
         let again = w.page_text("lib", true, Some(n)).unwrap();
         assert_eq!(
             again,
@@ -350,14 +344,9 @@ fn full_over_budget_doc_truncates_on_a_line() {
 
 #[test]
 fn truncating_a_huge_doc_is_the_longest_whole_line_prefix() {
-    let dir = tempdir().unwrap();
-    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
-    fs::create_dir_all(&input).unwrap();
     let lines: Vec<String> = (0..20_000).map(|i| format!("line number {i}\n")).collect();
     let body = lines.concat();
-    fs::write(input.join("big.md"), format!("# Big\n\n{body}")).unwrap();
-    compile(&input, &out, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&out).unwrap();
+    let (_d, w) = common::compiled_wiki(&[("big.md", &format!("# Big\n\n{body}"))]);
     let page = w.page("big").unwrap();
     let t = w.page_text("big", true, Some(50)).unwrap();
     let (kept, marker) = t.trim_end().rsplit_once('\n').unwrap();

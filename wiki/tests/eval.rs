@@ -7,10 +7,10 @@
 //! with the live files it was copied from.** Re-syncing restores the moving
 //! target this harness exists to remove: a score change would no longer be
 //! attributable to the scorer, because the corpus could have moved instead.
-//! The corpus is re-cut only by explicit decision when a scoring cycle
-//! closes, in a commit that quotes both the old and the new table. The next
+//! The corpus is re-cut only by explicit decision, in a commit that quotes
+//! both the old and the new table. The next
 //! re-cut must add a `lib.rs`-style page whose `pub mod` lines name other
-//! pages: the 2026-09-02 exports-field prototype scored 19/19 here while
+//! pages: an exports-field prototype once scored 19/19 here while
 //! dropping title-as-query own-page hits on the live wiki from 35/37 to
 //! 29/37 — a defect class this corpus cannot see.
 //!
@@ -98,16 +98,6 @@ const CHROME_SECTIONS: [&str; 6] = [
 /// pass for any page.
 const MIN_TOKEN_CHARS: usize = 4;
 
-/// Queries exempt from the majority-coverage guard: deliberate minimal
-/// repros for a specific fix, whose whole point is a word the target page
-/// does not contain (e.g. a stemming case like `wikilinks` against a page
-/// that only has `wikilink`). Empty today. Adding an entry is a claim that
-/// the label is a known-unreachable target, not an oversight.
-///
-/// The guard this exempts from is narrower than "unreachable target": see
-/// `covers_majority`'s doc comment for what it actually checks and does not.
-const EXEMPT: &[&str] = &[];
-
 /// The searchable content of a rendered page: every section except the
 /// generated chrome, lowercased.
 fn searchable_content(page: &str) -> String {
@@ -170,16 +160,10 @@ fn covers_majority_ignores_short_tokens_and_needs_half() {
 
 /// `(query, the one page that should answer it)`.
 ///
-/// Eight of these scored zero under the strict-AND scorer this harness was
-/// built against, because a page missing any one token was dropped before
-/// ranking. They were kept deliberately, and the 2026-09-02 scoring cycle
-/// (partial matching, IDF, length normalisation, section-heading field)
-/// made all eight reachable. The set still contains one deliberate miss
-/// (`sorted` → `walk`, rank 2 under both the substring and the prefix
-/// scorer, which became the set's deliberate miss in the 2026-09-03
-/// prefix-match cycle; before it `extractor` → `formats`, and before that
-/// `slugify title case`) for the same reason: a set of only passing cases
-/// is blind to the next defect.
+/// Some cases are multi-token queries where a page misses one token, kept so
+/// partial matching stays covered. The set also keeps one deliberate miss
+/// (`sorted` → `walk`, rank 2): a set of only passing cases is blind to the
+/// next defect.
 const CASES: &[(&str, &str)] = &[
     ("determinism rules", "architecture"),
     ("incremental cache", "cache"),
@@ -200,18 +184,15 @@ const CASES: &[(&str, &str)] = &[
     ("obsidian wikilink slug format", "wiki"),
     ("token estimate chars", "manifest"),
     ("cache version hash algo mismatch", "cache"),
-    // 2026-09-02 defined-names cycle. `extractor trait`: baseline rank 2,
-    // now 1 — pins "definer over implementer". `extractor`: rank 4 → 3 in
-    // that cycle (`text` and `markdown` earned the word from the substring
-    // hit inside `TextExtractor`/`MarkdownExtractor` in their signature
-    // summaries) → 1 in the 2026-09-03 prefix-match cycle, which removed
-    // that substring hit; `formats`' own score is unchanged (4.2002).
+    // `extractor trait` pins "definer over implementer". `extractor` ranks
+    // `formats` first: there is no substring hit inside
+    // `TextExtractor`/`MarkdownExtractor` in the `text` and `markdown`
+    // signature summaries; `formats`' own score is 4.2002.
     ("extractor trait", "formats"),
     ("extractor", "formats"),
-    // 2026-09-03 prefix-match and methods cycle: the deliberate miss.
-    // Rank 2 under both the substring and the prefix scorer; `architecture`
-    // wins on body volume (1.8651 vs 1.8351) and `walk`'s frozen summary is
-    // a signature, so no field carries the word. Replaces `extractor`.
+    // The deliberate miss: rank 2; `architecture` wins on body volume
+    // (1.8651 vs 1.8351) and `walk`'s frozen summary is a signature, so no
+    // field carries the word.
     ("sorted", "walk"),
 ];
 
@@ -225,23 +206,19 @@ fn every_label_names_a_page_that_could_answer_it() {
             wiki.has_page(expected),
             "label `{query}` expects page `{expected}`, which does not exist",
         );
-        if EXEMPT.contains(query) {
-            continue;
-        }
         let page = wiki.page(expected).expect("has_page just succeeded");
         assert!(
             covers_majority(query, &searchable_content(&page)),
             "label `{query}` -> `{expected}`: fewer than half its tokens \
              appear in that page's searchable content, so the page is not \
-             the answer. Fix the label, or add the query to EXEMPT if it is \
-             a deliberate minimal repro.",
+             the answer. Fix the label.",
         );
     }
 }
 
 /// Run every case and return `(top1, mrr@10, table)`.
 ///
-/// The table is both the snapshot payload and the body of Task 4's floor
+/// The table is both the snapshot payload and the body of the floor
 /// messages, so it is built once here.
 ///
 /// Columns: the rank of the expected page (`-` when absent from the top ten),
@@ -313,14 +290,6 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 const MIN_TOP1: f64 = 21.0 / 22.0; // 0.9545454…
 const MIN_MRR10: f64 = 43.0 / 44.0; // 0.9772727… = (21 + 1/2) / 22
 
-/// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
-/// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
-/// from the same rational written as a fraction (the original baseline,
-/// 55/114, did exactly that). The current floors happen to be bit-identical
-/// to their accumulations, but a future re-cut may not be. One case is worth
-/// 1/22 ≈ 4.5 percentage points, so 1e-9 cannot hide a real move.
-const FLOOR_EPS: f64 = 1e-9;
-
 /// The function name is load-bearing: `insta` derives the snapshot file name
 /// (`eval__retrieval_quality.snap`) from it, so renaming this test orphans
 /// the existing snapshot and fails CI with "no stored snapshot" instead of a
@@ -338,11 +307,11 @@ fn retrieval_quality() {
     // short-circuits `assert_snapshot!` — no rerun recovers it (not even with
     // INSTA_FORCE_UPDATE), and the corpus tempdir is already gone.
     assert!(
-        top1 >= MIN_TOP1 - FLOOR_EPS,
+        top1 >= MIN_TOP1 - corpus::FLOOR_EPS,
         "top1 regressed: {top1} < {MIN_TOP1}\n{table}"
     );
     assert!(
-        mrr >= MIN_MRR10 - FLOOR_EPS,
+        mrr >= MIN_MRR10 - corpus::FLOOR_EPS,
         "mrr@10 regressed: {mrr} < {MIN_MRR10}\n{table}"
     );
 

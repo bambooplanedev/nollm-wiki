@@ -1,7 +1,7 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
-use crate::formats::{derive_name_from_path, normalize_tags, summarize, Extractor};
-use crate::model::{slugify, Entity, SourceKind};
+use crate::formats::{derive_name_from_path, summarize, Extractor};
+use crate::model::{basename, days_in_month, slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
 
@@ -13,7 +13,6 @@ impl Extractor for MarkdownExtractor {
     fn extract(&self, rel_path: &str, text: &str) -> Entity {
         let (fm, body_text) = split_frontmatter(text);
 
-        let mut title = fm_get(&fm, "title");
         let created = fm_get(&fm, "created").unwrap_or_default();
         let updated = find_date(&fm, rel_path);
         let description = fm_get(&fm, "description");
@@ -21,10 +20,9 @@ impl Extractor for MarkdownExtractor {
         let tags = normalize_tags(fm_list(&fm, "tags"));
         let supersedes = fm_list(&fm, "supersedes");
 
-        if title.is_none() {
-            title = first_h1(body_text);
-        }
-        let name = title.unwrap_or_else(|| derive_name_from_path(rel_path));
+        let name = fm_get(&fm, "title")
+            .or_else(|| first_h1(body_text))
+            .unwrap_or_else(|| derive_name_from_path(rel_path));
         let body = body_text.trim().to_string();
         let summary = summarize(description.as_deref(), None, &body, None);
 
@@ -35,19 +33,11 @@ impl Extractor for MarkdownExtractor {
             tags,
             created,
             updated,
-            memory: false,
             supersedes,
-            superseded_by: None,
             body,
-            source_path: String::new(),
             kind: SourceKind::Markdown,
-            content_hash: [0u8; 32],
             summary,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            defined: Vec::new(),
-            methods: Vec::new(),
-            items: Vec::new(),
+            ..Entity::default()
         }
     }
 }
@@ -103,7 +93,7 @@ fn find_date(fm: &[String], rel_path: &str) -> String {
             .find_map(|k| fm_get(&own, k).as_deref().and_then(leading_date))
     };
     let stem = || {
-        let name = rel_path.rsplit('/').next().unwrap_or(rel_path);
+        let name = basename(rel_path);
         leading_date(name.rsplit_once('.').map_or(name, |(s, _)| s))
     };
     top.or_else(block).or_else(stem).unwrap_or_default()
@@ -125,14 +115,9 @@ fn leading_date(s: &str) -> Option<String> {
         return None;
     }
     let (year, month, day) = (num(0..4)?, num(5..7)?, num(8..10)?);
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let len = match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => 28 + u32::from(leap),
-        _ => return None,
-    };
-    (1..=len).contains(&day).then(|| date.to_string())
+    (1..=days_in_month(Some(year), month))
+        .contains(&day)
+        .then(|| date.to_string())
 }
 
 /// Value of a top-level `key:` line; indented lines belong to some other key.
@@ -141,6 +126,19 @@ fn fm_get(fm: &[String], key: &str) -> Option<String> {
     fm.iter()
         .find_map(|l| l.strip_prefix(&prefix).map(unquote))
         .filter(|v| !v.is_empty())
+}
+
+/// Front-matter tags as stored: `#` stripped, trimmed, lowercased, empties
+/// dropped, duplicates removed keeping the first-seen order.
+fn normalize_tags(raw: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in raw {
+        let t = t.trim().trim_start_matches('#').trim().to_lowercase();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// A list under a top-level `key:`: inline (`a, b` / `[a, b]`) or a YAML block of `- item` lines.

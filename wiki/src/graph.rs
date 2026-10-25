@@ -162,12 +162,6 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         .keys()
         .map(|k| (k.clone(), Edges::default()))
         .collect();
-    if entities.is_empty() {
-        return Graph {
-            edges,
-            pagerank: BTreeMap::new(),
-        };
-    }
     let index = build_phrase_index(entities);
     let by_path: BTreeMap<&str, &str> = entities
         .iter()
@@ -250,9 +244,8 @@ struct ImportResolver<'a> {
     /// `#include` of the bare stem should mean, so the tie-break is
     /// `source_rank` first (a header always ranks below its implementation)
     /// and `source_path` only to break a tie between two files of the same
-    /// rank. Before C++ landed no header extension existed, so every
-    /// existing corpus ties on rank and this reduces to the old
-    /// smallest-path rule.
+    /// rank. Without a header extension every file ties on rank and this
+    /// reduces to the smallest-path rule.
     by_stem: BTreeMap<&'a str, (u8, &'a str, &'a str)>,
     /// Defined name → (`source_rank`, page id) of the lowest-rank claimant,
     /// or `None` once two pages of the *same* rank both claim it.
@@ -438,15 +431,6 @@ fn local_crate_root(source_path: &str) -> Option<&str> {
     parts.next()
 }
 
-pub fn orphan_ids(graph: &Graph) -> Vec<String> {
-    graph
-        .edges
-        .iter()
-        .filter(|(_, e)| e.incoming.is_empty())
-        .map(|(id, _)| id.clone())
-        .collect()
-}
-
 /// Deterministic `PageRank`: fixed 40 iterations, damping 0.85, `BTree` node order.
 fn pagerank(edges: &BTreeMap<String, Edges>) -> BTreeMap<String, f64> {
     let n = edges.len();
@@ -492,23 +476,9 @@ mod tests {
         Entity {
             id: id.into(),
             name: name.into(),
-            aliases: vec![],
-            tags: vec![],
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
-            kind: SourceKind::Text,
-            content_hash: [0u8; 32],
-            summary: None,
-            symbols: vec![],
-            imports: vec![],
-            defined: vec![],
-            methods: vec![],
-            items: vec![],
+            ..Entity::default()
         }
     }
 
@@ -644,19 +614,6 @@ mod tests {
         let trip = ent("trip", "Trip", "We saw a naïve painting.");
         let g = build_graph(&map(vec![ve, trip]));
         assert!(!g.edges["trip"].outgoing.contains("ve"));
-    }
-
-    #[test]
-    fn orphans_have_zero_incoming() {
-        let g = build_graph(&map(vec![
-            ent("a", "Alpha", "mentions Beta"),
-            ent("b", "Beta", "nothing"),
-            ent("c", "Gamma", "nothing"),
-        ]));
-        let o = orphan_ids(&g);
-        assert!(o.contains(&"c".to_string()));
-        assert!(o.contains(&"a".to_string()));
-        assert!(!o.contains(&"b".to_string()));
     }
 
     #[test]

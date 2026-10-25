@@ -1,23 +1,16 @@
 use std::fs;
 
+mod common;
+
 fn compile_tree(files: &[(&str, &str)]) -> serde_json::Value {
     compile_with_items(files).0
 }
 
 /// The compiled `index.json` and its `items.json` sidecar.
 fn compile_with_items(files: &[(&str, &str)]) -> (serde_json::Value, serde_json::Value) {
-    let src = tempfile::tempdir().unwrap();
-    let out = tempfile::tempdir().unwrap();
-    for (path, body) in files {
-        let p = src.path().join(path);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, body).unwrap();
-    }
-    wiki::compile(src.path(), out.path(), &wiki::CompileOptions::default()).unwrap();
-    let read = |name: &str| {
-        serde_json::from_str(&fs::read_to_string(out.path().join(name)).unwrap()).unwrap()
-    };
-    (read("index.json"), read("items.json"))
+    let (_dir, _, out) = common::compiled(files);
+    let items = fs::read_to_string(out.join("items.json")).unwrap();
+    (common::index(&out), serde_json::from_str(&items).unwrap())
 }
 
 fn neighbors_out<'a>(index: &'a serde_json::Value, id: &str) -> Vec<&'a str> {

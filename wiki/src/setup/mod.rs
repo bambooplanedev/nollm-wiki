@@ -14,6 +14,8 @@ const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/wiki-navigation";
 const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
+/// The command the agents run.
+const CMD: &str = "wiki";
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
@@ -66,48 +68,31 @@ struct Report<'a> {
     guard_tracked: bool,
 }
 
+/// `memory::git`, run only when git is on `PATH`.
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    find_on_path("git").and_then(|_| memory::git(root, args))
+}
+
 /// Whether git (when on `PATH`) tracks `file` in `root`.
 fn tracked(root: &Path, file: &str) -> bool {
-    find_on_path("git").is_some()
-        && Command::new("git")
-            .args(["ls-files", "--error-unmatch", "--", file])
-            .current_dir(root)
-            .output()
-            .is_ok_and(|o| o.status.success())
+    git(root, &["ls-files", "--error-unmatch", "--", file]).is_some()
 }
 
 /// The repository's `info/exclude`: asked of git when it is on `PATH`, else `.git/info/exclude`.
 fn exclude_file(root: &Path) -> Option<PathBuf> {
-    if find_on_path("git").is_some() {
-        let o = Command::new("git")
-            .args(["rev-parse", "--git-path", "info/exclude"])
-            .current_dir(root)
-            .output()
-            .ok()
-            .filter(|o| o.status.success());
-        if let Some(o) = o {
-            return Some(root.join(String::from_utf8_lossy(&o.stdout).trim()));
-        }
-    }
-    root.join(".git")
-        .is_dir()
-        .then(|| root.join(".git/info/exclude"))
+    git(root, &["rev-parse", "--git-path", "info/exclude"])
+        .map(|p| root.join(p))
+        .or_else(|| {
+            root.join(".git")
+                .is_dir()
+                .then(|| root.join(".git/info/exclude"))
+        })
 }
 
 /// `root`'s path below the worktree top, with a trailing `/` (empty at the top or without git).
 /// Patterns in `info/exclude` anchor to the top, so a subdirectory's lines need it.
 fn worktree_prefix(root: &Path) -> String {
-    if find_on_path("git").is_none() {
-        return String::new();
-    }
-    Command::new("git")
-        .args(["rev-parse", "--show-prefix"])
-        .current_dir(root)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+    git(root, &["rev-parse", "--show-prefix"]).unwrap_or_default()
 }
 
 impl Report<'_> {
@@ -184,13 +169,13 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
 }
 
 /// Claude Code's own local-scope MCP config, through its CLI.
-fn claude_local_mcp(root: &Path, cmd: &str, entry: &Value, remove: bool) -> Outcome {
+fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = claude(root, &["mcp", "get", "wiki"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
-                && has(&format!("Command: {cmd}"))
+                && has(&format!("Command: {CMD}"))
                 && has("Args: serve --source .");
             if !ours {
                 return Ok(Outcome::Foreign(
@@ -248,18 +233,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         a
     };
 
-    if find_on_path("git").is_some() {
-        if let Ok(o) = Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(root)
-            .output()
-        {
-            let top = String::from_utf8_lossy(&o.stdout);
-            if o.status.success()
-                && std::fs::canonicalize(top.trim()).ok() != root.canonicalize().ok()
-            {
-                r.line("warning: this is not the git toplevel; agents must be started from here")?;
-            }
+    if let Some(top) = git(root, &["rev-parse", "--show-toplevel"]) {
+        if std::fs::canonicalize(top).ok() != root.canonicalize().ok() {
+            r.line("warning: this is not the git toplevel; agents must be started from here")?;
         }
     }
 
@@ -321,12 +297,10 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let on_path = find_on_path("wiki").is_some();
-    let cmd = "wiki";
-    if !on_path && !opts.remove {
+    if !opts.remove && find_on_path("wiki").is_none() {
         r.line("warning: wiki is not on PATH; the agents will not find it until it is")?;
     }
-    let entry = json!({"command": cmd, "args": ["serve", "--source", "."]});
+    let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
     let mut ignore = vec![".wiki/".to_string()];
 
     for agent in agents {
@@ -356,7 +330,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, cmd, &entry, opts.remove);
+            let o = claude_local_mcp(root, &entry, opts.remove);
             r.item("Claude Code local wiki server", false, Ok(o))?;
         }
         // Skill
@@ -375,7 +349,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // Hook (`--remove` always looks, so it undoes a hook installed earlier)
         if opts.hook || opts.remove {
             if pi {
-                let content = PI_HOOK.replace("<cmd>", cmd);
+                let content = PI_HOOK.replace("<cmd>", CMD);
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
@@ -394,7 +368,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 } else {
                     ".claude/settings.json"
                 };
-                let item = json!({"hooks": [{"type": "command", "command": format!("{cmd} hint --claude-hook")}]});
+                let item = json!({"hooks": [{"type": "command", "command": format!("{CMD} hint --claude-hook")}]});
                 let path = root.join(file);
                 let parents = ["hooks", "UserPromptSubmit"];
                 let res = || {

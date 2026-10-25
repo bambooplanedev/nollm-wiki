@@ -1,9 +1,6 @@
 //! Rust extraction: bare-`pub` visibility gating, owner qualification through
 //! `impl`/`trait` scopes, and `#[cfg(test)]` module stripping.
-use super::code::{
-    default_shape, keep_all, no_body_doc, no_export_set, owner_anchor_identity, sig_start_identity,
-    LangSpec, Lead, Placement, Rank, Shape,
-};
+use super::code::{default_shape, LangSpec, Lead, Placement, Rank, Shape};
 use std::sync::LazyLock;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
@@ -122,10 +119,9 @@ fn has_attribute(node: Node, text: &str, want: &str) -> bool {
     })
 }
 
-/// The previous cycle's `rust_module_level` guard and `rust_owner` resolution,
-/// composed. Order is unobservable: both were pure functions, and the old loop
-/// called `rust_owner` only after `rust_module_level` had passed.
-pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
+/// The `rust_module_level` guard and `rust_owner` resolution, composed. Order
+/// is unobservable: both are pure, and `rust_owner` runs only once the guard passes.
+fn rust_placement(def: Node, text: &str) -> Placement {
     // A macro carries no visibility modifier, so the query cannot gate it
     // structurally the way it gates every other item: `#[macro_export]` is
     // the whole of a `macro_rules!` macro's public surface.
@@ -135,10 +131,7 @@ pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
     if !rust_module_level(def) {
         return Placement::Rejected;
     }
-    match rust_owner(def, text) {
-        Some(owner) => Placement::Scoped(vec![owner]),
-        None => Placement::Scoped(Vec::new()),
-    }
+    Placement::Scoped(rust_owner(def, text).into_iter().collect())
 }
 
 /// A trait impl rendered as an owner, in Rust's own disambiguation syntax:
@@ -170,15 +163,14 @@ pub(crate) fn is_trait_impl(owner: &str) -> bool {
 }
 
 /// The group a trait-impl header shares with its own methods.
-pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
+fn rust_header_group(def: Node, text: &str) -> Option<String> {
     if def.kind() != "impl_item" {
         return None;
     }
     trait_impl_owner(def, text)
 }
 
-/// Rust's grammar-specific shapes. Everything here was previously a
-/// `def.kind()` arm inside the shared core.
+/// Rust's grammar-specific shapes.
 pub(crate) fn rust_shape(def: Node) -> Shape {
     match def.kind() {
         // A variant IS its payload. Cutting at `body` the way a struct is cut
@@ -190,10 +182,8 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
         // every other value it is unbudgeted. Recorded as a deferral, not fixed
         // here.
         "enum_variant" => Shape {
-            rank: Rank::Def,
             cut: None,
-            value: None,
-            has_type: true,
+            ..default_shape(def)
         },
         // A `macro_definition`'s rules are plain children, not a `body` field,
         // so without an explicit cut the entire macro would become its
@@ -205,10 +195,8 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
             // `cursor`, and inside the literal that borrow would outlive it.
             let cut = def.children(&mut cursor).find(|c| c.kind() == "macro_rule");
             Shape {
-                rank: Rank::Def,
                 cut,
-                value: None,
-                has_type: true,
+                ..default_shape(def)
             }
         }
         // A `const`/`static` cuts at its value and then re-appends it: the
@@ -237,18 +225,14 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
     }
 }
 
-pub(crate) fn rust_spec() -> LangSpec {
-    LangSpec {
-        lang_name: "rust",
-        language: tree_sitter_rust::LANGUAGE.into(),
-        // Requiring `(visibility_modifier)` excludes private items
-        // structurally; `vis_filter` then drops the restricted forms
-        // (`pub(crate)` and friends) that the node kind also covers.
-        // The trait-impl patterns deliberately capture no `@vis`: rustc
-        // rejects a visibility modifier there, and those items are public
-        // through the trait. The trait-declaration patterns gate on the
-        // trait's own visibility instead of the method's.
-        query_src: r"
+// Requiring `(visibility_modifier)` excludes private items
+// structurally; `vis_filter` then drops the restricted forms
+// (`pub(crate)` and friends) that the node kind also covers.
+// The trait-impl patterns deliberately capture no `@vis`: rustc
+// rejects a visibility modifier there, and those items are public
+// through the trait. The trait-declaration patterns gate on the
+// trait's own visibility instead of the method's.
+const QUERY: &str = r"
                 (function_item (visibility_modifier) @vis name: (identifier) @name) @def
                 (struct_item (visibility_modifier) @vis name: (type_identifier) @name) @def
                 (enum_item (visibility_modifier) @vis name: (type_identifier) @name) @def
@@ -281,22 +265,21 @@ pub(crate) fn rust_spec() -> LangSpec {
                 (trait_item name: (type_identifier) @name) @item
                 (union_item name: (type_identifier) @name) @item
                 (type_item name: (type_identifier) @name) @item
-            ",
-        name_filter: keep_all,
+            ";
+
+pub(crate) fn rust_spec() -> LangSpec {
+    LangSpec {
         vis_filter: keep_bare_pub,
         strip_trailing: &[';', '=', '{'],
         placement: rust_placement,
         owner_sep: "::",
-        export_set: no_export_set,
-        join_continuations: false,
-        sig_start: sig_start_identity,
-        owner_anchor: owner_anchor_identity,
         header_group: rust_header_group,
         item_lead: rust_lead,
-        body_doc: no_body_doc,
-        // Every public item also matches a @def pattern above, whose gate
+        // Every public item also matches a @def pattern in `QUERY`, whose gate
         // decides it; an @item-only match is private or restricted.
         query_gates_visibility: true,
+        shape: rust_shape,
+        ..LangSpec::base("rust", tree_sitter_rust::LANGUAGE.into(), QUERY)
     }
 }
 
@@ -436,7 +419,7 @@ mod tests {
             _ => panic!("expected Code kind"),
         }
         assert_has(&e.symbols, "pub fn render_page(x: i32) -> String");
-        assert!(!e.symbols.iter().any(|s| s.contains("private_helper")));
+        assert_lacks(&e.symbols, "private_helper");
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert_eq!(e.summary.as_deref(), Some("Module docs."));
     }
@@ -485,11 +468,8 @@ mod tests {
             e.symbols
         );
         for leaked in ["crate_only", "super_only", "CrateType", "impl_crate_only"] {
-            assert!(
-                !e.symbols.iter().any(|s| s.contains(leaked)),
-                "{leaked} is not exported outside the crate: {:?}",
-                e.symbols
-            );
+            // each name is not exported outside the crate
+            assert_lacks(&e.symbols, leaked);
         }
     }
 
@@ -498,11 +478,8 @@ mod tests {
         let src = "pub trait Public {\n    fn m(&self);\n}\ntrait Private {\n    fn n(&self);\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_has(&e.symbols, "pub trait Public");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("Private")),
-            "private trait leaked as export: {:?}",
-            e.symbols
-        );
+        // private trait leaked as export
+        assert_lacks(&e.symbols, "Private");
     }
 
     #[test]
@@ -527,12 +504,9 @@ mod tests {
             &e.symbols,
             "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>",
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn free_function()"),
-            "a top-level function must stay unqualified: {:?}",
-            e.symbols
-        );
-        assert!(!e.symbols.iter().any(|s| s.contains("helper")));
+        // a top-level function must stay unqualified
+        assert_has(&e.symbols, "pub fn free_function()");
+        assert_lacks(&e.symbols, "helper");
     }
 
     #[test]
@@ -550,11 +524,8 @@ mod tests {
         let e = CodeExtractor.extract("t.rs", src);
         assert_has(&e.symbols, "pub fn outer()");
         for leaked in ["Local", "hidden", "nested"] {
-            assert!(
-                !e.symbols.iter().any(|s| s.contains(leaked)),
-                "{leaked} lives in a function body and is not module surface: {:?}",
-                e.symbols
-            );
+            // each name lives in a function body and is not module surface
+            assert_lacks(&e.symbols, leaked);
         }
     }
 
@@ -650,11 +621,8 @@ mod tests {
         // The body assertion above only catches the symptom; the stake is
         // that a same-line export doesn't silently vanish from the page's
         // exports once the newline separates it from the marker comment.
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn after() -> u8"),
-            "export following the test module on the same line was lost: {:?}",
-            e.symbols
-        );
+        // export following the test module on the same line was lost
+        assert_has(&e.symbols, "pub fn after() -> u8");
     }
 
     #[test]
@@ -688,19 +656,13 @@ mod tests {
             "test-only import leaked: {:?}",
             e.imports
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "pub struct Fixture"),
-            "real export lost: {:?}",
-            e.symbols
-        );
+        // real export lost
+        assert_has(&e.symbols, "pub struct Fixture");
         // The fixture also plants an `impl Default for Fixture` inside the
         // `#[cfg(test)]` module — exactly the widening the module-level
         // guard exists to prevent. It must not survive stripping.
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("Default")),
-            "impl inside the stripped test module leaked as an export: {:?}",
-            e.symbols
-        );
+        // impl inside the stripped test module leaked as an export
+        assert_lacks(&e.symbols, "Default");
     }
 
     #[test]
@@ -863,11 +825,8 @@ mod tests {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
         let e = CodeExtractor.extract("q.rs", src);
         assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("hidden")),
-            "function-local item leaked: {:?}",
-            e.symbols
-        );
+        // function-local item leaked
+        assert_lacks(&e.symbols, "hidden");
     }
 
     #[test]
@@ -1007,8 +966,8 @@ mod surface_tests {
 
     #[test]
     fn public_struct_fields_are_exported_and_private_ones_are_not() {
-        // The Python extractor has shown class fields since its own cycle;
-        // a Rust struct's fields are the same contract and were invisible.
+        // Matches the Python extractor's class fields: a Rust struct's public
+        // fields are part of the same contract.
         let src = "pub struct Store {\n    pub path: String,\n    pub(crate) internal: u8,\n    seen: u32,\n}\n";
         assert_has(src, "pub struct Store");
         assert_has(src, "pub Store::path: String");
@@ -1134,7 +1093,7 @@ mod surface_tests {
     #[test]
     fn an_enum_variant_does_not_render_its_inner_doc_comments() {
         // A variant renders its whole node, body included, so a `///` on a
-        // field inside it used to collapse into the signature. Measured in
+        // field inside it would collapse into the signature. Measured in
         // real crates: aho-corasick renders `MatchErrorKind::UnsupportedStream
         // { /// The match semantics ... got: MatchKind, }`. Beyond being noise
         // that inflates token_estimate, a `///` inside a one-line signature
@@ -1161,10 +1120,9 @@ mod surface_tests {
 
     #[test]
     fn a_rust_string_value_keeps_its_own_punctuation() {
-        // `tidy_punctuation` used to be a flat substring pass over collapsed
-        // text, so it rewrote punctuation *inside* a string literal that
-        // survived into a signature: this rendered `", "`, silently
-        // misreporting the constant's value. `render_span` now decides
+        // A flat `tidy_punctuation` pass over collapsed text would rewrite
+        // punctuation *inside* a string literal, rendering `", "` and silently
+        // misreporting the constant's value. `render_span` decides
         // structurally, leaving literal spans untidied.
         let src = "pub const SEP: &str = \" , \";\n";
         assert_has(src, "pub const SEP: &str = \" , \"");

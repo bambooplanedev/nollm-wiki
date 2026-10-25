@@ -1,71 +1,36 @@
 //! Regression tests for search ranking.
 //!
-//! Coverage: the four dogfood checklist queries from the 2026-07-14 cycle,
-//! plus the 2026-09-02 scoring cycle's pins — partial matching, occurrence
-//! monotonicity, the heading field, and IDF over volume. Fixtures are
+//! Coverage: the four dogfood checklist queries, plus pins for partial
+//! matching, occurrence monotonicity, the heading field, and IDF over volume. Fixtures are
 //! authored in-test (modeled on the self-hosted corpus), not a checkout of
 //! this repo.
 
-use std::fs;
-use tempfile::tempdir;
 use wiki::query::Wiki;
-use wiki::{compile, CompileOptions};
+
+mod common;
 
 fn build_corpus() -> (tempfile::TempDir, std::path::PathBuf) {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
+    let flood_a = format!("# Flood A\n\n{}\n", "quokka ".repeat(25).trim());
+    let flood_b = format!("# Flood B\n\n{}\n", "quokka ".repeat(40).trim());
+    let (dir, _, output) = common::compiled(&[
     // architecture-like: the key word lives under an embedded subheading.
-    fs::write(
-        input.join("architecture.md"),
-        "# Architecture\n\nPipeline internals.\n\n## Determinism rules\n\nDeterminism is enforced by sorted walks. Determinism again.\n",
-    )
-    .unwrap();
+        ("architecture.md", "# Architecture\n\nPipeline internals.\n\n## Determinism rules\n\nDeterminism is enforced by sorted walks. Determinism again.\n"),
     // serve-like: multi-word query words appear apart from each other.
-    fs::write(
-        input.join("serve.md"),
-        "# Serve\n\nThe MCP server exposes pages as resources over stdio.\n",
-    )
-    .unwrap();
+        ("serve.md", "# Serve\n\nThe MCP server exposes pages as resources over stdio.\n"),
     // lint-like: three query words scattered through the body.
-    fs::write(
-        input.join("lint.md"),
-        "# Lint\n\nReports broken wikilinks and orphans. Links are checked pagewise.\n",
-    )
-    .unwrap();
+        ("lint.md", "# Lint\n\nReports broken wikilinks and orphans. Links are checked pagewise.\n"),
     // cache-like.
-    fs::write(
-        input.join("cache.md"),
-        "# Cache\n\nThe incremental cache skips unchanged pages on recompile.\n",
-    )
-    .unwrap();
+        ("cache.md", "# Cache\n\nThe incremental cache skips unchanged pages on recompile.\n"),
     // ranking pair: many mentions vs one incidental mention. Neither title
     // contains the query word, so only body term frequency can rank "hub"
     // above "aside" (which would otherwise lead on id order).
-    fs::write(
-        input.join("hub.md"),
-        "# Hub\n\nkumquat kumquat kumquat kumquat kumquat.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("aside.md"),
-        "# Aside\n\nMentions a kumquat once, in passing.\n",
-    )
-    .unwrap();
+        ("hub.md", "# Hub\n\nkumquat kumquat kumquat kumquat kumquat.\n"),
+        ("aside.md", "# Aside\n\nMentions a kumquat once, in passing.\n"),
     // monotonicity pair: 25 vs 40 occurrences, both unlinked (equal
     // pagerank) — the higher count must score higher.
-    fs::write(
-        input.join("flood_a.md"),
-        format!("# Flood A\n\n{}\n", "quokka ".repeat(25).trim()),
-    )
-    .unwrap();
-    fs::write(
-        input.join("flood_b.md"),
-        format!("# Flood B\n\n{}\n", "quokka ".repeat(40).trim()),
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+        ("flood_a.md", &flood_a),
+        ("flood_b.md", &flood_b),
+    ]);
     (dir, output)
 }
 
@@ -115,8 +80,7 @@ fn more_occurrences_score_higher() {
     // page's searchable body is its H1 line plus its `quokka` run, so
     // len = tf + 3 and tf' = tf·2.2 / (tf + 1.2·(0.25 + 0.75·len/avglen))
     // is strictly increasing in tf: more mentions score strictly higher.
-    // (The old scorer capped at 20 and forced an exact tie; that concept
-    // is gone.)
+    // (There is no occurrence cap, so no exact tie.)
     assert!(
         b.score > a.score,
         "40 occurrences must score above 25: {} vs {}",
@@ -146,42 +110,35 @@ fn section_headings_are_searchable() {
 fn rare_title_match_beats_volume_on_a_common_word() {
     // Own fixture: adding pages to `build_corpus` would shift N, df and
     // avglen under every other test in this file.
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     // The `content hash` shape from the eval corpus: a tiny page titled
     // with the rare term, versus a long page that mentions the rare term
     // many times alongside a word almost every page contains.
-    fs::write(
-        input.join("hash.md"),
-        "# Hash\n\nBlake3 digest of a file.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("architecture.md"),
-        format!(
-            "# Architecture\n\n{}\n",
-            "content flows through the pipeline and each stage records a hash of its input. "
-                .repeat(60)
-                .trim()
-        ),
-    )
-    .unwrap();
-    for i in 0..5 {
-        fs::write(
-            input.join(format!("filler_{i}.md")),
-            format!("# Filler {i}\n\nSome content about topic {i}.\n"),
-        )
-        .unwrap();
-    }
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let architecture = format!(
+        "# Architecture\n\n{}\n",
+        "content flows through the pipeline and each stage records a hash of its input. "
+            .repeat(60)
+            .trim()
+    );
+    let fillers: Vec<_> = (0..5)
+        .map(|i| {
+            (
+                format!("filler_{i}.md"),
+                format!("# Filler {i}\n\nSome content about topic {i}.\n"),
+            )
+        })
+        .collect();
+    let mut files = vec![
+        ("hash.md", "# Hash\n\nBlake3 digest of a file.\n"),
+        ("architecture.md", architecture.as_str()),
+    ];
+    files.extend(fillers.iter().map(|(n, b)| (n.as_str(), b.as_str())));
+    let (_dir, _, output) = common::compiled(&files);
     let w = Wiki::load(&output).unwrap();
 
     let hits = w.search("content hash", None, 10);
     let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
     // Under strict AND `hash` was not even a hit (it lacks "content").
-    // Under the old additive scorer `architecture` won on volume. IDF
+    // Volume alone would put `architecture` first. IDF
     // makes "content" nearly weightless and the title hit on "hash"
     // decisive.
     assert_eq!(ids.first(), Some(&"hash"), "got {ids:?}");
@@ -247,12 +204,7 @@ fn title_only_hits_have_no_snippet() {
     // markdown page can't provide that — its own `# H1` line lands inside
     // the rendered `## Body` section — so use a code file: the title comes
     // from the basename, which appears nowhere in the extracted content.
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("zephyr.rs"), "pub fn blow() {}\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[("zephyr.rs", "pub fn blow() {}\n")]);
     let w = Wiki::load(&output).unwrap();
     let hits = w.search("zephyr", None, 10);
     let hit = hits.iter().find(|h| h.id == "zephyr").expect("hit");
@@ -265,20 +217,13 @@ fn title_only_hits_have_no_snippet() {
 
 #[test]
 fn snippet_never_splits_multibyte_chars() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     // Multibyte chars (— and é) crowd both sides of the match word so the
     // 60-char window edges land amid non-ASCII. Must not panic.
     let padding = "café — déjà-vu ".repeat(20);
-    fs::write(
-        input.join("unicode.md"),
-        format!("# Unicode\n\n{padding}xylophone{padding}\n"),
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
+    let (_dir, w) = common::compiled_wiki(&[(
+        "unicode.md",
+        &format!("# Unicode\n\n{padding}xylophone{padding}\n"),
+    )]);
     let hits = w.search("xylophone", None, 10);
     let hit = hits.iter().find(|h| h.id == "unicode").expect("hit");
     let s = hit.snippet.as_deref().expect("snippet");
@@ -294,16 +239,10 @@ fn author_heading_differing_only_in_case_from_chrome_stays_searchable() {
     // `## Notes` (exact case) is generated chrome and is skipped; an
     // author's `## NOTES` is not chrome. The exclusion is exact-case on
     // purpose so the author's section keeps both its heading and its body.
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("page.md"),
+    let (_dir, _, output) = common::compiled(&[(
+        "page.md",
         "# Page\n\nIntro.\n\n## NOTES\n\nThe pangolin lives here.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    )]);
     let w = Wiki::load(&output).unwrap();
 
     let body = w.search("pangolin", None, 10);

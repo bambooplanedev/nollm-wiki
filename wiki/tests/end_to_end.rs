@@ -2,18 +2,18 @@
 
 use std::collections::BTreeSet;
 use std::fs;
-use tempfile::tempdir;
+use std::path::Path;
+use tempfile::{tempdir, TempDir};
 use wiki::{compile, CompileOptions};
 
 mod common;
-use common::{exports, imports, write};
+use common::{exports, imports, index_entries, write};
 
 #[test]
 fn compiles_a_small_corpus_and_emits_artifacts() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     write(&input, "alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n");
     write(&input, "beta.txt", "# Beta\n\nBeta stands alone.\n");
 
@@ -32,7 +32,6 @@ fn compiles_a_small_corpus_and_emits_artifacts() {
 fn output_is_deterministic_across_jobs() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
-    fs::create_dir_all(&input).unwrap();
     for i in 0..20 {
         write(
             &input,
@@ -129,7 +128,6 @@ fn source_slugging_to_reserved_manifest_name_is_remapped_not_clobbered() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     // This file's title slugs to "index", which collides with the manifest's
     // own index.md — it must be remapped, not silently overwritten.
     write(
@@ -167,11 +165,8 @@ fn source_slugging_to_reserved_manifest_name_is_remapped_not_clobbered() {
 
     // index.json must parse and list the remapped entity with a `page` field
     // that matches the file actually written to disk.
-    let index_json = fs::read_to_string(output.join("index.json")).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&index_json).unwrap();
-    let entries = parsed["entries"].as_array().unwrap();
-    let remapped_entry = entries
-        .iter()
+    let remapped_entry = index_entries(&output)
+        .into_iter()
         .find(|e| e["id"] == "index_page")
         .expect("manifest should list the remapped 'index_page' entity");
     assert_eq!(remapped_entry["page"], "index_page.md");
@@ -182,7 +177,6 @@ fn output_nested_under_input_does_not_ingest_generated_pages() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("proj");
     let output = input.join("wiki"); // output nested INSIDE input
-    fs::create_dir_all(&input).unwrap();
     write(&input, "alpha.txt", "# Alpha\n\nAlpha stands alone.\n");
 
     // First compile: output dir does not exist yet, so only alpha.txt is seen.
@@ -203,7 +197,6 @@ fn names_differing_only_by_case_both_get_pages() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     // Two sources whose titles differ only by case both slugify to "widget".
     write(&input, "a.md", "---\ntitle: Widget\n---\n\nFirst body.\n");
     write(&input, "b.md", "---\ntitle: widget\n---\n\nSecond body.\n");
@@ -234,7 +227,6 @@ fn incremental_recompile_with_no_changes_writes_nothing() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     write(&input, "alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n");
     write(&input, "beta.txt", "# Beta\n\nBeta stands alone.\n");
 
@@ -262,12 +254,11 @@ fn incremental_recompile_with_no_changes_writes_nothing() {
 #[test]
 fn same_named_files_in_different_directories_all_survive() {
     // The canonical Python package layout: a `models.py` and an `__init__.py`
-    // per app. The `models.py` pair collides on the id `models`, and the dedup
-    // in `compile_inner` used to drop the loser with nothing louder than a
-    // stderr warning — the run still exited 0 and lint still reported no
-    // broken links, so the loss was invisible to both CI and an agent.
+    // per app. The `models.py` pair collides on the id `models`, and a loser
+    // dropped with nothing louder than a stderr warning would leave exit 0
+    // and clean lint, invisible to both CI and an agent.
     //
-    // The `__init__.py` pair no longer collides: a directory-module file is
+    // The `__init__.py` pair does not collide: a directory-module file is
     // named for its directory, so these are `api` and `db` rather than two
     // pages both called "Init". That is the point of the naming rule — the
     // page for `app/api/__init__.py` IS the `api` package, and code refers to
@@ -276,7 +267,6 @@ fn same_named_files_in_different_directories_all_survive() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     for app in ["api", "db"] {
         write(
             &input,
@@ -311,7 +301,6 @@ fn directory_modules_sharing_a_directory_name_are_still_disambiguated() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     for top in ["app", "lib"] {
         write(
             &input,
@@ -335,7 +324,6 @@ fn a_unique_filename_keeps_its_short_page_id() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     write(
         &input,
         "src/deep/nested/walker.py",
@@ -348,10 +336,9 @@ fn a_unique_filename_keeps_its_short_page_id() {
 
 /// alpha -> beta, plus gamma so the manifest has more than the two pages
 /// under test. Returns the tempdir; input is `<dir>/raw`, output `<dir>/out`.
-fn write_incremental_corpus() -> tempfile::TempDir {
+fn write_incremental_corpus() -> TempDir {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
-    fs::create_dir_all(&input).unwrap();
     write(&input, "alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n");
     write(&input, "beta.txt", "# Beta\n\nBeta stands alone.\n");
     write(&input, "gamma.txt", "# Gamma\n\nGamma stands alone.\n");
@@ -424,14 +411,8 @@ fn incremental_delete_prunes_page_and_cache() {
         "deleted page must leave the cache, got keys {:?}",
         cached.keys().collect::<Vec<_>>()
     );
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
     assert!(
-        !index["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["id"] == "beta"),
+        !index_entries(&output).iter().any(|e| e["id"] == "beta"),
         "deleted page must leave index.json"
     );
     // alpha linked to beta, so its render changed and it must be rewritten
@@ -458,8 +439,7 @@ fn emit_json_writes_a_parsable_graph() {
     // "edges": [{source, target}]}.
     let graph: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output.join("graph.json")).unwrap()).unwrap();
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
+    let index = common::index(&output);
     let ids = |v: &serde_json::Value| -> BTreeSet<String> {
         v.as_array()
             .unwrap()
@@ -481,26 +461,11 @@ fn emit_json_writes_a_parsable_graph() {
 
 #[test]
 fn js_ts_go_extract_exported_signatures() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    write(
-        &input,
-        "mod.js",
-        "export function foo(a) {\n  return a;\n}\nexport const K = 1;\nexport default foo(1);\nfunction hidden() {}\n",
-    );
-    write(
-        &input,
-        "svc.ts",
-        "export class Svc {\n  run(): void {}\n}\nexport interface Shape {}\nconst x = 1;\n",
-    );
-    write(
-        &input,
-        "thing.go",
-        "package thing\n\nfunc Exported() {}\nfunc unexported() {}\ntype Thing struct{}\nfunc (t Thing) Method() {}\n",
-    );
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("mod.js", "export function foo(a) {\n  return a;\n}\nexport const K = 1;\nexport default foo(1);\nfunction hidden() {}\n"),
+        ("svc.ts", "export class Svc {\n  run(): void {}\n}\nexport interface Shape {}\nconst x = 1;\n"),
+        ("thing.go", "package thing\n\nfunc Exported() {}\nfunc unexported() {}\ntype Thing struct{}\nfunc (t Thing) Method() {}\n"),
+    ]);
     let page = |id: &str| fs::read_to_string(output.join(format!("{id}.md"))).unwrap();
 
     // JS (`extract_simple::js_spec`): only function/class declarations wrapped
@@ -527,27 +492,14 @@ fn js_ts_go_extract_exported_signatures() {
 
 #[test]
 fn index_json_carries_methods_for_code_pages_and_empty_for_text() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    write(
-        &input,
-        "store.rs",
-        "pub struct Store;\nimpl Store {\n    pub fn open() -> Store {\n        Store\n    }\n}\n",
-    );
-    write(&input, "notes.txt", "Plain notes.\n");
-    let output = dir.path().join("out");
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let v: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
-    let entry = |id: &str| {
-        v["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap_or_else(|| panic!("no entry {id}"))
-            .clone()
-    };
+    let (_dir, _, output) = common::compiled(&[
+        (
+            "store.rs",
+            "pub struct Store;\nimpl Store {\n    pub fn open() -> Store {\n        Store\n    }\n}\n",
+        ),
+        ("notes.txt", "Plain notes.\n"),
+    ]);
+    let entry = |id: &str| common::entry(&output, id);
     assert_eq!(entry("store")["methods"], serde_json::json!(["open"]));
     assert_eq!(entry("notes")["methods"], serde_json::json!([]));
 }
@@ -561,26 +513,15 @@ fn relative_markdown_links_become_edges() {
     let tmp = tempdir().unwrap();
     let raw = tmp.path().join("raw");
     let out = tmp.path().join("out");
-    fs::create_dir_all(raw.join("docs")).unwrap();
-    fs::write(raw.join("README.md"), "# Root\n\nStart here.\n").unwrap();
-    fs::write(
-        raw.join("docs/guide.md"),
+    write(&raw, "README.md", "# Root\n\nStart here.\n");
+    write(
+        &raw,
+        "docs/guide.md",
         "# Guide\n\nSee the [top page](../README.md#start), the [site](https://example.org/README.md), and [nothing](missing.md).\n",
-    )
-    .unwrap();
+    );
     let r = compile(&raw, &out, &CompileOptions::default()).unwrap();
 
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-    let entry = |id: &str| {
-        index["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap()
-            .clone()
-    };
+    let entry = |id: &str| common::entry(&out, id);
     assert_eq!(entry("guide")["neighbors_out"], serde_json::json!(["root"]));
     assert_eq!(entry("root")["neighbors_in"], serde_json::json!(["guide"]));
     assert!(
@@ -602,34 +543,24 @@ fn prose_does_not_link_a_code_page_but_a_use_path_does() {
     let tmp = tempdir().unwrap();
     let raw = tmp.path().join("raw");
     let out = tmp.path().join("out");
-    common::write(
+    write(
         &raw,
         "src/text.rs",
         "//! Text extractor.\npub fn extract() {}\n",
     );
-    common::write(
+    write(
         &raw,
         "notes.md",
         "# Notes\n\nThe text of the page is long.\n",
     );
-    common::write(
+    write(
         &raw,
         "src/user.rs",
         "//! Uses the extractor.\nuse crate::text::extract;\npub fn run() { extract() }\n",
     );
     compile(&raw, &out, &CompileOptions::default()).unwrap();
 
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-    let entry = |id: &str| {
-        index["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|e| e["id"] == id)
-            .unwrap()
-            .clone()
-    };
+    let entry = |id: &str| common::entry(&out, id);
     assert_eq!(entry("user")["neighbors_out"], serde_json::json!(["text"]));
     assert_eq!(entry("notes")["neighbors_out"], serde_json::json!([]));
     assert_eq!(entry("text")["neighbors_in"], serde_json::json!(["user"]));
@@ -637,33 +568,29 @@ fn prose_does_not_link_a_code_page_but_a_use_path_does() {
 
 #[test]
 fn notes_follow_the_source_file_when_two_pages_swap_ids() {
-    let src = tempfile::tempdir().unwrap();
-    let out = tempfile::tempdir().unwrap();
-    std::fs::write(src.path().join("x.md"), "# Alpha\n\nbody x\n").unwrap();
-    std::fs::write(src.path().join("y.md"), "# Beta\n\nbody y\n").unwrap();
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    fs::write(src.path().join("x.md"), "# Alpha\n\nbody x\n").unwrap();
+    fs::write(src.path().join("y.md"), "# Beta\n\nbody y\n").unwrap();
 
-    let opts = wiki::CompileOptions {
+    let opts = CompileOptions {
         incremental: true,
         ..Default::default()
     };
-    wiki::compile(src.path(), out.path(), &opts).unwrap();
+    compile(src.path(), out.path(), &opts).unwrap();
 
     // Hand-write notes on each page.
     for (id, note) in [("alpha", "NOTE-FROM-X"), ("beta", "NOTE-FROM-Y")] {
-        let p = out.path().join(format!("{id}.md"));
-        let text = std::fs::read_to_string(&p).unwrap();
-        let replaced = text.replace("_(add your own notes here — preserved on recompile)_", note);
-        assert_ne!(text, replaced, "placeholder not found in {id}.md");
-        std::fs::write(&p, replaced).unwrap();
+        set_notes(&out.path().join(format!("{id}.md")), note);
     }
 
     // Swap the titles: x.md is now "Beta", y.md is now "Alpha".
-    std::fs::write(src.path().join("x.md"), "# Beta\n\nbody x\n").unwrap();
-    std::fs::write(src.path().join("y.md"), "# Alpha\n\nbody y\n").unwrap();
-    wiki::compile(src.path(), out.path(), &opts).unwrap();
+    fs::write(src.path().join("x.md"), "# Beta\n\nbody x\n").unwrap();
+    fs::write(src.path().join("y.md"), "# Alpha\n\nbody y\n").unwrap();
+    compile(src.path(), out.path(), &opts).unwrap();
 
-    let beta = std::fs::read_to_string(out.path().join("beta.md")).unwrap();
-    let alpha = std::fs::read_to_string(out.path().join("alpha.md")).unwrap();
+    let beta = fs::read_to_string(out.path().join("beta.md")).unwrap();
+    let alpha = fs::read_to_string(out.path().join("alpha.md")).unwrap();
     assert!(
         beta.contains("body x"),
         "beta.md should now be sourced from x.md"
@@ -680,9 +607,7 @@ fn notes_follow_the_source_file_when_two_pages_swap_ids() {
 
 #[test]
 fn every_source_file_gets_a_page() {
-    let src = tempfile::tempdir().unwrap();
-    let out = tempfile::tempdir().unwrap();
-    for (path, body) in [
+    let (_dir, _, out) = common::compiled(&[
         ("a/foo.h", "class Foo {};\n"),
         ("a/foo.cpp", "int main(){return 0;}\n"),
         ("b/foo.h", "class Foo {};\n"),
@@ -690,24 +615,11 @@ fn every_source_file_gets_a_page() {
         ("api/client.test.ts", "export function t(){}\n"),
         ("docs/v1.md", "# API Reference\n\nfirst\n"),
         ("docs/v2.md", "# API Reference\n\nsecond\n"),
-    ] {
-        let p = src.path().join(path);
-        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-        std::fs::write(p, body).unwrap();
-    }
-
-    let res = wiki::compile(src.path(), out.path(), &wiki::CompileOptions::default()).unwrap();
+    ]);
     // .h files only count once Task 8 lands; assert on what is handled today
     // and tighten the number in Task 12.
-    let index: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(out.path().join("index.json")).unwrap())
-            .unwrap();
-    let ids: Vec<&str> = index["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|e| e["id"].as_str().unwrap())
-        .collect();
+    let entries = index_entries(&out);
+    let ids: Vec<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
     let mut sorted = ids.clone();
     sorted.sort_unstable();
     sorted.dedup();
@@ -725,20 +637,19 @@ fn every_source_file_gets_a_page() {
             == 2,
         "both same-titled docs need pages: {ids:?}"
     );
-    let _ = res;
 }
 
 #[test]
 fn stale_pages_are_pruned_without_incremental_but_notes_are_never_destroyed() {
-    let src = tempfile::tempdir().unwrap();
-    let out = tempfile::tempdir().unwrap();
-    std::fs::write(src.path().join("keep.md"), "# Keep\n\nbody\n").unwrap();
-    std::fs::write(src.path().join("gone.md"), "# Gone\n\nbody\n").unwrap();
-    std::fs::write(src.path().join("precious.md"), "# Precious\n\nbody\n").unwrap();
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    fs::write(src.path().join("keep.md"), "# Keep\n\nbody\n").unwrap();
+    fs::write(src.path().join("gone.md"), "# Gone\n\nbody\n").unwrap();
+    fs::write(src.path().join("precious.md"), "# Precious\n\nbody\n").unwrap();
 
     // A plain compile records what it wrote, so no cache surgery is needed to
     // set this up: the two orphans below are pages this compiler really made.
-    wiki::compile(src.path(), out.path(), &wiki::CompileOptions::default()).unwrap();
+    compile(src.path(), out.path(), &CompileOptions::default()).unwrap();
     let orphan = out.path().join("gone.md");
     let precious = out.path().join("precious.md");
     assert!(orphan.exists() && precious.exists());
@@ -746,11 +657,11 @@ fn stale_pages_are_pruned_without_incremental_but_notes_are_never_destroyed() {
     // One orphan-to-be carries REAL notes; the other keeps the placeholder.
     set_notes(&precious, "HAND WRITTEN");
 
-    std::fs::remove_file(src.path().join("gone.md")).unwrap();
-    std::fs::remove_file(src.path().join("precious.md")).unwrap();
+    fs::remove_file(src.path().join("gone.md")).unwrap();
+    fs::remove_file(src.path().join("precious.md")).unwrap();
 
     // Second plain compile — still no --incremental.
-    wiki::compile(src.path(), out.path(), &wiki::CompileOptions::default()).unwrap();
+    compile(src.path(), out.path(), &CompileOptions::default()).unwrap();
 
     assert!(!orphan.exists(), "a placeholder-only orphan must be pruned");
     assert!(
@@ -761,7 +672,7 @@ fn stale_pages_are_pruned_without_incremental_but_notes_are_never_destroyed() {
 
 /// Overwrite `## Notes` on an already-written page, asserting the placeholder
 /// was there to replace.
-fn set_notes(page: &std::path::Path, note: &str) {
+fn set_notes(page: &Path, note: &str) {
     let text = fs::read_to_string(page).unwrap();
     let replaced = text.replace("_(add your own notes here — preserved on recompile)_", note);
     assert_ne!(
@@ -855,7 +766,6 @@ fn two_plain_compiles_prune_a_page_whose_source_was_deleted() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     write(&input, "keep.md", "# Keep\n\nbody\n");
     write(&input, "gone.md", "# Gone\n\nbody\n");
 
@@ -922,7 +832,6 @@ fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     write(&input, "a.md", "---\ntitle: Канал\n---\n\nCyrillic body.\n");
     write(&input, "b.md", "---\ntitle: Kanal\n---\n\nLatin body.\n");
     write(&input, "c.md", "---\ntitle: Third\n---\n\nSee [[Маяк]].\n");
@@ -931,9 +840,7 @@ fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
     let result = compile(&input, &output, &CompileOptions::default()).unwrap();
     assert_eq!(result.pages_total, 4);
 
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
-    let entries = index["entries"].as_array().unwrap();
+    let entries = index_entries(&output);
     let ids: BTreeSet<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
     assert_eq!(
         ids,
@@ -941,12 +848,6 @@ fn cyrillic_titles_get_distinct_pages_and_resolve_links() {
     );
     let third = entries.iter().find(|e| e["id"] == "third").unwrap();
     assert_eq!(third["neighbors_out"], serde_json::json!(["maiak"]));
-}
-
-fn index_entries(output: &std::path::Path) -> Vec<serde_json::Value> {
-    let index: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(output.join("index.json")).unwrap()).unwrap();
-    index["entries"].as_array().unwrap().clone()
 }
 
 #[test]

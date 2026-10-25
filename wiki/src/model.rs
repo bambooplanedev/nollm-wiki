@@ -5,11 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
+    #[default]
     Text,
     Markdown,
-    Code { lang: String },
+    Code {
+        lang: String,
+    },
 }
 
 impl SourceKind {
@@ -55,6 +58,11 @@ impl KindFilter {
         }
     }
 
+    /// `parse` for a user argument, with the error text callers show.
+    pub fn parse_arg(s: &str) -> Result<KindFilter, String> {
+        Self::parse(s).ok_or_else(|| format!("unknown kind {s:?}; expected {}", Self::EXPECTED))
+    }
+
     pub fn matches(&self, k: &SourceKind) -> bool {
         match self {
             KindFilter::Exact(x) => x == k,
@@ -64,7 +72,7 @@ impl KindFilter {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Entity {
     pub id: String,
     pub name: String,
@@ -135,6 +143,19 @@ pub struct Entity {
     /// anonymous-class method is a free `fn`, its owner unknown. The names
     /// of one multi-declarator statement (`int a = 1, b;`) share its range.
     pub items: Vec<CodeItem>,
+}
+
+impl CodeItemKind {
+    /// The serde name, as `items.json` and the outline print it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CodeItemKind::Fn => "fn",
+            CodeItemKind::Method => "method",
+            CodeItemKind::Type => "type",
+            CodeItemKind::Value => "value",
+            CodeItemKind::Module => "module",
+        }
+    }
 }
 
 /// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
@@ -225,6 +246,11 @@ pub enum CallVia {
 }
 
 impl CodeItem {
+    /// `path:start-end`, the item's lines in its source file.
+    pub fn span(&self, path: &str) -> String {
+        format!("{path}:{}-{}", self.start_line, self.end_line)
+    }
+
     /// `owner::name`, or `name` when the item has no owner: how search
     /// prints the item, and a whole-name match for it.
     pub fn qualified_name(&self) -> String {
@@ -269,6 +295,33 @@ pub struct LintReport {
     pub orphans: Vec<String>,
     /// Pages (id, tokens) too big for a default `neighbors` pack, sorted by id.
     pub large: Vec<(String, usize)>,
+}
+
+/// Days in `month` (0 for a month outside 1..=12); no `year` counts as a leap year.
+pub(crate) fn days_in_month(year: Option<u32>, month: u32) -> u32 {
+    let leap = year.is_none_or(|y| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
+    match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        1..=12 => 31,
+        _ => 0,
+    }
+}
+
+/// The last `/`-separated segment of `path`.
+pub(crate) fn basename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+/// `title_case` of a file stem or directory name, `_` and `-` read as spaces.
+pub(crate) fn title_from_slug(s: &str) -> String {
+    title_case(&s.replace(['_', '-'], " "))
+}
+
+/// `s` with every whitespace run, newlines included, collapsed to one space.
+pub(crate) fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// Capitalize each whitespace-separated word and lowercase the rest of it.
@@ -422,6 +475,19 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn code_item_kind_names_match_serde() {
+        for k in [
+            CodeItemKind::Fn,
+            CodeItemKind::Method,
+            CodeItemKind::Type,
+            CodeItemKind::Value,
+            CodeItemKind::Module,
+        ] {
+            assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
+        }
+    }
+
+    #[test]
     fn slugify_lowercases_and_replaces_separators() {
         assert_eq!(slugify("Gradient Descent"), "gradient_descent");
         assert_eq!(slugify("Top-K Sampling"), "top_k_sampling");
@@ -440,7 +506,7 @@ mod tests {
         assert_eq!(slugify("café"), "cafe");
         // A `|` in a title MUST fold away — the id is both the `<id>.md`
         // filename and the `[[id|display]]` link target, and a pipe in either
-        // would break Task 1's split-on-`|` resolution (Task 1 review finding).
+        // would break the split-on-`|` link resolution.
         assert_eq!(slugify("Chapter 1 | Overview"), "chapter_1_overview");
         // 'İ' lowercases to `i` plus a combining dot, which is dropped.
         assert_eq!(slugify("İstanbul"), "istanbul");

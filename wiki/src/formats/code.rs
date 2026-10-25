@@ -1,8 +1,9 @@
 //! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
 
-use crate::formats::{summarize, Extractor};
+use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
-    slugify, title_case, CallSite, CallVia, CodeItem, CodeItemKind, Entity, SourceKind,
+    basename, one_line, slugify, title_from_slug, CallSite, CallVia, CodeItem, CodeItemKind,
+    Entity, SourceKind,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
@@ -88,6 +89,40 @@ pub(crate) struct LangSpec {
     /// also matches a @def pattern, and that match's flag wins). False
     /// makes an @item-only match run `should_keep` itself.
     pub(crate) query_gates_visibility: bool,
+    /// What a captured definition is and where its signature stops. A plain-JS
+    /// Vue or Svelte script uses `default_shape`; a `lang` script uses that
+    /// language's own spec.
+    pub(crate) shape: fn(Node) -> Shape,
+}
+
+impl LangSpec {
+    /// A spec with every hook at its no-op default: a language lists only
+    /// what it overrides and spreads `..LangSpec::base(..)` for the rest.
+    pub(crate) fn base(
+        lang_name: &'static str,
+        language: Language,
+        query_src: &'static str,
+    ) -> Self {
+        LangSpec {
+            lang_name,
+            language,
+            query_src,
+            name_filter: keep_all,
+            vis_filter: keep_any_vis,
+            strip_trailing: &[],
+            placement: |_, _| Placement::Scoped(Vec::new()),
+            owner_sep: ".",
+            export_set: no_export_set,
+            join_continuations: false,
+            sig_start: sig_start_identity,
+            owner_anchor: owner_anchor_identity,
+            header_group: no_header_group,
+            item_lead: |_, _| Lead::Stop,
+            body_doc: no_body_doc,
+            query_gates_visibility: false,
+            shape: default_shape,
+        }
+    }
 }
 
 /// See `LangSpec::item_lead`.
@@ -204,44 +239,42 @@ pub(crate) fn plain_doc(
 }
 
 /// `body_doc` for a language with no in-body doc convention.
-pub(crate) fn no_body_doc(_: Node, _: &str) -> Option<String> {
+fn no_body_doc(_: Node, _: &str) -> Option<String> {
     None
 }
 
-pub(crate) fn sig_start_identity(def: Node) -> Node {
+fn sig_start_identity(def: Node) -> Node {
     def
 }
 
 /// `owner_anchor` for a language whose declarations never write their own
 /// qualifier: the owner is spliced in at the name node itself.
-pub(crate) fn owner_anchor_identity(name: Node) -> Node {
+fn owner_anchor_identity(name: Node) -> Node {
     name
 }
 
-pub(crate) fn keep_all(_name: &str) -> bool {
+fn keep_all(_name: &str) -> bool {
     true
 }
 
-pub(crate) fn keep_any_vis(_vis: &str) -> bool {
+fn keep_any_vis(_vis: &str) -> bool {
     true
 }
 
-pub(crate) fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
+fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
     None
 }
 
 /// Only Rust emits a `@def` without a `@name` (the trait-impl header pattern),
 /// so every other language never reaches this.
-pub(crate) fn no_header_group(_def: Node, _text: &str) -> Option<String> {
+fn no_header_group(_def: Node, _text: &str) -> Option<String> {
     None
 }
 
 /// Where a captured definition sits relative to the module's public surface.
 ///
-/// Replaces the previous `owner_of` + `def_filter` pair. The two were split
-/// only because Rust could answer them independently; Python answers both from
-/// a single upward traversal of the tree, and keeping them apart would
-/// traverse it twice and duplicate the privacy check.
+/// One answer for both "is it public" and "who owns it": Python derives both
+/// from a single upward traversal of the tree, so they are not split.
 pub(crate) enum Placement {
     /// Not part of the module's surface — drop the definition outright.
     Rejected,
@@ -261,36 +294,23 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "vue" => super::extract_vue::vue_spec(),
         "svelte" => super::extract_svelte::svelte_spec(),
         "go" => super::extract_simple::go_spec(),
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_spec(),
+        _ if is_cpp(ext) => super::extract_cpp::cpp_spec(),
         _ => return None,
     })
 }
 
-/// The per-language `Shape` hook. Kept beside `lang_for_ext` rather than as a
-/// `LangSpec` field so that adding this seam needed no edit to the specs,
-/// which spell every field out literally. Vue and Svelte never reach it: their
-/// script is extracted under its own `js`/`ts`/`jsx`/`tsx` extension.
-///
-/// Everything this dispatches to lives in the language's own module.
-fn shape_for(ext: &str) -> fn(Node) -> Shape {
-    match ext {
-        "rs" => super::extract_rust::rust_shape,
-        "py" => super::extract_python::python_shape,
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_shape,
-        "go" => super::extract_simple::go_shape,
-        "js" | "ts" | "jsx" | "tsx" => super::extract_simple::ecma_shape,
-        _ => default_shape,
-    }
+/// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them too.
+pub(crate) fn is_cpp(ext: &str) -> bool {
+    matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h")
 }
 
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
 /// extension (`Makefile`) or is a dotfile (`.gitignore`).
 ///
-/// `Registry::ext_of` lowercases when dispatching, but `CodeExtractor::extract`
-/// used to recompute the extension without lowercasing, so `Book.H` reached
-/// this extractor and then fell through `lang_for_ext` to zero symbols.
+/// Lowercasing matters: `Registry::ext_of` dispatches on the lowercase form, so
+/// `Book.H` must also reach `lang_for_ext` as `h`, not fall through to zero symbols.
 pub(crate) fn ext_of(rel_path: &str) -> String {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = basename(rel_path);
     match base.rsplit_once('.') {
         Some((stem, ext)) if !stem.is_empty() && !ext.is_empty() => ext.to_lowercase(),
         _ => String::new(),
@@ -440,15 +460,13 @@ impl Extractor for CodeExtractor {
                     && matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method)
                     && super::extract_rust::has_test_attribute(text, item.start_line));
         }
-        let mut lang_name = info.lang;
-
-        // A component is reported as its own format, whichever language its
-        // script is written in.
-        if script.is_some() {
-            if let Some(spec) = lang_for_ext(ext) {
-                lang_name = spec.lang_name.to_string();
-            }
-        }
+        // A component is reported as its own format (`vue`, `svelte`, which
+        // is also their `lang_name`), whichever language its script is in.
+        let lang_name = if script.is_some() {
+            ext.to_string()
+        } else {
+            info.lang
+        };
 
         let docstring = info.docstring.or_else(|| leading_doc(code, code_ext));
         // `body` is deliberately NOT scanned for a summary: source code is not
@@ -466,23 +484,15 @@ impl Extractor for CodeExtractor {
         Entity {
             id: slugify(&name),
             name,
-            aliases: Vec::new(),
-            tags: Vec::new(),
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: source,
-            source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },
-            content_hash: [0u8; 32],
             summary,
             symbols: info.symbols,
             imports: info.imports,
             defined: info.defined,
             methods: info.methods,
             items,
+            ..Entity::default()
         }
     }
 }
@@ -581,19 +591,16 @@ pub(crate) struct Shape<'a> {
 /// The signature cut every language shares: stop at the body, at a wrapped
 /// declaration's body, or at a value.
 ///
-/// Written as three independent lookups rather than a chain of `?`: a Rust
-/// `const_item` has no `declaration` field, so an early return there would
-/// skip the `value` lookup and leave the initializer in the signature.
+/// An `or_else` chain rather than `?`: a Rust `const_item` has no
+/// `declaration` field, so an early return there would skip the `value`
+/// lookup and leave the initializer in the signature.
 pub(crate) fn default_cut(def: Node) -> Option<Node> {
-    if let Some(body) = def.child_by_field_name("body") {
-        return Some(body);
-    }
-    if let Some(declaration) = def.child_by_field_name("declaration") {
-        if let Some(body) = declaration.child_by_field_name("body") {
-            return Some(body);
-        }
-    }
-    def.child_by_field_name("value")
+    def.child_by_field_name("body")
+        .or_else(|| {
+            def.child_by_field_name("declaration")
+                .and_then(|d| d.child_by_field_name("body"))
+        })
+        .or_else(|| def.child_by_field_name("value"))
 }
 
 /// A plain definition: cut at the shared boundary, retain no value.
@@ -608,6 +615,30 @@ pub(crate) fn default_shape(def: Node) -> Shape {
         value: None,
         has_type: true,
     }
+}
+
+/// A `Rank::Value` definition cut at its `=` (or, with no `=`, at its value)
+/// that re-appends the value only when there is an `=` to re-append it after.
+pub(crate) fn value_shape<'a>(
+    eq: Option<Node<'a>>,
+    value: Option<Node<'a>>,
+    has_type: bool,
+) -> Shape<'a> {
+    Shape {
+        rank: Rank::Value,
+        cut: eq.or(value),
+        value: eq.and(value),
+        has_type,
+    }
+}
+
+/// Climbs from `node` while the parent's kind satisfies `up`; the topmost such
+/// ancestor, or `node` itself when the parent does not.
+pub(crate) fn outermost(mut node: Node<'_>, up: impl Fn(&str) -> bool) -> Node<'_> {
+    while let Some(parent) = node.parent().filter(|p| up(p.kind())) {
+        node = parent;
+    }
+    node
 }
 
 /// Capture indices for one language's query, resolved once per extraction.
@@ -760,11 +791,11 @@ fn group_key(
     text: &str,
     spec: &LangSpec,
 ) -> String {
-    match (owner, name_text) {
-        (Some(o), _) => o.to_string(),
-        (None, Some(n)) => n.to_string(),
-        (None, None) => (spec.header_group)(def, text).unwrap_or_default(),
-    }
+    owner
+        .or(name_text)
+        .map(str::to_string)
+        .or_else(|| (spec.header_group)(def, text))
+        .unwrap_or_default()
 }
 
 /// The module's summary when no docstring supplies one.
@@ -809,7 +840,7 @@ fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
 /// nothing, so the bytes are provably the same.
 fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
-    // Compiled once per process. A malformed query can no longer strip a
+    // Compiled once per process. A malformed query must not silently strip a
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
     let query = QUERIES.get(ext)?;
@@ -828,11 +859,10 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         item: query.capture_index_for_name("item"),
     };
     let exports = (spec.export_set)(&tree, text);
-    let shape_of = shape_for(ext);
 
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
-    // group `Article`, so a class no longer scatters across the section
+    // group `Article`, so a class does not scatter across the section
     // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
     // stays a plain `Vec<String>`.
     let mut collected: Vec<Collected> = Vec::new();
@@ -852,18 +882,21 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     while let Some(m) = matches.next() {
         let parts = split_captures(m, &idx, text, &mut imports);
-        if let Some(def) = parts.def {
-            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-                continue;
-            };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+        let Some(def) = parts.def.or(parts.item) else {
+            continue;
+        };
+        let Placement::Scoped(chain) = (spec.placement)(def, text) else {
+            continue;
+        };
+        let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+        let shape = (spec.shape)(def);
+        let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
+        let public = if parts.def.is_some() {
             let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
             if keep {
-                let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
-                // then used for both the signature and the classification —
-                // the two used to re-derive the node's kind independently.
-                let shape = shape_of(def);
+                // then used for both the signature and the classification, so
+                // the node's kind is derived once.
                 let sig = build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
                 if !sig.is_empty() {
                     let kind = classify(parts.name, owner.as_deref(), shape.rank);
@@ -879,24 +912,23 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
-            let shape = shape_of(def);
-            merge_item(
-                &mut items,
-                code_item(def, parts.name, &chain, keep, text, &spec, &shape),
-            );
-        } else if let Some(def) = parts.item {
-            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-                continue;
-            };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-            let public = !spec.query_gates_visibility
-                && should_keep(None, &chain, name_text, exports.as_ref(), &spec);
-            let shape = shape_of(def);
-            merge_item(
-                &mut items,
-                code_item(def, parts.name, &chain, public, text, &spec, &shape),
-            );
-        }
+            keep
+        } else {
+            !spec.query_gates_visibility
+                && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
+        };
+        merge_item(
+            &mut items,
+            code_item(
+                def,
+                parts.name,
+                owner.as_deref(),
+                public,
+                text,
+                &spec,
+                &shape,
+            ),
+        );
     }
     let mut items: Vec<CodeItem> = items.into_values().collect();
     items.sort_by(|a, b| {
@@ -937,7 +969,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
     let docstring = if ext == "py" {
-        super::extract_python::python_docstring(&tree, text)
+        super::extract_python::docstring_paragraph(tree.root_node(), text)
     } else {
         None
     };
@@ -1096,13 +1128,16 @@ const ITEM_DOC_MAX_CHARS: usize = 120;
 /// `ITEM_DOC_MAX_CHARS`. Counts `chars()`, never bytes, so a multi-byte doc
 /// is never split mid-scalar.
 fn item_doc_line(raw: &str) -> Option<String> {
-    let line = summarize(None, Some(raw), "", None)?;
-    if line.chars().count() <= ITEM_DOC_MAX_CHARS {
-        return Some(line);
+    first_real_sentence(raw).map(|line| cap_chars(&line, ITEM_DOC_MAX_CHARS))
+}
+
+/// `s` unchanged, or its first `max - 1` chars and a `…` when it has more than
+/// `max`.
+fn cap_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
     }
-    let mut cut: String = line.chars().take(ITEM_DOC_MAX_CHARS - 1).collect();
-    cut.push('…');
-    Some(cut)
+    s.chars().take(max - 1).chain(['…']).collect()
 }
 
 /// The most chars of an item's whole doc kept in `items.json`.
@@ -1111,11 +1146,7 @@ const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
 /// An item's whole raw doc on one line, capped at `ITEM_DOC_TEXT_MAX_CHARS`
 /// (the `…` included); `None` when it is just `doc`.
 fn item_doc_text(raw: &str, doc: Option<&str>) -> Option<String> {
-    let mut text = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.chars().count() > ITEM_DOC_TEXT_MAX_CHARS {
-        text = text.chars().take(ITEM_DOC_TEXT_MAX_CHARS - 1).collect();
-        text.push('…');
-    }
+    let text = cap_chars(&one_line(raw), ITEM_DOC_TEXT_MAX_CHARS);
     (!text.is_empty() && doc != Some(text.as_str())).then_some(text)
 }
 
@@ -1152,7 +1183,7 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 fn code_item(
     def: Node,
     name: Option<Node>,
-    chain: &[String],
+    owner: Option<&str>,
     public: bool,
     text: &str,
     spec: &LangSpec,
@@ -1166,11 +1197,7 @@ fn code_item(
         .child_by_field_name("declaration")
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
-    let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
-    let kind = match (
-        classify(Some(name), owner.as_deref(), shape.rank),
-        is_function(def),
-    ) {
+    let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
         (ItemKind::Member, true) => CodeItemKind::Method,
         (ItemKind::FreeDef, true) => CodeItemKind::Fn,
         (ItemKind::FreeDef, false) => CodeItemKind::Type,
@@ -1266,7 +1293,7 @@ fn code_item(
     let mut item = CodeItem {
         kind,
         name: name_text.to_string(),
-        owner,
+        owner: owner.map(str::to_string),
         signature,
         start_line: first.start_position().row + 1,
         end_line: last_row(top) + 1,
@@ -1375,19 +1402,18 @@ fn descendant_spans(
 
 /// Render one fragment of a signature from source, with the parse tree in hand.
 ///
-/// Replaces a flat `normalize` over the raw span. Three segment kinds, decided
-/// structurally rather than by searching the text:
+/// Three segment kinds, decided structurally rather than by searching the text:
 ///
 ///   * a **comment** is dropped. A `///` on a field inside an enum variant's
-///     body used to collapse into the signature — real crates render
-///     `MatchErrorKind::UnsupportedStream { /// The match semantics … got: MatchKind, }`
-///     — and a `//` line comment inside a one-line signature would comment out
-///     everything after it for anyone who copied it. Also closes the two
-///     documented Python risks: a comment between a decorator and its
-///     definition, and one inside a retained value.
+///     body would otherwise collapse into the signature
+///     (`MatchErrorKind::UnsupportedStream { /// The match semantics … got: MatchKind, }`),
+///     and a `//` line comment inside a one-line signature would comment out
+///     everything after it for anyone who copied it. This also covers a
+///     comment between a decorator and its definition, and one inside a
+///     retained value.
 ///   * a **string literal** is collapsed but never tidied, so a `" , "` stays
 ///     `" , "` instead of being rewritten to `", "`.
-///   * everything else is collapsed and tidied, exactly as before.
+///   * everything else is collapsed and tidied.
 ///
 /// Order is load-bearing. Segmentation reads node offsets, so it must happen
 /// on the *raw* span: `join_continuations` is a `replace` that changes length
@@ -1527,16 +1553,10 @@ fn build_signature(
         }
         _ => render_span(text, root, start, end, spec),
     };
-    let mut sig = raw.trim().to_string();
-    loop {
-        match sig.chars().last() {
-            Some(c) if spec.strip_trailing.contains(&c) => {
-                sig.pop();
-                sig = sig.trim_end().to_string();
-            }
-            _ => break,
-        }
-    }
+    let mut sig = raw
+        .trim()
+        .trim_end_matches(|c: char| c.is_whitespace() || spec.strip_trailing.contains(&c))
+        .to_string();
     if let Some(value) = shape.value {
         let rendered = render_span(text, value, value.start_byte(), value.end_byte(), spec);
         sig = append_value(sig, rendered.trim(), shape.has_type);
@@ -1598,10 +1618,9 @@ fn append_value(head: String, value: &str, has_type: bool) -> String {
 /// `LangSpec` field: it runs inside `render_span` for all five languages, not
 /// just Rust.
 ///
-/// It is still a plain substring substitution, but it is no longer applied to
-/// the whole signature: `render_span` withholds string-literal spans from it,
-/// so a Python default `gamma=" )"` and a Rust `pub const SEP: &str = " , "`
-/// now keep their own punctuation. Pinned by
+/// It is a plain substring substitution, applied only outside string literals:
+/// `render_span` withholds those spans, so a Python default `gamma=" )"` and a
+/// Rust `pub const SEP: &str = " , "` keep their own punctuation. Pinned by
 /// `a_rust_string_value_keeps_its_own_punctuation` and by the Python fixture in
 /// `wrapped_parameter_lists_are_tidied_in_every_language`.
 fn tidy_punctuation(mut sig: String) -> String {
@@ -1641,7 +1660,7 @@ fn collapse_runs(s: &str) -> String {
 ///
 /// Empty doc lines are SKIPPED rather than terminating the scan: a Doxygen
 /// block opens with a bare `/**`, which strips to nothing, and aborting there
-/// left the commonest C++ comment shape with no docstring at all.
+/// would leave the commonest C++ comment shape with no docstring at all.
 ///
 /// Skipping forward past a NON-doc line (a license/SPDX banner) in search of
 /// the real doc beneath it is a C++-only allowance, gated on `cpp` below —
@@ -1657,7 +1676,7 @@ fn collapse_runs(s: &str) -> String {
 /// `class OrderBook {` and `public:` to reach a MEMBER's doc comment and
 /// report that as the file's.
 fn leading_doc(text: &str, ext: &str) -> Option<String> {
-    let cpp = matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h");
+    let cpp = is_cpp(ext);
     // Tracks whether the line about to be stripped sits inside a still-open
     // Doxygen block (`/**` or `/*!` not yet closed by `*/`) — the only
     // context in which a bare `*` continuation is real doc content. Without
@@ -1677,7 +1696,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
-            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => {
+            _ if cpp => {
                 return super::extract_cpp::cpp_doc_step(line, &mut in_doxygen_block);
             }
             _ => None,
@@ -1700,72 +1719,14 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             // "skip past a license header" apart from "skip past
             // `#include`, a class's opening brace, or a whole member's
             // body" — none of which documents the FILE.
-            None if collected.is_empty() && cpp && is_banner_shaped(line) => {}
+            None if collected.is_empty() && cpp && super::extract_cpp::is_banner_shaped(line) => {}
             // Every other language, and C++ once real code appears: no doc
-            // comment opens this file.
-            None if collected.is_empty() => break,
-            // A non-doc line ends an already-open paragraph.
+            // comment opens this file. Past the first doc line, a non-doc
+            // line ends the paragraph.
             None => break,
         }
     }
     (!collected.is_empty()).then(|| collected.join("\n"))
-}
-
-/// True for a line that reads as a COMMENT, or as a blank line between
-/// comments, even though `cpp_doc_line` rejected it as a doc marker — a
-/// `// Copyright` banner, an SPDX line, or a plain `/*`/`*` continuation of a
-/// non-Doxygen block comment. False for actual code.
-///
-/// This is what bounds the C++ banner-skip in `leading_doc` to an actual
-/// banner: without it, the skip cannot tell a license header from
-/// `#include <vector>`, `class OrderBook {`, or `public:`, and scans clean
-/// through them looking for the first doc marker anywhere in the file —
-/// which is exactly the whole-file-scan defect the C++-only gate exists to
-/// avoid in the first place, just relocated one line down. The blank-line
-/// allowance is what lets a banner followed by a blank separator line still
-/// reach the doc comment beneath it, pinned by
-/// `doc_comment_below_a_license_banner_is_still_found`.
-fn is_banner_shaped(line: &str) -> bool {
-    line.is_empty() || line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')
-}
-
-/// One C++ doc line, or `None` when the line is not documentation.
-///
-/// Only real markers count — `///`, `//!`, `/**`, `/*!` — so a `// Copyright`
-/// banner is not a doc comment. Punctuation-only results are rejected, which
-/// is what keeps an LLVM `//===--- … ---===//` header and a `/*****/` rule out
-/// of the summary. Continuation lines shed a leading `*`, a `@brief`/`\brief`
-/// tag, and the closing `*/`.
-///
-/// The bare-`*` continuation form is only accepted while `in_doxygen_block`
-/// is true — i.e. while the caller (`leading_doc`) has tracked us as still
-/// inside a block that actually opened with `/**`/`/*!`. A `*`-prefixed line
-/// is ALSO how a plain `/* Copyright ... */` block continues (`* All rights
-/// reserved.`), and without this gate that banner text reads as a doc
-/// continuation and gets concatenated onto whatever real `///` doc follows —
-/// e.g. `"All rights reserved.\nMaintains the book."` — since this function
-/// sees one line at a time and cannot otherwise tell which kind of block
-/// opened it.
-pub(crate) fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
-    let body = line
-        .strip_prefix("///")
-        .or_else(|| line.strip_prefix("//!"))
-        .or_else(|| line.strip_prefix("/**"))
-        .or_else(|| line.strip_prefix("/*!"))
-        .or_else(|| in_doxygen_block.then(|| line.strip_prefix('*')).flatten())?;
-    let cleaned = body
-        .trim()
-        .trim_end_matches("*/")
-        .trim()
-        .trim_start_matches("@brief")
-        .trim_start_matches("\\brief")
-        .trim()
-        .to_string();
-    if cleaned.chars().any(char::is_alphanumeric) {
-        Some(cleaned)
-    } else {
-        Some(String::new())
-    }
 }
 
 /// Filenames that say nothing about the module's own identity: the language
@@ -1798,7 +1759,7 @@ const DIRECTORY_MODULES: &[(&str, &str)] = &[
 /// and the code-shaped mention filter), so there is exactly one definition
 /// of how a code page is named.
 pub(crate) fn module_stem(rel_path: &str) -> &str {
-    let base = rel_path.rsplit('/').next().unwrap_or(rel_path);
+    let base = basename(rel_path);
     let stem = base.split('.').next().unwrap_or(base);
     let ext = rel_path.rsplit('.').next().unwrap_or("");
     if DIRECTORY_MODULES
@@ -1825,7 +1786,7 @@ pub(crate) fn module_stem(rel_path: &str) -> &str {
 /// declaration or a `common::` path link it, and `graph::ImportResolver`
 /// reaches it through the same stem.
 fn derive_code_name(rel_path: &str) -> String {
-    title_case(&module_stem(rel_path).replace(['_', '-'], " "))
+    title_from_slug(module_stem(rel_path))
 }
 
 /// Assertions shared by every language's extraction tests.
@@ -1842,7 +1803,25 @@ fn derive_code_name(rel_path: &str) -> String {
 /// test with several assertions extracts once.
 #[cfg(test)]
 pub(crate) mod testutil {
+    use crate::formats::code::CodeExtractor;
+    use crate::formats::Extractor;
     use crate::model::CodeItem;
+
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    pub(crate) fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
+    /// Two extractions of the same file agree on symbols, imports and summary.
+    pub(crate) fn assert_deterministic(path: &str, src: &str) {
+        let a = CodeExtractor.extract(path, src);
+        let b = CodeExtractor.extract(path, src);
+        assert_eq!(a.symbols, b.symbols);
+        assert_eq!(a.imports, b.imports);
+        assert_eq!(a.summary, b.summary);
+    }
 
     /// The exact signature `want` must be among `symbols`.
     pub(crate) fn assert_has(symbols: &[String], want: &str) {
@@ -1866,7 +1845,6 @@ pub(crate) mod testutil {
         items
             .iter()
             .map(|i| {
-                let kind = serde_json::to_value(i.kind).expect("a unit variant serializes");
                 let name = match &i.owner {
                     Some(owner) => format!("{owner}::{}", i.name),
                     None => i.name.clone(),
@@ -1876,7 +1854,7 @@ pub(crate) mod testutil {
                     "{}-{} {} {name} {vis}",
                     i.start_line,
                     i.end_line,
-                    kind.as_str().unwrap_or_default()
+                    i.kind.as_str()
                 )
             })
             .collect()
@@ -1885,6 +1863,7 @@ pub(crate) mod testutil {
 
 #[cfg(test)]
 mod tests {
+    use super::testutil::{assert_has, assert_lacks};
     use super::*;
 
     #[test]
@@ -2035,7 +2014,7 @@ mod tests {
 
     #[test]
     fn a_directory_module_at_the_corpus_root_keeps_its_own_stem() {
-        // Nothing to borrow a name from, so the old behaviour stands.
+        // Nothing to borrow a name from, so the file's own stem is kept.
         let e = CodeExtractor.extract("mod.rs", "pub fn f() {}\n");
         assert_eq!(e.name, "Mod");
         let e = CodeExtractor.extract("__init__.py", "def f():\n    pass\n");
@@ -2077,11 +2056,8 @@ mod tests {
     fn one_element_tuple_survives_tidying() {
         let src = "pub type Single = (u8,);\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub type Single = (u8,)"),
-            "a one-element tuple is not a parenthesized value: {:?}",
-            e.symbols
-        );
+        // a one-element tuple is not a parenthesized value
+        assert_has(&e.symbols, "pub type Single = (u8,)");
     }
 
     #[test]
@@ -2103,24 +2079,14 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "def outer()"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("inner")),
-            "function-local def must be dropped: {:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("::")),
-            "Python must use `.`, never Rust's `::`: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def outer()");
+        // function-local def must be dropped
+        assert_lacks(&e.symbols, "inner");
+        // Python must use `.`, never Rust's `::`
+        assert_lacks(&e.symbols, "::");
 
-        // The summary fallback is shared machinery that Task 9 reordered.
-        // Pin it per language so a future reordering cannot move it silently.
+        // The summary fallback is shared machinery; pin it per language so a
+        // reordering cannot move it silently.
         let e = CodeExtractor.extract("t.py", py);
         assert_eq!(
             e.summary.as_deref(),
@@ -2133,11 +2099,7 @@ mod tests {
         // method both stay exactly as they are today.
         let go = "package main\n\nfunc Foo(a int) string {\n\treturn \"\"\n}\n";
         let e = CodeExtractor.extract("m.go", go);
-        assert!(
-            e.symbols.iter().any(|s| s == "func Foo(a int) string"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "func Foo(a int) string");
         assert_eq!(e.summary.as_deref(), Some("func Foo(a int) string"));
 
         let js = "export function foo(a, b) {\n  return a + b;\n}\n";
@@ -2276,7 +2238,7 @@ mod tests {
     fn the_query_registry_covers_exactly_the_claimed_extensions() {
         // A language accepted by `extensions()` but absent from `QUERIES`
         // would extract nothing while the compile still exits 0 — the silent
-        // failure the old per-file `Query::new` path allowed.
+        // failure a per-file `Query::new` would allow.
         let claimed: BTreeSet<&str> = CodeExtractor.extensions().iter().copied().collect();
         let compiled: BTreeSet<&str> = QUERIES.keys().copied().collect();
         assert_eq!(claimed, compiled);

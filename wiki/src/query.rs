@@ -5,7 +5,7 @@
 //! `neighbors` walks outward from a page and stops at a caller-supplied
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
-use crate::model::{CodeItem, CodeItemKind, KindFilter, SourceKind};
+use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -53,6 +53,13 @@ pub(crate) struct Entry {
     pub(crate) methods: Vec<String>,
 }
 
+impl Entry {
+    /// Whether the page's source kind passes `f`.
+    fn is_kind(&self, f: &KindFilter) -> bool {
+        SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
+    }
+}
+
 #[derive(Deserialize)]
 struct IndexFile {
     /// `Manifest::root`; empty for an `index.json` older than the field.
@@ -62,7 +69,7 @@ struct IndexFile {
 }
 
 /// The error for an id `resolve_id` could not place; `near` are its candidates.
-pub fn unknown_page(arg: &str, near: &[String]) -> String {
+pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
     let closest = if near.is_empty() {
         String::new()
     } else {
@@ -77,6 +84,11 @@ pub fn tag_filter(arg: &str) -> Option<String> {
     let t = arg.trim().trim_start_matches('#').trim();
     let t = t.trim_end_matches('/').to_lowercase();
     (!t.is_empty()).then_some(t)
+}
+
+/// `tag_filter` for a user argument, with the error text callers show.
+pub fn tag_arg(arg: &str) -> Result<String, String> {
+    tag_filter(arg).ok_or_else(|| format!("empty tag {arg:?}"))
 }
 
 /// Multiplies a memory page's final score, so a note outranks code that
@@ -150,15 +162,7 @@ const MONTH_NAMES: [(u32, &[&str]); 12] = [
 impl QueryDate {
     /// A real calendar day; 29 February passes without a year.
     fn new(year: Option<u32>, month: u32, day: u32) -> Option<QueryDate> {
-        let leap = year.is_none_or(|y| (y % 4 == 0 && y % 100 != 0) || y % 400 == 0);
-        let last = match month {
-            2 if leap => 29,
-            2 => 28,
-            4 | 6 | 9 | 11 => 30,
-            1..=12 => 31,
-            _ => 0,
-        };
-        (1..=last)
+        (1..=days_in_month(year, month))
             .contains(&day)
             .then_some(QueryDate { year, month, day })
     }
@@ -268,6 +272,24 @@ pub struct Hit {
     pub symbols: Vec<SymbolLine>,
 }
 
+impl Hit {
+    /// A hit for `e` with no symbol lines yet.
+    fn from_entry(e: &Entry, score: f64, snippet: Option<String>) -> Hit {
+        Hit {
+            id: e.id.clone(),
+            title: e.title.clone(),
+            path: e.path.clone(),
+            summary: e.summary.clone(),
+            updated: e.updated.clone(),
+            score,
+            memory: e.memory,
+            superseded_by: e.superseded_by.clone(),
+            snippet,
+            symbols: Vec::new(),
+        }
+    }
+}
+
 /// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
 /// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
 /// marker counts only when whitespace or the line end follows it, so
@@ -333,6 +355,11 @@ pub struct ContextPack {
 /// The phrase a degraded target block carries when a page's body does not
 /// fit the pack's token budget. Tests assert on it; keep it in one place.
 pub const OVER_BUDGET_NOTE: &str = "exceeds the budget";
+
+/// Token ceiling applied to the `neighbors` tool when the caller omits
+/// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
+/// an agent calling with defaults should not receive a 30 KB dump.
+pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
 
 /// What `Wiki::search` learns about one page in its first pass. Scores
 /// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
@@ -439,13 +466,17 @@ impl Wiki {
         self.bodies.get(id).cloned()
     }
 
+    /// A page's body without cloning it; empty when the id is unknown.
+    fn body(&self, id: &str) -> &str {
+        self.bodies.get(id).map_or("", String::as_str)
+    }
+
     /// A page's index entry by exact id.
     pub(crate) fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.get(id)
     }
 
-    /// Whether `id` is a page in the loaded index. Used by the MCP server to
-    /// validate resource ids before touching the filesystem.
+    /// Whether `id` is a page in the loaded index.
     pub fn has_page(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }
@@ -466,7 +497,7 @@ impl Wiki {
     /// purpose: `rewrite.rs` emits the chrome with this exact casing, so the
     /// exact match excludes the generated sections and nothing else. A
     /// case-insensitive match would also hide an author's own `## notes` or
-    /// `## NOTES` section (2026-09-02 audit, findings-log item 37).
+    /// `## NOTES` section.
     /// `Referenced By` is what `Imported by` and `Mentioned in` replaced: a
     /// served wiki may be older than the compiler.
     const CHROME_SECTIONS: [&'static str; 6] = [
@@ -540,7 +571,7 @@ impl Wiki {
         sections
             .iter()
             .filter(|(k, _)| !Self::CHROME_SECTIONS.contains(&k.as_str()))
-            .map(|(_, v)| v.clone())
+            .map(|(_, v)| v.as_str())
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -600,8 +631,7 @@ impl Wiki {
     /// acronym run stays one word (`HTTPServer` → `http`, `server`;
     /// `PackBudget` → `pack`, `budget`; `CACHE_VERSION` → `cache`,
     /// `version`). Must run on the ORIGINAL-case name: lowercasing first
-    /// erases every CamelCase boundary (the 2026-09-02 V7 prototype's dead
-    /// rule).
+    /// erases every CamelCase boundary.
     pub(crate) fn name_words(name: &str) -> Vec<String> {
         let mut words = Vec::new();
         let mut cur = String::new();
@@ -638,6 +668,13 @@ impl Wiki {
             .filter(|w| !w.is_empty())
             .map(str::to_string)
             .collect()
+    }
+
+    /// `field_words` of a lowercased optional field; empty for `None`.
+    fn lower_words(field: Option<&str>) -> Vec<String> {
+        field
+            .map(|f| Self::field_words(&f.to_lowercase()))
+            .unwrap_or_default()
     }
 
     /// Whether query token `t` hits a field given its `field_words`: every
@@ -709,24 +746,20 @@ impl Wiki {
     ) -> BTreeSet<String> {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
         let mut terms = BTreeSet::new();
-        for name in defined {
+        for name in defined.iter().chain(methods) {
             let full = name.to_lowercase();
             if !title_words.contains(&full.as_str()) {
                 terms.insert(full);
             }
+        }
+        // Method names whole, never through `name_words`: splitting them
+        // re-creates the V7 failure (`needs_render` credits `render`).
+        for name in defined {
             terms.extend(
                 Self::name_words(name)
                     .into_iter()
                     .filter(|w| !title_words.contains(&w.as_str())),
             );
-        }
-        // Method names whole, never through `name_words`: splitting them
-        // re-creates the V7 failure (`needs_render` credits `render`).
-        for name in methods {
-            let full = name.to_lowercase();
-            if !title_words.contains(&full.as_str()) {
-                terms.insert(full);
-            }
         }
         terms
     }
@@ -764,13 +797,9 @@ impl Wiki {
             } else {
                 f.words.extend(words);
             }
-            if let Some(doc) = &item.doc {
-                f.doc_words.extend(Self::field_words(&doc.to_lowercase()));
-            }
-            if let Some(text) = &item.doc_text {
-                f.doc_rest_words
-                    .extend(Self::field_words(&text.to_lowercase()));
-            }
+            f.doc_words.extend(Self::lower_words(item.doc.as_deref()));
+            f.doc_rest_words
+                .extend(Self::lower_words(item.doc_text.as_deref()));
         }
         f.words.retain(|w| !f.whole.contains(w));
         f.method_words
@@ -804,16 +833,8 @@ impl Wiki {
         } else {
             Self::IW_NAME_WORD
         };
-        let doc = item
-            .doc
-            .as_deref()
-            .map(|d| Self::field_words(&d.to_lowercase()))
-            .unwrap_or_default();
-        let doc_rest = item
-            .doc_text
-            .as_deref()
-            .map(|d| Self::field_words(&d.to_lowercase()))
-            .unwrap_or_default();
+        let doc = Self::lower_words(item.doc.as_deref());
+        let doc_rest = Self::lower_words(item.doc_text.as_deref());
         let score: f64 = tokens
             .iter()
             .zip(idf)
@@ -960,8 +981,7 @@ impl Wiki {
             .map(|s| Self::field_words(&s.to_lowercase()));
         let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
         let symbols = self.symbol_fields.get(&e.id);
-        let page = self.page(&e.id).unwrap_or_default();
-        let sections = crate::rewrite::parse_sections(&page);
+        let sections = crate::rewrite::parse_sections(self.body(&e.id));
         let headings: Vec<String> = sections
             .keys()
             .filter(|k| {
@@ -1127,8 +1147,7 @@ impl Wiki {
                 MemoryScope::Without => !e.memory,
                 MemoryScope::Only => e.memory,
             }) && kind.is_none_or(|f| {
-                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs))
-                    || SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k))
+                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
             }) && tag.is_none_or(|t| {
                 e.tags
                     .iter()
@@ -1144,18 +1163,7 @@ impl Wiki {
             listed.truncate(limit.unwrap_or(usize::MAX));
             return listed
                 .into_iter()
-                .map(|e| Hit {
-                    id: e.id.clone(),
-                    title: e.title.clone(),
-                    path: e.path.clone(),
-                    summary: e.summary.clone(),
-                    updated: e.updated.clone(),
-                    score: 0.0,
-                    memory: e.memory,
-                    superseded_by: e.superseded_by.clone(),
-                    snippet: None,
-                    symbols: Vec::new(),
-                })
+                .map(|e| Hit::from_entry(e, 0.0, None))
                 .collect();
         }
         let limit = limit.unwrap_or(10);
@@ -1210,18 +1218,7 @@ impl Wiki {
                 } else {
                     base
                 };
-                let hit = Hit {
-                    id: c.entry.id.clone(),
-                    title: c.entry.title.clone(),
-                    path: c.entry.path.clone(),
-                    summary: c.entry.summary.clone(),
-                    updated: c.entry.updated.clone(),
-                    score: total,
-                    memory: c.entry.memory,
-                    superseded_by: c.entry.superseded_by.clone(),
-                    snippet: c.snippet,
-                    symbols: Vec::new(),
-                };
+                let hit = Hit::from_entry(c.entry, total, c.snippet);
                 (hit, c.entry.pagerank)
             })
             .collect();
@@ -1253,10 +1250,7 @@ impl Wiki {
         let per_hit: Vec<Vec<(f64, &CodeItem)>> = hits
             .iter()
             .map(|h| {
-                let code = self.entries.get(&h.id).is_some_and(|e| {
-                    SourceKind::parse(&e.kind).is_some_and(|k| KindFilter::Code.matches(&k))
-                });
-                if code {
+                if self.is_code(&h.id) {
                     self.page_symbols(&h.id, tokens, idf)
                 } else {
                     Vec::new()
@@ -1314,6 +1308,12 @@ impl Wiki {
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {
         self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
+    /// `resolve_id` with the unknown-page error text callers show.
+    pub fn resolve(&self, arg: &str) -> Result<String, String> {
+        self.resolve_id(arg)
+            .map_err(|near| unknown_page(arg, &near))
     }
 
     /// Resolves what a caller typed to a page id: an exact id, a title
@@ -1392,8 +1392,7 @@ impl Wiki {
     fn is_code(&self, id: &str) -> bool {
         self.entries
             .get(id)
-            .and_then(|e| SourceKind::parse(&e.kind))
-            .is_some_and(|k| KindFilter::Code.matches(&k))
+            .is_some_and(|e| e.is_kind(&KindFilter::Code))
     }
 
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
@@ -1440,12 +1439,10 @@ impl Wiki {
             .iter()
             .filter(|n| *n != id)
             .filter(|n| {
-                budget.kind.as_ref().is_none_or(|k| {
-                    self.entries
-                        .get(*n)
-                        .and_then(|e| SourceKind::parse(&e.kind))
-                        .is_some_and(|sk| k.matches(&sk))
-                })
+                budget
+                    .kind
+                    .as_ref()
+                    .is_none_or(|k| self.entries.get(*n).is_some_and(|e| e.is_kind(k)))
             })
             .cloned()
             .collect();
@@ -1637,7 +1634,7 @@ mod tests {
             w("wiki::search 2026-09 a_b"),
             vec!["wiki", "search", "2026", "09", "a", "b"]
         );
-        // No longer a substring hit inside a word.
+        // Not a substring hit inside a word.
         assert!(!Wiki::field_hit(&w("rewrite"), "write"));
         assert!(!Wiki::field_hit(&w("process-wide query cache"), "id"));
         // A prefix of a word still hits (derived forms survive).

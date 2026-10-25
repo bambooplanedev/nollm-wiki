@@ -8,7 +8,7 @@
 //! skipped as nested markup — a `<script>` inside `<svelte:head>` belongs to
 //! the rendered page, not the component — and a `{...}` expression is skipped
 //! whole, since it may hold a `<` that opens no tag.
-use super::code::LangSpec;
+use super::code::{default_shape, LangSpec};
 use super::extract_simple::js_spec;
 use super::extract_vue::{script_view, ScriptView};
 
@@ -17,6 +17,7 @@ use super::extract_vue::{script_view, ScriptView};
 pub(crate) fn svelte_spec() -> LangSpec {
     LangSpec {
         lang_name: "svelte",
+        shape: default_shape,
         ..js_spec()
     }
 }
@@ -33,7 +34,9 @@ pub(crate) fn svelte_script(source: &str) -> ScriptView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{
+        assert_deterministic, assert_has, assert_lacks, item_lines,
+    };
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -122,11 +125,7 @@ mod tests {
 
     #[test]
     fn extraction_is_deterministic() {
-        let a = CodeExtractor.extract("CartDrawer.svelte", COMPONENT);
-        let b = CodeExtractor.extract("CartDrawer.svelte", COMPONENT);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
+        assert_deterministic("CartDrawer.svelte", COMPONENT);
     }
 
     #[test]

@@ -83,7 +83,8 @@ pub fn generate_corpus(
         .collect();
 
     let mut written = Vec::new();
-    for topic in &all_topics {
+    let n = all_topics.len();
+    for (i, topic) in all_topics.iter().enumerate() {
         let slug = slugify(topic);
         let mut lines: Vec<String> = Vec::new();
 
@@ -104,11 +105,13 @@ pub fn generate_corpus(
         }
         lines.push(String::new());
 
-        let others: Vec<&String> = all_topics.iter().filter(|t| *t != topic).collect();
-        if !others.is_empty() {
-            let k = 1 + rng.below(3.min(others.len()));
+        // Topics are unique, so "every topic but this one" is n - 1 entries;
+        // skip index `i` instead of collecting them.
+        if n > 1 {
+            let k = 1 + rng.below(3.min(n - 1));
             for _ in 0..k {
-                let other = others[rng.below(others.len())];
+                let j = rng.below(n - 1);
+                let other = &all_topics[if j >= i { j + 1 } else { j }];
                 let tmpl = TEMPLATES[rng.below(TEMPLATES.len())];
                 lines.push(tmpl.replace("{a}", topic).replace("{b}", other));
             }

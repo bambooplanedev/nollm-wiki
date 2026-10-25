@@ -4,7 +4,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::KindFilter;
+use crate::model::{one_line, KindFilter};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -26,10 +26,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-/// Token ceiling applied to the `neighbors` tool when the caller omits
-/// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
-/// an agent calling with defaults should not receive a 30 KB dump.
-pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
+pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 
 /// Hits the `search` tool returns when the caller omits `limit` (the CLI
 /// keeps 10): every hit line is re-read on every later turn of the agent.
@@ -142,6 +139,14 @@ fn stale_line(reason: &str) -> String {
     format!("wiki may be stale: {reason}")
 }
 
+/// A text result: success for `Ok`, an error result for `Err`.
+fn text_result(r: Result<String, String>) -> CallToolResult {
+    match r {
+        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
+        Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]),
+    }
+}
+
 /// Append the stale line, if any, as a text block after a tool's own result.
 fn with_stale(mut result: CallToolResult, stale: Option<&str>) -> CallToolResult {
     if let Some(reason) = stale {
@@ -223,22 +228,18 @@ impl WikiServer {
         &self,
         Parameters(p): Parameters<SearchParams>,
     ) -> Result<CallToolResult, McpError> {
-        let kind = match p.kind.as_deref() {
-            None => None,
-            Some(s) => Some(KindFilter::parse(s).ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED),
-                    None,
-                )
-            })?),
-        };
-        let tag = match p.tag.as_deref() {
-            None => None,
-            Some(s) => Some(
-                crate::query::tag_filter(s)
-                    .ok_or_else(|| McpError::invalid_params(format!("empty tag {s:?}"), None))?,
-            ),
-        };
+        let kind = p
+            .kind
+            .as_deref()
+            .map(KindFilter::parse_arg)
+            .transpose()
+            .map_err(|m| McpError::invalid_params(m, None))?;
+        let tag = p
+            .tag
+            .as_deref()
+            .map(crate::query::tag_arg)
+            .transpose()
+            .map_err(|m| McpError::invalid_params(m, None))?;
         let (wiki, stale) = self.state.snapshot().await;
         let json = match p.format.as_deref() {
             None | Some("lines") => false,
@@ -259,10 +260,7 @@ impl WikiServer {
         } else {
             search_lines(&hits)
         };
-        Ok(with_stale(
-            CallToolResult::success(vec![ContentBlock::text(text)]),
-            stale.as_deref(),
-        ))
+        Ok(with_stale(text_result(Ok(text)), stale.as_deref()))
     }
 
     #[tool(
@@ -272,15 +270,12 @@ impl WikiServer {
         &self,
         Parameters(p): Parameters<NeighborsParams>,
     ) -> Result<CallToolResult, McpError> {
-        let kind = match p.kind.as_deref() {
-            None => None,
-            Some(s) => Some(KindFilter::parse(s).ok_or_else(|| {
-                McpError::invalid_params(
-                    format!("unknown kind {s:?}; expected {}", KindFilter::EXPECTED),
-                    None,
-                )
-            })?),
-        };
+        let kind = p
+            .kind
+            .as_deref()
+            .map(KindFilter::parse_arg)
+            .transpose()
+            .map_err(|m| McpError::invalid_params(m, None))?;
         let budget = PackBudget {
             max_tokens: Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             max_nodes: p.max_nodes,
@@ -288,24 +283,15 @@ impl WikiServer {
             kind,
         };
         let (wiki, stale) = self.state.snapshot().await;
-        let result = match wiki.resolve_id(&p.id) {
-            Ok(id) if p.symbol.is_some() => {
-                let symbol = p.symbol.as_deref().unwrap_or_default();
-                match wiki.calls(&id, symbol, p.depth, budget.max_tokens) {
-                    Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
-                    Err(e) => CallToolResult::error(vec![ContentBlock::text(e)]),
-                }
+        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+            match &p.symbol {
+                Some(symbol) => wiki.calls(&id, symbol, p.depth, budget.max_tokens),
+                None => wiki
+                    .neighbors(&id, p.depth.unwrap_or(1), &budget)
+                    .map(|pack| pack.text)
+                    .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
             }
-            Ok(id) => match wiki.neighbors(&id, p.depth.unwrap_or(1), &budget) {
-                Some(pack) => CallToolResult::success(vec![ContentBlock::text(pack.text)]),
-                None => CallToolResult::error(vec![ContentBlock::text(
-                    crate::query::unknown_page(&p.id, &[]),
-                )]),
-            },
-            Err(near) => CallToolResult::error(vec![ContentBlock::text(
-                crate::query::unknown_page(&p.id, &near),
-            )]),
-        };
+        }));
         Ok(with_stale(result, stale.as_deref()))
     }
 
@@ -318,17 +304,10 @@ impl WikiServer {
             .max_tokens
             .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
         let (wiki, stale) = self.state.snapshot().await;
-        let result = match wiki.resolve_id(&p.id) {
-            Ok(id) => match wiki.page_text(&id, full, max_tokens) {
-                Some(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
-                None => CallToolResult::error(vec![ContentBlock::text(
-                    crate::query::unknown_page(&p.id, &[]),
-                )]),
-            },
-            Err(near) => CallToolResult::error(vec![ContentBlock::text(
-                crate::query::unknown_page(&p.id, &near),
-            )]),
-        };
+        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+            wiki.page_text(&id, full, max_tokens)
+                .ok_or_else(|| crate::query::unknown_page(&p.id, &[]))
+        }));
         with_stale(result, stale.as_deref())
     }
 
@@ -347,7 +326,7 @@ impl WikiServer {
             "large": r.large,
         });
         Ok(with_stale(
-            CallToolResult::success(vec![ContentBlock::text(report.to_string())]),
+            text_result(Ok(report.to_string())),
             stale.as_deref(),
         ))
     }
@@ -486,16 +465,15 @@ pub fn search_lines(hits: &[Hit]) -> String {
         return "no matches\n".to_string();
     }
     // Fields are one-line text; collapse any newline or tab they carry.
-    let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut out = String::new();
     for h in hits {
         out.push_str(&format!("{}  {}  ", h.id, h.path));
         if let Some(u) = &h.updated {
             out.push_str(&format!("{u}  "));
         }
-        out.push_str(&one(&h.title));
+        out.push_str(&one_line(&h.title));
         if let Some(s) = &h.summary {
-            out.push_str(&format!(" — {}", one(s)));
+            out.push_str(&format!(" — {}", one_line(s)));
         }
         if let Some(by) = &h.superseded_by {
             out.push_str(&format!(" (superseded by {by})"));
@@ -508,15 +486,15 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 s.start_line,
                 s.end_line,
                 s.name,
-                one(&s.signature)
+                one_line(&s.signature)
             ));
             if let Some(d) = &s.doc {
-                out.push_str(&format!("  — {}", one(d)));
+                out.push_str(&format!("  — {}", one_line(d)));
             }
             out.push('\n');
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
-            out.push_str(&format!("    {}\n", one(sn)));
+            out.push_str(&format!("    {}\n", one_line(sn)));
         }
     }
     out

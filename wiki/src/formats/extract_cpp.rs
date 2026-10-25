@@ -1,9 +1,8 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    cpp_doc_line, default_cut, ext_of, keep_all, keep_any_vis, module_stem, no_body_doc,
-    no_export_set, no_header_group, plain_comment_text, source_rank, LangSpec, Lead, Placement,
-    Rank, Shape,
+    default_cut, default_shape, ext_of, is_cpp, module_stem, outermost, plain_comment_text,
+    source_rank, value_shape, LangSpec, Lead, Placement, Shape,
 };
 use crate::model::{CodeItem, CodeItemKind, Entity};
 use std::collections::BTreeMap;
@@ -134,32 +133,25 @@ const QUERY: &str = r"
 
 pub(crate) fn cpp_spec() -> LangSpec {
     LangSpec {
-        lang_name: "cpp",
-        language: tree_sitter_cpp::LANGUAGE.into(),
-        query_src: QUERY,
-        name_filter: keep_all,
-        // Everything visible is extracted, private members included. Gating on
+        // `vis_filter` stays at the base default: everything visible is
+        // extracted, private members included. Gating on
         // `access_specifier` would be inconsistent — an out-of-line
         // `void OrderBook::rebuild_()` carries no visible specifier and would
         // be kept anyway — and a sticky previous-sibling scan would default to
         // private and drop every member nested in a `template_declaration` or
         // a `preproc_ifdef`, neither of which has a sibling specifier in the
         // `field_declaration_list`.
-        vis_filter: keep_any_vis,
         // `OrderBook() = default;` renders whole: `default_method_clause` is
         // not the `body` field, so no cut applies. `declaration` and
         // `field_declaration` also carry their `;`.
         strip_trailing: &[';'],
         placement: cpp_placement,
         owner_sep: "::",
-        export_set: no_export_set,
-        join_continuations: false,
         sig_start: cpp_sig_start,
         owner_anchor: cpp_owner_anchor,
-        header_group: no_header_group,
         item_lead: cpp_lead,
-        body_doc: no_body_doc,
-        query_gates_visibility: false,
+        shape: cpp_shape,
+        ..LangSpec::base("cpp", tree_sitter_cpp::LANGUAGE.into(), QUERY)
     }
 }
 
@@ -174,6 +166,63 @@ pub(crate) fn cpp_doc_step(line: &str, in_block: &mut bool) -> Option<String> {
     let result = cpp_doc_line(line, inside);
     *in_block = inside && !line.contains("*/");
     result
+}
+
+/// True for a line that reads as a COMMENT, or as a blank line between
+/// comments, even though `cpp_doc_line` rejected it as a doc marker — a
+/// `// Copyright` banner, an SPDX line, or a plain `/*`/`*` continuation of a
+/// non-Doxygen block comment. False for actual code.
+///
+/// This is what bounds the C++ banner-skip in `leading_doc` to an actual
+/// banner: without it, the skip cannot tell a license header from
+/// `#include <vector>`, `class OrderBook {`, or `public:`, and scans clean
+/// through them looking for the first doc marker anywhere in the file —
+/// which is exactly the whole-file-scan defect the C++-only gate exists to
+/// avoid in the first place, just relocated one line down. The blank-line
+/// allowance is what lets a banner followed by a blank separator line still
+/// reach the doc comment beneath it, pinned by
+/// `doc_comment_below_a_license_banner_is_still_found`.
+pub(crate) fn is_banner_shaped(line: &str) -> bool {
+    line.is_empty() || line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')
+}
+
+/// One C++ doc line, or `None` when the line is not documentation.
+///
+/// Only real markers count — `///`, `//!`, `/**`, `/*!` — so a `// Copyright`
+/// banner is not a doc comment. Punctuation-only results are rejected, which
+/// is what keeps an LLVM `//===--- … ---===//` header and a `/*****/` rule out
+/// of the summary. Continuation lines shed a leading `*`, a `@brief`/`\brief`
+/// tag, and the closing `*/`.
+///
+/// The bare-`*` continuation form is only accepted while `in_doxygen_block`
+/// is true — i.e. while the caller (`leading_doc`) has tracked us as still
+/// inside a block that actually opened with `/**`/`/*!`. A `*`-prefixed line
+/// is ALSO how a plain `/* Copyright ... */` block continues (`* All rights
+/// reserved.`), and without this gate that banner text reads as a doc
+/// continuation and gets concatenated onto whatever real `///` doc follows —
+/// e.g. `"All rights reserved.\nMaintains the book."` — since this function
+/// sees one line at a time and cannot otherwise tell which kind of block
+/// opened it.
+fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
+    let body = line
+        .strip_prefix("///")
+        .or_else(|| line.strip_prefix("//!"))
+        .or_else(|| line.strip_prefix("/**"))
+        .or_else(|| line.strip_prefix("/*!"))
+        .or_else(|| in_doxygen_block.then(|| line.strip_prefix('*')).flatten())?;
+    let cleaned = body
+        .trim()
+        .trim_end_matches("*/")
+        .trim()
+        .trim_start_matches("@brief")
+        .trim_start_matches("\\brief")
+        .trim()
+        .to_string();
+    Some(if cleaned.chars().any(char::is_alphanumeric) {
+        cleaned
+    } else {
+        String::new()
+    })
 }
 
 /// The doc text of one C++ comment node, or `None` when it is not a Doxygen
@@ -218,16 +267,8 @@ fn cpp_lead(node: Node, text: &str) -> Lead {
 /// template renders with its head. The exact analogue of Python's
 /// `decorated_definition`; without it `template<typename T> class RingBuffer`
 /// renders as `class RingBuffer`.
-pub(crate) fn cpp_sig_start(def: Node) -> Node {
-    let mut node = def;
-    while let Some(parent) = node.parent() {
-        if parent.kind() == "template_declaration" {
-            node = parent;
-        } else {
-            break;
-        }
-    }
-    node
+fn cpp_sig_start(def: Node) -> Node {
+    outermost(def, |k| k == "template_declaration")
 }
 
 /// The outermost `qualified_identifier` around the captured name, or the name
@@ -241,16 +282,8 @@ pub(crate) fn cpp_sig_start(def: Node) -> Node {
 /// makes the owner REPLACE it, which is also what strips the namespace:
 /// `void trading::OrderBook::apply()` renders `void OrderBook::apply()`, the
 /// same signature the in-class declaration of that method renders.
-pub(crate) fn cpp_owner_anchor(name: Node) -> Node {
-    let mut node = name;
-    while let Some(parent) = node.parent() {
-        if parent.kind() == "qualified_identifier" {
-            node = parent;
-        } else {
-            break;
-        }
-    }
-    node
+fn cpp_owner_anchor(name: Node) -> Node {
+    outermost(name, |k| k == "qualified_identifier")
 }
 
 /// Reject first, then resolve the owner. The order matters: `int x;` inside a
@@ -268,7 +301,7 @@ pub(crate) fn cpp_owner_anchor(name: Node) -> Node {
 /// makes it replace the whole written prefix. So `void trading::OrderBook::apply()`
 /// and the in-class declaration of the same method both render `OrderBook::apply`
 /// and index under one key.
-pub(crate) fn cpp_placement(def: Node, text: &str) -> Placement {
+fn cpp_placement(def: Node, text: &str) -> Placement {
     let mut node = def;
     while let Some(parent) = node.parent() {
         if parent.kind() == "compound_statement" {
@@ -372,12 +405,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
         let init = declarator.filter(|d| single && d.kind() == "init_declarator");
         let eq = init.and_then(|d| d.children(&mut d.walk()).find(|c| c.kind() == "="));
         let value = init.and_then(|d| d.child_by_field_name("value"));
-        return Shape {
-            rank: Rank::Value,
-            cut: eq.or(value),
-            value: eq.and(value),
-            has_type: true,
-        };
+        return value_shape(eq, value, true);
     }
     let mut cursor = def.walk();
     // Bound before the struct literal: the child iterator borrows `cursor`,
@@ -387,10 +415,8 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
         .find(|c| c.kind() == "field_initializer_list")
         .or_else(|| default_cut(def));
     Shape {
-        rank: Rank::Def,
         cut,
-        value: None,
-        has_type: true,
+        ..default_shape(def)
     }
 }
 
@@ -503,10 +529,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, e) in entities.iter() {
         let sp = e.source_path.as_str();
-        if matches!(
-            ext_of(sp).as_str(),
-            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h"
-        ) {
+        if is_cpp(&ext_of(sp)) {
             groups.entry(module_stem(sp)).or_default().push(id);
         }
     }
@@ -540,10 +563,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
         }
     }
     for (hid, hi, cid, ci) in pairs {
-        let span = |e: &Entity, i: usize| {
-            let it = &e.items[i];
-            format!("{}:{}-{}", e.source_path, it.start_line, it.end_line)
-        };
+        let span = |e: &Entity, i: usize| e.items[i].span(&e.source_path);
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
         let h_doc = &entities[&hid].items[hi];
         let (doc, doc_text) = (h_doc.doc.clone(), h_doc.doc_text.clone());
@@ -560,7 +580,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::item_lines;
+    use crate::formats::code::testutil::{assert_lacks, doc_of, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -834,11 +854,7 @@ mod tests {
         // `Level** grid()` nests two wrappers, which `QUERY` knowingly does
         // not reach. The two indexes must agree about that: a method the
         // query never captures must not appear in `methods` either.
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("grid")),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_lacks(&e.symbols, "grid");
         assert!(
             !e.methods.iter().any(|x| x == "grid"),
             "methods must not outrun what `## Exports` captures: {:?}",
@@ -937,9 +953,9 @@ mod tests {
         // rights reserved.`) look identical, line by line, to a Doxygen
         // `/** ... */` block's own continuation lines — the only thing that
         // tells them apart is whether the block that opened them started
-        // with `/**`/`/*!` or plain `/*`. Before this was tracked, the
-        // banner's second line was collected as if it were doc content and
-        // concatenated onto the real `///` doc that follows, producing
+        // with `/**`/`/*!` or plain `/*`. Untracked, the banner's second
+        // line would be collected as doc content and concatenated onto the
+        // real `///` doc that follows, producing
         // "All rights reserved.\nMaintains the book." instead of the real
         // one-line summary.
         let s = summary(
@@ -947,13 +963,6 @@ mod tests {
             "/* Copyright (c) 2026 Acme.\n * All rights reserved.\n */\n/// Maintains the book.\nclass F {};\n",
         );
         assert_eq!(s.as_deref(), Some("Maintains the book."), "got {s:?}");
-    }
-
-    /// The `(doc, start_line)` of the item named `name` in `src`.
-    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
-        let e = CodeExtractor.extract(path, src);
-        let item = e.items.iter().find(|i| i.name == name).unwrap();
-        (item.doc.clone(), item.start_line)
     }
 
     #[test]
