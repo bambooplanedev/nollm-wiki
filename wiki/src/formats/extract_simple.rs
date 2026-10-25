@@ -260,16 +260,9 @@ fn is_go_directive(body: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_lacks, item_lines};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
-
-    /// The `(doc, start_line)` of the item named `name` in `src`.
-    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
-        let e = CodeExtractor.extract(path, src);
-        let item = e.items.iter().find(|i| i.name == name).unwrap();
-        (item.doc.clone(), item.start_line)
-    }
 
     #[test]
     fn a_jsdoc_keeps_a_plain_directive_below_it_out_of_the_doc() {
@@ -298,12 +291,8 @@ mod tests {
     fn js_export_gated_signatures() {
         let src = "export function foo(a, b) {\n  return a + b;\n}\nfunction helper() {\n  return 1;\n}\n";
         let e = CodeExtractor.extract("mod.js", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "export function foo(a, b)"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(!e.symbols.iter().any(|s| s.contains("helper")));
+        assert_has(&e.symbols, "export function foo(a, b)");
+        assert_lacks(&e.symbols, "helper");
     }
 
     #[test]
@@ -328,24 +317,16 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "export class Bar"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(!e.symbols.iter().any(|s| s.contains("hidden")));
+        assert_has(&e.symbols, "export class Bar");
+        assert_lacks(&e.symbols, "hidden");
     }
 
     #[test]
     fn go_exported_gated_signatures_and_imports() {
         let src = "package main\n\nimport \"fmt\"\n\nfunc Foo(a int) string {\n\treturn fmt.Sprint(a)\n}\n\nfunc bar() {\n}\n";
         let e = CodeExtractor.extract("main.go", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "func Foo(a int) string"),
-            "symbols: {:?}",
-            e.symbols
-        );
-        assert!(!e.symbols.iter().any(|s| s.contains("bar")));
+        assert_has(&e.symbols, "func Foo(a int) string");
+        assert_lacks(&e.symbols, "bar");
         assert!(e.imports.iter().any(|i| i.contains("fmt")));
     }
 
@@ -364,7 +345,7 @@ mod tests {
         );
         assert_eq!(e.items[1].doc.as_deref(), Some("Run starts it."));
         assert!(e.methods.is_empty());
-        assert!(!e.symbols.iter().any(|s| s.contains("Run")));
+        assert_lacks(&e.symbols, "Run");
     }
 
     #[test]

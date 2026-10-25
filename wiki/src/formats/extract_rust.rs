@@ -421,7 +421,7 @@ mod tests {
             _ => panic!("expected Code kind"),
         }
         assert_has(&e.symbols, "pub fn render_page(x: i32) -> String");
-        assert!(!e.symbols.iter().any(|s| s.contains("private_helper")));
+        assert_lacks(&e.symbols, "private_helper");
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert_eq!(e.summary.as_deref(), Some("Module docs."));
     }
@@ -470,11 +470,8 @@ mod tests {
             e.symbols
         );
         for leaked in ["crate_only", "super_only", "CrateType", "impl_crate_only"] {
-            assert!(
-                !e.symbols.iter().any(|s| s.contains(leaked)),
-                "{leaked} is not exported outside the crate: {:?}",
-                e.symbols
-            );
+            // each name is not exported outside the crate
+            assert_lacks(&e.symbols, leaked);
         }
     }
 
@@ -483,11 +480,8 @@ mod tests {
         let src = "pub trait Public {\n    fn m(&self);\n}\ntrait Private {\n    fn n(&self);\n}\n";
         let e = CodeExtractor.extract("t.rs", src);
         assert_has(&e.symbols, "pub trait Public");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("Private")),
-            "private trait leaked as export: {:?}",
-            e.symbols
-        );
+        // private trait leaked as export
+        assert_lacks(&e.symbols, "Private");
     }
 
     #[test]
@@ -512,12 +506,9 @@ mod tests {
             &e.symbols,
             "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>",
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn free_function()"),
-            "a top-level function must stay unqualified: {:?}",
-            e.symbols
-        );
-        assert!(!e.symbols.iter().any(|s| s.contains("helper")));
+        // a top-level function must stay unqualified
+        assert_has(&e.symbols, "pub fn free_function()");
+        assert_lacks(&e.symbols, "helper");
     }
 
     #[test]
@@ -535,11 +526,8 @@ mod tests {
         let e = CodeExtractor.extract("t.rs", src);
         assert_has(&e.symbols, "pub fn outer()");
         for leaked in ["Local", "hidden", "nested"] {
-            assert!(
-                !e.symbols.iter().any(|s| s.contains(leaked)),
-                "{leaked} lives in a function body and is not module surface: {:?}",
-                e.symbols
-            );
+            // each name lives in a function body and is not module surface
+            assert_lacks(&e.symbols, leaked);
         }
     }
 
@@ -635,11 +623,8 @@ mod tests {
         // The body assertion above only catches the symptom; the stake is
         // that a same-line export doesn't silently vanish from the page's
         // exports once the newline separates it from the marker comment.
-        assert!(
-            e.symbols.iter().any(|s| s == "pub fn after() -> u8"),
-            "export following the test module on the same line was lost: {:?}",
-            e.symbols
-        );
+        // export following the test module on the same line was lost
+        assert_has(&e.symbols, "pub fn after() -> u8");
     }
 
     #[test]
@@ -673,19 +658,13 @@ mod tests {
             "test-only import leaked: {:?}",
             e.imports
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "pub struct Fixture"),
-            "real export lost: {:?}",
-            e.symbols
-        );
+        // real export lost
+        assert_has(&e.symbols, "pub struct Fixture");
         // The fixture also plants an `impl Default for Fixture` inside the
         // `#[cfg(test)]` module — exactly the widening the module-level
         // guard exists to prevent. It must not survive stripping.
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("Default")),
-            "impl inside the stripped test module leaked as an export: {:?}",
-            e.symbols
-        );
+        // impl inside the stripped test module leaked as an export
+        assert_lacks(&e.symbols, "Default");
     }
 
     #[test]
@@ -848,11 +827,8 @@ mod tests {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
         let e = CodeExtractor.extract("q.rs", src);
         assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("hidden")),
-            "function-local item leaked: {:?}",
-            e.symbols
-        );
+        // function-local item leaked
+        assert_lacks(&e.symbols, "hidden");
     }
 
     #[test]

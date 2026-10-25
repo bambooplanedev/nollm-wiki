@@ -341,7 +341,9 @@ fn attr_value<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{
+        assert_deterministic, assert_has, assert_lacks, item_lines,
+    };
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -460,11 +462,7 @@ mod tests {
 
     #[test]
     fn extraction_is_deterministic() {
-        let a = CodeExtractor.extract("ProductCard.vue", SFC);
-        let b = CodeExtractor.extract("ProductCard.vue", SFC);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
+        assert_deterministic("ProductCard.vue", SFC);
     }
 
     #[test]

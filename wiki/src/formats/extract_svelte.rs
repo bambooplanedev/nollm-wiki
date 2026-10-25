@@ -33,7 +33,9 @@ pub(crate) fn svelte_script(source: &str) -> ScriptView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{
+        assert_deterministic, assert_has, assert_lacks, item_lines,
+    };
     use crate::formats::code::CodeExtractor;
     use crate::formats::{Extractor, Registry};
     use crate::model::SourceKind;
@@ -122,11 +124,7 @@ mod tests {
 
     #[test]
     fn extraction_is_deterministic() {
-        let a = CodeExtractor.extract("CartDrawer.svelte", COMPONENT);
-        let b = CodeExtractor.extract("CartDrawer.svelte", COMPONENT);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
+        assert_deterministic("CartDrawer.svelte", COMPONENT);
     }
 
     #[test]

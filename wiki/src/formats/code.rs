@@ -1807,7 +1807,25 @@ fn derive_code_name(rel_path: &str) -> String {
 /// test with several assertions extracts once.
 #[cfg(test)]
 pub(crate) mod testutil {
+    use crate::formats::code::CodeExtractor;
+    use crate::formats::Extractor;
     use crate::model::CodeItem;
+
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    pub(crate) fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
+    /// Two extractions of the same file agree on symbols, imports and summary.
+    pub(crate) fn assert_deterministic(path: &str, src: &str) {
+        let a = CodeExtractor.extract(path, src);
+        let b = CodeExtractor.extract(path, src);
+        assert_eq!(a.symbols, b.symbols);
+        assert_eq!(a.imports, b.imports);
+        assert_eq!(a.summary, b.summary);
+    }
 
     /// The exact signature `want` must be among `symbols`.
     pub(crate) fn assert_has(symbols: &[String], want: &str) {
@@ -1849,6 +1867,7 @@ pub(crate) mod testutil {
 
 #[cfg(test)]
 mod tests {
+    use super::testutil::{assert_has, assert_lacks};
     use super::*;
 
     #[test]
@@ -2041,11 +2060,8 @@ mod tests {
     fn one_element_tuple_survives_tidying() {
         let src = "pub type Single = (u8,);\n";
         let e = CodeExtractor.extract("t.rs", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "pub type Single = (u8,)"),
-            "a one-element tuple is not a parenthesized value: {:?}",
-            e.symbols
-        );
+        // a one-element tuple is not a parenthesized value
+        assert_has(&e.symbols, "pub type Single = (u8,)");
     }
 
     #[test]
@@ -2067,21 +2083,11 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "def outer()"),
-            "{:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("inner")),
-            "function-local def must be dropped: {:?}",
-            e.symbols
-        );
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("::")),
-            "Python must use `.`, never Rust's `::`: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "def outer()");
+        // function-local def must be dropped
+        assert_lacks(&e.symbols, "inner");
+        // Python must use `.`, never Rust's `::`
+        assert_lacks(&e.symbols, "::");
 
         // The summary fallback is shared machinery that Task 9 reordered.
         // Pin it per language so a future reordering cannot move it silently.
@@ -2097,11 +2103,7 @@ mod tests {
         // method both stay exactly as they are today.
         let go = "package main\n\nfunc Foo(a int) string {\n\treturn \"\"\n}\n";
         let e = CodeExtractor.extract("m.go", go);
-        assert!(
-            e.symbols.iter().any(|s| s == "func Foo(a int) string"),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_has(&e.symbols, "func Foo(a int) string");
         assert_eq!(e.summary.as_deref(), Some("func Foo(a int) string"));
 
         let js = "export function foo(a, b) {\n  return a + b;\n}\n";

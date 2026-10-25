@@ -580,7 +580,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::item_lines;
+    use crate::formats::code::testutil::{assert_lacks, doc_of, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -854,11 +854,7 @@ mod tests {
         // `Level** grid()` nests two wrappers, which `QUERY` knowingly does
         // not reach. The two indexes must agree about that: a method the
         // query never captures must not appear in `methods` either.
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("grid")),
-            "symbols: {:?}",
-            e.symbols
-        );
+        assert_lacks(&e.symbols, "grid");
         assert!(
             !e.methods.iter().any(|x| x == "grid"),
             "methods must not outrun what `## Exports` captures: {:?}",
@@ -967,13 +963,6 @@ mod tests {
             "/* Copyright (c) 2026 Acme.\n * All rights reserved.\n */\n/// Maintains the book.\nclass F {};\n",
         );
         assert_eq!(s.as_deref(), Some("Maintains the book."), "got {s:?}");
-    }
-
-    /// The `(doc, start_line)` of the item named `name` in `src`.
-    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
-        let e = CodeExtractor.extract(path, src);
-        let item = e.items.iter().find(|i| i.name == name).unwrap();
-        (item.doc.clone(), item.start_line)
     }
 
     #[test]

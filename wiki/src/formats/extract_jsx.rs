@@ -28,7 +28,7 @@ pub(crate) fn tsx_spec() -> LangSpec {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_has, assert_lacks};
+    use crate::formats::code::testutil::{assert_deterministic, assert_has, assert_lacks};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
     use crate::model::SourceKind;
@@ -98,10 +98,6 @@ mod tests {
 
     #[test]
     fn extraction_is_deterministic() {
-        let a = CodeExtractor.extract("src/Counter.tsx", TSX);
-        let b = CodeExtractor.extract("src/Counter.tsx", TSX);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
+        assert_deterministic("src/Counter.tsx", TSX);
     }
 }

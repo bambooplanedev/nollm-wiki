@@ -343,7 +343,7 @@ pub(crate) fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
+    use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
 
@@ -372,7 +372,7 @@ mod tests {
         let src = "\"\"\"\nTop docstring.\n\"\"\"\nimport os\nfrom graph import build\ndef extract_all(d):\n    pass\ndef _private():\n    pass\n";
         let e = CodeExtractor.extract("extractor.py", src);
         assert_has(&e.symbols, "def extract_all(d)");
-        assert!(!e.symbols.iter().any(|s| s.contains("_private")));
+        assert_lacks(&e.symbols, "_private");
         assert!(e.imports.iter().any(|i| i.contains("graph")));
         assert!(e.imports.iter().any(|i| i.contains("os")));
         assert_eq!(e.summary.as_deref(), Some("Top docstring."));
@@ -484,11 +484,8 @@ mod tests {
             "a private class must not export its methods: {:?}",
             e.symbols
         );
-        assert!(
-            e.symbols.iter().any(|s| s == "class Public"),
-            "extraction must still be happening at all: {:?}",
-            e.symbols
-        );
+        // extraction must still be happening at all
+        assert_has(&e.symbols, "class Public");
         assert_has(&e.symbols, "def Public.run(self) -> None");
     }
 
@@ -540,11 +537,8 @@ mod tests {
         assert_lacks(&e.symbols, "NotListed");
         assert_lacks(&e.symbols, "not_listed");
         assert_lacks(&e.symbols, "HIDDEN_CONST");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains("_hidden")),
-            "__all__ says nothing about what is public inside a class: {:?}",
-            e.symbols
-        );
+        // __all__ says nothing about what is public inside a class
+        assert_lacks(&e.symbols, "_hidden");
     }
 
     #[test]
@@ -556,11 +550,8 @@ mod tests {
         // `__all__` here instead of being replaced by it.
         let src = "__all__ = [\"_private_api\", \"__version__\", \"Public\"]\n\n__version__ = \"1.0\"\n\ndef _private_api() -> int:\n    return 1\n\nclass Public:\n    def _hidden(self) -> None:\n        pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def _private_api() -> int"),
-            "__all__ must be able to export a free underscore-prefixed name: {:?}",
-            e.symbols
-        );
+        // __all__ must be able to export a free underscore-prefixed name
+        assert_has(&e.symbols, "def _private_api() -> int");
         assert_has(&e.symbols, "__version__ = \"1.0\"");
         assert_has(&e.symbols, "class Public");
         assert!(
@@ -588,11 +579,8 @@ mod tests {
         let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "a non-literal __all__ must not gate anything: {:?}",
-            e.symbols
-        );
+        // a non-literal __all__ must not gate anything
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -600,11 +588,8 @@ mod tests {
         let src =
             "x = 1\n__all__ = [f\"a{x}\", \"b\"]\n\ndef b():\n    pass\n\ndef c():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
-        assert!(
-            e.symbols.iter().any(|s| s == "def c()"),
-            "an f-string element must invalidate __all__, falling back to the convention: {:?}",
-            e.symbols
-        );
+        // an f-string element must invalidate __all__, falling back to the convention
+        assert_has(&e.symbols, "def c()");
     }
 
     #[test]
@@ -631,11 +616,8 @@ mod tests {
         let src = "__all__ = [\"base_name\"]\n__all__ += [\"added_name\"]\n\ndef base_name() -> int:\n    return 1\n\ndef added_name() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def base_name() -> int");
-        assert!(
-            e.symbols.iter().any(|s| s == "def added_name() -> int"),
-            "`__all__ +=` must fall back to the convention, not keep the stale literal: {:?}",
-            e.symbols
-        );
+        // `__all__ +=` must fall back to the convention, not keep the stale literal
+        assert_has(&e.symbols, "def added_name() -> int");
     }
 
     #[test]
@@ -649,11 +631,8 @@ mod tests {
             "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = compute()\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "a non-literal reassignment must fall back to the convention: {:?}",
-            e.symbols
-        );
+        // a non-literal reassignment must fall back to the convention
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -661,11 +640,8 @@ mod tests {
         let src = "__all__ = [\"a\"]\n__all__.extend([\"b\"])\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "def a()");
-        assert!(
-            e.symbols.iter().any(|s| s == "def b()"),
-            "__all__.extend(...) must fall back to the convention: {:?}",
-            e.symbols
-        );
+        // __all__.extend(...) must fall back to the convention
+        assert_has(&e.symbols, "def b()");
     }
 
     #[test]
@@ -850,11 +826,8 @@ mod tests {
         let src = format!("BIG: str = \"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);
         assert_has(&e.symbols, "BIG: str");
-        assert!(
-            !e.symbols.iter().any(|s| s.contains('…')),
-            "annotated must omit, not truncate: {:?}",
-            e.symbols
-        );
+        // annotated must omit, not truncate
+        assert_lacks(&e.symbols, "…");
     }
 
     #[test]
@@ -915,18 +888,11 @@ mod tests {
         assert_eq!(e.items[1].doc.as_deref(), Some("Slug for the url."));
     }
 
-    /// The `(doc, start_line)` of the item named `name` in `src`.
-    fn doc_of(src: &str, name: &str) -> (Option<String>, usize) {
-        let e = CodeExtractor.extract("a.py", src);
-        let item = e.items.iter().find(|i| i.name == name).unwrap();
-        (item.doc.clone(), item.start_line)
-    }
-
     #[test]
     fn python_hash_comment_is_a_doc() {
         let src = "x = 1\n# Wait longer than w_min counts as a stall.\nW_MIN_DEFAULT_S = 5\n";
         assert_eq!(
-            doc_of(src, "W_MIN_DEFAULT_S"),
+            doc_of("a.py", src, "W_MIN_DEFAULT_S"),
             (Some("Wait longer than w_min counts as a stall.".into()), 2)
         );
     }
@@ -935,7 +901,7 @@ mod tests {
     fn a_sphinx_attribute_comment_drops_its_colon() {
         let src = "x = 1\n#: Sphinx attribute doc.\nLIMIT = 5\n";
         assert_eq!(
-            doc_of(src, "LIMIT"),
+            doc_of("a.py", src, "LIMIT"),
             (Some("Sphinx attribute doc.".into()), 2)
         );
     }
@@ -943,9 +909,9 @@ mod tests {
     #[test]
     fn python_docstring_wins_over_hash_comment() {
         let src = "x = 1\n# note\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
-        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
+        assert_eq!(doc_of("a.py", src, "f"), (Some("Real doc.".into()), 3));
         let src =
             "x = 1\n# Builds the frame for each caller.\ndef f():\n    \"\"\"Real doc.\"\"\"\n";
-        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 3));
+        assert_eq!(doc_of("a.py", src, "f"), (Some("Real doc.".into()), 3));
     }
 }
