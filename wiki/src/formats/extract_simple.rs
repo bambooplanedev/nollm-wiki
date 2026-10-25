@@ -2,7 +2,8 @@
 //! (`export_statement`) or by a naming convention (Go's leading capital), with
 //! no owner resolution and no scope guard.
 use super::code::{
-    default_shape, is_function, plain_comment_text, LangSpec, Lead, Placement, Rank, Shape,
+    default_shape, is_function, outermost, plain_comment_text, value_shape, LangSpec, Lead,
+    Placement, Rank, Shape,
 };
 use tree_sitter::{Language, Node};
 
@@ -114,16 +115,12 @@ pub(crate) fn ecma_shape(def: Node) -> Shape {
 
 /// A declaration's range and signature start at its `export` or `const`.
 fn ecma_sig_start(def: Node) -> Node {
-    let mut top = def;
-    while let Some(p) = top.parent().filter(|p| {
+    outermost(def, |k| {
         matches!(
-            p.kind(),
+            k,
             "lexical_declaration" | "variable_declaration" | "export_statement"
         )
-    }) {
-        top = p;
-    }
-    top
+    })
 }
 
 /// A `JSDoc` block (`/** … */`) above a declaration is its doc, and any other
@@ -231,12 +228,7 @@ pub(crate) fn go_shape(def: Node) -> Shape {
     }
     let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
     let value = def.child_by_field_name("value");
-    Shape {
-        rank: Rank::Value,
-        cut: eq.or(value),
-        value: eq.and(value),
-        has_type: def.child_by_field_name("type").is_some(),
-    }
+    value_shape(eq, value, def.child_by_field_name("type").is_some())
 }
 
 /// Go's doc convention is the `//` comment lines directly above a declaration.

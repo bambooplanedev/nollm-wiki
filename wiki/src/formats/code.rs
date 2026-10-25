@@ -295,9 +295,14 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "vue" => super::extract_vue::vue_spec(),
         "svelte" => super::extract_svelte::svelte_spec(),
         "go" => super::extract_simple::go_spec(),
-        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => super::extract_cpp::cpp_spec(),
+        _ if is_cpp(ext) => super::extract_cpp::cpp_spec(),
         _ => return None,
     })
+}
+
+/// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them too.
+pub(crate) fn is_cpp(ext: &str) -> bool {
+    matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h")
 }
 
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
@@ -617,6 +622,30 @@ pub(crate) fn default_shape(def: Node) -> Shape {
         value: None,
         has_type: true,
     }
+}
+
+/// A `Rank::Value` definition cut at its `=` (or, with no `=`, at its value)
+/// that re-appends the value only when there is an `=` to re-append it after.
+pub(crate) fn value_shape<'a>(
+    eq: Option<Node<'a>>,
+    value: Option<Node<'a>>,
+    has_type: bool,
+) -> Shape<'a> {
+    Shape {
+        rank: Rank::Value,
+        cut: eq.or(value),
+        value: eq.and(value),
+        has_type,
+    }
+}
+
+/// Climbs from `node` while the parent's kind satisfies `up`; the topmost such
+/// ancestor, or `node` itself when the parent does not.
+pub(crate) fn outermost(mut node: Node<'_>, up: impl Fn(&str) -> bool) -> Node<'_> {
+    while let Some(parent) = node.parent().filter(|p| up(p.kind())) {
+        node = parent;
+    }
+    node
 }
 
 /// Capture indices for one language's query, resolved once per extraction.
@@ -1664,7 +1693,7 @@ fn collapse_runs(s: &str) -> String {
 /// `class OrderBook {` and `public:` to reach a MEMBER's doc comment and
 /// report that as the file's.
 fn leading_doc(text: &str, ext: &str) -> Option<String> {
-    let cpp = matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h");
+    let cpp = is_cpp(ext);
     // Tracks whether the line about to be stripped sits inside a still-open
     // Doxygen block (`/**` or `/*!` not yet closed by `*/`) — the only
     // context in which a bare `*` continuation is real doc content. Without
@@ -1684,7 +1713,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
-            "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" => {
+            _ if cpp => {
                 return super::extract_cpp::cpp_doc_step(line, &mut in_doxygen_block);
             }
             _ => None,
@@ -1707,72 +1736,14 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             // "skip past a license header" apart from "skip past
             // `#include`, a class's opening brace, or a whole member's
             // body" — none of which documents the FILE.
-            None if collected.is_empty() && cpp && is_banner_shaped(line) => {}
+            None if collected.is_empty() && cpp && super::extract_cpp::is_banner_shaped(line) => {}
             // Every other language, and C++ once real code appears: no doc
-            // comment opens this file.
-            None if collected.is_empty() => break,
-            // A non-doc line ends an already-open paragraph.
+            // comment opens this file. Past the first doc line, a non-doc
+            // line ends the paragraph.
             None => break,
         }
     }
     (!collected.is_empty()).then(|| collected.join("\n"))
-}
-
-/// True for a line that reads as a COMMENT, or as a blank line between
-/// comments, even though `cpp_doc_line` rejected it as a doc marker — a
-/// `// Copyright` banner, an SPDX line, or a plain `/*`/`*` continuation of a
-/// non-Doxygen block comment. False for actual code.
-///
-/// This is what bounds the C++ banner-skip in `leading_doc` to an actual
-/// banner: without it, the skip cannot tell a license header from
-/// `#include <vector>`, `class OrderBook {`, or `public:`, and scans clean
-/// through them looking for the first doc marker anywhere in the file —
-/// which is exactly the whole-file-scan defect the C++-only gate exists to
-/// avoid in the first place, just relocated one line down. The blank-line
-/// allowance is what lets a banner followed by a blank separator line still
-/// reach the doc comment beneath it, pinned by
-/// `doc_comment_below_a_license_banner_is_still_found`.
-fn is_banner_shaped(line: &str) -> bool {
-    line.is_empty() || line.starts_with("//") || line.starts_with("/*") || line.starts_with('*')
-}
-
-/// One C++ doc line, or `None` when the line is not documentation.
-///
-/// Only real markers count — `///`, `//!`, `/**`, `/*!` — so a `// Copyright`
-/// banner is not a doc comment. Punctuation-only results are rejected, which
-/// is what keeps an LLVM `//===--- … ---===//` header and a `/*****/` rule out
-/// of the summary. Continuation lines shed a leading `*`, a `@brief`/`\brief`
-/// tag, and the closing `*/`.
-///
-/// The bare-`*` continuation form is only accepted while `in_doxygen_block`
-/// is true — i.e. while the caller (`leading_doc`) has tracked us as still
-/// inside a block that actually opened with `/**`/`/*!`. A `*`-prefixed line
-/// is ALSO how a plain `/* Copyright ... */` block continues (`* All rights
-/// reserved.`), and without this gate that banner text reads as a doc
-/// continuation and gets concatenated onto whatever real `///` doc follows —
-/// e.g. `"All rights reserved.\nMaintains the book."` — since this function
-/// sees one line at a time and cannot otherwise tell which kind of block
-/// opened it.
-pub(crate) fn cpp_doc_line(line: &str, in_doxygen_block: bool) -> Option<String> {
-    let body = line
-        .strip_prefix("///")
-        .or_else(|| line.strip_prefix("//!"))
-        .or_else(|| line.strip_prefix("/**"))
-        .or_else(|| line.strip_prefix("/*!"))
-        .or_else(|| in_doxygen_block.then(|| line.strip_prefix('*')).flatten())?;
-    let cleaned = body
-        .trim()
-        .trim_end_matches("*/")
-        .trim()
-        .trim_start_matches("@brief")
-        .trim_start_matches("\\brief")
-        .trim()
-        .to_string();
-    if cleaned.chars().any(char::is_alphanumeric) {
-        Some(cleaned)
-    } else {
-        Some(String::new())
-    }
 }
 
 /// Filenames that say nothing about the module's own identity: the language

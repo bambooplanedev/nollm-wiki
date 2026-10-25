@@ -184,10 +184,8 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
         // every other value it is unbudgeted. Recorded as a deferral, not fixed
         // here.
         "enum_variant" => Shape {
-            rank: Rank::Def,
             cut: None,
-            value: None,
-            has_type: true,
+            ..default_shape(def)
         },
         // A `macro_definition`'s rules are plain children, not a `body` field,
         // so without an explicit cut the entire macro would become its
@@ -199,10 +197,8 @@ pub(crate) fn rust_shape(def: Node) -> Shape {
             // `cursor`, and inside the literal that borrow would outlive it.
             let cut = def.children(&mut cursor).find(|c| c.kind() == "macro_rule");
             Shape {
-                rank: Rank::Def,
                 cut,
-                value: None,
-                has_type: true,
+                ..default_shape(def)
             }
         }
         // A `const`/`static` cuts at its value and then re-appends it: the
