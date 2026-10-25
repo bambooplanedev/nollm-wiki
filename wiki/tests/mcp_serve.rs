@@ -691,11 +691,12 @@ fn serve_source_catches_up_an_existing_wiki() {
     // The old wiki is served at once and a call waits only 5 s for the
     // start-up compile, which a cold debug build under parallel tests can
     // exceed; what must hold is that the compile catches up, so ask again
-    // while the answer says it may be stale.
+    // while the answer says the recompile is still running.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let mut id = 2;
     let mut resp = search(&mut stdin, &stdout, id, "zebrafish");
-    while stale_block(&resp).is_some() && std::time::Instant::now() < deadline {
+    let running = |r: &Value| stale_block(r).is_some_and(|b| b.contains("recompile still running"));
+    while running(&resp) && std::time::Instant::now() < deadline {
         id += 1;
         resp = search(&mut stdin, &stdout, id, "zebrafish");
     }
