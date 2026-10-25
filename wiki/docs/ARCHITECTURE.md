@@ -558,7 +558,9 @@ matching:
   words or a defined name is skipped; other pages' title words stay. When
   the query's words are exactly the title's words, in any order, every
   token adds `W_TITLE` 3.0, so a title query finds its page even where
-  other pages' item names share the title's words. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
+  other pages' item names share the title's words. When they are exactly
+  the words of one item's name (`get bin stock` for `getBinStock`), every
+  token the page title does not already match adds `W_SYMBOL`. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
@@ -589,7 +591,8 @@ matching:
 - **Symbol expansion** (`expand`) runs after the sort and `limit` cut, on
   the surviving code hits only. Each item of a hit page (modules excluded)
   scores per token `idf × (name + doc)`: whole name or `owner::name` 3.5
-  (`IW_WHOLE`), a name word 2.0, a doc word 1.0; test items are scaled by 0.5
+  (`IW_WHOLE`, also for every token when the query is exactly the name's
+  words), a name word 2.0, a doc word 1.0; test items are scaled by 0.5
   (`TEST_ITEM_FACTOR`). A whole-name match outranks any word match even
   with a doc match (a compile-time assert pins it). Per page the top 3
   (`SYMBOLS_PER_PAGE`) distinct items are kept, ties by line; across the

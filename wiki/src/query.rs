@@ -336,6 +336,8 @@ struct SymbolFields {
     doc_words: Vec<String>,
     /// Words of the items' whole docs, scored below `doc_words`.
     doc_rest_words: Vec<String>,
+    /// The word sets of multi-word item names (`name_words`, unfiltered).
+    name_sets: BTreeSet<BTreeSet<String>>,
 }
 
 #[derive(Default)]
@@ -791,7 +793,11 @@ impl Wiki {
             if item.owner.is_some() {
                 f.whole.insert(item.qualified_name().to_lowercase());
             }
-            let words = Self::name_words(&item.name).into_iter().filter(keep_word);
+            let words = Self::name_words(&item.name);
+            if words.len() > 1 {
+                f.name_sets.insert(words.iter().cloned().collect());
+            }
+            let words = words.into_iter().filter(keep_word);
             if item.kind == CodeItemKind::Method {
                 f.method_words.extend(words);
             } else {
@@ -808,7 +814,8 @@ impl Wiki {
     }
 
     // Item scores for the symbol lines under a hit: per query token,
-    // `idf · (whole name or name word) + idf · doc`, test items scaled down.
+    // `idf · (whole name or name word) + idf · doc`, test items scaled down;
+    // a query made of exactly the name's words scores every token as whole.
     // A whole-name match outranks any word match, even one whose item also
     // matches by doc (checked at compile time below): at 2.5, graph.rs
     // `resolve_link`'s word plus its doc put it above the method `resolve`.
@@ -828,6 +835,10 @@ impl Wiki {
         let whole = item.name.to_lowercase();
         let qualified = item.qualified_name().to_lowercase();
         let words = Self::name_words(&item.name);
+        // The query's words are this item's name words, in any order.
+        let spelled = words.len() > 1
+            && words.iter().cloned().collect::<BTreeSet<_>>()
+                == tokens.iter().flat_map(|t| Self::field_words(t)).collect();
         let w_word = if item.kind == CodeItemKind::Method {
             Self::IW_METHOD_WORD
         } else {
@@ -839,7 +850,7 @@ impl Wiki {
             .iter()
             .zip(idf)
             .map(|(t, &idf_t)| {
-                let name = if *t == whole || *t == qualified {
+                let name = if spelled || *t == whole || *t == qualified {
                     Self::IW_WHOLE
                 } else if words.contains(t) {
                     w_word
@@ -981,6 +992,9 @@ impl Wiki {
             .map(|s| Self::field_words(&s.to_lowercase()));
         let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
         let symbols = self.symbol_fields.get(&e.id);
+        // The query's words are one item's name words, in any order.
+        let query_words: BTreeSet<String> = raw.iter().flat_map(|t| Self::field_words(t)).collect();
+        let whole_symbol = symbols.is_some_and(|f| f.name_sets.contains(&query_words));
         let sections = crate::rewrite::parse_sections(self.body(&e.id));
         let headings: Vec<String> = sections
             .keys()
@@ -1002,11 +1016,21 @@ impl Wiki {
         for (i, t) in tokens.iter().enumerate() {
             let t = t.as_str();
             let mut weight = 0.0;
-            if Self::field_hit(&title_words, t) {
+            let title_hit = Self::field_hit(&title_words, t);
+            if title_hit {
                 weight += Self::W_NAME;
             }
             if whole_title {
                 weight += Self::W_TITLE;
+            }
+            // A query spelling out an item's name (`get bin stock` for
+            // `getBinStock`) scores each word `W_SYMBOL`, unless the title
+            // already credits it: else `bin planner` put `planner.rs`
+            // (`BinPlanner`) over the page titled `Bin Planner`. On the
+            // 2,746-page project's 300 name-word queries file@1 went 196 →
+            // 289, title queries 199/200 → 198.
+            if whole_symbol && !title_hit {
+                weight += Self::W_SYMBOL;
             }
             if alias_words.iter().any(|w| Self::field_hit(w, t)) {
                 weight += Self::W_ALIAS;
