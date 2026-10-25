@@ -29,36 +29,36 @@ where is the snippet built                        Stopwords    tune           1 
 how do we write a page atomically                 Stopwords    tune           1           1     585  src/rewrite.rs
 what is the module stem of a path                 Stopwords    held           1           1     455  src/formats/code.rs
 where are the test modules stripped               Stopwords    tune           1           2     461  src/formats/extract_rust.rs
-needs render                                      MethodSplit  tune           1           1     414  src/cache.rs
-retain ids                                        MethodSplit  tune           1           1     563  src/cache.rs
+needs render                                      MethodSplit  tune           1           1     325  src/cache.rs
+retain ids                                        MethodSplit  tune           1           1     387  src/cache.rs
 with defaults                                     MethodSplit  held           1           1     304  src/formats/mod.rs
-resolve segment                                   MethodSplit  tune           1           2     439  src/graph.rs
+resolve segment                                   MethodSplit  tune           1           1     439  src/graph.rs
 resolve include                                   MethodSplit  tune           1           1     472  src/graph.rs
-has page                                          MethodSplit  held           1           1     644  src/query.rs
-list pages                                        MethodSplit  tune           1           1     382  src/query.rs
-content text                                      MethodSplit  tune           1           1     392  src/query.rs
-name words                                        MethodSplit  held           1           1     498  src/query.rs
+has page                                          MethodSplit  held           1           1     538  src/query.rs
+list pages                                        MethodSplit  tune           1           1     362  src/query.rs
+content text                                      MethodSplit  tune           1           1     386  src/query.rs
+name words                                        MethodSplit  held           1           1     401  src/query.rs
 field words                                       MethodSplit  tune           1           1     447  src/query.rs
 field hit                                         MethodSplit  tune           1           1     405  src/query.rs
-defined terms                                     MethodSplit  held           1           1     412  src/query.rs
+defined terms                                     MethodSplit  held           1           1     376  src/query.rs
 bfs neighborhood                                  MethodSplit  tune           1           1     333  src/query.rs
-pagerank of                                       MethodSplit  tune           2           2     347  src/graph.rs
-with wiki                                         MethodSplit  held           2           2     296  README.md
+pagerank of                                       MethodSplit  tune           1           1     347  src/query.rs
+with wiki                                         MethodSplit  held           1           1     296  src/serve.rs
 list resources                                    MethodSplit  tune           1           1     338  src/serve.rs
 read resource                                     MethodSplit  tune           1           1     326  src/serve.rs
 next u64                                          MethodSplit  held           1           1     316  src/generator.rs
-render fingerprint                                V7           tune           1           1     393  src/rewrite.rs
-render page                                       V7           tune           1           1     749  src/rewrite.rs
-render index json                                 V7           held           1           1     583  src/manifest.rs
+render fingerprint                                V7           tune           1           1     338  src/rewrite.rs
+render page                                       V7           tune           1           1     620  src/rewrite.rs
+render index json                                 V7           held           1           1     367  src/manifest.rs
 render span                                       V7           tune           1           1     386  src/formats/code.rs
 resolve                                           V7           tune           1           1     485  src/graph.rs
 render                                            V7           held           1           1     631  src/rewrite.rs
 a stray backtick does not re pair later lines     TestTarget   tune           1           1     289  src/rewrite.rs
 pagerank is deterministic and sums to about one   TestTarget   tune           1           1     381  src/graph.rs
-stale page files lists orphaned on disk only      TestTarget   held           1           2     420  src/lib.rs
+stale page files lists orphaned on disk only      TestTarget   held           1           1     420  src/lib.rs
 
-tune  file_hit@1=34/35 (0.9714) file_hit@3=35/35 (1.0000) mrr@10=0.9857 symbol_hit@3=35/35 (1.0000) tokens=390.1 tokens_json=579.3
-held  file_hit@1=16/17 (0.9412) file_hit@3=17/17 (1.0000) mrr@10=0.9706 symbol_hit@3=17/17 (1.0000) tokens=419.6 tokens_json=641.2
+tune  file_hit@1=35/35 (1.0000) file_hit@3=35/35 (1.0000) mrr@10=1.0000 symbol_hit@3=35/35 (1.0000) tokens=376.6 tokens_json=551.6
+held  file_hit@1=17/17 (1.0000) file_hit@3=17/17 (1.0000) mrr@10=1.0000 symbol_hit@3=17/17 (1.0000) tokens=392.8 tokens_json=594.9
 class Name: file_hit@3=9/9 symbol_hit@3=9/9
 class NameWords: file_hit@3=6/6 symbol_hit@3=6/6
 class DocOnly: file_hit@3=6/6 symbol_hit@3=6/6

@@ -566,13 +566,42 @@ fn test_items_do_not_lift_a_page_but_still_show() {
             "#[test]\nfn zebra_walk_works() {\n    zebra_walk();\n    zebra_walk();\n}\n",
         ),
     ]);
-    let hits = w.search("zebra walk", None, 10);
+    let hits = w.search("zebra", None, 10);
     let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
     assert_eq!(ids, ["zz", "aa"]);
     let test_line = &hits[1].symbols;
     assert_eq!(test_line.len(), 1, "the test fn still shows");
     assert_eq!(test_line[0].name, "zebra_walk_works");
     assert!(test_line[0].test);
+}
+
+#[test]
+fn a_query_spelling_out_a_name_finds_its_definer() {
+    // `bin_stock.rs` carries two of the words in its title and all three in
+    // its docs; the query spells out `getBinStock`, which only the large
+    // `client.ts` defines.
+    let mut client = String::new();
+    for i in 0..30 {
+        client.push_str(&format!(
+            "export function fetchThing{i}() {{ return {i}; }}\n"
+        ));
+    }
+    client.push_str("export function getBinStock() { return 1; }\n");
+    let (_d, w) = code_fixture(&[
+        ("src/client.ts", &client),
+        (
+            "src/bin_stock.rs",
+            "/// Get risk limits.\npub fn limits() {}\n/// Get a slot.\npub fn slot() {}\n",
+        ),
+    ]);
+    let hits = w.search("get bin stock", None, 10);
+    assert_eq!(
+        hits[0].id,
+        "client",
+        "{:?}",
+        hits.iter().map(|h| &h.id).collect::<Vec<_>>()
+    );
+    assert_eq!(hits[0].symbols[0].name, "getBinStock");
 }
 
 #[test]
