@@ -184,6 +184,36 @@ pub struct CodeItem {
     /// shows such items but does not let them lift their page.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub test: bool,
+    /// The functions this function calls, as `path:start-end`, sorted: the
+    /// call sites in its body matched to project items by name (see
+    /// `graph::resolve_calls`). Empty for anything but a function.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub calls: Vec<String>,
+    /// The call sites as the source names them, until `resolve_calls` turns
+    /// them into `calls`.
+    #[serde(skip)]
+    pub call_sites: Vec<CallSite>,
+}
+
+/// A call in a function body, as the source writes its target.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CallSite {
+    /// The called name: `f` of `f()`, `a::f()`, `x.f()`.
+    pub name: String,
+    pub via: CallVia,
+}
+
+/// How a call site reaches its name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallVia {
+    /// `f()`.
+    Bare,
+    /// `q::f()`: the qualifier's last segment, generics dropped.
+    Path(String),
+    /// `self.f()`, `this->f()`.
+    SelfRecv,
+    /// `x.f()`: the receiver when it is a plain name.
+    Member(Option<String>),
 }
 
 impl CodeItem {

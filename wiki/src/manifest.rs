@@ -174,6 +174,7 @@ tree first — start here.\n\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
 - Code symbols with their line ranges: `items.json` (keyed by page id).\n\
 - A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
+- What a function calls, through all levels: `wiki neighbors <id> --symbol <fn>`.\n\
 - Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Imported by / Mentioned in / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
@@ -336,6 +337,8 @@ mod tests {
                 public: true,
                 twin: None,
                 test: false,
+                calls: Vec::new(),
+                call_sites: Vec::new(),
             },
             CodeItem {
                 kind: CodeItemKind::Method,
@@ -349,6 +352,8 @@ mod tests {
                 public: false,
                 twin: Some("beta.cpp:2-4".into()),
                 test: true,
+                calls: vec!["beta.rs:1-1".into()],
+                call_sites: Vec::new(),
             },
         ];
         // Each item's keys in declaration order, the `None` ones skipped;
@@ -358,7 +363,7 @@ mod tests {
             concat!(
                 r#"{"beta":["#,
                 r#"{"kind":"fn","name":"build_beta","signature":"pub fn build_beta()","start_line":1,"end_line":1,"public":true},"#,
-                r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4","test":true}]}"#
+                r#"{"kind":"method","name":"build","owner":"Beta","signature":"fn build()","start_line":3,"end_line":5,"doc":"Builds.","public":false,"twin":"beta.cpp:2-4","test":true,"calls":["beta.rs:1-1"]}]}"#
             )
         );
     }

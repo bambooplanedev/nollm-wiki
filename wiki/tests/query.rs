@@ -1114,3 +1114,86 @@ fn neighbors_kind_keeps_the_pack_to_that_kind() {
     assert!(text.contains("# Consumer (consumer)\n"), "{text}");
     assert!(text.contains("See `text.rs`"), "{text}");
 }
+
+const CALLS_TEXT_RS: &str = "pub fn render() {\n    helper();\n}\nfn helper() {}\npub struct Doc;\nimpl Doc {\n    pub fn new() -> Doc {\n        Doc\n    }\n    pub fn show(&self) {\n        self.paint();\n        render();\n    }\n    fn paint(&self) {}\n}\n";
+const CALLS_MAIN_RS: &str = "use crate::text::{render, Doc};\nfn main() {\n    let d = Doc::new();\n    d.show();\n    std::mem::drop(1);\n}\n";
+
+#[test]
+fn calls_follow_every_level_grouped_by_file() {
+    let (_dir, w) = code_fixture(&[
+        ("src/text.rs", CALLS_TEXT_RS),
+        ("src/main.rs", CALLS_MAIN_RS),
+        ("src/tool.py", "def run():\n    render()\n"),
+    ]);
+    // `Doc::new` by type, `d.show` as a method the file sees, `self.paint`
+    // by owner, `render` and `helper` as free functions; `std::mem::drop`
+    // is outside the project.
+    assert_eq!(
+        w.calls("main", "main", None, None).unwrap(),
+        "calls from main  src/main.rs:2-6 — 5 functions in 1 files\nsrc/text.rs\n  1-3  fn  render\n  4-4  fn  helper\n  7-9  method  Doc::new\n  10-13  method  Doc::show\n  14-14  method  Doc::paint\n"
+    );
+    assert_eq!(
+        w.calls("main", "main", Some(1), None).unwrap(),
+        "calls from main  src/main.rs:2-6 — 2 functions in 1 files\nsrc/text.rs\n  7-9  method  Doc::new\n  10-13  method  Doc::show\n"
+    );
+    assert_eq!(
+        w.calls("text", "Doc::show", None, None).unwrap(),
+        "calls from Doc::show  src/text.rs:10-13 — 3 functions in 1 files\nsrc/text.rs\n  1-3  fn  render\n  4-4  fn  helper\n  14-14  method  Doc::paint\n"
+    );
+    // A Python call never reaches a Rust function of the same name.
+    assert_eq!(
+        w.calls("tool", "run", None, None).unwrap(),
+        "calls from run  src/tool.py:1-2 — 0 functions in 0 files\n"
+    );
+    assert_eq!(
+        w.calls("text", "nope", None, None).unwrap_err(),
+        "no function \"nope\" on page text; its functions: Doc::new, Doc::paint, Doc::show, helper, render"
+    );
+}
+
+#[test]
+fn calls_cut_to_the_budget_say_how_to_see_all() {
+    let (_dir, w) = code_fixture(&[
+        ("src/text.rs", CALLS_TEXT_RS),
+        ("src/main.rs", CALLS_MAIN_RS),
+    ]);
+    let full = w.calls("main", "main", None, None).unwrap();
+    let cut = w.calls("main", "main", None, Some(30)).unwrap();
+    assert!(tok(&cut) <= 30, "{cut}");
+    let marker = format!("— pass max_tokens: {} for all\n", tok(&full));
+    assert!(cut.ends_with(&marker), "{cut}");
+    assert_eq!(
+        w.calls("main", "main", None, Some(tok(&full))).unwrap(),
+        full
+    );
+}
+
+#[test]
+fn a_header_declaration_stands_for_its_definition() {
+    let (_dir, w) = code_fixture(&[
+        (
+            "src/a.h",
+            "class Base {\npublic:\n  void log() {}\n};\nclass A : public Base {\npublic:\n  void run();\n  void step();\n};\n",
+        ),
+        (
+            "src/a.cpp",
+            "#include \"a.h\"\nvoid A::run() { step(); log(); }\nvoid A::step() {}\n",
+        ),
+        (
+            "src/main.cpp",
+            "#include \"a.h\"\nint main() {\n  A a;\n  a.run();\n}\n",
+        ),
+    ]);
+    // `a` is also a module name; with no `a::run` it is read as a value.
+    // `log()` is bare, as a base class's method is called in C++.
+    assert_eq!(
+        w.calls("main", "main", None, None).unwrap(),
+        "calls from main  src/main.cpp:2-5 — 3 functions in 2 files\nsrc/a.cpp\n  2-2  method  A::run\n  3-3  method  A::step\nsrc/a.h\n  3-3  method  Base::log\n"
+    );
+    // Asked on the header, the walk starts from the definition too.
+    let header = w.resolve_id("src/a.h").unwrap();
+    assert_eq!(
+        w.calls(&header, "A::run", None, None).unwrap(),
+        "calls from A::run  src/a.h:7-7, src/a.cpp:2-2 — 2 functions in 2 files\nsrc/a.cpp\n  3-3  method  A::step\nsrc/a.h\n  3-3  method  Base::log\n"
+    );
+}

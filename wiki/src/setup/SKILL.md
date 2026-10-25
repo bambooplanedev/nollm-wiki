@@ -10,6 +10,8 @@ description: Find where something is or how it works in this project's code. Use
 2. Read only those lines with your file tool. The start and end lines are
    exact — do not re-derive them with grep.
 3. For a module's map, call `page` (`mcp__wiki__page`) with the path; it lists every symbol
-   with its lines.
+   with its lines. To follow a function through the code, call `neighbors`
+   (`mcp__wiki__neighbors`) with the path and `symbol`: it lists every
+   function that one calls, with its lines.
 4. Only if search finds nothing relevant, try other words (a name, an
    abbreviation), then fall back to grep.

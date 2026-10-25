@@ -1,7 +1,9 @@
 //! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
 
 use crate::formats::{summarize, Extractor};
-use crate::model::{slugify, title_case, CodeItem, CodeItemKind, Entity, SourceKind};
+use crate::model::{
+    slugify, title_case, CallSite, CallVia, CodeItem, CodeItemKind, Entity, SourceKind,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::LazyLock;
 use tree_sitter::{
@@ -896,6 +898,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     items.sort_by(|a, b| {
         (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
     });
+    attach_call_sites(&mut items, tree.root_node(), text);
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
     // plain lexicographic order on the rendered signature, and within a group
@@ -945,6 +948,108 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         docstring,
         summary_fallback,
     })
+}
+
+/// Gives each call in the tree to the narrowest function item whose lines
+/// hold it. A call outside every function (a static initializer) is dropped.
+fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
+    let fns: Vec<usize> = (0..items.len())
+        .filter(|&i| matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method))
+        .collect();
+    if fns.is_empty() {
+        return;
+    }
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+        // `call` is Python's; every other grammar says `call_expression`.
+        if !matches!(node.kind(), "call_expression" | "call") {
+            continue;
+        }
+        let Some(site) = node
+            .child_by_field_name("function")
+            .and_then(|f| call_site(f, text))
+        else {
+            continue;
+        };
+        let line = node.start_position().row + 1;
+        let holder = fns
+            .iter()
+            .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
+            .min_by_key(|&&i| items[i].end_line - items[i].start_line);
+        if let Some(&i) = holder {
+            items[i].call_sites.push(site);
+        }
+    }
+}
+
+/// What a call's `function` node names, in any grammar this file dispatches
+/// on; `None` for a call through an expression (`f()()`, `(*p)()`), an
+/// operator or a destructor.
+fn call_site(f: Node, text: &str) -> Option<CallSite> {
+    let field = |name: &str| f.child_by_field_name(name);
+    let text_of = |n: Node| text.get(n.byte_range());
+    match f.kind() {
+        "identifier" => Some(CallSite {
+            name: text_of(f)?.to_string(),
+            via: CallVia::Bare,
+        }),
+        "generic_function" => call_site(field("function")?, text),
+        "template_function" => call_site(field("name")?, text),
+        // Rust `a::b::f`, C++ `a::b::f` (whose `name` nests the rest).
+        "scoped_identifier" | "qualified_identifier" => {
+            let inner = call_site(field("name")?, text)?;
+            if inner.via != CallVia::Bare {
+                return Some(inner);
+            }
+            let Some(scope) = field("path").or_else(|| field("scope")) else {
+                return Some(inner);
+            };
+            // `Vec::<u8>` and `Foo<T>` are `Vec` and `Foo`.
+            let scope = text_of(scope)?.split('<').next().unwrap_or("");
+            let last = scope
+                .trim_end_matches("::")
+                .rsplit("::")
+                .next()
+                .unwrap_or("");
+            let last = last.trim();
+            Some(CallSite {
+                via: CallVia::Path(last.to_string()),
+                ..inner
+            })
+        }
+        "field_expression" | "member_expression" | "attribute" | "selector_expression" => {
+            let mut name = field("field")
+                .or_else(|| field("property"))
+                .or_else(|| field("attribute"))?;
+            if name.kind() == "template_method" {
+                name = name.child_by_field_name("name")?;
+            }
+            if !matches!(
+                name.kind(),
+                "field_identifier" | "property_identifier" | "identifier"
+            ) {
+                return None;
+            }
+            let recv = field("value")
+                .or_else(|| field("argument"))
+                .or_else(|| field("object"))
+                .or_else(|| field("operand"))?;
+            let recv_text = text_of(recv)?;
+            let via = match recv.kind() {
+                "self" | "this" => CallVia::SelfRecv,
+                "identifier" if recv_text == "self" => CallVia::SelfRecv,
+                "identifier" => CallVia::Member(Some(recv_text.to_string())),
+                _ => CallVia::Member(None),
+            };
+            Some(CallSite {
+                name: text_of(name)?.to_string(),
+                via,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// Whether a definition node is a function, in any grammar this file
@@ -1166,6 +1271,8 @@ fn code_item(
         public,
         twin: None,
         test: false,
+        calls: Vec::new(),
+        call_sites: Vec::new(),
     };
     item.doc_text = raw_doc
         .as_deref()
@@ -2290,5 +2397,46 @@ mod tests {
             test_flags("src/a.go", "package a\nfunc F() {}\n"),
             [("F".into(), false)]
         );
+    }
+
+    /// The call sites of item `name` in `src`, one per call, written
+    /// `name`, `q::name`, `self.name`, `x.name` or `_.name`, sorted.
+    fn sites(path: &str, src: &str, name: &str) -> Vec<String> {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).expect("the item");
+        let mut out: Vec<String> = item
+            .call_sites
+            .iter()
+            .map(|c| match &c.via {
+                CallVia::Bare => c.name.clone(),
+                CallVia::Path(q) => format!("{q}::{}", c.name),
+                CallVia::SelfRecv => format!("self.{}", c.name),
+                CallVia::Member(x) => format!("{}.{}", x.as_deref().unwrap_or("_"), c.name),
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn call_sites_name_their_targets_in_each_grammar() {
+        let rs = "struct S;\nimpl S {\n    fn f(&self) {\n        g();\n        a::b::h();\n        Self::k();\n        self.m();\n        x.n();\n        Vec::<u8>::new();\n        v.iter().map(|y| y);\n    }\n}\nfn g() {}\n";
+        assert_eq!(
+            sites("src/s.rs", rs, "f"),
+            ["Self::k", "Vec::new", "_.map", "b::h", "g", "self.m", "v.iter", "x.n"]
+        );
+        // The narrowest function holds a call: `g`'s own body is empty.
+        assert!(sites("src/s.rs", rs, "g").is_empty());
+        let cpp = "void S::f() {\n  g();\n  ns::h();\n  this->m();\n  obj.n();\n  p->q();\n  std::max<int>(1, 2);\n}\n";
+        assert_eq!(
+            sites("src/s.cpp", cpp, "f"),
+            ["g", "ns::h", "obj.n", "p.q", "self.m", "std::max"]
+        );
+        let py = "class C:\n    def f(self):\n        g()\n        self.m()\n        mod.h()\n";
+        assert_eq!(sites("src/c.py", py, "f"), ["g", "mod.h", "self.m"]);
+        let ts = "export class C {\n  f() {\n    g();\n    this.m();\n    obj.n();\n  }\n}\n";
+        assert_eq!(sites("src/c.ts", ts, "f"), ["g", "obj.n", "self.m"]);
+        let go = "package a\nfunc F() {\n\tg()\n\tpkg.H()\n}\n";
+        assert_eq!(sites("src/a.go", go, "F"), ["g", "pkg.H"]);
     }
 }

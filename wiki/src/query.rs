@@ -246,6 +246,13 @@ impl Wiki {
         self.items.get(id).map_or(&[], Vec::as_slice)
     }
 
+    /// Every page with code items: its source path and its items.
+    pub(crate) fn code_items(&self) -> impl Iterator<Item = (&str, &[CodeItem])> {
+        self.items
+            .iter()
+            .filter_map(|(id, items)| Some((self.entries.get(id)?.path.as_str(), items.as_slice())))
+    }
+
     /// A page's rendered Markdown body by id, as it was when loaded.
     pub fn page(&self, id: &str) -> Option<String> {
         self.bodies.get(id).cloned()
@@ -1380,6 +1387,8 @@ mod tests {
             public: false,
             twin: None,
             test,
+            calls: Vec::new(),
+            call_sites: Vec::new(),
         }
     }
 
