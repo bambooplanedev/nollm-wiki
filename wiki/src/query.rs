@@ -580,8 +580,9 @@ impl Wiki {
             )
     }
 
-    /// `tokenize`, then `stem` each word and dedupe again: (stemmed, raw).
-    fn query_tokens(query: &str) -> (Vec<String>, Vec<String>) {
+    /// `tokenize`, then `stem` each word and dedupe again; with the query's
+    /// word set as typed, each token split like a name: (stemmed, words).
+    fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
         let raw = Self::tokenize(query);
         let mut stemmed: Vec<String> = Vec::new();
         for t in &raw {
@@ -590,7 +591,8 @@ impl Wiki {
                 stemmed.push(s);
             }
         }
-        (stemmed, raw)
+        let words = raw.iter().flat_map(|t| Self::field_words(t)).collect();
+        (stemmed, words)
     }
 
     /// The words of an identifier, lowercased: split on `_`/`-`, at a
@@ -749,14 +751,18 @@ impl Wiki {
     /// in the whole response.
     const MIN_REL_SYMBOL: f64 = 0.3;
 
-    fn item_score(item: &CodeItem, tokens: &[String], idf: &[f64]) -> f64 {
+    fn item_score(
+        item: &CodeItem,
+        tokens: &[String],
+        query_words: &BTreeSet<String>,
+        idf: &[f64],
+    ) -> f64 {
         let whole = item.name.to_lowercase();
         let qualified = item.qualified_name().to_lowercase();
         let words = Self::name_words(&item.name);
         // The query's words are this item's name words, in any order.
-        let spelled = words.len() > 1
-            && words.iter().cloned().collect::<BTreeSet<_>>()
-                == tokens.iter().flat_map(|t| Self::field_words(t)).collect();
+        let spelled =
+            words.len() > 1 && words.iter().cloned().collect::<BTreeSet<_>>() == *query_words;
         let doc = Self::lower_words(item.doc.as_deref());
         let doc_rest = Self::lower_words(item.doc_text.as_deref());
         let score: f64 = tokens
@@ -793,13 +799,14 @@ impl Wiki {
         &'a self,
         id: &str,
         tokens: &[String],
+        query_words: &BTreeSet<String>,
         idf: &[f64],
     ) -> Vec<(f64, &'a CodeItem)> {
         let mut scored: Vec<(f64, &CodeItem)> = self
             .items(id)
             .iter()
             .filter(|i| i.kind != CodeItemKind::Module)
-            .map(|i| (Self::item_score(i, tokens, idf), i))
+            .map(|i| (Self::item_score(i, tokens, query_words, idf), i))
             .filter(|(s, _)| *s > 0.0)
             .collect();
         scored.sort_by(|(a, x), (b, y)| {
@@ -882,18 +889,14 @@ impl Wiki {
         &self,
         e: &'a Entry,
         tokens: &[String],
-        raw: &[String],
+        query_words: &BTreeSet<String>,
         dates: &[QueryDate],
         df: &mut [usize],
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
         let title_words = Self::field_words(&title);
         // The query is this page's whole title, in any order.
-        let whole_title = raw
-            .iter()
-            .flat_map(|t| Self::field_words(t))
-            .collect::<BTreeSet<_>>()
-            == title_words.iter().cloned().collect();
+        let whole_title = *query_words == title_words.iter().cloned().collect();
         let alias_words: Vec<Vec<String>> = e
             .aliases
             .iter()
@@ -905,8 +908,7 @@ impl Wiki {
             .map(|s| Self::field_words(&s.to_lowercase()));
         let symbols = self.symbol_fields.get(&e.id);
         // The query's words are one item's name words, in any order.
-        let query_words: BTreeSet<String> = raw.iter().flat_map(|t| Self::field_words(t)).collect();
-        let whole_symbol = symbols.is_some_and(|f| f.name_sets.contains(&query_words));
+        let whole_symbol = symbols.is_some_and(|f| f.name_sets.contains(query_words));
         // Two or more query words, all inside one longer item name.
         let in_one_name = query_words.len() > 1
             && !whole_symbol
@@ -1081,7 +1083,7 @@ impl Wiki {
         limit: Option<usize>,
         scope: MemoryScope,
     ) -> Vec<Hit> {
-        let (tokens, raw) = Self::query_tokens(q);
+        let (tokens, query_words) = Self::query_tokens(q);
         let dates = query_dates(q);
         let passes = |e: &Entry| {
             (match scope {
@@ -1119,7 +1121,7 @@ impl Wiki {
             if !passes(e) {
                 continue;
             }
-            let (len, candidate) = self.candidate(e, &tokens, &raw, &dates, &mut df);
+            let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut df);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             n += 1;
@@ -1182,18 +1184,24 @@ impl Wiki {
         });
         ranked.truncate(limit);
         let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
-        self.expand(&mut hits, &tokens, &idf[..tokens.len()]);
+        self.expand(&mut hits, &tokens, &query_words, &idf[..tokens.len()]);
         hits
     }
 
     /// Gives each code hit its symbol lines (`page_symbols`), keeping only
     /// lines at or above `MIN_REL_SYMBOL` of the response's best line.
-    fn expand(&self, hits: &mut [Hit], tokens: &[String], idf: &[f64]) {
+    fn expand(
+        &self,
+        hits: &mut [Hit],
+        tokens: &[String],
+        query_words: &BTreeSet<String>,
+        idf: &[f64],
+    ) {
         let per_hit: Vec<Vec<(f64, &CodeItem)>> = hits
             .iter()
             .map(|h| {
                 if self.is_code(&h.id) {
-                    self.page_symbols(&h.id, tokens, idf)
+                    self.page_symbols(&h.id, tokens, query_words, idf)
                 } else {
                     Vec::new()
                 }
@@ -1538,15 +1546,19 @@ mod tests {
     }
 
     #[test]
-    fn query_tokens_stem_dedupe_and_keep_the_raw_words() {
+    fn query_tokens_stem_dedupe_and_keep_the_typed_words() {
         let owned = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let set = |v: &[&str]| v.iter().map(ToString::to_string).collect::<BTreeSet<_>>();
         assert_eq!(
             Wiki::query_tokens("агента агентом"),
-            (owned(&["агент"]), owned(&["агента", "агентом"]))
+            (owned(&["агент"]), set(&["агента", "агентом"]))
         );
         assert_eq!(
-            Wiki::query_tokens("MCP resources"),
-            (owned(&["mcp", "resources"]), owned(&["mcp", "resources"]))
+            Wiki::query_tokens("MCP token_estimate"),
+            (
+                owned(&["mcp", "token_estimate"]),
+                set(&["estimate", "mcp", "token"])
+            )
         );
     }
 
@@ -1628,7 +1640,7 @@ mod tests {
         let b = item(Fn, "beta", None, false);
         let score = |i: &CodeItem, q: &[&str]| {
             let t: Vec<String> = q.iter().map(|s| (*s).into()).collect();
-            Wiki::item_score(i, &t, &vec![1.0; t.len()])
+            Wiki::item_score(i, &t, &t.iter().cloned().collect(), &vec![1.0; t.len()])
         };
         let head = score(&a, &["opens", "gate"]);
         a.doc_text = Some("Opens the gate. Refuses when a position is open.".into());
