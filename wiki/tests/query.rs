@@ -1048,3 +1048,69 @@ fn punctuation_query_with_tag_is_the_listing() {
     );
     assert!(w.search("!!!", None, 10).is_empty());
 }
+
+/// consumer.rs imports text.rs; guide.md only mentions it.
+fn import_fixture() -> (tempfile::TempDir, Wiki) {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(
+        input.join("src/text.rs"),
+        "//! Text rendering.\n\n/// Renders a page.\npub fn render() {}\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("src/consumer.rs"),
+        "//! Uses text.\nuse crate::text::render;\n\npub fn run() {\n    render();\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("guide.md"),
+        "# Guide\n\nSee `text.rs` for how pages render.\n",
+    )
+    .unwrap();
+    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let w = Wiki::load(&output).unwrap();
+    (dir, w)
+}
+
+#[test]
+fn a_code_target_is_its_outline_with_its_imports_as_outlines() {
+    let (_dir, w) = import_fixture();
+    let pack = w.neighbors("consumer", 1, &PackBudget::default()).unwrap();
+    assert!(
+        pack.text.starts_with("# Consumer (consumer)\n"),
+        "{}",
+        pack.text
+    );
+    assert!(!pack.text.contains("## Body"), "{}", pack.text);
+    assert!(pack.text.contains("# Text (text)\n"), "{}", pack.text);
+    assert!(pack.text.contains("fn render()"), "{}", pack.text);
+}
+
+#[test]
+fn neighbors_kind_keeps_the_pack_to_that_kind() {
+    let (_dir, w) = import_fixture();
+    let mut all = w
+        .neighbors("text", 1, &PackBudget::default())
+        .unwrap()
+        .included;
+    all[1..].sort();
+    assert_eq!(all, ["text", "consumer", "guide"]);
+    let code = PackBudget {
+        kind: KindFilter::parse("code"),
+        ..Default::default()
+    };
+    assert_eq!(
+        w.neighbors("text", 1, &code).unwrap().included,
+        ["text", "consumer"]
+    );
+    let full = PackBudget {
+        full_neighbors: true,
+        ..Default::default()
+    };
+    let text = w.neighbors("text", 1, &full).unwrap().text;
+    assert!(text.contains("# Consumer (consumer)\n"), "{text}");
+    assert!(text.contains("See `text.rs`"), "{text}");
+}

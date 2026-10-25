@@ -542,7 +542,8 @@ matching:
 - Hits sort descending by score (`total_cmp`), then descending by
   PageRank as the second sort key, then ascending by id.
 - The searched body text is the rendered page's parsed sections minus
-  generated chrome (`Metadata`, `Related`, `Referenced By`, `Notes`) —
+  generated chrome (`Metadata`, `Related`, `Imported by`, `Mentioned in`,
+  `Notes`) —
   subtractive on purpose, so text under a doc's own embedded `## `
   subheadings stays searchable. The heading names of those sections are
   the `heading` field, minus the chrome and the generated content
@@ -600,19 +601,25 @@ both edge directions, then builds a budgeted context pack:
   the same chars/4 rule as `manifest::token_estimate`; every block is
   charged at the size of the text actually emitted, so the concatenated
   pack can't overshoot the ceiling.
-- The target page comes first — in full when it fits, otherwise degraded
-  to a title + summary block pointing at `wiki://page/<id>`. The degraded
-  block is the one floor exception: it is always emitted, even when a
-  pathologically small budget cannot contain it.
-- Neighbor admission walks candidates in descending centrality
-  (skip-not-break): a neighbor that doesn't fit the remaining budget is
-  skipped and the walk continues, so the kept set favors high-centrality
-  neighbors over maximum cardinality. `--max-nodes` truncates the
-  candidate list before admission.
+- The target page comes first. A code page is its outline, cut to the
+  budget; another page is in full when it fits, otherwise degraded to a
+  title + summary block pointing at `wiki://page/<id>`. The outline's
+  header and `…` line, or the degraded block, are the one floor
+  exception: always emitted, even when a pathologically small budget
+  cannot contain them.
+- Neighbor admission walks the target's import neighbors (`imports_out`
+  and `imports_in` in `index.json`, either direction) first, then the
+  rest, each group in descending centrality (skip-not-break): a neighbor
+  that doesn't fit the remaining budget is skipped and the walk
+  continues, so the kept set favors high-centrality neighbors over
+  maximum cardinality. An import neighbor is its whole outline when that
+  fits, else a summary block like every other neighbor. `--max-nodes`
+  truncates the candidate list before admission; `--kind` (the values of
+  `search --kind`) drops neighbors of other kinds before it.
 - Emission order is ascending PageRank — the highest-centrality neighbor
   lands last, closest to the end of the pack ("lost in the middle"
-  placement). `--full` swaps neighbor summary blocks for full page
-  bodies.
+  placement). `--full` swaps neighbor summary blocks for whole outlines
+  (code) and full page bodies (other pages).
 
 ## Extending: add a format extractor
 
