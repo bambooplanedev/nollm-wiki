@@ -107,7 +107,7 @@ fn hint_reads_claude_hook_json() {
         String::from_utf8(out.get_output().stdout.clone()).unwrap(),
         expected
     );
-    assert!(!expected.is_empty());
+    assert_ne!(expected, "");
 }
 
 #[test]

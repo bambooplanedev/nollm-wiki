@@ -183,7 +183,7 @@ mod tests {
             ent("alpha", "Alpha", "mentions Beta"),
             ent("beta", "Beta", "nothing"),
         ]);
-        assert!(lint(&pages).broken_links.is_empty());
+        assert_eq!(lint(&pages).broken_links, [] as [(String, String); 0]);
     }
 
     #[test]
@@ -262,15 +262,19 @@ mod tests {
         let r = lint(&one(page_of_tokens("markdown", over)));
         assert_eq!(r.large, vec![("t".to_string(), over)]);
         let at = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
-        assert!(lint(&one(page_of_tokens("markdown", at))).large.is_empty());
+        assert_eq!(
+            lint(&one(page_of_tokens("markdown", at))).large,
+            [] as [(String, usize); 0]
+        );
     }
 
     #[test]
     fn large_skips_code_pages_and_reports_text_pages() {
         let over = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
-        assert!(lint(&one(page_of_tokens("code:rust", over)))
-            .large
-            .is_empty());
+        assert_eq!(
+            lint(&one(page_of_tokens("code:rust", over))).large,
+            [] as [(String, usize); 0]
+        );
         let r = lint(&one(page_of_tokens("text", over)));
         assert_eq!(r.large, vec![("t".to_string(), over)]);
     }

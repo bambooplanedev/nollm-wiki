@@ -974,7 +974,10 @@ fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
     assert_ne!(note["id"], "setup");
     assert!(note["title"].as_str().unwrap().contains("Setup"));
     let pages = wiki::lint::load_compiled_pages(&output).unwrap();
-    assert!(wiki::lint::lint(&pages).broken_links.is_empty());
+    assert_eq!(
+        wiki::lint::lint(&pages).broken_links,
+        [] as [(String, String); 0]
+    );
     let linker = fs::read_to_string(output.join("linker.md")).unwrap();
     assert!(linker.contains("[[setup|Setup]]"), "{linker}");
 }

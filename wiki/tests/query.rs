@@ -1155,16 +1155,16 @@ fn a_call_whose_argument_count_cannot_fit_is_no_match() {
     assert_eq!(callees(&w, "m", "user"), ["src/m.rs:4-4"]);
     assert_eq!(callees(&w, "m", "by_path"), ["src/m.rs:4-4"]);
     assert_eq!(callees(&w, "p", "ok"), ["src/p.py:3-4"]);
-    assert!(callees(&w, "p", "bad").is_empty());
+    assert_eq!(callees(&w, "p", "bad"), [] as [String; 0]);
     // A star parameter takes any count; a decorator may change the signature.
     assert_eq!(callees(&w, "p", "splat"), ["src/p.py:6-7", "src/p.py:9-11"]);
     assert_eq!(callees(&w, "p", "u"), ["src/p.py:14-15"]);
     assert_eq!(callees(&w, "p", "unbound"), ["src/p.py:14-15"]);
     // C++ sets no minimum: a default may sit on another declaration.
     assert_eq!(callees(&w, "c", "g"), ["src/c.cpp:1-1"]);
-    assert!(callees(&w, "c", "h").is_empty());
+    assert_eq!(callees(&w, "c", "h"), [] as [String; 0]);
     assert_eq!(callees(&w, "a", "A"), ["src/a.go:3-3"]);
-    assert!(callees(&w, "a", "B").is_empty());
+    assert_eq!(callees(&w, "a", "B"), [] as [String; 0]);
     assert_eq!(callees(&w, "a", "C"), ["src/a.go:4-4"]);
 }
 

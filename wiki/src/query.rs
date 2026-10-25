@@ -1588,8 +1588,8 @@ mod tests {
     #[test]
     fn tokenize_dedupes_and_drops_empty() {
         assert_eq!(Wiki::tokenize("beta BETA beta"), vec!["beta"]);
-        assert!(Wiki::tokenize("").is_empty());
-        assert!(Wiki::tokenize("  ,, !! ").is_empty());
+        assert_eq!(Wiki::tokenize(""), [] as [String; 0]);
+        assert_eq!(Wiki::tokenize("  ,, !! "), [] as [String; 0]);
     }
 
     #[test]

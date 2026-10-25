@@ -411,7 +411,7 @@ fn search_hits_include_snippet_field() {
     let text = text_of(&resp);
     let hits: Value = serde_json::from_str(text).unwrap();
     let arr = hits.as_array().expect("hits array");
-    assert!(!arr.is_empty());
+    assert_ne!(*arr, [] as [Value; 0]);
     for h in arr {
         assert!(h.get("snippet").is_some(), "hit missing snippet key: {h}");
     }
@@ -703,7 +703,10 @@ fn serve_source_sees_edit_without_sleep() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
+        [] as [String; 0]
+    );
 
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -723,7 +726,10 @@ fn serve_source_sees_file_in_new_subdir() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
+        [] as [String; 0]
+    );
 
     std::fs::create_dir_all(project.path().join("notes/deep")).unwrap();
     std::fs::write(
@@ -747,7 +753,10 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
     let wiki_dir = project.path().join(".wiki");
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
+        [] as [String; 0]
+    );
 
     std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
     std::fs::write(
@@ -780,7 +789,10 @@ fn serve_source_through_symlink_answers_fresh() {
     std::os::unix::fs::symlink(project.path(), &link).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server_source(&link, &[]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
+        [] as [String; 0]
+    );
 
     std::fs::write(link.join("notes/alpha.md"), "# Alpha\n\nzebrafish here\n").unwrap();
     let resp = search(&mut stdin, &stdout, 3, "zebrafish");
@@ -796,7 +808,10 @@ fn concurrent_calls_after_edit_both_fresh() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "oldword")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
+        [] as [String; 0]
+    );
 
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -960,7 +975,10 @@ fn serve_source_sees_first_repo_memory_note_and_its_removal() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &["--memory", "none"]);
     initialize(&mut stdin, &stdout);
-    assert!(hit_ids(&search(&mut stdin, &stdout, 2, "wombatnote")).is_empty());
+    assert_eq!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "wombatnote")),
+        [] as [String; 0]
+    );
 
     let mem = project.path().join(".agents/memory");
     std::fs::create_dir_all(&mem).unwrap();
@@ -970,7 +988,7 @@ fn serve_source_sees_first_repo_memory_note_and_its_removal() {
 
     std::fs::remove_dir_all(project.path().join(".agents")).unwrap();
     let resp = search(&mut stdin, &stdout, 4, "wombatnote");
-    assert!(hit_ids(&resp).is_empty());
+    assert_eq!(hit_ids(&resp), [] as [String; 0]);
     assert!(stale_block(&resp).is_none(), "{resp}");
 
     drop(stdin);
@@ -987,10 +1005,16 @@ fn serve_source_watches_an_external_memory_folder() {
     let (mut child, mut stdin, stdout) =
         spawn_server_source(project.path(), &["--memory", mem.to_str().unwrap()]);
     initialize(&mut stdin, &stdout);
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 2, "platypusone")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "platypusone")),
+        [] as [String; 0]
+    );
 
     std::fs::write(mem.join("b.md"), "# Ext B\n\nplatypustwo\n").unwrap();
-    assert!(!hit_ids(&search(&mut stdin, &stdout, 3, "platypustwo")).is_empty());
+    assert_ne!(
+        hit_ids(&search(&mut stdin, &stdout, 3, "platypustwo")),
+        [] as [String; 0]
+    );
 
     drop(stdin);
     let _ = child.wait();

@@ -2723,7 +2723,7 @@ mod tests {
             ["Self::k", "Vec::new", "_.map", "b::h", "g", "self.m", "v.iter", "x.n"]
         );
         // The narrowest function holds a call: `g`'s own body is empty.
-        assert!(sites("src/s.rs", rs, "g").is_empty());
+        assert_eq!(sites("src/s.rs", rs, "g"), [] as [String; 0]);
         let cpp = "void S::f() {\n  g();\n  ns::h();\n  this->m();\n  obj.n();\n  p->q();\n  std::max<int>(1, 2);\n}\n";
         assert_eq!(
             sites("src/s.cpp", cpp, "f"),

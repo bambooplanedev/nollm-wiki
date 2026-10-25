@@ -344,7 +344,7 @@ mod tests {
             ]
         );
         assert_eq!(e.items[1].doc.as_deref(), Some("Run starts it."));
-        assert!(e.methods.is_empty());
+        assert_eq!(e.methods, [] as [String; 0]);
         assert_lacks(&e.symbols, "Run");
     }
 
