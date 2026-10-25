@@ -701,3 +701,105 @@ fn setup_local_twice_reports_everything_already_there() {
     );
     assert!(!o.contains("skipped"), "{o}");
 }
+
+/// A `codex` that logs its argv and answers `mcp get wiki` as our server once `mcp add` ran.
+fn codex_stub(f: &Fixture) {
+    let t = f.tmp.path().display();
+    f.stub(
+        "codex",
+        &format!(
+            r#"echo "$@" >> {t}/codex.log
+case "$1 $2" in
+"mcp get") [ -f {t}/codex.state ] || {{ echo "Error: No MCP server named 'wiki' found." >&2; exit 1; }}
+  printf 'wiki\n  enabled: true\n  transport: stdio\n  command: wiki\n  args: serve --source .\n' ;;
+"mcp add") echo x > {t}/codex.state ;;
+"mcp remove") /bin/rm -f {t}/codex.state ;;
+esac"#
+        ),
+    );
+}
+
+const NAV: &str = include_str!("../src/setup/navigation.md");
+
+#[test]
+fn setup_cursor_writes_the_project_mcp_json_and_says_to_approve_it() {
+    let f = fixture(true, false);
+    let a = f.setup(&["--agent", "cursor", "--scope", "repo"]).success();
+    assert_eq!(
+        read(&f.root().join(".cursor/mcp.json")),
+        format!(
+            "{{\n  \"mcpServers\": {{\n    \"wiki\": {}\n  }}\n}}\n",
+            ENTRY.replace('\n', "\n    ")
+        )
+    );
+    assert!(
+        out(&a).contains("cursor-agent mcp enable wiki"),
+        "{}",
+        out(&a)
+    );
+    f.setup(&["--remove", "--agent", "cursor", "--scope", "repo"])
+        .success();
+    assert!(!f.root().join(".cursor").exists());
+}
+
+#[test]
+fn setup_finds_cursor_by_its_project_folder() {
+    let f = fixture(true, false);
+    fs::remove_file(f.bin().join("pi")).unwrap();
+    fs::create_dir_all(f.root().join(".cursor")).unwrap();
+    f.setup(&["--scope", "repo"]).success();
+    assert!(f.root().join(".cursor/mcp.json").exists());
+}
+
+#[test]
+fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    let agents = f.root().join("AGENTS.md");
+    fs::write(&agents, "# Team rules\n").unwrap();
+    let args = ["--agent", "codex", "--scope", "repo"];
+    f.setup(&args).success();
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(
+        log.contains("mcp add wiki -- wiki serve --source ."),
+        "{log}"
+    );
+    let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
+    assert_eq!(read(&agents), format!("# Team rules\n\n{block}"));
+
+    let a = f.setup(&args).success();
+    for l in out(&a).lines().filter(|l| !l.starts_with("Compiled")) {
+        assert!(l.starts_with("already set up:"), "{l}");
+    }
+
+    f.setup(&["--remove", "--agent", "codex", "--scope", "repo"])
+        .success();
+    assert_eq!(read(&agents), "# Team rules\n");
+    assert!(read(&f.tmp.path().join("codex.log")).contains("mcp remove wiki"));
+}
+
+#[test]
+fn setup_codex_local_creates_agents_md_and_excludes_it() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    f.setup(&["--agent", "codex", "--scope", "local"]).success();
+    assert!(f.root().join("AGENTS.md").exists());
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.lines().any(|l| l == "/AGENTS.md"), "{ex}");
+}
+
+#[test]
+fn setup_codex_leaves_another_wiki_server_alone() {
+    let f = fixture(true, false);
+    f.stub(
+        "codex",
+        "case \"$1 $2\" in \"mcp get\") printf 'wiki\\n  command: other\\n' ;; esac",
+    );
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(
+        out(&a)
+            .contains("skipped Codex wiki server (~/.codex/config.toml): another \"wiki\" server"),
+        "{}",
+        out(&a)
+    );
+}

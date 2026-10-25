@@ -135,9 +135,9 @@ enum Command {
         #[arg(long)]
         claude_hook: bool,
     },
-    /// Install the MCP server and a skill so Claude Code and pi use the wiki in this project.
+    /// Install the MCP server and a skill so Claude Code, pi, Cursor and Codex use the wiki in this project.
     Setup {
-        /// Agents to set up (default: the ones found).
+        /// Agents to set up (default: the ones found; Codex only when named, its config is global).
         #[arg(long, value_delimiter = ',')]
         agent: Option<Vec<Agent>>,
         /// Where the files go (asked when omitted and stdin is a terminal).

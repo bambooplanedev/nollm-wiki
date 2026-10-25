@@ -216,6 +216,50 @@ pub fn remove_file(root: &Path, path: &Path, content: &str) -> Result<Outcome> {
     Ok(Outcome::Done)
 }
 
+/// Adds `block` (which starts with the line `begin`) to a text file, after a blank line when the
+/// file has other content. A file holding another block that starts with `begin` is foreign.
+pub fn upsert_block(path: &Path, begin: &str, block: &str) -> Result<Outcome> {
+    let mut text = read_opt(path)?.unwrap_or_default();
+    if text.contains(block) {
+        return Ok(Outcome::AlreadyThere);
+    }
+    if text.lines().any(|l| l == begin) {
+        return Ok(foreign("holds another wiki block"));
+    }
+    if !text.is_empty() {
+        if !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push('\n');
+    }
+    text.push_str(block);
+    create_parent(path)?;
+    std::fs::write(path, text)?;
+    Ok(Outcome::Done)
+}
+
+/// Takes out `block` and the blank line [`upsert_block`] put before it; deletes the file (and the
+/// directories it leaves empty) when nothing else is left.
+pub fn remove_block(root: &Path, path: &Path, block: &str) -> Result<Outcome> {
+    let Some(text) = read_opt(path)? else {
+        return Ok(Outcome::AlreadyThere);
+    };
+    let rest = if let Some(i) = text.find(&format!("\n\n{block}")) {
+        format!("{}{}", &text[..=i], &text[i + 2 + block.len()..])
+    } else if let Some(i) = text.find(block) {
+        format!("{}{}", &text[..i], &text[i + block.len()..])
+    } else {
+        return Ok(Outcome::AlreadyThere);
+    };
+    if rest.trim().is_empty() {
+        std::fs::remove_file(path)?;
+        prune_dirs(root, path);
+    } else {
+        std::fs::write(path, rest)?;
+    }
+    Ok(Outcome::Done)
+}
+
 pub fn ensure_line(path: &Path, line: &str) -> Result<Outcome> {
     let mut text = read_opt(path)?.unwrap_or_default();
     if text.lines().any(|l| l == line) {
@@ -368,6 +412,37 @@ mod tests {
         remove_file(root, &p, "body").unwrap();
         assert!(!root.join(".claude").exists());
         assert!(root.exists());
+    }
+
+    #[test]
+    fn a_block_goes_after_other_text_and_comes_out_byte_for_byte() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("AGENTS.md");
+        let (begin, block) = ("<!-- b -->", "<!-- b -->\nrules\n<!-- /b -->\n");
+        fs::write(&p, "# Mine\n").unwrap();
+        assert_eq!(upsert_block(&p, begin, block).unwrap(), Outcome::Done);
+        assert_eq!(
+            fs::read_to_string(&p).unwrap(),
+            format!("# Mine\n\n{block}")
+        );
+        assert_eq!(
+            upsert_block(&p, begin, block).unwrap(),
+            Outcome::AlreadyThere
+        );
+        let other = "<!-- b -->\nold\n<!-- /b -->\n";
+        assert!(is_foreign(&upsert_block(&p, begin, other).unwrap()));
+        assert_eq!(remove_block(d.path(), &p, block).unwrap(), Outcome::Done);
+        assert_eq!(fs::read_to_string(&p).unwrap(), "# Mine\n");
+        assert_eq!(
+            remove_block(d.path(), &p, block).unwrap(),
+            Outcome::AlreadyThere
+        );
+
+        let q = d.path().join("new/AGENTS.md");
+        upsert_block(&q, begin, block).unwrap();
+        assert_eq!(fs::read_to_string(&q).unwrap(), block);
+        remove_block(d.path(), &q, block).unwrap();
+        assert!(!d.path().join("new").exists());
     }
 
     #[test]

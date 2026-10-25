@@ -172,7 +172,9 @@ per question is noise-level: treat single results as anecdotes.
 
 ## `wiki setup`
 
-- Agents: Claude Code and pi only.
+- Agents: Claude Code, pi, Cursor and Codex. Cursor is detected only by a `.cursor/` folder and
+  needs its approval after setup; Codex is set up only with `--agent codex`, and its server entry is
+  global (`~/.codex/config.toml`). The Cursor editor is not checked, only `cursor-agent`.
 - Local scope skips (exit 1) a file git already tracks.
 - `--remove` leaves `.wiki/` and the ignore lines in place.
 

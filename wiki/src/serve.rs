@@ -258,6 +258,7 @@ impl WikiServer {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Find where code or docs live in this project. Use it before grep or reading files. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive."
     )]
     async fn search(
@@ -301,6 +302,7 @@ impl WikiServer {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
     )]
     async fn neighbors(
@@ -333,6 +335,7 @@ impl WikiServer {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name. Calls are matched by name and argument count, not by type. `depth` goes up more levels."
     )]
     async fn callers(
@@ -352,6 +355,7 @@ impl WikiServer {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
     )]
     async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
@@ -368,6 +372,7 @@ impl WikiServer {
     }
 
     #[tool(
+        annotations(read_only_hint = true),
         description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {

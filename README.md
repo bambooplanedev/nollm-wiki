@@ -35,7 +35,7 @@ wiki/src/lib.rs
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Usage](#usage) — [agents](#agents): [Claude Code and pi](#wiki-setup-claude-code-and-pi) ·
+- [Usage](#usage) — [agents](#agents): [`wiki setup`](#wiki-setup) ·
   [Cursor](#cursor) · [Codex](#codex) · [others](#other-mcp-clients) — [MCP server](#mcp-server) ·
   [agent memory](#agent-memory) · [CLI](#cli)
 - [Output](#output) — [a page](#a-page) · [artifacts](#artifacts) · [what agents read](#what-agents-read) ·
@@ -55,8 +55,8 @@ wiki/src/lib.rs
   call; `neighbors --symbol` lists everything a function calls, level by level.
 - **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page`, `neighbors` and `callers` to Claude Code, pi, Cursor, Codex or any MCP client.
-- **One-command setup.** `wiki setup` installs the server and a skill for Claude Code and pi, and
-  with `--hook` adds the matching code lines to each prompt.
+- **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
+  Claude Code, pi, Cursor and Codex, and with `--hook` adds the matching code lines to each prompt.
 - **Agent memory.** Notes an agent writes in `.agents/memory/` (or a per-user folder) become
   searchable pages that rank above code, with dates, aliases and `supersedes:`.
 - **Languages.** Rust, Python, C++, Go, JavaScript, TypeScript, `.vue` and `.svelte` scripts,
@@ -97,7 +97,8 @@ In the project you want agents to navigate:
 
 Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
 `.wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `wiki setup --remove` undoes either. For Cursor, Codex and other clients, see [Agents](#agents).
+and `wiki setup --remove` undoes either. Cursor and Codex: `wiki setup --agent cursor,codex`; other
+clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
 
@@ -139,47 +140,56 @@ symbols, `page` lists a file's symbols with line ranges, and the agent reads jus
 its own file tool. `callers` answers "what breaks if this changes"; `neighbors` is for when the
 surrounding pages matter.
 
-| agent | how it connects | what tells it to use the wiki |
+| agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
-| Claude Code | [`wiki setup`](#wiki-setup-claude-code-and-pi), or [by hand](#claude-code-by-hand) | the server's instructions; tools load up front |
-| pi | [`wiki setup`](#wiki-setup-claude-code-and-pi), or [by hand](#pi-by-hand) | the `wiki-navigation` skill |
-| Cursor | [`.cursor/mcp.json`](#cursor) | the tool descriptions (enough in our runs) |
-| Codex | [`codex mcp add`](#codex) | the [navigation rules](#navigation-rules) in `AGENTS.md` |
-| any other MCP client | [its MCP config](#other-mcp-clients) | the navigation rules in its instructions file |
+| Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local), the `wiki-memory` skill | the server's instructions; tools load up front |
+| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill |
+| Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
+| Codex | `codex mcp add` (global), the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
+| any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
 
-#### `wiki setup`: Claude Code and pi
+#### `wiki setup`
 
-`wiki setup` makes Claude Code and pi use the wiki on their own. Run it in the project root:
+`wiki setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    wiki setup [--agent claude,pi] [--scope repo|local] [--hook] [--remove]
+    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook] [--remove]
 
-It compiles `.` into `.wiki`, then installs the MCP server (`wiki serve --source .`) and a skill.
-pi gets the `wiki-navigation` skill (how to find code, and the memory rules). Claude Code gets only a
-`wiki-memory` skill with the memory rules: it shows the server's instructions, which carry the same
-navigation steps, and the server marks its tools to load up front instead of behind a `ToolSearch`
-call. Agents are detected (`.claude/`, `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`)
-unless `--agent` names them.
+It compiles `.` into `.wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
+each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory rules).
+Claude Code gets only a `wiki-memory` skill with the memory rules: it shows the server's
+instructions, which carry the same navigation steps, and the server marks its tools to load up
+front instead of behind a `ToolSearch` call. Codex reads neither, so it gets the navigation rules
+in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
+`CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
+names them. Codex is set up only when named: its MCP config is global.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
-  `.claude/skills/wiki-memory/SKILL.md`, `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in
-  `.gitignore`.
+  `.cursor/mcp.json`, `AGENTS.md`, `.claude/skills/wiki-memory/SKILL.md`,
+  `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
-  `claude mcp add-json wiki … --scope local`, the other files are written and listed in
-  `.git/info/exclude`. A file git already tracks is skipped; use `--scope repo` for it.
+  `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
+  created are listed in `.git/info/exclude`. A file git already tracks is skipped; use
+  `--scope repo` for it.
+- Either scope adds Codex's server with `codex mcp add wiki -- wiki serve --source .`, which writes
+  `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
+  directory it runs in, so the one entry serves every project.
 - Without `--scope`, setup asks on a terminal and fails without one.
 - `--hook` — also adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`wiki hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/wiki-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
   prompt.
-- `--remove` deletes exactly what setup wrote, hooks included even without `--hook`. Ignore lines,
-  `.wiki/` and memory notes stay.
+- `--remove` deletes exactly what setup wrote, hooks included even without `--hook`, and Codex's
+  server only when it is the one setup added. Ignore lines, `.wiki/` and memory notes stay.
 
-Either scope writes the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is
-not. Safe to run twice. An entry or file at the same place with other content is left alone and
-reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space pretty
-JSON with its keys and their order kept. pi loads project files only after you trust the project
-(`/trust`, or `--approve` in print mode).
+Every agent runs the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is
+not. Safe to run twice. An entry, file or block at the same place with other content is left alone
+and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
+pretty JSON with its keys and their order kept.
+
+After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
+print mode), and Cursor loads a new server only after you approve it (its MCP settings, or
+`cursor-agent mcp enable wiki`).
 
 #### Claude Code by hand
 
@@ -198,8 +208,8 @@ finding code; the memory rules are in [Agent memory](#agent-memory).
 ```
 
 pi does not show MCP server instructions for `direct` servers, so it needs the navigation steps as
-a skill: `wiki setup --agent pi` writes `.agents/skills/wiki-navigation/SKILL.md`, or put the
-[navigation rules](#navigation-rules) there yourself. pi loads both only after `/trust`.
+a skill: put the [navigation rules](#navigation-rules) in
+`.agents/skills/wiki-navigation/SKILL.md`. pi loads both only after `/trust`.
 
 #### Cursor
 
@@ -210,9 +220,9 @@ a skill: `wiki setup --agent pi` writes `.agents/skills/wiki-navigation/SKILL.md
 ```
 
 Cursor starts the server in the project directory, so `--source .` works. A new server stays off
-until you approve it: in Cursor's MCP settings, or `cursor-agent mcp enable wiki`. Cursor drops
-that approval whenever the entry's command changes, and the server then silently does not load. In
-our runs the agent called `search` and `callers` with no extra instructions.
+until you approve it, and Cursor drops that approval whenever the entry's command changes; the
+server then silently does not load. In our runs the agent called `search` and `callers` with no
+extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with
@@ -220,26 +230,19 @@ our runs the agent called `search` and `callers` with no extra instructions.
 
 #### Codex
 
-    codex mcp add wiki -- wiki serve --source .
-
-writes this to `~/.codex/config.toml` (Codex has no per-project MCP config); add the last line by
-hand:
+By hand, `codex mcp add wiki -- wiki serve --source .` writes this to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.wiki]
 command = "wiki"
 args = ["serve", "--source", "."]
-default_tools_approval_mode = "approve"
 ```
 
-Codex starts the server in the directory it runs in, so one entry serves every project. Without
-`default_tools_approval_mode = "approve"` it asks before each wiki call, and `codex exec` fails
-them (`MCP tool call requires approval, but approval policy is never`).
-
-Codex does not reach for the wiki on its own: put the [navigation rules](#navigation-rules) in the
-project's `AGENTS.md`. On three questions about this repository (codex-cli 0.164.0, read-only
-sandbox), without them it made no wiki call and named the wrong caller once; with them it used
-`search`, `page` and `callers` and answered all three.
+The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
+Codex does not reach for them on its own, though: it needs the
+[navigation rules](#navigation-rules) in the project's `AGENTS.md`. On three questions about this
+repository (codex-cli 0.164.0, read-only sandbox), without them it made no wiki call and named the
+wrong caller once; with them it used `search`, `page` and `callers` and answered all three.
 
 #### Other MCP clients
 
@@ -249,10 +252,12 @@ not start in the project directory, such as Claude Desktop, needs the project's 
 
 #### Navigation rules
 
-What `wiki setup` puts in pi's skill, for an agent that needs them in its instructions file:
+What `wiki setup` puts in `AGENTS.md` for Codex, for any agent that needs them in its instructions
+file:
 
 ```
-Find code with the project wiki:
+## Find code with the project wiki
+
 1. Call the wiki `search` tool with the words of what you are looking for and `kind: "code"`.
    Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are exact — do not
@@ -384,7 +389,7 @@ Memory notes live in <folder> (.agents/memory, or the local folder setup named),
 | `lint` | broken links, orphan pages, pages too large for a pack |
 | `serve` | the MCP server — see [MCP server](#mcp-server) |
 | `hint` | the code lines for a task text, for prompt hooks |
-| `setup` | install the server and a skill for Claude Code and pi — see [Agents](#agents) |
+| `setup` | install the server for Claude Code, pi, Cursor and Codex — see [Agents](#agents) |
 | `generate` | a synthetic corpus for demos and bug reports |
 
 `--jobs N` sets the worker threads of `compile` (Rayon's default, usually the number of CPUs); the

@@ -25,11 +25,19 @@ const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
 /// The command the agents run.
 const CMD: &str = "wiki";
+/// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
+/// `--remove` takes out exactly them.
+const NAV_RULES: &str = include_str!("navigation.md");
+const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
+const NAV_END: &str = "<!-- /wiki:navigation -->";
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
     Claude,
     Pi,
+    Cursor,
+    /// Its MCP config is global (`~/.codex/config.toml`), so it is never detected.
+    Codex,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -155,14 +163,15 @@ impl Report<'_> {
     }
 }
 
-/// Runs `claude` with `args` in `root`; the error is a short reason for the user.
-fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
-    let exe = find_on_path("claude").ok_or("claude is not on PATH")?;
+/// Runs the agent CLI `name` with `args` in `root`; the error is a short reason for the user.
+/// `mcp get` may fail: its status says whether the server exists.
+fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String> {
+    let exe = find_on_path(name).ok_or(format!("{name} is not on PATH"))?;
     let o = Command::new(exe)
         .args(args)
         .current_dir(root)
         .output()
-        .map_err(|e| format!("could not run claude: {e}"))?;
+        .map_err(|e| format!("could not run {name}: {e}"))?;
     if o.status.success() || args[1] == "get" {
         return Ok((
             o.status.success(),
@@ -171,10 +180,45 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     }
     let err = String::from_utf8_lossy(&o.stderr);
     Err(format!(
-        "`claude {}` failed: {}",
+        "`{name} {}` failed: {}",
         args[..2].join(" "),
         err.trim().lines().next().unwrap_or("no message")
     ))
+}
+
+fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
+    cli("claude", root, args)
+}
+
+/// Codex's MCP server, through its CLI. Its config is global, so one entry serves every project:
+/// Codex starts the server in the directory it runs in.
+fn codex_mcp(root: &Path, remove: bool) -> Outcome {
+    let run = || -> Result<Outcome, String> {
+        let (found, text) = cli("codex", root, &["mcp", "get", "wiki"])?;
+        if found {
+            let has = |l: &str| text.lines().any(|t| t.trim() == l);
+            if !(has(&format!("command: {CMD}")) && has("args: serve --source .")) {
+                return Ok(Outcome::Foreign(
+                    "another \"wiki\" server is configured".into(),
+                ));
+            }
+            if !remove {
+                return Ok(Outcome::AlreadyThere);
+            }
+            cli("codex", root, &["mcp", "remove", "wiki"])?;
+            return Ok(Outcome::Done);
+        }
+        if remove {
+            return Ok(Outcome::AlreadyThere);
+        }
+        cli(
+            "codex",
+            root,
+            &["mcp", "add", "wiki", "--", CMD, "serve", "--source", "."],
+        )?;
+        Ok(Outcome::Done)
+    };
+    run().unwrap_or_else(Outcome::Foreign)
 }
 
 /// Claude Code's own local-scope MCP config, through its CLI.
@@ -234,9 +278,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         if root.join(".pi").exists() || find_on_path("pi").is_some() {
             a.push(Agent::Pi);
         }
+        // Only the project folder: Cursor on PATH says nothing about this project.
+        if root.join(".cursor").is_dir() {
+            a.push(Agent::Cursor);
+        }
         if a.is_empty() {
             return Err(WikiError::Setup(
-                "no agent found: pass --agent claude,pi".into(),
+                "no agent found: pass --agent claude,pi,cursor,codex".into(),
             ));
         }
         a
@@ -314,11 +362,53 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
     let mut ignore = vec![".wiki/".to_string()];
+    let mut cursor_added = false;
 
     for agent in agents {
         let (name, pi) = match agent {
             Agent::Claude => ("claude", false),
             Agent::Pi => ("pi", true),
+            Agent::Cursor => {
+                let file = ".cursor/mcp.json";
+                let path = root.join(file);
+                let res = || {
+                    if opts.remove {
+                        edit::remove_entry(root, &path, &["mcpServers"], "wiki", &entry)
+                    } else {
+                        edit::upsert_entry(&path, &["mcpServers"], "wiki", &entry)
+                    }
+                };
+                let before = path.exists();
+                if r.file_item(root, file, &format!("{file} wiki server"), false, res)? {
+                    cursor_added |= !opts.remove;
+                    if !before {
+                        ignore.push(format!("/{file}"));
+                    }
+                }
+                continue;
+            }
+            Agent::Codex => {
+                let o = codex_mcp(root, opts.remove);
+                r.item("Codex wiki server (~/.codex/config.toml)", false, Ok(o))?;
+                // The navigation steps, which Codex otherwise never reads.
+                let file = "AGENTS.md";
+                let path = root.join(file);
+                let block = format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n");
+                let res = || {
+                    if opts.remove {
+                        edit::remove_block(root, &path, &block)
+                    } else {
+                        edit::upsert_block(&path, NAV_BEGIN, &block)
+                    }
+                };
+                let before = path.exists();
+                if r.file_item(root, file, "AGENTS.md wiki navigation steps", false, res)?
+                    && !before
+                {
+                    ignore.push(format!("/{file}"));
+                }
+                continue;
+            }
         };
         let (skill, text) = if pi {
             (Path::new(".agents").join(SKILL_DIR), Some(skill_text))
@@ -446,6 +536,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     if r.wrote_pi {
         r.line("pi loads project files only after you trust the project (/trust, or --approve in print mode).")?;
+    }
+    if cursor_added {
+        r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable wiki`.")?;
     }
     Ok(r.ok)
 }
