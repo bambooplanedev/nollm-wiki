@@ -68,14 +68,19 @@ struct Report<'a> {
     guard_tracked: bool,
 }
 
+/// `memory::git`, run only when git is on `PATH`.
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    find_on_path("git").and_then(|_| memory::git(root, args))
+}
+
 /// Whether git (when on `PATH`) tracks `file` in `root`.
 fn tracked(root: &Path, file: &str) -> bool {
-    memory::git(root, &["ls-files", "--error-unmatch", "--", file]).is_some()
+    git(root, &["ls-files", "--error-unmatch", "--", file]).is_some()
 }
 
 /// The repository's `info/exclude`: asked of git when it is on `PATH`, else `.git/info/exclude`.
 fn exclude_file(root: &Path) -> Option<PathBuf> {
-    memory::git(root, &["rev-parse", "--git-path", "info/exclude"])
+    git(root, &["rev-parse", "--git-path", "info/exclude"])
         .map(|p| root.join(p))
         .or_else(|| {
             root.join(".git")
@@ -87,7 +92,7 @@ fn exclude_file(root: &Path) -> Option<PathBuf> {
 /// `root`'s path below the worktree top, with a trailing `/` (empty at the top or without git).
 /// Patterns in `info/exclude` anchor to the top, so a subdirectory's lines need it.
 fn worktree_prefix(root: &Path) -> String {
-    memory::git(root, &["rev-parse", "--show-prefix"]).unwrap_or_default()
+    git(root, &["rev-parse", "--show-prefix"]).unwrap_or_default()
 }
 
 impl Report<'_> {
@@ -228,7 +233,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         a
     };
 
-    if let Some(top) = memory::git(root, &["rev-parse", "--show-toplevel"]) {
+    if let Some(top) = git(root, &["rev-parse", "--show-toplevel"]) {
         if std::fs::canonicalize(top).ok() != root.canonicalize().ok() {
             r.line("warning: this is not the git toplevel; agents must be started from here")?;
         }

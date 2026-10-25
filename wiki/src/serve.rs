@@ -4,7 +4,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::{one_line as one, KindFilter};
+use crate::model::{one_line, KindFilter};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -471,9 +471,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
         if let Some(u) = &h.updated {
             out.push_str(&format!("{u}  "));
         }
-        out.push_str(&one(&h.title));
+        out.push_str(&one_line(&h.title));
         if let Some(s) = &h.summary {
-            out.push_str(&format!(" — {}", one(s)));
+            out.push_str(&format!(" — {}", one_line(s)));
         }
         if let Some(by) = &h.superseded_by {
             out.push_str(&format!(" (superseded by {by})"));
@@ -486,15 +486,15 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 s.start_line,
                 s.end_line,
                 s.name,
-                one(&s.signature)
+                one_line(&s.signature)
             ));
             if let Some(d) = &s.doc {
-                out.push_str(&format!("  — {}", one(d)));
+                out.push_str(&format!("  — {}", one_line(d)));
             }
             out.push('\n');
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
-            out.push_str(&format!("    {}\n", one(sn)));
+            out.push_str(&format!("    {}\n", one_line(sn)));
         }
     }
     out

@@ -8,7 +8,7 @@
 //! skipped as nested markup — a `<script>` inside `<svelte:head>` belongs to
 //! the rendered page, not the component — and a `{...}` expression is skipped
 //! whole, since it may hold a `<` that opens no tag.
-use super::code::LangSpec;
+use super::code::{default_shape, LangSpec};
 use super::extract_simple::js_spec;
 use super::extract_vue::{script_view, ScriptView};
 
@@ -17,6 +17,7 @@ use super::extract_vue::{script_view, ScriptView};
 pub(crate) fn svelte_spec() -> LangSpec {
     LangSpec {
         lang_name: "svelte",
+        shape: default_shape,
         ..js_spec()
     }
 }

@@ -335,6 +335,7 @@ fn search_cli_accepts_valid_kinds() {
         .stdout(contains("guide  ").not());
     search("pdf")
         .failure()
+        .stderr(contains("unknown kind \"pdf\""))
         .stderr(contains(wiki::model::KindFilter::EXPECTED));
 }
 

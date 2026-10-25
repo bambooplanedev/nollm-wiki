@@ -89,8 +89,9 @@ pub(crate) struct LangSpec {
     /// also matches a @def pattern, and that match's flag wins). False
     /// makes an @item-only match run `should_keep` itself.
     pub(crate) query_gates_visibility: bool,
-    /// What a captured definition is and where its signature stops. Vue and
-    /// Svelte inherit their script language's hook.
+    /// What a captured definition is and where its signature stops. A plain-JS
+    /// Vue or Svelte script uses `default_shape`; a `lang` script uses that
+    /// language's own spec.
     pub(crate) shape: fn(Node) -> Shape,
 }
 
