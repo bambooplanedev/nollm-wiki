@@ -5,11 +5,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
+    #[default]
     Text,
     Markdown,
-    Code { lang: String },
+    Code {
+        lang: String,
+    },
 }
 
 impl SourceKind {
@@ -64,7 +67,7 @@ impl KindFilter {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Entity {
     pub id: String,
     pub name: String,

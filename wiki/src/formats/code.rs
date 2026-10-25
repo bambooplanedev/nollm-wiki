@@ -466,23 +466,15 @@ impl Extractor for CodeExtractor {
         Entity {
             id: slugify(&name),
             name,
-            aliases: Vec::new(),
-            tags: Vec::new(),
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: source,
-            source_path: String::new(),
             kind: SourceKind::Code { lang: lang_name },
-            content_hash: [0u8; 32],
             summary,
             symbols: info.symbols,
             imports: info.imports,
             defined: info.defined,
             methods: info.methods,
             items,
+            ..Entity::default()
         }
     }
 }

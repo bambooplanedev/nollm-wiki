@@ -62,22 +62,13 @@ impl Extractor for TextExtractor {
             id: slugify(&name),
             name,
             aliases,
-            tags: Vec::new(),
             created,
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body,
             source_path: String::new(), // filled by Registry
             kind: SourceKind::Text,
             content_hash: [0u8; 32], // filled by Registry
             summary,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            defined: Vec::new(),
-            methods: Vec::new(),
-            items: Vec::new(),
+            ..Entity::default()
         }
     }
 }

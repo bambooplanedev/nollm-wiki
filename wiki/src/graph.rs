@@ -477,23 +477,9 @@ mod tests {
         Entity {
             id: id.into(),
             name: name.into(),
-            aliases: vec![],
-            tags: vec![],
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
-            kind: SourceKind::Text,
-            content_hash: [0u8; 32],
-            summary: None,
-            symbols: vec![],
-            imports: vec![],
-            defined: vec![],
-            methods: vec![],
-            items: vec![],
+            ..Entity::default()
         }
     }
 

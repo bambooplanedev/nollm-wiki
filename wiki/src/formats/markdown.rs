@@ -35,19 +35,11 @@ impl Extractor for MarkdownExtractor {
             tags,
             created,
             updated,
-            memory: false,
             supersedes,
-            superseded_by: None,
             body,
-            source_path: String::new(),
             kind: SourceKind::Markdown,
-            content_hash: [0u8; 32],
             summary,
-            symbols: Vec::new(),
-            imports: Vec::new(),
-            defined: Vec::new(),
-            methods: Vec::new(),
-            items: Vec::new(),
+            ..Entity::default()
         }
     }
 }

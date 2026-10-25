@@ -208,29 +208,16 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
 mod tests {
     use super::*;
     use crate::graph::build_graph;
-    use crate::model::{CodeItemKind, SourceKind};
+    use crate::model::CodeItemKind;
 
     fn ent(id: &str, name: &str, body: &str, summary: Option<&str>) -> Entity {
         Entity {
             id: id.into(),
             name: name.into(),
-            aliases: vec![],
-            tags: vec![],
-            created: String::new(),
-            updated: String::new(),
-            memory: false,
-            supersedes: Vec::new(),
-            superseded_by: None,
             body: body.into(),
             source_path: format!("{id}.txt"),
-            kind: SourceKind::Text,
-            content_hash: [0u8; 32],
             summary: summary.map(String::from),
-            symbols: vec![],
-            imports: vec![],
-            defined: vec![],
-            methods: vec![],
-            items: vec![],
+            ..Entity::default()
         }
     }
 
