@@ -21,10 +21,7 @@
 //! still yields every file — the walker never filters its own root.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
-use tempfile::TempDir;
 use wiki::query::{PackBudget, Wiki};
-use wiki::{compile, CompileOptions};
 
 /// Every page the corpus must compile to, **ascending by id** — the order
 /// `Wiki::list_pages` returns, which is not the source-path order the spec's
@@ -65,51 +62,12 @@ const EXPECTED_IDS: &[&str] = &[
 /// note above `MIN_TOP1`).
 const CORPUS_HASH: &str = "3cb65763c753f33981baf851f94424817562cb1496df2fa28c866368ba5e5359";
 
-/// Hash the corpus directory's relative paths and contents, in sorted path
-/// order, so the result does not depend on directory-listing order.
-///
-/// Line endings are normalised (`\r\n` -> `\n`) before hashing: a corpus
-/// checked out with CRLF moves no scoring metric, so it must not move this
-/// hash either, or the check would fail spuriously on a Windows checkout.
-fn corpus_hash(corpus: &Path) -> String {
-    let mut files = wiki::walk::walk(corpus, false, &|_| true).unwrap();
-    // `walk` already sorts by `rel_path`, but the hash's determinism is the
-    // point here, not an incidental property of the walker, so make it
-    // explicit rather than relying on that guarantee silently.
-    files.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
-    let mut parts: Vec<Vec<u8>> = Vec::new();
-    for f in &files {
-        let normalized = String::from_utf8_lossy(&f.bytes).replace("\r\n", "\n");
-        parts.push(f.rel_path.clone().into_bytes());
-        parts.push(normalized.into_bytes());
-    }
-    let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-    wiki::hash::to_hex(&wiki::hash::combine(&refs))
-}
+#[path = "common/corpus.rs"]
+mod corpus;
 
 /// Compile the frozen corpus into a fresh tempdir and load it.
-///
-/// The `TempDir` is returned alongside the `Wiki` because dropping it deletes
-/// the compiled pages, and `Wiki` reads page bodies from disk on demand.
-fn load_corpus() -> (TempDir, Wiki) {
-    let corpus: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/.eval_corpus");
-    assert_eq!(
-        corpus_hash(&corpus),
-        CORPUS_HASH,
-        "the frozen corpus's content changed. The id-set assertion in \
-         `corpus_compiles_to_the_expected_pages` cannot catch this: it only \
-         sees which pages exist, not what they say. If this is a deliberate \
-         re-cut, update CORPUS_HASH in the same commit that quotes the old \
-         and new tables; if it is not, revert the corpus.",
-    );
-    let dir = tempfile::tempdir().unwrap();
-    let output = dir.path().join("out");
-    let opts = CompileOptions {
-        respect_ignore: false,
-        ..CompileOptions::default()
-    };
-    compile(&corpus, &output, &opts).unwrap();
-    let wiki = Wiki::load(&output).unwrap();
+fn load_corpus() -> (tempfile::TempDir, Wiki) {
+    let (dir, _, wiki) = corpus::compile_frozen("tests/.eval_corpus", CORPUS_HASH);
     (dir, wiki)
 }
 
