@@ -814,12 +814,19 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     assert_eq!(read(&f.root().join("CLAUDE.md")), "# Project rules\n");
     let o = out(&a);
     assert!(
-        o.contains("skipped AGENTS.md wiki navigation steps: a new AGENTS.md would hide CLAUDE.md"),
+        o.contains("skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
         "{o}"
     );
     assert!(o.contains("wrote Codex wiki server"), "{o}");
 
-    // With AGENTS.md already there, the steps go into it as usual.
+    // An AGENTS.md an earlier setup created beside CLAUDE.md goes.
+    let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
+    fs::write(f.root().join("AGENTS.md"), &block).unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
+    assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
+
+    // With the team's own AGENTS.md there, the steps go into it as usual.
     fs::write(f.root().join("AGENTS.md"), "# Agents\n").unwrap();
     f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(read(&f.root().join("AGENTS.md")).contains("<!-- wiki:navigation -->"));

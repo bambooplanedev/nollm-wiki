@@ -401,19 +401,27 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                         edit::upsert_block(&path, NAV_BEGIN, &block)
                     }
                 };
-                let before = path.exists();
                 let what = "AGENTS.md wiki navigation steps";
-                // pi, like other agents, reads AGENTS.md instead of CLAUDE.md
-                // when both exist: a new AGENTS.md would hide CLAUDE.md.
-                if !opts.remove && !before && root.join("CLAUDE.md").exists() {
+                // pi reads AGENTS.md instead of CLAUDE.md when both exist, so
+                // beside a CLAUDE.md the steps get no AGENTS.md of their own; one
+                // an earlier setup created holds only them and goes.
+                let lone = std::fs::read_to_string(&path).is_ok_and(|t| t == block);
+                if !opts.remove && root.join("CLAUDE.md").exists() && (lone || !path.exists()) {
+                    if lone {
+                        edit::remove_block(root, &path, &block)?;
+                        r.line("removed AGENTS.md: it held only the wiki steps and hid CLAUDE.md from pi")?;
+                    }
                     r.skip(
                         what,
-                        "a new AGENTS.md would hide CLAUDE.md from agents that read only one \
-                         (pi); move CLAUDE.md to AGENTS.md (Claude Code reads it through \
-                         `@AGENTS.md` in CLAUDE.md) and run setup again",
+                        "an AGENTS.md beside CLAUDE.md hides CLAUDE.md from pi; rename CLAUDE.md \
+                         to AGENTS.md, put `@AGENTS.md` in a new CLAUDE.md for Claude Code, and \
+                         run setup again",
                     )?;
-                } else if r.file_item(root, file, what, false, res)? && !before {
-                    ignore.push(format!("/{file}"));
+                } else {
+                    let before = path.exists();
+                    if r.file_item(root, file, what, false, res)? && !before {
+                        ignore.push(format!("/{file}"));
+                    }
                 }
                 continue;
             }

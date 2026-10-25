@@ -161,10 +161,7 @@ each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and
 Claude Code gets only a `wiki-memory` skill with the memory rules: it shows the server's
 instructions, which carry the same navigation steps, and the server marks its tools to load up
 front instead of behind a `ToolSearch` call. Codex reads neither, so it gets the navigation rules
-in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. In a project with `CLAUDE.md` and no
-`AGENTS.md`, setup skips that step instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when
-both exist, so it would stop seeing `CLAUDE.md`. Move `CLAUDE.md` to `AGENTS.md` (Claude Code reads
-it through a `CLAUDE.md` holding `@AGENTS.md`) and run setup again. Agents are detected (`.claude/`,
+in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
 names them. Codex is set up only when named: its MCP config is global.
 
@@ -186,6 +183,14 @@ names them. Codex is set up only when named: its MCP config is global.
   prompt.
 - `--remove` deletes exactly what setup wrote, hooks included even without `--hook`, and Codex's
   server only when it is the one setup added. Ignore lines, `.wiki/` and memory notes stay.
+
+In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
+navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
+exist, so it would stop seeing `CLAUDE.md`. An `AGENTS.md` an earlier setup created there, holding
+nothing but the steps, is removed for the same reason. To get them, rename `CLAUDE.md` to `AGENTS.md`, create a
+new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, and run setup again;
+Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
+run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
 Every agent runs the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
