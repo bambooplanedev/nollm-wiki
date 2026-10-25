@@ -442,12 +442,12 @@ mod tests {
     fn mask_preserves_byte_offsets_through_multibyte_code() {
         // Offsets from the mask index back into the original, so a mask that
         // changed length would panic or slice mid-char.
-        let page = "## Body\n`«кодування»`\n\n```\nтіло → приклад\n```\n\n## Notes\nx\n";
+        let page = "## Body\n`«naïve café»`\n\n```\nbody → example\n```\n\n## Notes\nx\n";
         assert_eq!(mask_code(page).len(), page.len());
         assert_eq!(mask_fenced_code(page).len(), page.len());
         let sections = parse_sections(page);
         assert_eq!(sections["Notes"], "x");
-        assert!(sections["Body"].contains("«кодування»"));
+        assert!(sections["Body"].contains("«naïve café»"));
     }
 
     #[test]

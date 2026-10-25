@@ -90,6 +90,10 @@ enum Command {
         /// Wiki to serve (default: `<source>/.wiki` with `--source`, else `out`).
         #[arg(long)]
         dir: Option<PathBuf>,
+        /// Tools to expose, comma-separated, from search, page, neighbors,
+        /// lint (default: search,page,neighbors).
+        #[arg(long, value_delimiter = ',')]
+        tools: Option<Vec<String>>,
     },
     Generate {
         dir: PathBuf,
@@ -236,13 +240,13 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Command::Serve { source, dir } => {
+        Command::Serve { source, dir, tools } => {
             let dir = dir.unwrap_or_else(|| {
                 source
                     .as_ref()
                     .map_or_else(|| "out".into(), |s| s.join(".wiki"))
             });
-            wiki::serve::run(&dir, source.as_deref(), cli.jobs)?;
+            wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref())?;
         }
         Command::Generate { dir, files, seed } => {
             let paths = generate_corpus(&dir, files, seed).context("generate corpus")?;

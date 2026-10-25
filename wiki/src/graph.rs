@@ -619,9 +619,9 @@ mod tests {
 
     #[test]
     fn cyrillic_alias_creates_edge() {
-        let mut ai = ent("ai", "Штучний інтелект", "Про навчання.");
+        let mut ai = ent("ai", "Artificial intelligence", "About learning.");
         ai.aliases = vec!["ШІ".into()];
-        let notes = ent("notes", "Нотатки", "Сьогодні говорили про ШІ.");
+        let notes = ent("notes", "Notes", "Today we talked about ШІ.");
         let g = build_graph(&map(vec![ai, notes]));
         assert!(g.edges["notes"].outgoing.contains("ai"));
     }

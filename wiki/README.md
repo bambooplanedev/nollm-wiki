@@ -293,6 +293,8 @@ wiki serve [OPTIONS]
   with it (see [MCP server](#mcp-server)).
 - `--dir <out>` (`<project>/.wiki` with `--source`, else `out`) — the
   compiled wiki directory to serve.
+- `--tools <list>` (`search,page,neighbors`) — the tools to expose,
+  comma-separated, from `search`, `page`, `neighbors`, `lint`.
 
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).
@@ -409,18 +411,21 @@ out to the CLI. Client configuration:
 }
 ```
 
-**Tools** (mirroring the CLI subcommands, with one difference: `neighbors`
+**Tools** (mirroring the CLI subcommands, with two differences: `neighbors`
 and the `page` outline default `max_tokens` to 4000 here, where the CLI leaves
-it unbounded — an agent calling with defaults should not receive a 30 KB dump,
-while a person passes the flag on purpose; `page` with `full: true` has no
-default):
+it unbounded, and `search` defaults `limit` to 5, where the CLI returns 10 —
+an agent calling with defaults should not receive a 30 KB dump, and every hit
+line is re-read on each later turn, while a person passes the flag on purpose;
+`page` with `full: true` has no default). `lint` is exposed only when
+`--tools` names it: it serves the person keeping the wiki, and each exposed
+tool costs schema tokens on every request.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (10 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under `search`, or with `json` `[{id, title, summary, score, snippet, path, symbols}]` (`snippet` is `null` for title/alias/summary/heading-only hits) |
 | `neighbors` | `id` (id, title, or path), `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?` | The context-pack text |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline text, or the whole page |
-| `lint` | — | JSON `{total_pages, broken_links, orphans}` |
+| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans}` |
 
 **Resources:** every page is `wiki://page/<id>` (markdown), plus
 `wiki://index` (`index.json`) and `wiki://llms.txt`.
@@ -516,8 +521,8 @@ oversights:
 - **Text, markdown, and code are the only formats.** There is no PDF,
   OCR, or audio extractor; adding one means adding an `Extractor` (see
   [ARCHITECTURE.md](docs/ARCHITECTURE.md)).
-- **MCP server is query-only.** `wiki serve` exposes search/neighbors/page/lint
-  and page resources over stdio (see [MCP server](#mcp-server)); there is
+- **MCP server is query-only.** `wiki serve` exposes search/neighbors/page
+  (lint on request) and page resources over stdio (see [MCP server](#mcp-server)); there is
   deliberately no compile-over-MCP tool (`--source` recompiles on file edits,
   not on request) and no HTTP transport.
 - **Graph export is JSON only.** `--emit-json` writes the node-link

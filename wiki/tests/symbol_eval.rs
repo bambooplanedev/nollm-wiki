@@ -11,6 +11,8 @@
 //! copied from: a score change would no longer be attributable to the scorer,
 //! because the corpus could have moved instead. It is re-cut only by explicit
 //! decision, in a commit that quotes both the old and the new table.
+//! Re-cut 2026-10-23: two test fixtures' text made English (`extract_python.rs`,
+//! `rewrite.rs`), line counts kept; the table did not change.
 //!
 //! **Held-out rule:** every third case in each class is `held_out`. Held-out
 //! cases are never used to choose constants (ranking weights, thresholds);
@@ -23,22 +25,24 @@
 //! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
 //! The `tokens` column charges the MCP tool's default search response
-//! (`search_lines` at limit 10); `tokens_json` in the footers charges the
-//! `format: "json"` response (`search_json`). The step that changes the
-//! default renderer or limit must swap it here and quote both numbers.
+//! (`search_lines` at `DEFAULT_SEARCH_LIMIT`, 5; it was 639.9 / 700.7
+//! tune / held at limit 10); `tokens_json` in the footers charges the
+//! `format: "json"` response (`search_json`) at the same limit. Ranks are
+//! still taken at limit 10. A step that changes the default renderer or
+//! limit must swap it here and quote both numbers.
 
 use regex::Regex;
 use std::fmt::Write as _;
 use std::path::Path;
 use wiki::manifest::token_estimate;
 use wiki::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS};
+use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS, DEFAULT_SEARCH_LIMIT};
 
 #[path = "common/corpus.rs"]
 mod corpus;
 
 /// Content hash pinning the frozen corpus (see `common/corpus.rs`).
-const SYMBOL_CORPUS_HASH: &str = "ef2ee16ead15e4a3b6c5e9a89a1c293f08f0f82de631d4ed13f78c5580311c89";
+const SYMBOL_CORPUS_HASH: &str = "e3637a4e66af876b1cd3755477d96e84b03b2854f620a6d7038c0c64b05259e8";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Class {
@@ -669,8 +673,9 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
             .position(|s| s.path == c.path && s.name.rsplit("::").next() == Some(c.symbol))
             .map(|i| i + 1);
         let top1 = hits.first().map_or("-".to_string(), |h| h.path.clone());
-        let tokens = token_estimate(&search_lines(&hits));
-        let tokens_json = token_estimate(&search_json(hits));
+        let sent = wiki.search(c.query, None, DEFAULT_SEARCH_LIMIT);
+        let tokens = token_estimate(&search_lines(&sent));
+        let tokens_json = token_estimate(&search_json(sent));
         (if c.held_out { &mut held } else { &mut tune }).add(
             rank,
             symbol_rank,

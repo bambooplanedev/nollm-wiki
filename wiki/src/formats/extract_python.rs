@@ -686,10 +686,9 @@ mod tests {
 
     #[test]
     fn python_long_values_are_truncated_on_a_character_boundary() {
-        // Cyrillic: a byte-indexed cut panics here. The real corpus has exactly
-        // this shape in a project's judge.py.
-        let src = "SYSTEM_PROMPT = \"Ти — редакторський фільтр каналу, який оцінює статті дуже суворо\"\n";
-        let e = CodeExtractor.extract("judge.py", src);
+        // Multibyte characters: a byte-indexed cut panics here.
+        let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
+        let e = CodeExtractor.extract("judge.py", &src);
         let sig = e
             .symbols
             .iter()
