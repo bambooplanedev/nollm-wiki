@@ -1138,9 +1138,9 @@ mod tests {
         // docs/2.md's OWN title already renders the ordinal-shaped id
         // "chapter_2" — a coincidence the free-id search must discover by
         // checking every current id, not by counting positions within the
-        // {Chapter.md, chapter.md} group. The old positional code rendered
-        // "chapter_2" for chapter.md without checking, colliding with
-        // docs/2.md and losing a page to the first-wins dedup.
+        // {Chapter.md, chapter.md} group. Assigning by position would give
+        // chapter.md "chapter_2", colliding with docs/2.md and losing a page
+        // to the first-wins dedup.
         let got = ids_of(vec![
             named_text("docs/1.md", "Chapter 1"),
             named_text("docs/2.md", "Chapter 2"),
@@ -1164,9 +1164,7 @@ mod tests {
         // (a/foo.h, first by source_path) carrying an ordinal left over from
         // an earlier round — e.g. it once shared this same id string with a
         // blocker that has since moved away. Nothing blocks the bare name
-        // now, so the search must clear it rather than leave it (the old
-        // positional code never even visited position 0, so a stale value
-        // there was never cleared).
+        // now, so the search must clear it rather than leave it.
         let extracted = vec![named_code("a/foo.h", "Foo"), named_code("a/foo.hpp", "Foo")];
         let base: Vec<String> = extracted.iter().map(|e| e.name.clone()).collect();
         let disc = vec![String::new(), String::new()];
@@ -1212,12 +1210,11 @@ mod tests {
 
     #[test]
     fn multi_word_redundant_discriminator_is_skipped() {
-        // foo.test.spec.ts's discriminator (Task 4's infix rule) is
+        // foo.test.spec.ts's discriminator (the infix rule) is
         // "test_spec". Its own name already ends in "Test Spec", so applying
         // the discriminator would render "Foo Test Spec Test Spec" — a
         // doubled tail unreachable by mention, exactly what the guard
-        // exists to prevent now that multi-word discriminators are
-        // reachable.
+        // exists to prevent.
         let mut other = text_entity("a/other.md");
         other.name = "Foo Test Spec".into();
         let got = ids_of(vec![

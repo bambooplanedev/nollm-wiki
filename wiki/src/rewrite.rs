@@ -411,8 +411,8 @@ mod tests {
     #[test]
     fn fenced_example_headings_do_not_overwrite_real_sections() {
         // A page whose body shows an example rendered wiki page — exactly what
-        // this project's own README does. Before the mask, the fenced `## Body`
-        // won (BTreeMap insert is last-write-wins) and the real body was lost.
+        // this project's own README does. Unmasked, the fenced `## Body`
+        // would win (BTreeMap insert is last-write-wins) and the real body be lost.
         let page = "## Body\nthe real body\n\n```\n## Body\nexample body\n```\n";
         let sections = parse_sections(page);
         assert_eq!(sections.len(), 1);

@@ -254,12 +254,11 @@ fn incremental_recompile_with_no_changes_writes_nothing() {
 #[test]
 fn same_named_files_in_different_directories_all_survive() {
     // The canonical Python package layout: a `models.py` and an `__init__.py`
-    // per app. The `models.py` pair collides on the id `models`, and the dedup
-    // in `compile_inner` used to drop the loser with nothing louder than a
-    // stderr warning — the run still exited 0 and lint still reported no
-    // broken links, so the loss was invisible to both CI and an agent.
+    // per app. The `models.py` pair collides on the id `models`, and a loser
+    // dropped with nothing louder than a stderr warning would leave exit 0
+    // and clean lint, invisible to both CI and an agent.
     //
-    // The `__init__.py` pair no longer collides: a directory-module file is
+    // The `__init__.py` pair does not collide: a directory-module file is
     // named for its directory, so these are `api` and `db` rather than two
     // pages both called "Init". That is the point of the naming rule — the
     // page for `app/api/__init__.py` IS the `api` package, and code refers to

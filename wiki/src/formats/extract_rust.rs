@@ -119,9 +119,8 @@ fn has_attribute(node: Node, text: &str, want: &str) -> bool {
     })
 }
 
-/// The previous cycle's `rust_module_level` guard and `rust_owner` resolution,
-/// composed. Order is unobservable: both were pure functions, and the old loop
-/// called `rust_owner` only after `rust_module_level` had passed.
+/// The `rust_module_level` guard and `rust_owner` resolution, composed. Order
+/// is unobservable: both are pure, and `rust_owner` runs only once the guard passes.
 fn rust_placement(def: Node, text: &str) -> Placement {
     // A macro carries no visibility modifier, so the query cannot gate it
     // structurally the way it gates every other item: `#[macro_export]` is
@@ -171,8 +170,7 @@ fn rust_header_group(def: Node, text: &str) -> Option<String> {
     trait_impl_owner(def, text)
 }
 
-/// Rust's grammar-specific shapes. Everything here was previously a
-/// `def.kind()` arm inside the shared core.
+/// Rust's grammar-specific shapes.
 pub(crate) fn rust_shape(def: Node) -> Shape {
     match def.kind() {
         // A variant IS its payload. Cutting at `body` the way a struct is cut
@@ -968,8 +966,8 @@ mod surface_tests {
 
     #[test]
     fn public_struct_fields_are_exported_and_private_ones_are_not() {
-        // The Python extractor has shown class fields since its own cycle;
-        // a Rust struct's fields are the same contract and were invisible.
+        // Matches the Python extractor's class fields: a Rust struct's public
+        // fields are part of the same contract.
         let src = "pub struct Store {\n    pub path: String,\n    pub(crate) internal: u8,\n    seen: u32,\n}\n";
         assert_has(src, "pub struct Store");
         assert_has(src, "pub Store::path: String");
@@ -1095,7 +1093,7 @@ mod surface_tests {
     #[test]
     fn an_enum_variant_does_not_render_its_inner_doc_comments() {
         // A variant renders its whole node, body included, so a `///` on a
-        // field inside it used to collapse into the signature. Measured in
+        // field inside it would collapse into the signature. Measured in
         // real crates: aho-corasick renders `MatchErrorKind::UnsupportedStream
         // { /// The match semantics ... got: MatchKind, }`. Beyond being noise
         // that inflates token_estimate, a `///` inside a one-line signature
@@ -1122,10 +1120,9 @@ mod surface_tests {
 
     #[test]
     fn a_rust_string_value_keeps_its_own_punctuation() {
-        // `tidy_punctuation` used to be a flat substring pass over collapsed
-        // text, so it rewrote punctuation *inside* a string literal that
-        // survived into a signature: this rendered `", "`, silently
-        // misreporting the constant's value. `render_span` now decides
+        // A flat `tidy_punctuation` pass over collapsed text would rewrite
+        // punctuation *inside* a string literal, rendering `", "` and silently
+        // misreporting the constant's value. `render_span` decides
         // structurally, leaving literal spans untidied.
         let src = "pub const SEP: &str = \" , \";\n";
         assert_has(src, "pub const SEP: &str = \" , \"");

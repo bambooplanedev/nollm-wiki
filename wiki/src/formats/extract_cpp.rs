@@ -953,9 +953,9 @@ mod tests {
         // rights reserved.`) look identical, line by line, to a Doxygen
         // `/** ... */` block's own continuation lines — the only thing that
         // tells them apart is whether the block that opened them started
-        // with `/**`/`/*!` or plain `/*`. Before this was tracked, the
-        // banner's second line was collected as if it were doc content and
-        // concatenated onto the real `///` doc that follows, producing
+        // with `/**`/`/*!` or plain `/*`. Untracked, the banner's second
+        // line would be collected as doc content and concatenated onto the
+        // real `///` doc that follows, producing
         // "All rights reserved.\nMaintains the book." instead of the real
         // one-line summary.
         let s = summary(

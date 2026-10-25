@@ -47,8 +47,7 @@ pub(crate) fn validate_queries() {
 /// list (`@pytest.mark.parametrize("a,b", [(1, 2), …])`) is spliced in full.
 ///
 /// A comment between the decorator and the definition (`@dataclass  # noqa`)
-/// used to be spliced in with it. `render_span` drops comment nodes, so that
-/// risk is closed.
+/// is not spliced in: `render_span` drops comment nodes.
 ///
 /// An assignment climbs to its `expression_statement`, which starts at the
 /// same byte: the statement, not the assignment, is the sibling of a `#`
@@ -227,10 +226,8 @@ fn python_placement(def: Node, text: &str) -> Placement {
 /// statements, not just literal assignments: `__all__ = ["a"]` followed later
 /// by `__all__ += ["b"]` must fall back to the convention (the augmented
 /// assignment is last and isn't a literal assignment), even though the most
-/// recent *literal* assignment looks well-formed on its own — reading only
-/// literal assignments and ignoring everything between them is exactly the
-/// defect this cycle exists to close. Among literal assignments alone,
-/// last-wins is unchanged: when a module reassigns `__all__` to a literal list
+/// recent *literal* assignment looks well-formed on its own. Among literal
+/// assignments alone, last wins: when a module reassigns `__all__` to a literal list
 /// more than once with nothing else touching it in between, only the last one
 /// governs.
 ///
@@ -564,9 +561,8 @@ mod tests {
 
     #[test]
     fn without_all_the_underscore_convention_still_hides_a_free_name() {
-        // Guards against an overcorrection of the fix above: with no `__all__`
-        // at all, `exports` is `None` and the convention must still apply to
-        // a free item's own name exactly as before.
+        // Counterpart of the test above: with no `__all__` at all, `exports`
+        // is `None` and the convention must still apply to a free item's own name.
         let src =
             "def _private_api() -> int:\n    return 1\n\ndef public_api() -> int:\n    return 2\n";
         let e = CodeExtractor.extract("m.py", src);
@@ -729,8 +725,8 @@ mod tests {
 
     #[test]
     fn a_comment_between_a_decorator_and_its_definition_is_dropped() {
-        // Previously documented on `python_sig_start` as an accepted risk:
-        // the decorator span reaches the definition, so the comment came too.
+        // The decorator span reaches the definition, so the comment sits
+        // inside it and must be dropped by `render_span`.
         let src = "@dataclass  # noqa: D101\nclass Article:\n    title: str\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "@dataclass class Article");
@@ -740,7 +736,7 @@ mod tests {
     #[test]
     fn a_comment_inside_a_retained_value_is_dropped() {
         // The value is rendered through the same path as the head, so a
-        // comment inside it was spliced in the same way.
+        // comment inside it must be dropped the same way.
         let src = "CONFIG = {  # inline\n    \"a\": 1,\n}\n";
         let e = CodeExtractor.extract("m.py", src);
         assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
@@ -787,8 +783,8 @@ mod tests {
 
     #[test]
     fn python_unannotated_assignment_renders_its_value_once() {
-        // `signature_cut` no longer stops short of an unannotated value, so the
-        // head must not still carry it: `MAX_IDS = 2000 = 2000` is the failure.
+        // `signature_cut` leaves an unannotated value to the join, so the
+        // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
         let src = "MAX_IDS = 2000\n";
         let e = CodeExtractor.extract("state.py", src);
         assert_has(&e.symbols, "MAX_IDS = 2000");
@@ -802,9 +798,8 @@ mod tests {
     #[test]
     fn python_assignment_without_spaces_is_normalized_and_budgeted() {
         // The ` = ` is emitted by the join now, never copied from source, so a
-        // no-space assignment renders like every sibling. Previously
-        // `truncate_value`'s `sig.find(" = ")` missed this line entirely and
-        // the budget was bypassed however long the value was.
+        // no-space assignment renders like every sibling and the budget
+        // applies however long the value is.
         let long = "y".repeat(200);
         let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
         let e = CodeExtractor.extract("state.py", &src);

@@ -497,7 +497,7 @@ impl Wiki {
     /// purpose: `rewrite.rs` emits the chrome with this exact casing, so the
     /// exact match excludes the generated sections and nothing else. A
     /// case-insensitive match would also hide an author's own `## notes` or
-    /// `## NOTES` section (2026-09-02 audit, findings-log item 37).
+    /// `## NOTES` section.
     /// `Referenced By` is what `Imported by` and `Mentioned in` replaced: a
     /// served wiki may be older than the compiler.
     const CHROME_SECTIONS: [&'static str; 6] = [
@@ -631,8 +631,7 @@ impl Wiki {
     /// acronym run stays one word (`HTTPServer` → `http`, `server`;
     /// `PackBudget` → `pack`, `budget`; `CACHE_VERSION` → `cache`,
     /// `version`). Must run on the ORIGINAL-case name: lowercasing first
-    /// erases every CamelCase boundary (the 2026-09-02 V7 prototype's dead
-    /// rule).
+    /// erases every CamelCase boundary.
     pub(crate) fn name_words(name: &str) -> Vec<String> {
         let mut words = Vec::new();
         let mut cur = String::new();
@@ -1635,7 +1634,7 @@ mod tests {
             w("wiki::search 2026-09 a_b"),
             vec!["wiki", "search", "2026", "09", "a", "b"]
         );
-        // No longer a substring hit inside a word.
+        // Not a substring hit inside a word.
         assert!(!Wiki::field_hit(&w("rewrite"), "write"));
         assert!(!Wiki::field_hit(&w("process-wide query cache"), "id"));
         // A prefix of a word still hits (derived forms survive).

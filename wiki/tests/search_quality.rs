@@ -1,8 +1,7 @@
 //! Regression tests for search ranking.
 //!
-//! Coverage: the four dogfood checklist queries from the 2026-07-14 cycle,
-//! plus the 2026-09-02 scoring cycle's pins — partial matching, occurrence
-//! monotonicity, the heading field, and IDF over volume. Fixtures are
+//! Coverage: the four dogfood checklist queries, plus pins for partial
+//! matching, occurrence monotonicity, the heading field, and IDF over volume. Fixtures are
 //! authored in-test (modeled on the self-hosted corpus), not a checkout of
 //! this repo.
 
@@ -81,8 +80,7 @@ fn more_occurrences_score_higher() {
     // page's searchable body is its H1 line plus its `quokka` run, so
     // len = tf + 3 and tf' = tf·2.2 / (tf + 1.2·(0.25 + 0.75·len/avglen))
     // is strictly increasing in tf: more mentions score strictly higher.
-    // (The old scorer capped at 20 and forced an exact tie; that concept
-    // is gone.)
+    // (There is no occurrence cap, so no exact tie.)
     assert!(
         b.score > a.score,
         "40 occurrences must score above 25: {} vs {}",
@@ -140,7 +138,7 @@ fn rare_title_match_beats_volume_on_a_common_word() {
     let hits = w.search("content hash", None, 10);
     let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
     // Under strict AND `hash` was not even a hit (it lacks "content").
-    // Under the old additive scorer `architecture` won on volume. IDF
+    // Volume alone would put `architecture` first. IDF
     // makes "content" nearly weightless and the title hit on "hash"
     // decisive.
     assert_eq!(ids.first(), Some(&"hash"), "got {ids:?}");

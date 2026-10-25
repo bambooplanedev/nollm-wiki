@@ -506,7 +506,7 @@ mod tests {
         assert_eq!(slugify("café"), "cafe");
         // A `|` in a title MUST fold away — the id is both the `<id>.md`
         // filename and the `[[id|display]]` link target, and a pipe in either
-        // would break Task 1's split-on-`|` resolution (Task 1 review finding).
+        // would break the split-on-`|` link resolution.
         assert_eq!(slugify("Chapter 1 | Overview"), "chapter_1_overview");
         // 'İ' lowercases to `i` plus a combining dot, which is dropped.
         assert_eq!(slugify("İstanbul"), "istanbul");

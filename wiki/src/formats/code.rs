@@ -272,10 +272,8 @@ fn no_header_group(_def: Node, _text: &str) -> Option<String> {
 
 /// Where a captured definition sits relative to the module's public surface.
 ///
-/// Replaces the previous `owner_of` + `def_filter` pair. The two were split
-/// only because Rust could answer them independently; Python answers both from
-/// a single upward traversal of the tree, and keeping them apart would
-/// traverse it twice and duplicate the privacy check.
+/// One answer for both "is it public" and "who owns it": Python derives both
+/// from a single upward traversal of the tree, so they are not split.
 pub(crate) enum Placement {
     /// Not part of the module's surface — drop the definition outright.
     Rejected,
@@ -308,9 +306,8 @@ pub(crate) fn is_cpp(ext: &str) -> bool {
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
 /// extension (`Makefile`) or is a dotfile (`.gitignore`).
 ///
-/// `Registry::ext_of` lowercases when dispatching, but `CodeExtractor::extract`
-/// used to recompute the extension without lowercasing, so `Book.H` reached
-/// this extractor and then fell through `lang_for_ext` to zero symbols.
+/// Lowercasing matters: `Registry::ext_of` dispatches on the lowercase form, so
+/// `Book.H` must also reach `lang_for_ext` as `h`, not fall through to zero symbols.
 pub(crate) fn ext_of(rel_path: &str) -> String {
     let base = basename(rel_path);
     match base.rsplit_once('.') {
@@ -842,7 +839,7 @@ fn pick_summary_fallback(collected: &[Collected]) -> Option<String> {
 /// nothing, so the bytes are provably the same.
 fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeInfo> {
     let spec = lang_for_ext(ext)?;
-    // Compiled once per process. A malformed query can no longer strip a
+    // Compiled once per process. A malformed query must not silently strip a
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
     let query = QUERIES.get(ext)?;
@@ -864,7 +861,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
-    // group `Article`, so a class no longer scatters across the section
+    // group `Article`, so a class does not scatter across the section
     // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
     // stays a plain `Vec<String>`.
     let mut collected: Vec<Collected> = Vec::new();
@@ -897,8 +894,8 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
             if keep {
                 // Resolved once, after `placement` has accepted the item, and
-                // then used for both the signature and the classification —
-                // the two used to re-derive the node's kind independently.
+                // then used for both the signature and the classification, so
+                // the node's kind is derived once.
                 let sig = build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
                 if !sig.is_empty() {
                     let kind = classify(parts.name, owner.as_deref(), shape.rank);
@@ -1404,19 +1401,18 @@ fn descendant_spans(
 
 /// Render one fragment of a signature from source, with the parse tree in hand.
 ///
-/// Replaces a flat `normalize` over the raw span. Three segment kinds, decided
-/// structurally rather than by searching the text:
+/// Three segment kinds, decided structurally rather than by searching the text:
 ///
 ///   * a **comment** is dropped. A `///` on a field inside an enum variant's
-///     body used to collapse into the signature — real crates render
-///     `MatchErrorKind::UnsupportedStream { /// The match semantics … got: MatchKind, }`
-///     — and a `//` line comment inside a one-line signature would comment out
-///     everything after it for anyone who copied it. Also closes the two
-///     documented Python risks: a comment between a decorator and its
-///     definition, and one inside a retained value.
+///     body would otherwise collapse into the signature
+///     (`MatchErrorKind::UnsupportedStream { /// The match semantics … got: MatchKind, }`),
+///     and a `//` line comment inside a one-line signature would comment out
+///     everything after it for anyone who copied it. This also covers a
+///     comment between a decorator and its definition, and one inside a
+///     retained value.
 ///   * a **string literal** is collapsed but never tidied, so a `" , "` stays
 ///     `" , "` instead of being rewritten to `", "`.
-///   * everything else is collapsed and tidied, exactly as before.
+///   * everything else is collapsed and tidied.
 ///
 /// Order is load-bearing. Segmentation reads node offsets, so it must happen
 /// on the *raw* span: `join_continuations` is a `replace` that changes length
@@ -1621,10 +1617,9 @@ fn append_value(head: String, value: &str, has_type: bool) -> String {
 /// `LangSpec` field: it runs inside `render_span` for all five languages, not
 /// just Rust.
 ///
-/// It is still a plain substring substitution, but it is no longer applied to
-/// the whole signature: `render_span` withholds string-literal spans from it,
-/// so a Python default `gamma=" )"` and a Rust `pub const SEP: &str = " , "`
-/// now keep their own punctuation. Pinned by
+/// It is a plain substring substitution, applied only outside string literals:
+/// `render_span` withholds those spans, so a Python default `gamma=" )"` and a
+/// Rust `pub const SEP: &str = " , "` keep their own punctuation. Pinned by
 /// `a_rust_string_value_keeps_its_own_punctuation` and by the Python fixture in
 /// `wrapped_parameter_lists_are_tidied_in_every_language`.
 fn tidy_punctuation(mut sig: String) -> String {
@@ -1664,7 +1659,7 @@ fn collapse_runs(s: &str) -> String {
 ///
 /// Empty doc lines are SKIPPED rather than terminating the scan: a Doxygen
 /// block opens with a bare `/**`, which strips to nothing, and aborting there
-/// left the commonest C++ comment shape with no docstring at all.
+/// would leave the commonest C++ comment shape with no docstring at all.
 ///
 /// Skipping forward past a NON-doc line (a license/SPDX banner) in search of
 /// the real doc beneath it is a C++-only allowance, gated on `cpp` below —
@@ -2018,7 +2013,7 @@ mod tests {
 
     #[test]
     fn a_directory_module_at_the_corpus_root_keeps_its_own_stem() {
-        // Nothing to borrow a name from, so the old behaviour stands.
+        // Nothing to borrow a name from, so the file's own stem is kept.
         let e = CodeExtractor.extract("mod.rs", "pub fn f() {}\n");
         assert_eq!(e.name, "Mod");
         let e = CodeExtractor.extract("__init__.py", "def f():\n    pass\n");
@@ -2089,8 +2084,8 @@ mod tests {
         // Python must use `.`, never Rust's `::`
         assert_lacks(&e.symbols, "::");
 
-        // The summary fallback is shared machinery that Task 9 reordered.
-        // Pin it per language so a future reordering cannot move it silently.
+        // The summary fallback is shared machinery; pin it per language so a
+        // reordering cannot move it silently.
         let e = CodeExtractor.extract("t.py", py);
         assert_eq!(
             e.summary.as_deref(),
@@ -2242,7 +2237,7 @@ mod tests {
     fn the_query_registry_covers_exactly_the_claimed_extensions() {
         // A language accepted by `extensions()` but absent from `QUERIES`
         // would extract nothing while the compile still exits 0 — the silent
-        // failure the old per-file `Query::new` path allowed.
+        // failure a per-file `Query::new` would allow.
         let claimed: BTreeSet<&str> = CodeExtractor.extensions().iter().copied().collect();
         let compiled: BTreeSet<&str> = QUERIES.keys().copied().collect();
         assert_eq!(claimed, compiled);

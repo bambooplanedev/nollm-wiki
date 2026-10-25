@@ -244,9 +244,8 @@ struct ImportResolver<'a> {
     /// `#include` of the bare stem should mean, so the tie-break is
     /// `source_rank` first (a header always ranks below its implementation)
     /// and `source_path` only to break a tie between two files of the same
-    /// rank. Before C++ landed no header extension existed, so every
-    /// existing corpus ties on rank and this reduces to the old
-    /// smallest-path rule.
+    /// rank. Without a header extension every file ties on rank and this
+    /// reduces to the smallest-path rule.
     by_stem: BTreeMap<&'a str, (u8, &'a str, &'a str)>,
     /// Defined name → (`source_rank`, page id) of the lowest-rank claimant,
     /// or `None` once two pages of the *same* rank both claim it.
