@@ -33,17 +33,25 @@ fn is_boilerplate(line: &str) -> bool {
         || l.starts_with("this note")
 }
 
+/// A Doxygen or `JSDoc` block tag line (`@param id …`, `\return …`).
+fn is_doc_tag(line: &str) -> bool {
+    let mut chars = line.chars();
+    matches!(chars.next(), Some('@' | '\\'))
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+}
+
 /// First non-heading, non-boilerplate sentence from a text block.
 ///
 /// The sentence is taken from the whole paragraph that opens with the first
 /// real line — consecutive non-empty lines joined by one space — so a
 /// sentence wrapped at 80 columns (a `//!` block, README prose) is not cut at
-/// the line break.
+/// the line break. A tag line ends the paragraph: a `@brief` with no period
+/// would otherwise run on into the `@param` lines under it.
 fn first_real_sentence(text: &str) -> Option<String> {
     let mut lines = text.lines().map(str::trim);
     let first = lines.find(|l| !l.is_empty() && !l.starts_with('#') && !is_boilerplate(l))?;
     let paragraph = std::iter::once(first)
-        .chain(lines.take_while(|l| !l.is_empty()))
+        .chain(lines.take_while(|l| !l.is_empty() && !is_doc_tag(l)))
         .collect::<Vec<_>>()
         .join(" ");
     Some(first_sentence(&paragraph))
@@ -99,6 +107,21 @@ mod tests {
         );
         assert_eq!(first_sentence("Bump to v1.2"), "Bump to v1.2");
         assert_eq!(first_sentence("Done!Next"), "Done!Next");
+    }
+
+    #[test]
+    fn a_tag_line_ends_the_first_sentence() {
+        let doc =
+            "Pin the current thread to a core\n@param coreId The core\n@return true on success";
+        let s = summarize(None, Some(doc), "", None);
+        assert_eq!(s.as_deref(), Some("Pin the current thread to a core"));
+        let doc = "Async write callback\n\\param ec The status code";
+        let s = summarize(None, Some(doc), "", None);
+        assert_eq!(s.as_deref(), Some("Async write callback"));
+        // An `@` that opens no tag stays in the paragraph.
+        let doc = "Mails the owner\n@ 9am daily";
+        let s = summarize(None, Some(doc), "", None);
+        assert_eq!(s.as_deref(), Some("Mails the owner @ 9am daily"));
     }
 
     #[test]

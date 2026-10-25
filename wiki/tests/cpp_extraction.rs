@@ -143,7 +143,7 @@ fn a_definition_inherits_the_declaration_doc_and_both_point_at_each_other() {
     let idx = compile_with_items(&[
         (
             "include/book.h",
-            "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n};\n",
+            "class Book {\npublic:\n  /// Applies an order. Drops a stale one.\n  void apply(int o);\n};\n",
         ),
         (
             "src/book.cpp",
@@ -157,7 +157,26 @@ fn a_definition_inherits_the_declaration_doc_and_both_point_at_each_other() {
     let apply_c = c.iter().find(|i| i["name"] == "apply").unwrap();
     assert_eq!(apply_c["owner"], "Book");
     assert_eq!(apply_c["doc"], "Applies an order.");
+    assert_eq!(apply_c["doc_text"], "Applies an order. Drops a stale one.");
     assert_eq!(apply_c["twin"], "include/book.h:3-4");
+}
+
+#[test]
+fn overloads_pair_by_parameter_count() {
+    let idx = compile_with_items(&[
+        (
+            "book.h",
+            "class Book {\npublic:\n  /// One.\n  void apply(int o);\n  /// Two.\n  void apply(int o, std::map<int, int> m);\n};\n",
+        ),
+        (
+            "book.cpp",
+            "void Book::apply(int o, std::map<int, int> m) {}\nvoid Book::apply(int o) {}\n",
+        ),
+    ]);
+    let c = items_of(&idx, "book.cpp");
+    let doc_at = |line: u64| c.iter().find(|i| i["start_line"] == line).unwrap()["doc"].clone();
+    assert_eq!(doc_at(1), "Two.");
+    assert_eq!(doc_at(2), "One.");
 }
 
 #[test]
@@ -181,17 +200,22 @@ fn overloads_are_left_unpaired() {
 }
 
 #[test]
-fn two_impl_files_with_one_stem_pair_nothing() {
+fn same_stem_files_in_several_directories_pair_within_their_directory() {
     let idx = compile_with_items(&[
         ("a/book.h", "/// Doc.\nvoid run();\n"),
         ("a/book.cpp", "void run() {}\n"),
         ("b/book.cpp", "void run() {}\n"),
     ]);
-    for path in ["a/book.h", "a/book.cpp", "b/book.cpp"] {
-        let items = items_of(&idx, path);
-        assert!(items.iter().any(|i| i["name"] == "run"), "{path}");
-        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
-    }
+    let run = |path: &str| {
+        items_of(&idx, path)
+            .into_iter()
+            .find(|i| i["name"] == "run")
+            .unwrap_or_else(|| panic!("no run in {path}"))
+    };
+    assert_eq!(run("a/book.cpp")["twin"], "a/book.h:1-2");
+    assert_eq!(run("a/book.cpp")["doc"], "Doc.");
+    assert!(run("b/book.cpp").get("twin").is_none());
+    assert!(run("b/book.cpp").get("doc").is_none());
 }
 
 fn sig_of(items: &[serde_json::Value], owner: Option<&str>, name: &str) -> String {
