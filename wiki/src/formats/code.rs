@@ -995,22 +995,53 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
     if fns.is_empty() {
         return;
     }
+    let aliases = import_aliases(root, text);
+    // An alias a parameter or receiver of an enclosing function shadows
+    // (Go's `func (m *T)` beside an import `m`) stays as written.
+    let unalias = |n: &mut String, at: Node| {
+        let Some(o) = aliases.get(n) else { return };
+        let mut up = at.parent();
+        while let Some(u) = up {
+            let declares = |f: &str| {
+                u.child_by_field_name(f).is_some_and(|p| {
+                    text.get(p.byte_range())
+                        .unwrap_or("")
+                        .split(|c: char| !c.is_alphanumeric() && c != '_')
+                        .any(|w| w == n)
+                })
+            };
+            if declares("parameters") || declares("receiver") {
+                return;
+            }
+            up = u.parent();
+        }
+        n.clone_from(o);
+    };
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         let mut cursor = node.walk();
         stack.extend(node.named_children(&mut cursor));
         // `call` is Python's; every other grammar says `call_expression`.
-        if !matches!(node.kind(), "call_expression" | "call") {
-            continue;
-        }
-        let Some(mut site) = node
-            .child_by_field_name("function")
-            .and_then(|f| call_site(f, text))
-        else {
+        let site = match node.kind() {
+            "call_expression" | "call" => node
+                .child_by_field_name("function")
+                .and_then(|f| call_site(f, text))
+                .map(|mut s| {
+                    s.args = call_args(node);
+                    s
+                }),
+            "token_tree" => macro_call_site(node, text),
+            _ => None,
+        };
+        let Some(mut site) = site else {
             continue;
         };
+        match &mut site.via {
+            CallVia::Bare => unalias(&mut site.name, node),
+            CallVia::Path(q) | CallVia::Member(Some(q)) => unalias(q, node),
+            _ => {}
+        }
         let line = node.start_position().row + 1;
-        site.args = call_args(node);
         site.line = line;
         let holder = fns
             .iter()
@@ -1092,6 +1123,163 @@ fn call_site(f: Node, text: &str) -> Option<CallSite> {
         }
         _ => None,
     }
+}
+
+/// A file's import aliases, each local name to the name it stands for, one
+/// map for the whole file: `import { f as g }`, `from m import f as g` and
+/// `use m::f as g` give `g` → `f`; a module alias (`import * as m from
+/// './a/b'`, `import a.b as m`, `use a::b::{self as m}`, Go's `m "a/b"`)
+/// gives `m` → `b`, the module's last segment, past an `index` file or a Go
+/// `/vN` suffix.
+fn import_aliases(root: Node, text: &str) -> BTreeMap<String, String> {
+    let text_of = |n: Node| text.get(n.byte_range()).unwrap_or("");
+    let last = |s: &str| {
+        let segment = match s.strip_prefix(['"', '\'', '`']) {
+            Some(path) => path
+                .trim_end_matches(['"', '\'', '`'])
+                .rsplit('/')
+                .map(|f| f.split('.').next().unwrap_or(""))
+                .find(|f| {
+                    let version = f.len() > 1
+                        && f.starts_with('v')
+                        && f[1..].bytes().all(|b| b.is_ascii_digit());
+                    *f != "index" && !version
+                }),
+            None => s.rsplit(['.', ':']).next(),
+        };
+        segment.unwrap_or("").to_string()
+    };
+    let mut out = BTreeMap::new();
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+        let field = |f: &str| node.child_by_field_name(f);
+        let pair = match node.kind() {
+            "import_specifier" | "aliased_import" => {
+                field("alias").zip(field("name").map(|n| last(text_of(n))))
+            }
+            // `a::b::{self as m}` names `b`, the list's path.
+            "use_as_clause" => field("alias").zip(field("path").map(|n| {
+                match text_of(n) {
+                    "self" => node
+                        .parent()
+                        .and_then(|l| l.parent())
+                        .and_then(|u| u.child_by_field_name("path"))
+                        .map_or_else(String::new, |p| last(text_of(p))),
+                    t => last(t),
+                }
+            })),
+            "import_spec" => field("name").zip(field("path").map(|n| last(text_of(n)))),
+            // The source string sits on the `import_statement` two levels up.
+            "namespace_import" => node.named_child(0).zip(
+                node.parent()
+                    .and_then(|c| c.parent())
+                    .and_then(|s| s.child_by_field_name("source"))
+                    .map(|s| last(text_of(s))),
+            ),
+            _ => None,
+        };
+        if let Some((alias, orig)) = pair {
+            let alias = text_of(alias);
+            if !matches!(orig.as_str(), "" | "default" | "self")
+                && !matches!(alias, "_" | ".")
+                && alias != orig
+            {
+                out.insert(alias.to_string(), orig);
+            }
+        }
+    }
+    out
+}
+
+/// A call inside a Rust macro's arguments (`format!("{}", f(x))`,
+/// `select! { v = rx.recv() => … }`), which the grammar keeps as bare
+/// tokens: a `(…)` token tree right after a name, read as `f(…)`, `q::f(…)`
+/// or `x.f(…)`, generic arguments skipped. Attribute arguments,
+/// `macro_rules!` bodies and the names an item inside a macro defines
+/// (`fn f(…)`, `struct P(…)`) are not calls.
+fn macro_call_site(tree: Node, text: &str) -> Option<CallSite> {
+    // The token before `n`, stepping over `<…>` and the turbofish `::` before it.
+    fn back<'t>(n: Node<'t>, text: &str) -> Option<Node<'t>> {
+        let text_of = |n: Node| text.get(n.byte_range()).unwrap_or("");
+        let mut p = n.prev_sibling()?;
+        if text_of(p).bytes().all(|b| b == b'>') {
+            let (mut close, mut open) = (0, 0);
+            loop {
+                let t = text_of(p);
+                if t.bytes().all(|b| b == b'<' || b == b'>') {
+                    close += t.matches('>').count();
+                    open += t.matches('<').count();
+                }
+                if open >= close {
+                    break;
+                }
+                p = p.prev_sibling()?;
+            }
+            p = p.prev_sibling()?;
+            if text_of(p) == "::" {
+                p = p.prev_sibling()?;
+            }
+        }
+        Some(p)
+    }
+    let text_of = |n: Node| text.get(n.byte_range()).unwrap_or("");
+    let mut up = tree.parent()?;
+    while up.kind() == "token_tree" {
+        up = up.parent()?;
+    }
+    if up.kind() != "macro_invocation" || !text_of(tree).starts_with('(') {
+        return None;
+    }
+    let name = back(tree, text).filter(|n| n.kind() == "identifier")?;
+    let word = |n: Node| matches!(n.kind(), "identifier" | "self" | "crate" | "super");
+    let via = match back(name, text) {
+        Some(k)
+            if matches!(
+                text_of(k),
+                "fn" | "struct" | "enum" | "union" | "trait" | "type"
+            ) =>
+        {
+            return None;
+        }
+        Some(sep) if text_of(sep) == "::" => {
+            CallVia::Path(text_of(back(sep, text).filter(|q| word(*q))?).to_string())
+        }
+        Some(sep) if text_of(sep) == "." => {
+            // A plain name before the dot is the receiver; `a.b.f()` has none.
+            let recv = back(sep, text).filter(|w| {
+                word(*w) && back(*w, text).is_none_or(|b| !matches!(text_of(b), "." | "::"))
+            });
+            match recv.map(text_of) {
+                Some("self") => CallVia::SelfRecv,
+                Some(w) => CallVia::Member(Some(w.to_string())),
+                None => CallVia::Member(None),
+            }
+        }
+        _ => CallVia::Bare,
+    };
+    // Arguments are the commas at the top level of the tree, plus one; a
+    // closure's `|a, b|` or a `<A, B>` there hides the count.
+    let mut cursor = tree.walk();
+    let inner: Vec<Node> = tree.children(&mut cursor).collect();
+    let inner = inner.get(1..inner.len().saturating_sub(1)).unwrap_or(&[]);
+    let unsure = inner
+        .iter()
+        .any(|n| matches!(text_of(*n), "|" | "||" | "<"));
+    let commas = inner.iter().filter(|n| text_of(**n) == ",").count();
+    let trailing = inner.last().is_some_and(|n| text_of(*n) == ",");
+    let args = match inner {
+        _ if unsure => None,
+        [] => Some(0),
+        _ => Some(commas + 1 - usize::from(trailing)),
+    };
+    Some(CallSite {
+        name: text_of(name).to_string(),
+        via,
+        args,
+        line: 0,
+    })
 }
 
 /// How many arguments a call passes; `None` when a spread, splat or pack
@@ -2547,5 +2735,58 @@ mod tests {
         assert_eq!(sites("src/c.ts", ts, "f"), ["g", "obj.n", "self.m"]);
         let go = "package a\nfunc F() {\n\tg()\n\tpkg.H()\n}\n";
         assert_eq!(sites("src/a.go", go, "F"), ["g", "pkg.H"]);
+    }
+
+    #[test]
+    fn calls_inside_rust_macro_arguments_are_call_sites() {
+        let rs = "#[cfg(feature(x))]\nfn f() {\n    let a = format!(\"{}\", crate::port(\"X\", 1));\n    tokio::select! {\n        v = rx.recv() => self.on(v),\n        _ = a.b.tick() => g(1, 2,),\n    }\n    assert!(matches!(x, Foo(y)));\n    vec![h()];\n}\nmacro_rules! m { ($a:expr) => { k($a) } }\n";
+        assert_eq!(
+            sites("src/s.rs", rs, "f"),
+            [
+                "Foo",
+                "_.tick",
+                "crate::port",
+                "g",
+                "h",
+                "rx.recv",
+                "self.on"
+            ]
+        );
+        let e = CodeExtractor.extract("src/s.rs", rs);
+        let f = e.items.iter().find(|i| i.name == "f").unwrap();
+        let args = |n: &str| f.call_sites.iter().find(|c| c.name == n).unwrap().args;
+        assert_eq!(
+            (args("port"), args("g"), args("tick")),
+            (Some(2), Some(2), Some(0))
+        );
+        let rs = "fn f() {\n    assert_eq!(a::b::g(1), Foo::<T>::k(2), h::<A, B>(3));\n    m! { fn helper(a: u32) {} struct P(u32, u32); }\n    println!(\"{}\", xs.fold(0, |a, b| a + b), q(V::<K, W>::new()));\n}\n";
+        assert_eq!(
+            sites("src/s.rs", rs, "f"),
+            ["Foo::k", "V::new", "b::g", "h", "q", "xs.fold"]
+        );
+        let e = CodeExtractor.extract("src/s.rs", rs);
+        let f = e.items.iter().find(|i| i.name == "f").unwrap();
+        let args = |n: &str| f.call_sites.iter().find(|c| c.name == n).unwrap().args;
+        assert_eq!((args("g"), args("fold"), args("q")), (Some(1), None, None));
+    }
+
+    #[test]
+    fn calls_through_an_import_alias_name_the_original() {
+        let ts = "import { stopJob as apiStop, b } from './api/client';\nimport * as auth from '../api/auth.ts';\nfunction f() {\n  apiStop(1);\n  auth.login();\n  b();\n}\n";
+        assert_eq!(sites("src/h.ts", ts, "f"), ["auth.login", "b", "stopJob"]);
+        let py = "import a.b.mod as m\nfrom p import f as g\ndef h():\n    m.run()\n    g()\n";
+        assert_eq!(sites("src/h.py", py, "h"), ["f", "mod.run"]);
+        let rs = "use crate::x::{init as manager_init, y as _};\nuse a::b as c;\nfn h() {\n    manager_init();\n    c::k();\n}\n";
+        assert_eq!(sites("src/h.rs", rs, "h"), ["b::k", "init"]);
+        let go = "package a\nimport (\n\tx \"a/b/c\"\n)\nfunc F() {\n\tx.G()\n}\n";
+        assert_eq!(sites("src/a.go", go, "F"), ["c.G"]);
+        // A parameter or receiver of the same name shadows the alias.
+        let go = "package a\nimport m \"p/models/v2\"\nfunc (m *T) F() {\n\tm.Save()\n}\nfunc G() {\n\tm.Save()\n}\n";
+        assert_eq!(sites("src/a.go", go, "F"), ["m.Save"]);
+        assert_eq!(sites("src/a.go", go, "G"), ["models.Save"]);
+        let ts = "import * as api from './api/index';\nimport { default as d } from './d';\nfunction f() {\n  api.go();\n  d();\n}\n";
+        assert_eq!(sites("src/h.ts", ts, "f"), ["api.go", "d"]);
+        let rs = "use crate::net::{self as n};\nfn h() {\n    n::connect();\n}\n";
+        assert_eq!(sites("src/h.rs", rs, "h"), ["net::connect"]);
     }
 }
