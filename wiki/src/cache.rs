@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const CACHE_VERSION: u32 = 1;
 const HASH_ALGO: &str = "blake3";
@@ -42,34 +42,31 @@ impl Cache {
     }
 }
 
-fn cache_path(dir: &Path) -> std::path::PathBuf {
+fn cache_path(dir: &Path) -> PathBuf {
     dir.join(".wiki").join("cache.json")
 }
 
+/// The cache file as written, whatever its version; `None` when absent or unparseable.
+fn read(dir: &Path) -> Option<Cache> {
+    let text = std::fs::read_to_string(cache_path(dir)).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
 pub fn load(dir: &Path) -> Cache {
-    let path = cache_path(dir);
-    let Ok(text) = std::fs::read_to_string(&path) else {
-        return Cache::fresh();
-    };
-    let Ok(cache) = serde_json::from_str::<Cache>(&text) else {
-        return Cache::fresh();
-    };
-    if cache.version != CACHE_VERSION
-        || cache.hash_algo != HASH_ALGO
-        || cache.tool_version != env!("CARGO_PKG_VERSION")
-    {
-        return Cache::fresh();
-    }
-    cache
+    read(dir)
+        .filter(|c| {
+            c.version == CACHE_VERSION
+                && c.hash_algo == HASH_ALGO
+                && c.tool_version == env!("CARGO_PKG_VERSION")
+        })
+        .unwrap_or_else(Cache::fresh)
 }
 
 /// The page ids recorded in `dir`'s cache, IGNORING the version guard — for
 /// migration diagnostics (files the compiler previously wrote). Empty if the
 /// cache is absent or unparseable.
 pub fn prior_page_ids(dir: &Path) -> BTreeSet<String> {
-    std::fs::read_to_string(cache_path(dir))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Cache>(&t).ok())
+    read(dir)
         .map(|c| c.pages.into_keys().collect())
         .unwrap_or_default()
 }

@@ -20,8 +20,11 @@ pub mod setup;
 pub mod walk;
 pub mod watch;
 
+use crate::formats::code::{module_stem, source_rank};
 use crate::formats::Registry;
-use crate::model::{Entity, LintReport};
+use crate::model::{
+    basename, slugify, title_case, title_from_slug, Entity, LintReport, SourceKind,
+};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -47,7 +50,7 @@ pub struct CompileOptions {
     pub jobs: Option<usize>,
     pub project: Option<String>,
     /// An extra agent memory folder (absolute), compiled as flagged pages.
-    pub memory: Option<std::path::PathBuf>,
+    pub memory: Option<PathBuf>,
 }
 
 impl Default for CompileOptions {
@@ -112,7 +115,7 @@ fn prune_stale(
     prunable: &BTreeSet<String>,
     live: &BTreeSet<String>,
     output: &Path,
-    consumed: &BTreeSet<std::path::PathBuf>,
+    consumed: &BTreeSet<PathBuf>,
 ) {
     for stale in prunable.iter().filter(|k| !live.contains(*k)) {
         let path = output.join(format!("{stale}.md"));
@@ -323,7 +326,7 @@ fn compile_inner(
     let source_index = rewrite::page_source_index(output);
     let prior_ids = cache::prior_page_ids(output);
 
-    let rendered: Vec<(String, String, String)> = entities
+    let rendered: Vec<(String, String, String, Option<PathBuf>)> = entities
         .par_iter()
         .map(|(id, e)| {
             let edges = graph.edges.get(id).cloned().unwrap_or_default();
@@ -334,13 +337,15 @@ fn compile_inner(
             let notes = rewrite::read_notes_from(prior.as_deref().unwrap_or(&page_path));
             let fp = hash::to_hex(&rewrite::render_fingerprint(e, &edges, &entities, &notes));
             let content = rewrite::render_page(e, &edges, &entities, &notes);
-            (id.clone(), content, fp)
+            (id.clone(), content, fp, prior)
         })
         .collect();
+    // The prior page files whose notes were migrated onto a live page this run.
+    let consumed: BTreeSet<PathBuf> = rendered.iter().filter_map(|r| r.3.clone()).collect();
 
     let mut pages: BTreeMap<String, String> = BTreeMap::new();
     let mut written = 0usize;
-    for (id, content, fp) in rendered {
+    for (id, content, fp, _) in rendered {
         if !opts.incremental || cache.needs_render(&id, &fp) {
             rewrite::write_atomic(&output.join(format!("{id}.md")), &content)?;
             written += 1;
@@ -354,22 +359,13 @@ fn compile_inner(
     // for re-render decisions, not whether the output directory may keep files
     // that no longer correspond to any source.
     //
-    // `consumed` is every prior page file whose notes were migrated onto a
-    // (possibly renamed) live page this compile — the SAME file each page read
-    // its notes from above, chosen by the same `prior_page_for` rule. A losing
+    // `consumed` (above) is every prior page file whose notes were migrated onto a
+    // (possibly renamed) live page this compile — the file each page read
+    // its notes from. A losing
     // candidate is deliberately absent: nothing was migrated off it, so it
     // must reach `prune_stale`'s notes check and be kept-with-warning if it
     // still carries hand-written notes.
     let live: BTreeSet<String> = entities.keys().cloned().collect();
-    let consumed: BTreeSet<std::path::PathBuf> = entities
-        .values()
-        .filter_map(|e| {
-            let page_path = output.join(format!("{}.md", e.id));
-            source_index
-                .get(&e.source_path)
-                .and_then(|c| rewrite::prior_page_for(c, &page_path))
-        })
-        .collect();
     let mut prunable: BTreeSet<String> = cache.pages.keys().cloned().collect();
     prunable.extend(prior_ids.iter().cloned());
     prune_stale(&prunable, &live, output, &consumed);
@@ -499,18 +495,13 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
     // would render "Api Api" — a name whose tokens appear in no other page's
     // body, which is exactly the unreachability the naming rule exists to fix.
     // Qualify from the segment above it instead.
-    if segs
-        .last()
-        .map(|s| crate::model::title_from_slug(s))
-        .as_deref()
-        == Some(base)
-    {
+    if segs.last().map(|s| title_from_slug(s)).as_deref() == Some(base) {
         segs.pop();
     }
     let start = segs.len().saturating_sub(depth);
     let mut name = String::new();
     for seg in &segs[start..] {
-        name.push_str(&crate::model::title_from_slug(seg));
+        name.push_str(&title_from_slug(seg));
         name.push(' ');
     }
     name.push_str(base);
@@ -538,10 +529,10 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
 /// directory-module page (`pkg/__init__.py`) discarded no tail and uses the
 /// stem for the same reason.
 fn discriminator(entity: &Entity) -> String {
-    let base = crate::model::basename(&entity.source_path);
+    let base = basename(&entity.source_path);
     let stem = base.split('.').next().unwrap_or(base);
-    let named_after_stem = matches!(entity.kind, crate::model::SourceKind::Code { .. })
-        && crate::formats::code::module_stem(&entity.source_path) == stem;
+    let named_after_stem =
+        matches!(entity.kind, SourceKind::Code { .. }) && module_stem(&entity.source_path) == stem;
     if named_after_stem {
         let mut segs: Vec<&str> = base.split('.').collect();
         if segs.len() > 1 {
@@ -553,21 +544,18 @@ fn discriminator(entity: &Entity) -> String {
                 segs.join("_")
             };
             if !token.is_empty() {
-                return crate::model::slugify(&token);
+                return slugify(&token);
             }
         }
     }
-    crate::model::slugify(stem)
+    slugify(stem)
 }
 
 /// The name an entity renders at a given rung of the ladder.
 fn render_name(base: &str, source_path: &str, depth: usize, disc: &str, ordinal: usize) -> String {
     let mut name = qualify(base, source_path, depth);
     if !disc.is_empty() {
-        name = format!(
-            "{name} {}",
-            crate::model::title_case(&disc.replace('_', " "))
-        );
+        name = format!("{name} {}", title_case(&disc.replace('_', " ")));
     }
     if ordinal > 0 {
         name = format!("{name} {ordinal}");
@@ -671,7 +659,7 @@ fn assign_free_ids(
                 d,
                 n,
             );
-            let candidate_id = crate::model::slugify(&candidate);
+            let candidate_id = slugify(&candidate);
             if !claimed.contains(&candidate_id) {
                 break candidate_id;
             }
@@ -729,11 +717,8 @@ fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
     let key: Vec<(u8, usize)> = extracted
         .iter()
         .map(|e| {
-            let basename = crate::model::basename(&e.source_path);
-            (
-                crate::formats::code::source_rank(&e.source_path),
-                basename.matches('.').count(),
-            )
+            let basename = basename(&e.source_path);
+            (source_rank(&e.source_path), basename.matches('.').count())
         })
         .collect();
 
@@ -834,7 +819,7 @@ fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
         for i in 0..extracted.len() {
             let d = if used_disc[i] { disc[i].as_str() } else { "" };
             let name = render_name(&base[i], &extracted[i].source_path, depth[i], d, ordinal[i]);
-            extracted[i].id = crate::model::slugify(&name);
+            extracted[i].id = slugify(&name);
             extracted[i].name = name;
         }
 
@@ -853,7 +838,7 @@ fn resolve_supersedes(entities: &mut BTreeMap<String, Entity>) {
     for (id, e) in entities.iter().filter(|(_, e)| e.memory) {
         for name in &e.supersedes {
             let lower = name.to_lowercase();
-            let slug = crate::model::slugify(name);
+            let slug = slugify(name);
             let target = entities.iter().find(|(tid, t)| {
                 t.memory
                     && *tid != id
