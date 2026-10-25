@@ -299,14 +299,6 @@ fn score(wiki: &Wiki) -> (f64, f64, String) {
 const MIN_TOP1: f64 = 21.0 / 22.0; // 0.9545454…
 const MIN_MRR10: f64 = 43.0 / 44.0; // 0.9772727… = (21 + 1/2) / 22
 
-/// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
-/// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
-/// from the same rational written as a fraction (the original baseline,
-/// 55/114, did exactly that). The current floors happen to be bit-identical
-/// to their accumulations, but a future re-cut may not be. One case is worth
-/// 1/22 ≈ 4.5 percentage points, so 1e-9 cannot hide a real move.
-const FLOOR_EPS: f64 = 1e-9;
-
 /// The function name is load-bearing: `insta` derives the snapshot file name
 /// (`eval__retrieval_quality.snap`) from it, so renaming this test orphans
 /// the existing snapshot and fails CI with "no stored snapshot" instead of a
@@ -324,11 +316,11 @@ fn retrieval_quality() {
     // short-circuits `assert_snapshot!` — no rerun recovers it (not even with
     // INSTA_FORCE_UPDATE), and the corpus tempdir is already gone.
     assert!(
-        top1 >= MIN_TOP1 - FLOOR_EPS,
+        top1 >= MIN_TOP1 - corpus::FLOOR_EPS,
         "top1 regressed: {top1} < {MIN_TOP1}\n{table}"
     );
     assert!(
-        mrr >= MIN_MRR10 - FLOOR_EPS,
+        mrr >= MIN_MRR10 - corpus::FLOOR_EPS,
         "mrr@10 regressed: {mrr} < {MIN_MRR10}\n{table}"
     );
 

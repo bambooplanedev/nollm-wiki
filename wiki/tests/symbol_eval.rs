@@ -572,9 +572,7 @@ fn split(held_out: bool) -> &'static str {
 
 /// Page id -> source path, from the compiled `index.json`.
 fn id_paths(out: &Path) -> std::collections::BTreeMap<String, String> {
-    let v: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-    v["entries"]
+    corpus::read_json(out, "index.json")["entries"]
         .as_array()
         .unwrap()
         .iter()
@@ -600,8 +598,8 @@ struct Agg {
     n: f64,
 }
 
-/// Whether a symbol rank counts as `symbol_hit@3`.
-fn symbol_hit3(rank: Option<usize>) -> bool {
+/// Whether a file or symbol rank counts as a `hit@3`.
+fn hit3(rank: Option<usize>) -> bool {
     rank.is_some_and(|r| r <= 3)
 }
 
@@ -616,7 +614,7 @@ impl Agg {
         self.n += 1.0;
         self.tokens += tokens as f64;
         self.tokens_json += tokens_json as f64;
-        if symbol_hit3(symbol_rank) {
+        if hit3(symbol_rank) {
             self.s3 += 1.0;
         }
         if let Some(r) = rank {
@@ -624,9 +622,9 @@ impl Agg {
             if r == 1 {
                 self.h1 += 1.0;
             }
-            if r <= 3 {
-                self.h3 += 1.0;
-            }
+        }
+        if hit3(rank) {
+            self.h3 += 1.0;
         }
     }
 
@@ -702,11 +700,8 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     table.push_str(&held.footer("held"));
     for class in CLASSES {
         let of: Vec<_> = ranks.iter().filter(|(c, _, _)| c == class).collect();
-        let h3 = of
-            .iter()
-            .filter(|(_, r, _)| r.is_some_and(|r| r <= 3))
-            .count();
-        let s3 = of.iter().filter(|(_, _, s)| symbol_hit3(*s)).count();
+        let h3 = of.iter().filter(|(_, r, _)| hit3(*r)).count();
+        let s3 = of.iter().filter(|(_, _, s)| hit3(*s)).count();
         let n = of.len();
         writeln!(
             table,
@@ -776,9 +771,6 @@ const MIN_SYMBOL_HIT3_TUNE: f64 = 1.0; // 35/35
 const MIN_SYMBOL_HIT3_HELD: f64 = 1.0; // 17/17
 const MIN_TITLE_AS_QUERY: f64 = 1.0; // 28/28
 
-/// Slack on the floor comparisons (accumulated-sum ULP noise), as in `eval.rs`.
-const FLOOR_EPS: f64 = 1e-9;
-
 /// The function name is load-bearing: `insta` derives the snapshot file name
 /// (`symbol_eval__symbol_retrieval.snap`) from it.
 #[test]
@@ -789,24 +781,24 @@ fn symbol_retrieval() {
     // Floors before the snapshot, with the table in the message: this
     // ordering short-circuits `assert_snapshot!`.
     assert!(
-        tune.h3 / tune.n >= MIN_FILE_HIT3_TUNE - FLOOR_EPS,
+        tune.h3 / tune.n >= MIN_FILE_HIT3_TUNE - corpus::FLOOR_EPS,
         "tune file_hit@3 regressed below {MIN_FILE_HIT3_TUNE}\n{table}"
     );
     assert!(
-        held.h3 / held.n >= MIN_FILE_HIT3_HELD - FLOOR_EPS,
+        held.h3 / held.n >= MIN_FILE_HIT3_HELD - corpus::FLOOR_EPS,
         "held file_hit@3 regressed below {MIN_FILE_HIT3_HELD}\n{table}"
     );
     assert!(
-        tune.s3 / tune.n >= MIN_SYMBOL_HIT3_TUNE - FLOOR_EPS,
+        tune.s3 / tune.n >= MIN_SYMBOL_HIT3_TUNE - corpus::FLOOR_EPS,
         "tune symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_TUNE}\n{table}"
     );
     assert!(
-        held.s3 / held.n >= MIN_SYMBOL_HIT3_HELD - FLOOR_EPS,
+        held.s3 / held.n >= MIN_SYMBOL_HIT3_HELD - corpus::FLOOR_EPS,
         "held symbol_hit@3 regressed below {MIN_SYMBOL_HIT3_HELD}\n{table}"
     );
 
     assert!(
-        own as f64 / pages as f64 >= MIN_TITLE_AS_QUERY - FLOOR_EPS,
+        own as f64 / pages as f64 >= MIN_TITLE_AS_QUERY - corpus::FLOOR_EPS,
         "title_as_query regressed: {own}/{pages}\n{table}"
     );
 
@@ -818,10 +810,10 @@ fn symbol_retrieval() {
 #[test]
 fn items_on_the_frozen_corpus_are_line_true() {
     let (_dir, out, _wiki) = corpus::compile_frozen("tests/.symbol_corpus", SYMBOL_CORPUS_HASH);
-    let read = |name: &str| -> serde_json::Value {
-        serde_json::from_str(&std::fs::read_to_string(out.join(name)).unwrap()).unwrap()
-    };
-    let (index, all_items) = (read("index.json"), read("items.json"));
+    let (index, all_items) = (
+        corpus::read_json(&out, "index.json"),
+        corpus::read_json(&out, "items.json"),
+    );
     let entries = index["entries"].as_array().unwrap();
     let items_of = |entry: &serde_json::Value| all_items[entry["id"].as_str().unwrap()].as_array();
     let line_of =

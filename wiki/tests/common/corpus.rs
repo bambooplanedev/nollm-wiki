@@ -1,11 +1,22 @@
 //! Frozen-corpus helpers shared by the eval harnesses. Included with
 //! `#[path = "common/corpus.rs"] mod corpus;` rather than through
 //! `common/mod.rs`, so a harness that does not use them never compiles them.
+//! Each harness uses a subset, so unused items are expected.
+
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use wiki::query::Wiki;
 use wiki::{compile, CompileOptions};
+
+/// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
+/// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
+/// from the same rational written as a fraction (the original baseline,
+/// 55/114, did exactly that). The current floors happen to be bit-identical
+/// to their accumulations, but a future re-cut may not be. One case is worth
+/// 1/22 ≈ 4.5 percentage points, so 1e-9 cannot hide a real move.
+pub const FLOOR_EPS: f64 = 1e-9;
 
 /// Hash the corpus directory's relative paths and contents, in sorted path
 /// order, so the result does not depend on directory-listing order.
@@ -55,4 +66,9 @@ pub fn compile_frozen(rel: &str, expected_hash: &str) -> (TempDir, PathBuf, Wiki
     compile(&corpus, &output, &opts).unwrap();
     let wiki = Wiki::load(&output).unwrap();
     (dir, output, wiki)
+}
+
+/// The JSON file `name` under a compiled output directory.
+pub fn read_json(out: &Path, name: &str) -> serde_json::Value {
+    serde_json::from_str(&std::fs::read_to_string(out.join(name)).unwrap()).unwrap()
 }
