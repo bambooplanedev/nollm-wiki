@@ -560,7 +560,9 @@ matching:
   token adds `W_TITLE` 3.0, so a title query finds its page even where
   other pages' item names share the title's words. When they are exactly
   the words of one item's name (`get bin stock` for `getBinStock`), every
-  token the page title does not already match adds `W_SYMBOL`. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
+  token the page title does not already match adds `W_SYMBOL`.
+  When they all sit inside one longer item name (`order reject` in
+  `onOrderReject`), each such token adds `W_IN_ONE_NAME` 1.0 instead. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.

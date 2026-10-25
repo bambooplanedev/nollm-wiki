@@ -545,6 +545,8 @@ impl Wiki {
     // 2.8 restored the `W_NAME` rule and moved no eval rank.
     const W_SYMBOL: f64 = 2.8;
     const W_SYMBOL_WORD: f64 = 2.0;
+    // Per word, when all the query's words sit inside one longer item name.
+    const W_IN_ONE_NAME: f64 = 1.0;
     const W_METHOD_WORD: f64 = 2.0;
     const W_SYMBOL_DOC: f64 = 0.75;
     // A token the first sentence misses but the rest of the doc has.
@@ -995,6 +997,10 @@ impl Wiki {
         // The query's words are one item's name words, in any order.
         let query_words: BTreeSet<String> = raw.iter().flat_map(|t| Self::field_words(t)).collect();
         let whole_symbol = symbols.is_some_and(|f| f.name_sets.contains(&query_words));
+        // Two or more query words, all inside one longer item name.
+        let in_one_name = query_words.len() > 1
+            && !whole_symbol
+            && symbols.is_some_and(|f| f.name_sets.iter().any(|n| query_words.is_subset(n)));
         let sections = crate::rewrite::parse_sections(self.body(&e.id));
         let headings: Vec<String> = sections
             .keys()
@@ -1031,6 +1037,15 @@ impl Wiki {
             // 289, title queries 199/200 → 198.
             if whole_symbol && !title_hit {
                 weight += Self::W_SYMBOL;
+            }
+            // Words that sit together in one item name (`order reject` in
+            // `onOrderReject`) beat words scattered over several names
+            // (`synth_reject`, `spawn_parcel_drain`). At 2.0 it cost exact
+            // spellings their rank (`scene object` for `SceneObject`); 1.0
+            // moved 167 → 177 of 184 such queries over 15 local repos and
+            // no other eval row.
+            if in_one_name && !title_hit {
+                weight += Self::W_IN_ONE_NAME;
             }
             if alias_words.iter().any(|w| Self::field_hit(w, t)) {
                 weight += Self::W_ALIAS;
@@ -1582,9 +1597,10 @@ impl Wiki {
 
 // A whole-name match must outrank any word match, on the page and on the
 // line, even when the word's side also matches by doc; a title match must
-// outrank a whole-name match.
+// outrank a whole-name match; words inside a longer name rank below both.
 const _: () = assert!(
-    Wiki::W_SYMBOL < Wiki::W_NAME
+    Wiki::W_IN_ONE_NAME < Wiki::W_SYMBOL
+        && Wiki::W_SYMBOL < Wiki::W_NAME
         && Wiki::W_SYMBOL > Wiki::W_DEFINED + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL > Wiki::W_METHOD_WORD + Wiki::W_SYMBOL_DOC

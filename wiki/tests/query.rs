@@ -605,6 +605,25 @@ fn a_query_spelling_out_a_name_finds_its_definer() {
 }
 
 #[test]
+fn query_words_in_one_name_beat_words_spread_over_names() {
+    // Both pages carry `order` and `reject` as name words; only `fsm.rs`
+    // has them in one name.
+    let (_d, w) = code_fixture(&[
+        (
+            "src/fsm.rs",
+            "pub fn on_order_reject() {}\npub fn on_fill() {}\n",
+        ),
+        (
+            "src/worker.rs",
+            "pub fn synth_reject() {}\npub fn spawn_parcel_drain() {}\n",
+        ),
+    ]);
+    let hits = w.search("order reject", None, 10);
+    let ids: Vec<&str> = hits.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids, ["fsm", "worker"]);
+}
+
+#[test]
 fn symbol_lines_are_unique_per_page() {
     // Overloads in a header and their definitions in the `.cpp` twin: one
     // line per item, every line on its own page's path, a doc shown once.
