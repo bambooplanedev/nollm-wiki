@@ -147,7 +147,7 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 | агент | що записує `wiki setup` | що каже йому користуватися вікі |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local), скіл `wiki-memory` | інструкції сервера; інструменти завантажуються одразу |
-| pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл |
+| pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл (інструкцій сервера pi не показує) |
 | Cursor | `.cursor/mcp.json` | описи інструментів (у наших прогонах їх вистачило) |
 | Codex | `codex mcp add` (глобально), [правила навігації](#правила-навігації) в `AGENTS.md` | `AGENTS.md` |
 | будь-який інший MCP-клієнт | — ([вручну](#інші-mcp-клієнти)) | правила навігації в його файлі інструкцій |
@@ -203,17 +203,39 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 показує інструкції сервера з кроками навігації, тож для пошуку коду скіл не потрібен; правила
 памʼяті — у розділі [Памʼять агента](#памʼять-агента).
 
-#### pi вручну
+#### pi
 
-`.pi/mcp.json` у проєкті:
+`wiki setup --agent pi` записує `.pi/mcp.json` і скіл `wiki-navigation`; pi завантажує і те, і те
+після `/trust` (`--approve` з `pi -p`). Без скілу pi не обійдеться: інструкцій MCP-сервера для
+серверів `direct` він не показує, тож про вікі знає лише з описів інструментів і скілу. Без нього в
+наших прогонах модель шукала через grep, а коли встановлене користувачем розширення змушувало pi
+завантажити скіл перед відповіддю (у нас це було skill-first), вона брала невідповідний
+(`systematic-debugging` на питаннях «де знаходиться…»).
+
+Вручну — `.pi/mcp.json` у проєкті:
 
 ```json
 { "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-pi не показує інструкцій MCP-сервера для серверів `direct`, тож кроки навігації йому потрібні як
-скіл: покладіть [правила навігації](#правила-навігації) в
-`.agents/skills/wiki-navigation/SKILL.md`. pi завантажує і те, і те лише після `/trust`.
+і [правила навігації](#правила-навігації) в `.agents/skills/wiki-navigation/SKILL.md`, під front
+matter з `name: wiki-navigation` і `description:`, що каже, коли скіл потрібен (`wiki setup` пише
+«Find where something is or how it works in this project's code. Use before grep, find or reading
+whole files, whenever the task needs a function, type, handler or module location.»); за ними pi
+скіл і знаходить.
+
+Залиште лише сервер проєкту: якщо в `~/.pi/agent/mcp.json` теж є сервер вікі, під будь-якою назвою,
+видаліть його. З обома модель бачить кожен інструмент вікі двічі під двома назвами (pi називає їх
+за сервером: `mcp__wiki__search` для цього), а скіл, який пише `wiki setup`, називає лише
+`mcp__wiki__*`. Щоб перевірити, не даючи pi змінювати файли:
+`pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
+
+Виміряно по одному разу на питання з Mellum2.1 12B-A2.5B на llama-server, на трьох питаннях про
+приватний проєкт з розділу [Виміряне](#виміряне): усі шість відповідей правильні; зі скілом три
+питання забрали 10 викликів інструментів і 109 с, без нього 19 і 160 с. Зі скілом pi відповідав на
+«що викликає X» через `search`, потім `callers`, і в цих прогонах не завантажував невідповідного
+скілу. Питання, чиї слова відрізняються від слів у коді (`credentials` для `load_member_creds`), все
+одно закінчилося grep.
 
 #### Cursor
 

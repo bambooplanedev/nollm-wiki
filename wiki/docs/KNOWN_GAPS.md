@@ -36,6 +36,12 @@ per question is noise-level: treat single results as anecdotes.
   longer installs that skill for Claude Code.
 - **pi does not show MCP server instructions** for `direct` servers (pi
   1.3.0); only tool names, descriptions and parameter docs reach the model.
+  Without the `wiki-navigation` skill, a user-installed extension that makes
+  pi load a skill first (skill-first) led it in our runs to an unrelated
+  skill (`systematic-debugging`). Numbers: README, pi section.
+- **Two wiki servers in pi** (a global `~/.pi/agent/mcp.json` entry and the
+  project's `.pi/mcp.json`) give the model every tool twice, under two
+  names; the skill `wiki setup` writes names only `mcp__wiki__*`.
 - **pi loads project files only after trust**: `.pi/mcp.json` and project
   skills need `/trust`, or `--approve` in print mode.
 - **Agents edit despite "do not edit".** Seen twice in field runs, once
