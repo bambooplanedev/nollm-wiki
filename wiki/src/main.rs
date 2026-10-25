@@ -178,9 +178,8 @@ fn main() -> Result<()> {
             emit_json,
             watch,
             project,
-            memory,
+            memory: memory_arg,
         } => {
-            let memory_arg = memory;
             let memory = match memory_arg.as_deref() {
                 None => None,
                 Some("local") => wiki::memory::local_dir(&input)
@@ -373,10 +372,10 @@ fn main() -> Result<()> {
                 if std::io::Read::read_to_string(&mut std::io::stdin(), &mut json).is_err() {
                     return Ok(());
                 }
-                match wiki::hint::prompt_from_hook_json(&json) {
-                    Some(t) => t,
-                    None => return Ok(()),
-                }
+                let Some(t) = wiki::hint::prompt_from_hook_json(&json) else {
+                    return Ok(());
+                };
+                t
             } else {
                 text.context("hint needs TEXT or --claude-hook")?
             };
@@ -396,10 +395,7 @@ fn main() -> Result<()> {
             hook,
             remove,
         } => {
-            let scope = match scope {
-                Some(s) => s,
-                None => ask_scope()?,
-            };
+            let scope = scope.map_or_else(ask_scope, Ok)?;
             let opts = SetupOptions {
                 agents: agent,
                 scope,
