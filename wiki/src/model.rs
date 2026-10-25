@@ -58,6 +58,11 @@ impl KindFilter {
         }
     }
 
+    /// `parse` for a user argument, with the error text callers show.
+    pub fn parse_arg(s: &str) -> Result<KindFilter, String> {
+        Self::parse(s).ok_or_else(|| format!("unknown kind {s:?}; expected {}", Self::EXPECTED))
+    }
+
     pub fn matches(&self, k: &SourceKind) -> bool {
         match self {
             KindFilter::Exact(x) => x == k,

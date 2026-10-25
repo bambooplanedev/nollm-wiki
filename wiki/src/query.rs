@@ -62,7 +62,7 @@ struct IndexFile {
 }
 
 /// The error for an id `resolve_id` could not place; `near` are its candidates.
-pub fn unknown_page(arg: &str, near: &[String]) -> String {
+pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
     let closest = if near.is_empty() {
         String::new()
     } else {
@@ -77,6 +77,11 @@ pub fn tag_filter(arg: &str) -> Option<String> {
     let t = arg.trim().trim_start_matches('#').trim();
     let t = t.trim_end_matches('/').to_lowercase();
     (!t.is_empty()).then_some(t)
+}
+
+/// `tag_filter` for a user argument, with the error text callers show.
+pub fn tag_arg(arg: &str) -> Result<String, String> {
+    tag_filter(arg).ok_or_else(|| format!("empty tag {arg:?}"))
 }
 
 /// Multiplies a memory page's final score, so a note outranks code that
@@ -1317,6 +1322,12 @@ impl Wiki {
     /// Pagerank of `id`, or 0 for an id the index does not know.
     fn pagerank_of(&self, id: &str) -> f64 {
         self.entries.get(id).map_or(0.0, |e| e.pagerank)
+    }
+
+    /// `resolve_id` with the unknown-page error text callers show.
+    pub fn resolve(&self, arg: &str) -> Result<String, String> {
+        self.resolve_id(arg)
+            .map_err(|near| unknown_page(arg, &near))
     }
 
     /// Resolves what a caller typed to a page id: an exact id, a title
