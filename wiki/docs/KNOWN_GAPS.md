@@ -186,6 +186,11 @@ per question is noise-level: treat single results as anecdotes.
 - Agents: Claude Code, pi, Cursor and Codex. Cursor is detected only by a `.cursor/` folder and
   needs its approval after setup; Codex is set up only with `--agent codex`, and its server entry is
   global (`~/.codex/config.toml`). The Cursor editor is not checked, only `cursor-agent`.
+- With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
+  not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
+  one an earlier setup created there with only the steps is removed. Seen
+  with pi 1.4.0: with both files present, each naming a different codeword, it saw only the
+  `AGENTS.md` one.
 - Local scope skips (exit 1) a file git already tracks.
 - `--remove` leaves `.wiki/` and the ignore lines in place.
 

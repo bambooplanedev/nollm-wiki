@@ -184,6 +184,14 @@ names them. Codex is set up only when named: its MCP config is global.
 - `--remove` deletes exactly what setup wrote, hooks included even without `--hook`, and Codex's
   server only when it is the one setup added. Ignore lines, `.wiki/` and memory notes stay.
 
+In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
+navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
+exist, so it would stop seeing `CLAUDE.md`. An `AGENTS.md` an earlier setup created there, holding
+nothing but the steps, is removed for the same reason. To get them, rename `CLAUDE.md` to `AGENTS.md`, create a
+new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, and run setup again;
+Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
+run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
+
 Every agent runs the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
