@@ -299,6 +299,64 @@ wiki serve [OPTIONS]
 Runs an MCP (Model Context Protocol) server over stdio for the compiled
 wiki. See [MCP server](#mcp-server).
 
+### `hint`
+
+```
+wiki hint [OPTIONS] [TEXT]
+```
+
+Prints the code locations for a task text: the text agents' hooks inject
+before the agent starts reading. A header line, then at most 8
+`path:start-end  name  signature` lines (each cut at 160 characters) from
+the best-matching code pages, at most 2 per page; docs, test items and a
+line whose range holds another of the page's lines (a class around its
+methods) never appear. Prints nothing and exits 0
+when the wiki is missing or unreadable, or nothing matches, so a hook can
+run it on every prompt.
+
+- `--dir <wiki>` (`.wiki`; with `--claude-hook` and `CLAUDE_PROJECT_DIR` set,
+  `$CLAUDE_PROJECT_DIR/.wiki`) — the compiled wiki directory.
+- `--claude-hook` — read a Claude Code `UserPromptSubmit` hook's JSON from
+  stdin and use its `prompt` instead of `TEXT`. Without it, `TEXT` is required.
+
+### `setup`
+
+```
+wiki setup [--agent claude,pi] [--scope repo|local] [--hook] [--remove]
+```
+
+Run in the project root. Compiles `.` into `.wiki`, then installs what makes
+Claude Code and pi use the wiki on their own: the MCP server (`wiki serve
+--source .`) and a `wiki-navigation` skill. Agents are detected (`.claude/`,
+`CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`) unless
+`--agent` names them.
+
+- `--scope repo` — committed files for the whole team: `.mcp.json`,
+  `.pi/mcp.json`, `.claude/skills/wiki-navigation/SKILL.md`,
+  `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
+  `wiki` must be on `PATH`; setup warns when it is not.
+- `--scope local` — this checkout only (also written as `wiki`, with the same
+  warning; a file git already tracks is skipped, use `--scope repo` for it): Claude Code's server goes through
+  `claude mcp add-json wiki … --scope local`, the other files are written and
+  listed in `.git/info/exclude`.
+- Without `--scope`, setup asks on a terminal and fails without one.
+- `--remove` deletes exactly what setup wrote, hooks included even without
+  `--hook`. Ignore lines and `.wiki/` stay.
+- `--hook` — also adds the wiki's code lines for each prompt before the model
+  runs. Claude Code gets a `UserPromptSubmit` entry (`wiki hint --claude-hook`)
+  in `.claude/settings.json` (`settings.local.json` with `--scope local`);
+  pi gets `.pi/extensions/wiki-hint/index.ts`. The hook is silent when there
+  is no wiki, it cannot be read or nothing matches, and never blocks a prompt.
+
+A JSON config setup edits is rewritten as 2-space pretty JSON (keys and their
+order kept), so a hand-formatted file comes back reformatted after install or
+`--remove`.
+
+Safe to run twice. An entry or file at the same place with other content is
+left alone and reported; setup does the rest and exits 1. pi loads project
+files only after you trust the project (`/trust`, or `--approve` in print
+mode).
+
 ### `generate`
 
 ```
@@ -398,6 +456,8 @@ Learning Rate Schedule builds directly on the ideas behind Backpropagation.
 ```
 
 ## MCP server
+
+Or run `wiki setup` in the project: it writes this configuration (and a skill) for Claude Code and pi.
 
 `wiki serve` exposes a compiled wiki to MCP clients (Claude Code, Claude
 Desktop, and other agents) over stdio — the native alternative to shelling

@@ -5,6 +5,7 @@ pub mod formats;
 pub mod generator;
 pub mod graph;
 pub mod hash;
+pub mod hint;
 pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
@@ -13,6 +14,7 @@ pub mod outline;
 pub mod query;
 pub mod rewrite;
 pub mod serve;
+pub mod setup;
 pub mod walk;
 pub mod watch;
 
@@ -32,6 +34,8 @@ pub enum WikiError {
     Watch(String),
     #[error("serve failed: {0}")]
     Serve(String),
+    #[error("{0}")]
+    Setup(String),
 }
 
 pub struct CompileOptions {

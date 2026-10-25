@@ -1,4 +1,4 @@
-//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, and generate subcommands.
+//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, hint, setup, and generate subcommands.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use wiki::generator::generate_corpus;
 use wiki::model::KindFilter;
 use wiki::query::{PackBudget, Wiki};
+use wiki::setup::{Agent, Scope, SetupOptions};
 use wiki::{compile, CompileOptions};
 
 #[derive(Parser)]
@@ -95,6 +96,32 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
     },
+    /// Print the code locations for a task text; silent when there is nothing to say.
+    Hint {
+        /// The task text (not used with `--claude-hook`).
+        text: Option<String>,
+        /// Wiki to read (default: `.wiki`, or `$CLAUDE_PROJECT_DIR/.wiki` with `--claude-hook`).
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Read a Claude Code `UserPromptSubmit` hook's JSON from stdin.
+        #[arg(long)]
+        claude_hook: bool,
+    },
+    /// Install the MCP server and a skill so Claude Code and pi use the wiki in this project.
+    Setup {
+        /// Agents to set up (default: the ones found).
+        #[arg(long, value_delimiter = ',')]
+        agent: Option<Vec<Agent>>,
+        /// Where the files go (asked when omitted and stdin is a terminal).
+        #[arg(long)]
+        scope: Option<Scope>,
+        /// Also install the prompt hook.
+        #[arg(long)]
+        hook: bool,
+        /// Undo what setup wrote (ignore lines and `.wiki/` stay).
+        #[arg(long)]
+        remove: bool,
+    },
     Generate {
         dir: PathBuf,
         #[arg(long, default_value_t = 20)]
@@ -102,6 +129,26 @@ enum Command {
         #[arg(long, default_value_t = 42)]
         seed: u64,
     },
+}
+
+fn ask_scope() -> Result<Scope> {
+    use std::io::IsTerminal;
+    anyhow::ensure!(
+        std::io::stdin().is_terminal(),
+        "no terminal to ask: pass --scope repo or --scope local"
+    );
+    println!(
+        "Where should setup put its files?\n  1) Add to the repo (committed, for the whole team)\n  2) Local to this checkout (not committed)"
+    );
+    print!("Choose 1 or 2: ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    match answer.trim() {
+        "1" => Ok(Scope::Repo),
+        "2" => Ok(Scope::Local),
+        _ => anyhow::bail!("choose 1 or 2"),
+    }
 }
 
 fn main() -> Result<()> {
@@ -247,6 +294,55 @@ fn main() -> Result<()> {
                     .map_or_else(|| "out".into(), |s| s.join(".wiki"))
             });
             wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref())?;
+        }
+        Command::Hint {
+            text,
+            dir,
+            claude_hook,
+        } => {
+            let text = if claude_hook {
+                let mut json = String::new();
+                // A hook must never break the prompt: unusable input is silence.
+                if std::io::Read::read_to_string(&mut std::io::stdin(), &mut json).is_err() {
+                    return Ok(());
+                }
+                match wiki::hint::prompt_from_hook_json(&json) {
+                    Some(t) => t,
+                    None => return Ok(()),
+                }
+            } else {
+                text.context("hint needs TEXT or --claude-hook")?
+            };
+            let dir = dir.unwrap_or_else(|| {
+                match std::env::var_os("CLAUDE_PROJECT_DIR").filter(|_| claude_hook) {
+                    Some(p) => PathBuf::from(p).join(".wiki"),
+                    None => ".wiki".into(),
+                }
+            });
+            if let Ok(w) = Wiki::load(&dir) {
+                print!("{}", wiki::hint::hint_lines(&w, &text));
+            }
+        }
+        Command::Setup {
+            agent,
+            scope,
+            hook,
+            remove,
+        } => {
+            let scope = match scope {
+                Some(s) => s,
+                None => ask_scope()?,
+            };
+            let opts = SetupOptions {
+                agents: agent,
+                scope,
+                hook,
+                remove,
+            };
+            let root = std::env::current_dir()?;
+            if !wiki::setup::run(&root, &opts, &mut std::io::stdout())? {
+                std::process::exit(1);
+            }
         }
         Command::Generate { dir, files, seed } => {
             let paths = generate_corpus(&dir, files, seed).context("generate corpus")?;
