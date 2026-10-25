@@ -143,7 +143,7 @@ surrounding pages matter.
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local), the `wiki-memory` skill | the server's instructions; tools load up front |
-| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill |
+| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `codex mcp add` (global), the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
@@ -199,17 +199,39 @@ or the `mcpServers` entry of [MCP server](#mcp-server) in the project's `.mcp.js
 shows the server's instructions, which carry the navigation steps, so no skill is needed for
 finding code; the memory rules are in [Agent memory](#agent-memory).
 
-#### pi by hand
+#### pi
 
-`.pi/mcp.json` in the project:
+`wiki setup --agent pi` writes `.pi/mcp.json` and the `wiki-navigation` skill; pi loads both after
+`/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server instructions
+for `direct` servers, so all it learns about the wiki is the tool descriptions and the skill.
+Without it, in our runs the model grepped, and when a user-installed extension made pi load a skill
+before it answered (we ran one called skill-first), it picked an unrelated one
+(`systematic-debugging` for "where is" questions).
+
+By hand, `.pi/mcp.json` in the project:
 
 ```json
 { "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-pi does not show MCP server instructions for `direct` servers, so it needs the navigation steps as
-a skill: put the [navigation rules](#navigation-rules) in
-`.agents/skills/wiki-navigation/SKILL.md`. pi loads both only after `/trust`.
+and the [navigation rules](#navigation-rules) in `.agents/skills/wiki-navigation/SKILL.md`, under a
+front matter with `name: wiki-navigation` and a `description:` that says when to use it (`wiki
+setup` writes "Find where something is or how it works in this project's code. Use before grep,
+find or reading whole files, whenever the task needs a function, type, handler or module
+location."); pi finds a skill by them.
+
+Use only the project's server: if `~/.pi/agent/mcp.json` also has a wiki server, under any name,
+remove it. With both, the model sees every wiki tool twice under two names (pi names them after the
+server: `mcp__wiki__search` for this one), and the skill `wiki setup` writes names only
+`mcp__wiki__*`. To try it without letting pi edit files:
+`pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
+
+Measured once per question with Mellum2.1 12B-A2.5B on llama-server, on three questions about the
+private project described in [Measured](#measured): all six answers were correct; with the skill
+the three took 10 tool calls and 109 s, without it 19 and 160 s. With the skill, pi answered "what
+calls X" with `search`, then `callers`, and did not load an unrelated skill in these runs. A
+question whose words differ from the code's (`credentials` for `load_member_creds`) still ended in
+grep.
 
 #### Cursor
 
