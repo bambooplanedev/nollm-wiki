@@ -41,7 +41,7 @@ pub fn data_dir() -> Option<PathBuf> {
     data_dir_for(std::env::consts::OS, &|k| std::env::var(k).ok())
 }
 
-fn git(root: &Path, args: &[&str]) -> Option<String> {
+pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
