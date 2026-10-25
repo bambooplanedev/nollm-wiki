@@ -625,17 +625,18 @@ Obsidian's graph view and backlinks work. Open the output directory itself as th
 parent that also holds the sources, whose file names can collide with the pages. Quartz reads the
 same links: [`scripts/`](scripts/README.md) publishes a compiled wiki as a Quartz site.
 
-What does not carry over to Obsidian, from the page format rather than from a check in Obsidian
-itself:
+What does not carry over to Obsidian (inferred from the page format, not tested in Obsidian):
 
 - **Front matter.** A note's `aliases:`, `tags:` and date become bullets under `## Metadata`, not
-  YAML, so Obsidian shows no properties, and its tags and alias lookup do not see them.
+  YAML, so Obsidian shows no properties, and its tag pane and alias lookup do not see them. Inline
+  `#tags` in a note's body still work.
 - **Links inside a note's body.** The body is copied as written. `[[Matching Engine]]` in a note
   whose target compiled to `matching_engine.md` points to a note Obsidian cannot find, and a
   relative Markdown link resolves only when the file names happen to match, since all pages sit
-  in one folder.
+  in one folder. Such a link also shows up as an unresolved node in the graph.
 - **Code pages.** `## Body` holds the source as is, not in a fenced block, so Obsidian renders it
-  as Markdown: a `#include` or a Python `#` comment becomes a heading, `<T>` becomes HTML.
+  as Markdown: a Python `# comment` becomes a heading, `#include` and `#define` become tags, and
+  `<vector>` or `<T>` vanish as HTML tags.
 
 ### Page ids
 
