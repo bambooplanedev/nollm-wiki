@@ -1,6 +1,6 @@
 //! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
 
-use crate::formats::{summarize, Extractor};
+use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
     basename, one_line, slugify, title_from_slug, CallSite, CallVia, CodeItem, CodeItemKind,
     Entity, SourceKind,
@@ -462,15 +462,13 @@ impl Extractor for CodeExtractor {
                     && matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method)
                     && super::extract_rust::has_test_attribute(text, item.start_line));
         }
-        let mut lang_name = info.lang;
-
-        // A component is reported as its own format, whichever language its
-        // script is written in.
-        if script.is_some() {
-            if let Some(spec) = lang_for_ext(ext) {
-                lang_name = spec.lang_name.to_string();
-            }
-        }
+        // A component is reported as its own format (`vue`, `svelte`, which
+        // is also their `lang_name`), whichever language its script is in.
+        let lang_name = if script.is_some() {
+            ext.to_string()
+        } else {
+            info.lang
+        };
 
         let docstring = info.docstring.or_else(|| leading_doc(code, code_ext));
         // `body` is deliberately NOT scanned for a summary: source code is not
@@ -595,19 +593,16 @@ pub(crate) struct Shape<'a> {
 /// The signature cut every language shares: stop at the body, at a wrapped
 /// declaration's body, or at a value.
 ///
-/// Written as three independent lookups rather than a chain of `?`: a Rust
-/// `const_item` has no `declaration` field, so an early return there would
-/// skip the `value` lookup and leave the initializer in the signature.
+/// An `or_else` chain rather than `?`: a Rust `const_item` has no
+/// `declaration` field, so an early return there would skip the `value`
+/// lookup and leave the initializer in the signature.
 pub(crate) fn default_cut(def: Node) -> Option<Node> {
-    if let Some(body) = def.child_by_field_name("body") {
-        return Some(body);
-    }
-    if let Some(declaration) = def.child_by_field_name("declaration") {
-        if let Some(body) = declaration.child_by_field_name("body") {
-            return Some(body);
-        }
-    }
-    def.child_by_field_name("value")
+    def.child_by_field_name("body")
+        .or_else(|| {
+            def.child_by_field_name("declaration")
+                .and_then(|d| d.child_by_field_name("body"))
+        })
+        .or_else(|| def.child_by_field_name("value"))
 }
 
 /// A plain definition: cut at the shared boundary, retain no value.
@@ -798,11 +793,11 @@ fn group_key(
     text: &str,
     spec: &LangSpec,
 ) -> String {
-    match (owner, name_text) {
-        (Some(o), _) => o.to_string(),
-        (None, Some(n)) => n.to_string(),
-        (None, None) => (spec.header_group)(def, text).unwrap_or_default(),
-    }
+    owner
+        .or(name_text)
+        .map(str::to_string)
+        .or_else(|| (spec.header_group)(def, text))
+        .unwrap_or_default()
 }
 
 /// The module's summary when no docstring supplies one.
@@ -889,15 +884,18 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
     while let Some(m) = matches.next() {
         let parts = split_captures(m, &idx, text, &mut imports);
-        if let Some(def) = parts.def {
-            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-                continue;
-            };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+        let Some(def) = parts.def.or(parts.item) else {
+            continue;
+        };
+        let Placement::Scoped(chain) = (spec.placement)(def, text) else {
+            continue;
+        };
+        let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+        let shape = (spec.shape)(def);
+        let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
+        let public = if parts.def.is_some() {
             let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
-            let shape = (spec.shape)(def);
             if keep {
-                let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
                 // then used for both the signature and the classification —
                 // the two used to re-derive the node's kind independently.
@@ -916,23 +914,23 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
-            merge_item(
-                &mut items,
-                code_item(def, parts.name, &chain, keep, text, &spec, &shape),
-            );
-        } else if let Some(def) = parts.item {
-            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-                continue;
-            };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-            let public = !spec.query_gates_visibility
-                && should_keep(None, &chain, name_text, exports.as_ref(), &spec);
-            let shape = (spec.shape)(def);
-            merge_item(
-                &mut items,
-                code_item(def, parts.name, &chain, public, text, &spec, &shape),
-            );
-        }
+            keep
+        } else {
+            !spec.query_gates_visibility
+                && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
+        };
+        merge_item(
+            &mut items,
+            code_item(
+                def,
+                parts.name,
+                owner.as_deref(),
+                public,
+                text,
+                &spec,
+                &shape,
+            ),
+        );
     }
     let mut items: Vec<CodeItem> = items.into_values().collect();
     items.sort_by(|a, b| {
@@ -973,7 +971,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     let symbols: Vec<String> = collected.into_iter().map(|(_, _, _, sig)| sig).collect();
 
     let docstring = if ext == "py" {
-        super::extract_python::python_docstring(&tree, text)
+        super::extract_python::docstring_paragraph(tree.root_node(), text)
     } else {
         None
     };
@@ -1132,13 +1130,16 @@ const ITEM_DOC_MAX_CHARS: usize = 120;
 /// `ITEM_DOC_MAX_CHARS`. Counts `chars()`, never bytes, so a multi-byte doc
 /// is never split mid-scalar.
 fn item_doc_line(raw: &str) -> Option<String> {
-    let line = summarize(None, Some(raw), "", None)?;
-    if line.chars().count() <= ITEM_DOC_MAX_CHARS {
-        return Some(line);
+    first_real_sentence(raw).map(|line| cap_chars(&line, ITEM_DOC_MAX_CHARS))
+}
+
+/// `s` unchanged, or its first `max - 1` chars and a `…` when it has more than
+/// `max`.
+fn cap_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
     }
-    let mut cut: String = line.chars().take(ITEM_DOC_MAX_CHARS - 1).collect();
-    cut.push('…');
-    Some(cut)
+    s.chars().take(max - 1).chain(['…']).collect()
 }
 
 /// The most chars of an item's whole doc kept in `items.json`.
@@ -1147,11 +1148,7 @@ const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
 /// An item's whole raw doc on one line, capped at `ITEM_DOC_TEXT_MAX_CHARS`
 /// (the `…` included); `None` when it is just `doc`.
 fn item_doc_text(raw: &str, doc: Option<&str>) -> Option<String> {
-    let mut text = one_line(raw);
-    if text.chars().count() > ITEM_DOC_TEXT_MAX_CHARS {
-        text = text.chars().take(ITEM_DOC_TEXT_MAX_CHARS - 1).collect();
-        text.push('…');
-    }
+    let text = cap_chars(&one_line(raw), ITEM_DOC_TEXT_MAX_CHARS);
     (!text.is_empty() && doc != Some(text.as_str())).then_some(text)
 }
 
@@ -1188,7 +1185,7 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 fn code_item(
     def: Node,
     name: Option<Node>,
-    chain: &[String],
+    owner: Option<&str>,
     public: bool,
     text: &str,
     spec: &LangSpec,
@@ -1202,11 +1199,7 @@ fn code_item(
         .child_by_field_name("declaration")
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
-    let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
-    let kind = match (
-        classify(Some(name), owner.as_deref(), shape.rank),
-        is_function(def),
-    ) {
+    let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
         (ItemKind::Member, true) => CodeItemKind::Method,
         (ItemKind::FreeDef, true) => CodeItemKind::Fn,
         (ItemKind::FreeDef, false) => CodeItemKind::Type,
@@ -1302,7 +1295,7 @@ fn code_item(
     let mut item = CodeItem {
         kind,
         name: name_text.to_string(),
-        owner,
+        owner: owner.map(str::to_string),
         signature,
         start_line: first.start_position().row + 1,
         end_line: last_row(top) + 1,
@@ -1563,16 +1556,10 @@ fn build_signature(
         }
         _ => render_span(text, root, start, end, spec),
     };
-    let mut sig = raw.trim().to_string();
-    loop {
-        match sig.chars().last() {
-            Some(c) if spec.strip_trailing.contains(&c) => {
-                sig.pop();
-                sig = sig.trim_end().to_string();
-            }
-            _ => break,
-        }
-    }
+    let mut sig = raw
+        .trim()
+        .trim_end_matches(|c: char| c.is_whitespace() || spec.strip_trailing.contains(&c))
+        .to_string();
     if let Some(value) = shape.value {
         let rendered = render_span(text, value, value.start_byte(), value.end_byte(), spec);
         sig = append_value(sig, rendered.trim(), shape.has_type);

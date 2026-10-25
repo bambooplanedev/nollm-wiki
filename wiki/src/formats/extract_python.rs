@@ -299,15 +299,6 @@ fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     Some(names)
 }
 
-/// A Python module-level docstring: the first non-comment top-level
-/// statement, if it is a bare string expression, with its opening paragraph
-/// returned. Handles both single-line (`"""Doc."""`) and
-/// multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
-/// `string_content` node rather than assuming the doc text is on line 1.
-pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
-    docstring_paragraph(tree.root_node(), text)
-}
-
 /// A def's or class's docstring: the first non-comment statement of its
 /// `body`, when it is a string.
 fn python_body_doc(def: Node, text: &str) -> Option<String> {
@@ -318,8 +309,11 @@ fn python_body_doc(def: Node, text: &str) -> Option<String> {
 }
 
 /// The opening paragraph of `block`'s leading string statement, shared by a
-/// module (its root) and a def (its `body`).
-fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
+/// module (its root) and a def (its `body`): the first non-comment statement,
+/// if it is a bare string expression. Handles both single-line (`"""Doc."""`)
+/// and multi-line (`"""\nDoc.\n"""`) docstrings, since it reads the AST's
+/// `string_content` node rather than assuming the doc text is on line 1.
+pub(crate) fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
     let mut cursor = block.walk();
     let first_stmt = block
         .children(&mut cursor)

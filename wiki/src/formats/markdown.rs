@@ -13,7 +13,6 @@ impl Extractor for MarkdownExtractor {
     fn extract(&self, rel_path: &str, text: &str) -> Entity {
         let (fm, body_text) = split_frontmatter(text);
 
-        let mut title = fm_get(&fm, "title");
         let created = fm_get(&fm, "created").unwrap_or_default();
         let updated = find_date(&fm, rel_path);
         let description = fm_get(&fm, "description");
@@ -21,10 +20,9 @@ impl Extractor for MarkdownExtractor {
         let tags = normalize_tags(fm_list(&fm, "tags"));
         let supersedes = fm_list(&fm, "supersedes");
 
-        if title.is_none() {
-            title = first_h1(body_text);
-        }
-        let name = title.unwrap_or_else(|| derive_name_from_path(rel_path));
+        let name = fm_get(&fm, "title")
+            .or_else(|| first_h1(body_text))
+            .unwrap_or_else(|| derive_name_from_path(rel_path));
         let body = body_text.trim().to_string();
         let summary = summarize(description.as_deref(), None, &body, None);
 

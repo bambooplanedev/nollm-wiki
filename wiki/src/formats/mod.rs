@@ -14,6 +14,7 @@ pub mod text;
 
 pub use code::CodeExtractor;
 pub use markdown::MarkdownExtractor;
+pub(crate) use summary::first_real_sentence;
 pub use summary::summarize;
 pub use text::TextExtractor;
 

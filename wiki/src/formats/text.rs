@@ -1,6 +1,6 @@
 //! Plain-text extractor: `# Title` or an ALL-CAPS first line, `created:`/`aliases:` header fields, then the body.
 
-use crate::formats::{derive_name_from_path, summarize, Extractor};
+use crate::formats::{derive_name_from_path, first_real_sentence, Extractor};
 use crate::model::{slugify, title_case, Entity, SourceKind};
 use regex::Regex;
 use std::sync::LazyLock;
@@ -56,7 +56,7 @@ impl Extractor for TextExtractor {
 
         let name = name.unwrap_or_else(|| derive_name_from_path(rel_path));
         let body = body_lines.join("\n").trim().to_string();
-        let summary = summarize(None, None, &body, None);
+        let summary = first_real_sentence(&body);
 
         Entity {
             id: slugify(&name),
