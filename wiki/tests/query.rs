@@ -1,30 +1,20 @@
 //! `Wiki::load`, `search`, and `neighbors` against a compiled output directory, including the pack budget.
 
 use std::fs;
+
+mod common;
 use tempfile::tempdir;
 use wiki::model::{KindFilter, SourceKind};
 use wiki::query::{tag_filter, PackBudget, Wiki};
 use wiki::{compile, CompileOptions};
 
 fn build() -> tempfile::TempDir {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("alpha.txt"),
-        "# Alpha\n\nAlpha mentions Beta and Gamma.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("beta.txt"),
-        "# Beta\n\nBeta is about beta things.\n",
-    )
-    .unwrap();
-    fs::write(input.join("gamma.txt"), "# Gamma\n\nGamma stands alone.\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    // stash output path by leaking dir via returning it
-    dir
+    common::compiled(&[
+        ("alpha.txt", "# Alpha\n\nAlpha mentions Beta and Gamma.\n"),
+        ("beta.txt", "# Beta\n\nBeta is about beta things.\n"),
+        ("gamma.txt", "# Gamma\n\nGamma stands alone.\n"),
+    ])
+    .0
 }
 
 /// Mirror of the compiler's estimate (`manifest::token_estimate`): chars/4.
@@ -36,34 +26,20 @@ fn tok(s: &str) -> usize {
 /// hub -> popular, rare; three fillers point at popular so its pagerank
 /// beats rare's. Returns the tempdir; the compiled wiki is in `<dir>/out`.
 fn build_hub_corpus() -> tempfile::TempDir {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("hub.txt"),
-        "# Hub\n\nHub mentions Popular and Rare.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("popular.txt"),
-        "# Popular\n\nPopular is a popular topic.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("rare.txt"),
-        "# Rare\n\nRare stands alone here.\n",
-    )
-    .unwrap();
-    for n in ["one", "two", "three"] {
-        fs::write(
-            input.join(format!("filler_{n}.txt")),
+    let filler = |n: &str| {
+        (
+            format!("filler_{n}.txt"),
             format!("# Filler {n}\n\nFiller {n} talks about Popular.\n"),
         )
-        .unwrap();
-    }
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    dir
+    };
+    let fillers = ["one", "two", "three"].map(filler);
+    let mut files = vec![
+        ("hub.txt", "# Hub\n\nHub mentions Popular and Rare.\n"),
+        ("popular.txt", "# Popular\n\nPopular is a popular topic.\n"),
+        ("rare.txt", "# Rare\n\nRare stands alone here.\n"),
+    ];
+    files.extend(fillers.iter().map(|(n, b)| (n.as_str(), b.as_str())));
+    common::compiled(&files).0
 }
 
 #[test]
@@ -256,16 +232,10 @@ centrality versus packing distinction this test pins down. "
 fn search_finds_text_under_embedded_subheadings() {
     // A markdown doc whose body has its own `## ` subheading: parse_sections
     // splits there, and pre-fix the text below it is invisible to search.
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("doc.md"),
+    let (_dir, _, output) = common::compiled(&[(
+        "doc.md",
         "# Doc\n\nIntro paragraph.\n\n## Deep Section\n\nThe zanzibar rule lives here.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    )]);
     let w = Wiki::load(&output).unwrap();
 
     let hits = w.search("zanzibar", None, 10);
@@ -279,28 +249,14 @@ fn search_finds_text_under_embedded_subheadings() {
 /// rendered page alone exceeds a 100-token budget, and hub links to two
 /// small neighbors.
 fn build_oversized_hub_corpus() -> tempfile::TempDir {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
     let padding = "Padding sentence for sheer bulk in the body. ".repeat(40);
-    fs::write(
-        input.join("hub.txt"),
-        format!("# Hub\n\nHub mentions Popular and Rare.\n\n{padding}\n"),
-    )
-    .unwrap();
-    fs::write(
-        input.join("popular.txt"),
-        "# Popular\n\nPopular is a popular topic.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("rare.txt"),
-        "# Rare\n\nRare stands alone here.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    dir
+    let hub = format!("# Hub\n\nHub mentions Popular and Rare.\n\n{padding}\n");
+    common::compiled(&[
+        ("hub.txt", &hub),
+        ("popular.txt", "# Popular\n\nPopular is a popular topic.\n"),
+        ("rare.txt", "# Rare\n\nRare stands alone here.\n"),
+    ])
+    .0
 }
 
 /// Spec §2: `max_tokens` is a hard ceiling on `token_estimate(pack.text)` —
@@ -421,21 +377,10 @@ fn no_max_tokens_keeps_full_target_and_all_neighbors() {
 /// both unfiltered.
 #[test]
 fn search_kind_filter_restricts_to_that_kind() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("guide.txt"),
-        "# Guide\n\nThe zebra token lives in prose.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("zoo.rs"),
-        "//! zebra module\npub fn zebra() -> u8 { 0 }\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("guide.txt", "# Guide\n\nThe zebra token lives in prose.\n"),
+        ("zoo.rs", "//! zebra module\npub fn zebra() -> u8 { 0 }\n"),
+    ]);
     let w = Wiki::load(&output).unwrap();
     let ids =
         |hits: Vec<wiki::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
@@ -463,14 +408,11 @@ fn search_kind_filter_restricts_to_that_kind() {
 /// beta, depth 2 reaches gamma.
 #[test]
 fn neighbors_depth_two_reaches_the_second_hop() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha mentions Beta.\n").unwrap();
-    fs::write(input.join("beta.txt"), "# Beta\n\nBeta mentions Gamma.\n").unwrap();
-    fs::write(input.join("gamma.txt"), "# Gamma\n\nGamma stands alone.\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("alpha.txt", "# Alpha\n\nAlpha mentions Beta.\n"),
+        ("beta.txt", "# Beta\n\nBeta mentions Gamma.\n"),
+        ("gamma.txt", "# Gamma\n\nGamma stands alone.\n"),
+    ]);
     let w = Wiki::load(&output).unwrap();
 
     let one = w.neighbors("alpha", 1, &PackBudget::default()).unwrap();
@@ -498,17 +440,12 @@ fn neighbors_depth_two_reaches_the_second_hop() {
 }
 
 fn kind_fixture() -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("a.rs"), "//! zebra\npub fn zebra() {}\n").unwrap();
-    fs::write(input.join("b.cpp"), "// zebra\nint zebra() { return 0; }\n").unwrap();
-    fs::write(input.join("c.md"), "# C\n\nzebra in markdown.\n").unwrap();
-    fs::write(input.join("d.txt"), "# D\n\nzebra in text.\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
-    (dir, w)
+    common::compiled_wiki(&[
+        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
+        ("b.cpp", "// zebra\nint zebra() { return 0; }\n"),
+        ("c.md", "# C\n\nzebra in markdown.\n"),
+        ("d.txt", "# D\n\nzebra in text.\n"),
+    ])
 }
 
 fn ids_for(w: &Wiki, f: &str) -> Vec<String> {
@@ -545,11 +482,7 @@ fn kind_exact_code_rust_still_works() {
 
 #[test]
 fn search_without_items_json_has_no_symbol_lines() {
-    let dir = tempdir().unwrap();
-    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("lib.rs"), "pub fn alpha_beta() {}\n").unwrap();
-    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let (_dir, _, out) = common::compiled(&[("lib.rs", "pub fn alpha_beta() {}\n")]);
 
     let wiki = Wiki::load(&out).unwrap();
     let ids: Vec<String> = wiki.list_pages().into_iter().map(|(id, _)| id).collect();
@@ -567,16 +500,7 @@ fn search_without_items_json_has_no_symbol_lines() {
 
 /// Compiles `files` (relative path, contents) and loads the wiki.
 fn code_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
-    for (path, text) in files {
-        let p = input.join(path);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, text).unwrap();
-    }
-    compile(&input, &out, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&out).unwrap();
-    (dir, w)
+    common::compiled_wiki(files)
 }
 
 /// Every symbol line of a response in output order: `(path, start, end, name)`.
@@ -784,17 +708,10 @@ fn search_lines_says_no_matches_when_empty() {
 
 #[test]
 fn snippet_drops_comment_markers() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("a.rs"),
-        "//! Foo bar\n/// Foo baz\npub fn f() {}\n",
-    )
-    .unwrap();
-    fs::write(input.join("b.py"), "# Foo qux\ndef g(): pass\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        ("a.rs", "//! Foo bar\n/// Foo baz\npub fn f() {}\n"),
+        ("b.py", "# Foo qux\ndef g(): pass\n"),
+    ]);
     let w = Wiki::load(&output).unwrap();
     let hits = w.search("foo", None, 10);
     assert_eq!(hits.len(), 2);
@@ -807,17 +724,13 @@ fn snippet_drops_comment_markers() {
 
 #[test]
 fn snippet_keeps_markers_that_are_content() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("a.txt"),
-        "# T\nintro\n#include zork.h\n#[derive(Debug)] zork\n*ptr = zork;\n*note* zork\n",
-    )
-    .unwrap();
-    fs::write(input.join("c.txt"), "# C\n/*\n * Zork block\n */\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) = common::compiled(&[
+        (
+            "a.txt",
+            "# T\nintro\n#include zork.h\n#[derive(Debug)] zork\n*ptr = zork;\n*note* zork\n",
+        ),
+        ("c.txt", "# C\n/*\n * Zork block\n */\n"),
+    ]);
     let w = Wiki::load(&output).unwrap();
     let hits = w.search("zork", None, 10);
     let snips: Vec<String> = hits.into_iter().filter_map(|h| h.snippet).collect();
@@ -982,28 +895,28 @@ fn index_json_without_tags_still_loads() {
 }
 
 fn build_tag_corpus() -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    for i in 1..=12 {
-        let body = format!("---\ntags: [project/wiki]\n---\n# N{i}\n\nquokka page.\n");
-        fs::write(input.join(format!("n{i}.md")), body).unwrap();
-    }
-    fs::write(
-        input.join("root.md"),
-        "---\ntags: [Project]\n---\n# Root\n\nquokka page.\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("other.md"),
-        "---\ntags: [projects]\n---\n# Other\n\nquokka page.\n",
-    )
-    .unwrap();
-    fs::write(input.join("z.rs"), "//! quokka\npub fn z() {}\n").unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
-    (dir, w)
+    let notes: Vec<_> = (1..=12)
+        .map(|i| {
+            let body = format!("---\ntags: [project/wiki]\n---\n# N{i}\n\nquokka page.\n");
+            (format!("n{i}.md"), body)
+        })
+        .collect();
+    let mut files: Vec<(&str, &str)> = notes
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_str()))
+        .collect();
+    files.extend([
+        (
+            "root.md",
+            "---\ntags: [Project]\n---\n# Root\n\nquokka page.\n",
+        ),
+        (
+            "other.md",
+            "---\ntags: [projects]\n---\n# Other\n\nquokka page.\n",
+        ),
+        ("z.rs", "//! quokka\npub fn z() {}\n"),
+    ]);
+    common::compiled_wiki(&files)
 }
 
 #[test]
@@ -1054,28 +967,20 @@ fn punctuation_query_with_tag_is_the_listing() {
 
 /// consumer.rs imports text.rs; guide.md only mentions it.
 fn import_fixture() -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(input.join("src")).unwrap();
-    fs::write(
-        input.join("src/text.rs"),
-        "//! Text rendering.\n\n/// Renders a page.\npub fn render() {}\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("src/consumer.rs"),
-        "//! Uses text.\nuse crate::text::render;\n\npub fn run() {\n    render();\n}\n",
-    )
-    .unwrap();
-    fs::write(
-        input.join("guide.md"),
-        "# Guide\n\nSee `text.rs` for how pages render.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
-    (dir, w)
+    common::compiled_wiki(&[
+        (
+            "src/text.rs",
+            "//! Text rendering.\n\n/// Renders a page.\npub fn render() {}\n",
+        ),
+        (
+            "src/consumer.rs",
+            "//! Uses text.\nuse crate::text::render;\n\npub fn run() {\n    render();\n}\n",
+        ),
+        (
+            "guide.md",
+            "# Guide\n\nSee `text.rs` for how pages render.\n",
+        ),
+    ])
 }
 
 #[test]
@@ -1248,16 +1153,8 @@ fn search_lines_shows_date_after_path() {
 
 #[test]
 fn title_resolves_case_insensitively_in_any_script() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(
-        input.join("note.md"),
-        "---\ntitle: Морський Маяк\n---\n\nBody.\n",
-    )
-    .unwrap();
-    compile(&input, &output, &CompileOptions::default()).unwrap();
+    let (_dir, _, output) =
+        common::compiled(&[("note.md", "---\ntitle: Морський Маяк\n---\n\nBody.\n")]);
     let wiki = Wiki::load(&output).unwrap();
     assert_eq!(wiki.resolve_id("морський маяк").unwrap(), "morskyi_maiak");
     assert_eq!(wiki.resolve_id("МОРСЬКИЙ МАЯК").unwrap(), "morskyi_maiak");
@@ -1265,15 +1162,12 @@ fn title_resolves_case_insensitively_in_any_script() {
 
 #[test]
 fn cyrillic_query_words_match_another_grammatical_form() {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("a.md"), "# Плани агента\n\nНотатка.\n").unwrap();
-    fs::write(input.join("b.md"), "# Плани агентів\n\nНотатка.\n").unwrap();
-    fs::write(input.join("c.md"), "# Ринок\n\nОгляд конкурентів.\n").unwrap();
-    fs::write(input.join("d.md"), "# Шлюз\n\nПідключає mcp-сервер.\n").unwrap();
-    compile(&input, &dir.path().join("out"), &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&dir.path().join("out")).unwrap();
+    let (_dir, w) = common::compiled_wiki(&[
+        ("a.md", "# Плани агента\n\nНотатка.\n"),
+        ("b.md", "# Плани агентів\n\nНотатка.\n"),
+        ("c.md", "# Ринок\n\nОгляд конкурентів.\n"),
+        ("d.md", "# Шлюз\n\nПідключає mcp-сервер.\n"),
+    ]);
     // The whole-title bonus compares the words as typed.
     assert_eq!(w.search("плани агентів", None, 10)[0].id, "plany_ahentiv");
     assert!(w
@@ -1286,29 +1180,15 @@ fn cyrillic_query_words_match_another_grammatical_form() {
         .any(|h| h.id == "shliuz"));
 }
 
-fn memory_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    for (name, body) in files {
-        let p = input.join(name);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(p, body).unwrap();
-    }
-    compile(&input, &output, &CompileOptions::default()).unwrap();
-    let w = Wiki::load(&output).unwrap();
-    (dir, w)
-}
-
 #[test]
 fn memory_boost_lifts_a_note_above_code_with_a_higher_raw_score() {
     let code = "//! zebra\npub fn zebra() { /* zebra zebra */ }\n";
     let body = "---\ntitle: Note\n---\n\nOnce a zebra, then filler words follow.\n";
-    let (_d, plain) = memory_fixture(&[("a.rs", code), ("note.md", body)]);
+    let (_d, plain) = code_fixture(&[("a.rs", code), ("note.md", body)]);
     let raw = plain.search("zebra", None, 10);
     assert_eq!(raw[0].id, "a");
     let raw_note = raw.iter().find(|h| h.id == "note").unwrap().score;
-    let (_d, w) = memory_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
+    let (_d, w) = code_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
     let hits = w.search("zebra", None, 10);
     assert_eq!(hits[0].id, "note");
     assert!((hits[0].score - 4.0 * raw_note).abs() < 1e-9);
@@ -1318,7 +1198,7 @@ fn memory_boost_lifts_a_note_above_code_with_a_higher_raw_score() {
 fn equal_scores_order_memory_then_date_then_pagerank_without_a_cycle() {
     // Same words, so equal scores; pagerank differs by link count.
     let note = |t: &str, u: &str| format!("---\ntitle: {t}\nupdated: {u}\n---\n\nzebra\n");
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         (".agents/memory/a.md", &note("Aaa", "2026-01-01")),
         (".agents/memory/b.md", &note("Bbb", "2026-03-01")),
         ("c.md", "---\ntitle: Ccc\n---\n\nzebra\n"),
@@ -1336,7 +1216,7 @@ fn equal_scores_order_memory_then_date_then_pagerank_without_a_cycle() {
 fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
     let note =
         |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
         (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
         (".agents/memory/c.md", &note("Ccc", "")),
@@ -1351,7 +1231,7 @@ fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
 
 #[test]
 fn memory_passes_code_and_docs_filters_but_not_exact_code_kind() {
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         ("a.rs", "//! zebra\npub fn zebra() {}\n"),
         (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
     ]);
@@ -1373,7 +1253,7 @@ fn memory_passes_code_and_docs_filters_but_not_exact_code_kind() {
 
 #[test]
 fn memory_flag_shows_in_json_only_on_memory_hits() {
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         ("a.rs", "//! zebra\npub fn zebra() {}\n"),
         (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
     ]);
@@ -1385,11 +1265,9 @@ fn memory_flag_shows_in_json_only_on_memory_hits() {
 
 #[test]
 fn index_json_without_memory_still_loads() {
-    let (d, _w) = memory_fixture(&[("a.md", "# A\n\nzebra\n")]);
+    let (d, _w) = code_fixture(&[("a.md", "# A\n\nzebra\n")]);
     let out = d.path().join("out");
-    let v: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(out.join("index.json")).unwrap()).unwrap();
-    assert!(v["entries"][0].get("memory").is_none());
+    assert!(common::index(&out)["entries"][0].get("memory").is_none());
     let w = Wiki::load(&out).unwrap();
     assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
 }
@@ -1399,12 +1277,7 @@ fn note(title: &str, extra: &str, body: &str) -> String {
 }
 
 fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
-    let v: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(d.path().join("out/index.json")).unwrap())
-            .unwrap();
-    v["entries"]
-        .as_array()
-        .unwrap()
+    common::index_entries(&d.path().join("out"))
         .iter()
         .map(|e| {
             (
@@ -1418,7 +1291,7 @@ fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Op
 
 #[test]
 fn supersedes_marks_a_memory_note_by_title_alias_or_slug_only() {
-    let (d, _w) = memory_fixture(&[
+    let (d, _w) = code_fixture(&[
         (".agents/memory/t.md", &note("Old Title", "", "x")),
         (".agents/memory/a.md", &note("Aliased", "aliases: [Former Name]\n", "x")),
         (".agents/memory/s.md", &note("Slugged Note", "", "x")),
@@ -1442,7 +1315,7 @@ fn supersedes_marks_a_memory_note_by_title_alias_or_slug_only() {
 
 #[test]
 fn two_superseders_resolve_to_the_smaller_id() {
-    let (d, _w) = memory_fixture(&[
+    let (d, _w) = code_fixture(&[
         (".agents/memory/o.md", &note("Old", "", "x")),
         (
             ".agents/memory/z.md",
@@ -1461,7 +1334,7 @@ fn superseded_note_loses_boost_and_tie_key() {
     // The old note holds the words in its description, the new one in the body.
     let old = note("Old", "description: nightly benchmarks nightly\n", "filler");
     let new = note("New", "supersedes: Old\n", "benchmarks run nightly");
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         (".agents/memory/old.md", &old),
         (".agents/memory/new.md", &new),
     ]);
@@ -1470,7 +1343,7 @@ fn superseded_note_loses_boost_and_tie_key() {
     assert_eq!(hits[1].superseded_by.as_deref(), Some("new"));
     assert_eq!(hits[0].superseded_by, None);
     // Without the boost the old note's raw score stays unmultiplied.
-    let (_d, plain) = memory_fixture(&[("old.md", &old), ("new.md", &new)]);
+    let (_d, plain) = code_fixture(&[("old.md", &old), ("new.md", &new)]);
     let raw = plain.search("nightly benchmarks", None, 10);
     let raw_old = raw.iter().find(|h| h.id == "old").unwrap().score;
     assert!((hits[1].score - raw_old).abs() < 1e-9, "{}", hits[1].score);
@@ -1479,7 +1352,7 @@ fn superseded_note_loses_boost_and_tie_key() {
 #[test]
 fn superseded_note_does_not_win_the_memory_first_tie() {
     let same = |t: &str, extra: &str| note(t, extra, "zebra");
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         ("c.md", &same("Ccc", "")),
         (".agents/memory/a.md", &same("Aaa", "")),
         (".agents/memory/b.md", &same("Bbb", "supersedes: Aaa\n")),
@@ -1493,7 +1366,7 @@ fn superseded_note_does_not_win_the_memory_first_tie() {
 
 #[test]
 fn search_output_marks_only_superseded_hits() {
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         (".agents/memory/old.md", &note("Old", "", "zebra")),
         (
             ".agents/memory/new.md",
@@ -1524,7 +1397,7 @@ fn journals() -> (tempfile::TempDir, Wiki) {
         .map(|(a, b)| (a.as_str(), b.as_str()))
         .collect();
     refs.push(("src/stand.rs", "pub fn stand() {}\n"));
-    memory_fixture(&refs)
+    code_fixture(&refs)
 }
 
 #[test]
@@ -1550,7 +1423,7 @@ fn a_date_in_the_query_ranks_the_note_of_that_day_first() {
 fn a_date_without_a_year_hits_every_year_newer_first() {
     let note = |u: &str| format!("---\ntitle: N{u}\nupdated: {u}\n---\n\nstand\n");
     let (a, b) = (note("2025-10-12"), note("2026-10-12"));
-    let (_d, w) = memory_fixture(&[
+    let (_d, w) = code_fixture(&[
         (".agents/memory/a.md", &a),
         (".agents/memory/b.md", &b),
         (".agents/memory/c.md", &note("2026-10-13")),
@@ -1564,7 +1437,7 @@ fn a_date_without_a_year_hits_every_year_newer_first() {
 
 #[test]
 fn a_project_page_with_a_date_in_its_name_is_not_date_matched() {
-    let (_d, w) = memory_fixture(&[(
+    let (_d, w) = code_fixture(&[(
         "docs/2026-10-12-spec.md",
         "---\ntitle: Spec\nupdated: 2026-10-12\n---\n\nplain\n",
     )]);
@@ -1588,7 +1461,7 @@ fn a_date_lifts_only_the_notes_it_hits_and_a_missed_date_changes_nothing() {
         .iter()
         .map(|(a, b)| (a.as_str(), b.as_str()))
         .collect();
-    let (_d, w) = memory_fixture(&refs);
+    let (_d, w) = code_fixture(&refs);
     let scores = |q: &str| -> Vec<(String, f64)> {
         w.search(q, None, 10)
             .into_iter()
