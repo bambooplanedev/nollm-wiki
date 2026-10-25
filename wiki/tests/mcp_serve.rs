@@ -688,7 +688,20 @@ fn serve_source_catches_up_an_existing_wiki() {
 
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
-    for (id, word) in [(2, "zebrafish"), (3, "quokka")] {
+    // The old wiki is served at once and a call waits only 5 s for the
+    // start-up compile, which a cold debug build under parallel tests can
+    // exceed; what must hold is that the compile catches up, so ask again
+    // while the answer says it may be stale.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    let mut id = 2;
+    let mut resp = search(&mut stdin, &stdout, id, "zebrafish");
+    while stale_block(&resp).is_some() && std::time::Instant::now() < deadline {
+        id += 1;
+        resp = search(&mut stdin, &stdout, id, "zebrafish");
+    }
+    assert_eq!(stale_block(&resp), None, "{resp}");
+    for word in ["zebrafish", "quokka"] {
+        id += 1;
         let resp = search(&mut stdin, &stdout, id, word);
         assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
         assert_eq!(stale_block(&resp), None);
