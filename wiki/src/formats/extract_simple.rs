@@ -3,7 +3,8 @@
 //! no owner resolution and no scope guard.
 use super::code::{
     default_shape, is_function, keep_all, keep_any_vis, no_body_doc, no_export_set,
-    no_header_group, owner_anchor_identity, LangSpec, Lead, Placement, Rank, Shape,
+    no_header_group, owner_anchor_identity, plain_comment_text, LangSpec, Lead, Placement, Rank,
+    Shape,
 };
 use tree_sitter::{Language, Node};
 
@@ -135,13 +136,14 @@ fn ecma_sig_start(def: Node) -> Node {
     top
 }
 
-/// A `JSDoc` block (`/** … */`) above a declaration is its doc.
+/// A `JSDoc` block (`/** … */`) above a declaration is its doc, and any other
+/// comment a plain lead.
 fn ecma_lead(node: Node, text: &str) -> Lead {
-    let block = text
+    match text
         .get(node.byte_range())
-        .filter(|t| node.kind() == "comment" && t.starts_with("/**") && !t.starts_with("/**/"));
-    match block {
-        Some(t) => {
+        .filter(|_| node.kind() == "comment")
+    {
+        Some(t) if t.starts_with("/**") && !t.starts_with("/***") && !t.starts_with("/**/") => {
             let body = t.trim_start_matches("/**").trim_end_matches("*/");
             let lines: Vec<&str> = body
                 .lines()
@@ -150,6 +152,9 @@ fn ecma_lead(node: Node, text: &str) -> Lead {
                 .collect();
             Lead::Doc(lines.join("\n"))
         }
+        // A triple-slash directive (`/// <reference …/>`) is no doc.
+        Some(t) if t.starts_with("/// <") => Lead::Stop,
+        Some(t) => Lead::Plain(plain_comment_text(t)),
         None => Lead::Stop,
     }
 }
@@ -283,6 +288,25 @@ mod tests {
     use crate::formats::code::testutil::{assert_lacks, item_lines};
     use crate::formats::code::CodeExtractor;
     use crate::formats::Extractor;
+
+    /// The `(doc, start_line)` of the item named `name` in `src`.
+    fn doc_of(path: &str, src: &str, name: &str) -> (Option<String>, usize) {
+        let e = CodeExtractor.extract(path, src);
+        let item = e.items.iter().find(|i| i.name == name).unwrap();
+        (item.doc.clone(), item.start_line)
+    }
+
+    #[test]
+    fn a_jsdoc_keeps_a_plain_directive_below_it_out_of_the_doc() {
+        let src = "/** Best bid. */\n// eslint-disable-next-line no-unused-vars because legacy API\nexport function getBids() {}\n";
+        assert_eq!(doc_of("b.ts", src, "getBids"), (None, 3));
+    }
+
+    #[test]
+    fn a_triple_slash_directive_is_no_doc() {
+        let src = "const a = 1;\n/// <reference path=\"types.d.ts\"/>\nexport function f() {}\n";
+        assert_eq!(doc_of("f.ts", src, "f"), (None, 3));
+    }
 
     #[test]
     fn defined_ts_generic_function_and_go_struct_keep_original_case() {
@@ -491,5 +515,34 @@ mod tests {
         assert_eq!(e.items[4].signature, "const twice");
         assert_lacks(&e.symbols, "hidden");
         assert_lacks(&e.symbols, "twice");
+    }
+
+    #[test]
+    fn ts_line_and_block_comments_are_docs_jsdoc_wins() {
+        let doc_of = |src: &str, name: &str| {
+            let e = CodeExtractor.extract("m.ts", src);
+            let item = e.items.iter().find(|i| i.name == name).unwrap();
+            (item.doc.clone(), item.start_line)
+        };
+        let src =
+            "import x from 'y';\n// Thrown for any non-2xx response.\nexport class ApiError {}\n";
+        assert_eq!(
+            doc_of(src, "ApiError"),
+            (Some("Thrown for any non-2xx response.".into()), 2)
+        );
+        let src =
+            "import x from 'y';\n/* Parses the reply\n * body as JSON. */\nfunction parse() {}\n";
+        assert_eq!(
+            doc_of(src, "parse"),
+            (Some("Parses the reply body as JSON.".into()), 2)
+        );
+        let src =
+            "import x from 'y';\n// Compares with === so NaN never matches.\nfunction eq() {}\n";
+        assert_eq!(
+            doc_of(src, "eq"),
+            (Some("Compares with === so NaN never matches.".into()), 2)
+        );
+        let src = "// plain\n/** Real doc. */\nfunction f() {}\n";
+        assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 2));
     }
 }

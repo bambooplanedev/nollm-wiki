@@ -169,6 +169,10 @@ pub struct CodeItem {
     /// The first sentence of the item's own doc comment, capped.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub doc: Option<String>,
+    /// The item's whole doc, whitespace collapsed and capped; `None` when it
+    /// equals `doc`. Scored at half weight, never shown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub doc_text: Option<String>,
     /// Whether the item is part of the page's export surface (`symbols`).
     pub public: bool,
     /// The `path` of the file holding this item's other half, when one is

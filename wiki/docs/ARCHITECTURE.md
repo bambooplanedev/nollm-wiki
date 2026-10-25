@@ -527,7 +527,9 @@ matching:
   name, also as `owner::name` (`W_SYMBOL` 2.8, in place of `defined` and
   below the title weight), the words of item names (`W_SYMBOL_WORD` 2.0,
   methods `W_METHOD_WORD` 2.0), and the words of item doc sentences
-  (`W_SYMBOL_DOC` 0.75). Test items (`CodeItem.test`) and module items
+  (`W_SYMBOL_DOC` 0.75); a token the first sentence misses but the rest of the
+  item's doc (`CodeItem.doc_text`, never shown) has scores half that
+  (`W_SYMBOL_DOC_REST`; on item lines `IW_DOC_REST`). Test items (`CodeItem.test`) and module items
   feed none of them, nor the `defined` and method names that only test
   items carry, and a word that is already one of the page's own title
   words or a defined name is skipped; other pages' title words stay. When
@@ -789,6 +791,19 @@ that trails code on its own line (`int n; ///< Count.`), or at anything
 else, so a stray doc comment never stretches it. A C++ member-trailing doc
 (`///<`, `//!<`, `/**<`, `/*!<`) stops the climb even on a line of its own:
 it documents the member before it.
+In C++, JS/TS (JSX/TSX and SFC scripts included) and Python, a plain
+comment block (`//` lines, a `/* … */` block, `#` lines) directly above an
+item is its doc when nothing better exists: a Doxygen or JSDoc doc comes
+first, then a Python docstring, then the plain block (`plain_doc`). A plain
+block above a doc comment neither joins its doc nor extends its range. The
+block is no doc, and the range keeps its own start, when it begins on the
+file's first line or names `SPDX-License-Identifier`/`Copyright`, when it
+is only dividers and framed titles (`--- Risk ---`) or one title line
+between dividers (a banner), all TODO/FIXME/XXX/HACK
+lines, mostly code (half its lines end in `;`, `{` or `}`), or a group
+label: one line of at most three words, no closing `.`, `!`, `?` or `:`,
+sharing no word with the item's name ("Getters", but "Risk limits" above
+`risk_limit` is a doc). Rust and Go plain comments still stop the climb.
 Items of a Rust file with a test module come from a second pass over the
 **unstripped** text and its tree (`Stripped::Rewritten` carries it), so
 their lines are the file's and test functions are items too, while
