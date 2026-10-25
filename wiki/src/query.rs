@@ -444,8 +444,7 @@ impl Wiki {
         self.entries.get(id)
     }
 
-    /// Whether `id` is a page in the loaded index. Used by the MCP server to
-    /// validate resource ids before touching the filesystem.
+    /// Whether `id` is a page in the loaded index.
     pub fn has_page(&self, id: &str) -> bool {
         self.entries.contains_key(id)
     }

@@ -125,7 +125,7 @@ fn has_attribute(node: Node, text: &str, want: &str) -> bool {
 /// The previous cycle's `rust_module_level` guard and `rust_owner` resolution,
 /// composed. Order is unobservable: both were pure functions, and the old loop
 /// called `rust_owner` only after `rust_module_level` had passed.
-pub(crate) fn rust_placement(def: Node, text: &str) -> Placement {
+fn rust_placement(def: Node, text: &str) -> Placement {
     // A macro carries no visibility modifier, so the query cannot gate it
     // structurally the way it gates every other item: `#[macro_export]` is
     // the whole of a `macro_rules!` macro's public surface.
@@ -170,7 +170,7 @@ pub(crate) fn is_trait_impl(owner: &str) -> bool {
 }
 
 /// The group a trait-impl header shares with its own methods.
-pub(crate) fn rust_header_group(def: Node, text: &str) -> Option<String> {
+fn rust_header_group(def: Node, text: &str) -> Option<String> {
     if def.kind() != "impl_item" {
         return None;
     }

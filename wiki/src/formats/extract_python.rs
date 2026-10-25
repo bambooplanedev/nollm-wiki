@@ -56,7 +56,7 @@ pub(crate) fn validate_queries() {
 /// An assignment climbs to its `expression_statement`, which starts at the
 /// same byte: the statement, not the assignment, is the sibling of a `#`
 /// comment above it.
-pub(crate) fn python_sig_start(def: Node) -> Node {
+fn python_sig_start(def: Node) -> Node {
     match def.parent() {
         Some(p) if matches!(p.kind(), "decorated_definition" | "expression_statement") => p,
         _ => def,
@@ -186,7 +186,7 @@ fn python_lead(node: Node, text: &str) -> Lead {
 /// The two conventions fail in opposite directions: a new node kind that can
 /// host a definition is silently admitted here and would be silently rejected
 /// by Rust's rule. A tree-sitter bump must be reviewed under both.
-pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
+fn python_placement(def: Node, text: &str) -> Placement {
     let mut chain: Vec<String> = Vec::new();
     let mut node = def;
     while let Some(parent) = node.parent() {
@@ -243,7 +243,7 @@ pub(crate) fn python_placement(def: Node, text: &str) -> Placement {
 ///
 /// Names listed but not defined in this file (the `__init__.py` re-export
 /// case) match no captured definition and simply have no effect.
-pub(crate) fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
+fn python_all(tree: &Tree, text: &str) -> Option<BTreeSet<String>> {
     let query = &*ALL_QUERY;
     let lhs_idx = query.capture_index_for_name("lhs");
     let rhs_idx = query.capture_index_for_name("rhs");
@@ -317,7 +317,7 @@ pub(crate) fn python_docstring(tree: &Tree, text: &str) -> Option<String> {
 
 /// A def's or class's docstring: the first non-comment statement of its
 /// `body`, when it is a string.
-pub(crate) fn python_body_doc(def: Node, text: &str) -> Option<String> {
+fn python_body_doc(def: Node, text: &str) -> Option<String> {
     if !matches!(def.kind(), "function_definition" | "class_definition") {
         return None;
     }

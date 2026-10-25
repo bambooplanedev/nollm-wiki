@@ -218,7 +218,7 @@ fn cpp_lead(node: Node, text: &str) -> Lead {
 /// template renders with its head. The exact analogue of Python's
 /// `decorated_definition`; without it `template<typename T> class RingBuffer`
 /// renders as `class RingBuffer`.
-pub(crate) fn cpp_sig_start(def: Node) -> Node {
+fn cpp_sig_start(def: Node) -> Node {
     let mut node = def;
     while let Some(parent) = node.parent() {
         if parent.kind() == "template_declaration" {
@@ -241,7 +241,7 @@ pub(crate) fn cpp_sig_start(def: Node) -> Node {
 /// makes the owner REPLACE it, which is also what strips the namespace:
 /// `void trading::OrderBook::apply()` renders `void OrderBook::apply()`, the
 /// same signature the in-class declaration of that method renders.
-pub(crate) fn cpp_owner_anchor(name: Node) -> Node {
+fn cpp_owner_anchor(name: Node) -> Node {
     let mut node = name;
     while let Some(parent) = node.parent() {
         if parent.kind() == "qualified_identifier" {
@@ -268,7 +268,7 @@ pub(crate) fn cpp_owner_anchor(name: Node) -> Node {
 /// makes it replace the whole written prefix. So `void trading::OrderBook::apply()`
 /// and the in-class declaration of the same method both render `OrderBook::apply`
 /// and index under one key.
-pub(crate) fn cpp_placement(def: Node, text: &str) -> Placement {
+fn cpp_placement(def: Node, text: &str) -> Placement {
     let mut node = def;
     while let Some(parent) = node.parent() {
         if parent.kind() == "compound_statement" {

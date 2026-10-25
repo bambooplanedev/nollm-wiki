@@ -1,6 +1,6 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
-use crate::formats::{derive_name_from_path, normalize_tags, summarize, Extractor};
+use crate::formats::{derive_name_from_path, summarize, Extractor};
 use crate::model::{slugify, Entity, SourceKind};
 
 pub struct MarkdownExtractor;
@@ -141,6 +141,19 @@ fn fm_get(fm: &[String], key: &str) -> Option<String> {
     fm.iter()
         .find_map(|l| l.strip_prefix(&prefix).map(unquote))
         .filter(|v| !v.is_empty())
+}
+
+/// Front-matter tags as stored: `#` stripped, trimmed, lowercased, empties
+/// dropped, duplicates removed keeping the first-seen order.
+fn normalize_tags(raw: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in raw {
+        let t = t.trim().trim_start_matches('#').trim().to_lowercase();
+        if !t.is_empty() && !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// A list under a top-level `key:`: inline (`a, b` / `[a, b]`) or a YAML block of `- item` lines.

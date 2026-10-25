@@ -5,16 +5,16 @@ use crate::query::{MemoryScope, SymbolLine, Wiki, MEMORY_BOOST};
 use std::collections::HashSet;
 
 /// Most symbol lines a hint prints.
-pub const HINT_LINES: usize = 8;
+const HINT_LINES: usize = 8;
 /// Code pages searched for a hint.
-pub const HINT_PAGES: usize = 5;
+const HINT_PAGES: usize = 5;
 /// A page is kept when its score is at least this share of the best page's.
-pub const HINT_MIN_REL: f64 = 0.5;
+const HINT_MIN_REL: f64 = 0.5;
 /// Longest line, in characters, before it is cut with `…`.
-pub const HINT_LINE_CHARS: usize = 160;
+const HINT_LINE_CHARS: usize = 160;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
-pub const HINT_PAGE_LINES: usize = 2;
+const HINT_PAGE_LINES: usize = 2;
 /// A prompt word of at least this many characters naming a note is enough
 /// for its memory line.
 const HINT_MEMORY_LONG: usize = 6;
