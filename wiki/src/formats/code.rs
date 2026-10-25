@@ -858,12 +858,12 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
             let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
+            let shape = shape_of(def);
             if keep {
                 let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
                 // Resolved once, after `placement` has accepted the item, and
                 // then used for both the signature and the classification —
                 // the two used to re-derive the node's kind independently.
-                let shape = shape_of(def);
                 let sig = build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
                 if !sig.is_empty() {
                     let kind = classify(parts.name, owner.as_deref(), shape.rank);
@@ -879,7 +879,6 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
             }
-            let shape = shape_of(def);
             merge_item(
                 &mut items,
                 code_item(def, parts.name, &chain, keep, text, &spec, &shape),

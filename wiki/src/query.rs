@@ -439,6 +439,11 @@ impl Wiki {
         self.bodies.get(id).cloned()
     }
 
+    /// A page's body without cloning it; empty when the id is unknown.
+    fn body(&self, id: &str) -> &str {
+        self.bodies.get(id).map_or("", String::as_str)
+    }
+
     /// A page's index entry by exact id.
     pub(crate) fn entry(&self, id: &str) -> Option<&Entry> {
         self.entries.get(id)
@@ -539,7 +544,7 @@ impl Wiki {
         sections
             .iter()
             .filter(|(k, _)| !Self::CHROME_SECTIONS.contains(&k.as_str()))
-            .map(|(_, v)| v.clone())
+            .map(|(_, v)| v.as_str())
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -959,8 +964,7 @@ impl Wiki {
             .map(|s| Self::field_words(&s.to_lowercase()));
         let defined_terms = Self::defined_terms(&title, &e.defined, &e.methods);
         let symbols = self.symbol_fields.get(&e.id);
-        let page = self.page(&e.id).unwrap_or_default();
-        let sections = crate::rewrite::parse_sections(&page);
+        let sections = crate::rewrite::parse_sections(self.body(&e.id));
         let headings: Vec<String> = sections
             .keys()
             .filter(|k| {
