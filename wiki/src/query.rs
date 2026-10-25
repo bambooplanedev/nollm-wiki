@@ -53,6 +53,13 @@ pub(crate) struct Entry {
     pub(crate) methods: Vec<String>,
 }
 
+impl Entry {
+    /// Whether the page's source kind passes `f`.
+    fn is_kind(&self, f: &KindFilter) -> bool {
+        SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
+    }
+}
+
 #[derive(Deserialize)]
 struct IndexFile {
     /// `Manifest::root`; empty for an `index.json` older than the field.
@@ -265,6 +272,24 @@ pub struct Hit {
     pub symbols: Vec<SymbolLine>,
 }
 
+impl Hit {
+    /// A hit for `e` with no symbol lines yet.
+    fn from_entry(e: &Entry, score: f64, snippet: Option<String>) -> Hit {
+        Hit {
+            id: e.id.clone(),
+            title: e.title.clone(),
+            path: e.path.clone(),
+            summary: e.summary.clone(),
+            updated: e.updated.clone(),
+            score,
+            memory: e.memory,
+            superseded_by: e.superseded_by.clone(),
+            snippet,
+            symbols: Vec::new(),
+        }
+    }
+}
+
 /// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
 /// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
 /// marker counts only when whitespace or the line end follows it, so
@@ -330,6 +355,11 @@ pub struct ContextPack {
 /// The phrase a degraded target block carries when a page's body does not
 /// fit the pack's token budget. Tests assert on it; keep it in one place.
 pub const OVER_BUDGET_NOTE: &str = "exceeds the budget";
+
+/// Token ceiling applied to the `neighbors` tool when the caller omits
+/// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
+/// an agent calling with defaults should not receive a 30 KB dump.
+pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
 
 /// What `Wiki::search` learns about one page in its first pass. Scores
 /// need corpus-wide statistics (`df`, `avglen`), so per-page facts are
@@ -641,6 +671,13 @@ impl Wiki {
             .collect()
     }
 
+    /// `field_words` of a lowercased optional field; empty for `None`.
+    fn lower_words(field: Option<&str>) -> Vec<String> {
+        field
+            .map(|f| Self::field_words(&f.to_lowercase()))
+            .unwrap_or_default()
+    }
+
     /// Whether query token `t` hits a field given its `field_words`: every
     /// alphanumeric part of `t` is a prefix of some word of the field
     /// (prefix includes equality; parts may match non-adjacent words).
@@ -710,24 +747,20 @@ impl Wiki {
     ) -> BTreeSet<String> {
         let title_words: Vec<&str> = title_lower.split_whitespace().collect();
         let mut terms = BTreeSet::new();
-        for name in defined {
+        for name in defined.iter().chain(methods) {
             let full = name.to_lowercase();
             if !title_words.contains(&full.as_str()) {
                 terms.insert(full);
             }
+        }
+        // Method names whole, never through `name_words`: splitting them
+        // re-creates the V7 failure (`needs_render` credits `render`).
+        for name in defined {
             terms.extend(
                 Self::name_words(name)
                     .into_iter()
                     .filter(|w| !title_words.contains(&w.as_str())),
             );
-        }
-        // Method names whole, never through `name_words`: splitting them
-        // re-creates the V7 failure (`needs_render` credits `render`).
-        for name in methods {
-            let full = name.to_lowercase();
-            if !title_words.contains(&full.as_str()) {
-                terms.insert(full);
-            }
         }
         terms
     }
@@ -765,13 +798,9 @@ impl Wiki {
             } else {
                 f.words.extend(words);
             }
-            if let Some(doc) = &item.doc {
-                f.doc_words.extend(Self::field_words(&doc.to_lowercase()));
-            }
-            if let Some(text) = &item.doc_text {
-                f.doc_rest_words
-                    .extend(Self::field_words(&text.to_lowercase()));
-            }
+            f.doc_words.extend(Self::lower_words(item.doc.as_deref()));
+            f.doc_rest_words
+                .extend(Self::lower_words(item.doc_text.as_deref()));
         }
         f.words.retain(|w| !f.whole.contains(w));
         f.method_words
@@ -805,16 +834,8 @@ impl Wiki {
         } else {
             Self::IW_NAME_WORD
         };
-        let doc = item
-            .doc
-            .as_deref()
-            .map(|d| Self::field_words(&d.to_lowercase()))
-            .unwrap_or_default();
-        let doc_rest = item
-            .doc_text
-            .as_deref()
-            .map(|d| Self::field_words(&d.to_lowercase()))
-            .unwrap_or_default();
+        let doc = Self::lower_words(item.doc.as_deref());
+        let doc_rest = Self::lower_words(item.doc_text.as_deref());
         let score: f64 = tokens
             .iter()
             .zip(idf)
@@ -1127,8 +1148,7 @@ impl Wiki {
                 MemoryScope::Without => !e.memory,
                 MemoryScope::Only => e.memory,
             }) && kind.is_none_or(|f| {
-                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs))
-                    || SourceKind::parse(&e.kind).is_some_and(|k| f.matches(&k))
+                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
             }) && tag.is_none_or(|t| {
                 e.tags
                     .iter()
@@ -1144,18 +1164,7 @@ impl Wiki {
             listed.truncate(limit.unwrap_or(usize::MAX));
             return listed
                 .into_iter()
-                .map(|e| Hit {
-                    id: e.id.clone(),
-                    title: e.title.clone(),
-                    path: e.path.clone(),
-                    summary: e.summary.clone(),
-                    updated: e.updated.clone(),
-                    score: 0.0,
-                    memory: e.memory,
-                    superseded_by: e.superseded_by.clone(),
-                    snippet: None,
-                    symbols: Vec::new(),
-                })
+                .map(|e| Hit::from_entry(e, 0.0, None))
                 .collect();
         }
         let limit = limit.unwrap_or(10);
@@ -1210,18 +1219,7 @@ impl Wiki {
                 } else {
                     base
                 };
-                let hit = Hit {
-                    id: c.entry.id.clone(),
-                    title: c.entry.title.clone(),
-                    path: c.entry.path.clone(),
-                    summary: c.entry.summary.clone(),
-                    updated: c.entry.updated.clone(),
-                    score: total,
-                    memory: c.entry.memory,
-                    superseded_by: c.entry.superseded_by.clone(),
-                    snippet: c.snippet,
-                    symbols: Vec::new(),
-                };
+                let hit = Hit::from_entry(c.entry, total, c.snippet);
                 (hit, c.entry.pagerank)
             })
             .collect();
@@ -1253,10 +1251,7 @@ impl Wiki {
         let per_hit: Vec<Vec<(f64, &CodeItem)>> = hits
             .iter()
             .map(|h| {
-                let code = self.entries.get(&h.id).is_some_and(|e| {
-                    SourceKind::parse(&e.kind).is_some_and(|k| KindFilter::Code.matches(&k))
-                });
-                if code {
+                if self.is_code(&h.id) {
                     self.page_symbols(&h.id, tokens, idf)
                 } else {
                     Vec::new()
@@ -1398,8 +1393,7 @@ impl Wiki {
     fn is_code(&self, id: &str) -> bool {
         self.entries
             .get(id)
-            .and_then(|e| SourceKind::parse(&e.kind))
-            .is_some_and(|k| KindFilter::Code.matches(&k))
+            .is_some_and(|e| e.is_kind(&KindFilter::Code))
     }
 
     /// BFS to `depth` over `neighbors_out+neighbors_in`, then build a budgeted
@@ -1446,12 +1440,10 @@ impl Wiki {
             .iter()
             .filter(|n| *n != id)
             .filter(|n| {
-                budget.kind.as_ref().is_none_or(|k| {
-                    self.entries
-                        .get(*n)
-                        .and_then(|e| SourceKind::parse(&e.kind))
-                        .is_some_and(|sk| k.matches(&sk))
-                })
+                budget
+                    .kind
+                    .as_ref()
+                    .is_none_or(|k| self.entries.get(*n).is_some_and(|e| e.is_kind(k)))
             })
             .cloned()
             .collect();

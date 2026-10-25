@@ -63,7 +63,7 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         // (their outline is the intended view).
         let tokens = (text.chars().count() + Wiki::SEPARATOR.chars().count()) / 4;
         let is_code = is_code_page(&sections);
-        if !is_code && tokens > crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS {
+        if !is_code && tokens > crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS {
             large.push((id.clone(), tokens));
         }
         // Scan a code mask, not the raw page: a `[[slug|Name]]` written as a
@@ -258,16 +258,16 @@ mod tests {
 
     #[test]
     fn large_reports_a_page_over_the_default_pack_budget() {
-        let over = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
+        let over = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
         let r = lint(&one(page_of_tokens("markdown", over)));
         assert_eq!(r.large, vec![("t".to_string(), over)]);
-        let at = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS;
+        let at = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
         assert!(lint(&one(page_of_tokens("markdown", at))).large.is_empty());
     }
 
     #[test]
     fn large_skips_code_pages_and_reports_text_pages() {
-        let over = crate::serve::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
+        let over = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
         assert!(lint(&one(page_of_tokens("code:rust", over)))
             .large
             .is_empty());

@@ -26,10 +26,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::SystemTime;
 
-/// Token ceiling applied to the `neighbors` tool when the caller omits
-/// `max_tokens`. The CLI stays unbounded: a person passes flags on purpose,
-/// an agent calling with defaults should not receive a 30 KB dump.
-pub const DEFAULT_NEIGHBORS_MAX_TOKENS: usize = 4000;
+pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 
 /// Hits the `search` tool returns when the caller omits `limit` (the CLI
 /// keeps 10): every hit line is re-read on every later turn of the agent.
