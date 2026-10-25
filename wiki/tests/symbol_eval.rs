@@ -766,10 +766,10 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
 // Every class counts since step 4 (the floors were reset when the method,
 // V7 and test-target classes joined the splits).
 const MIN_FILE_HIT3_TUNE: f64 = 1.0; // 35/35
-const MIN_FILE_HIT3_HELD: f64 = 16.0 / 17.0;
+const MIN_FILE_HIT3_HELD: f64 = 1.0; // 17/17
 const MIN_SYMBOL_HIT3_TUNE: f64 = 1.0; // 35/35
-const MIN_SYMBOL_HIT3_HELD: f64 = 16.0 / 17.0;
-const MIN_TITLE_AS_QUERY: f64 = 27.0 / 28.0;
+const MIN_SYMBOL_HIT3_HELD: f64 = 1.0; // 17/17
+const MIN_TITLE_AS_QUERY: f64 = 1.0; // 28/28
 
 /// Slack on the floor comparisons (accumulated-sum ULP noise), as in `eval.rs`.
 const FLOOR_EPS: f64 = 1e-9;
