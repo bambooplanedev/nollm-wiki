@@ -115,7 +115,7 @@ enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Tools to expose, comma-separated, from search, page, neighbors,
-        /// lint (default: search,page,neighbors).
+        /// callers, lint (default: search,page,neighbors,callers).
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
         /// With `--source`, the agent memory folder to include: `none` for no

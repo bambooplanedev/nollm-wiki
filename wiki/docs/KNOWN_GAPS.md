@@ -3,7 +3,7 @@
 Places where the wiki is known to fall short: wrong or missing results,
 behaviour that surprises, and what agents actually do with it. Deliberate
 scope cuts (no embeddings, no LLM, three formats, query-only MCP) are in the
-README under [Limitations & roadmap](../README.md#limitations--roadmap); the
+README under [Limitations](../../README.md#limitations); the
 compiler's internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 Numbers below come from field runs on a 2,746-page C++/Rust/Python project
