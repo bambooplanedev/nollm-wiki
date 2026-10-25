@@ -291,53 +291,36 @@ pub fn render_page(
         to_hex(&entity.content_hash)
     ));
 
-    // Related (omit if empty)
-    let related: Vec<String> = edges
-        .outgoing
-        .iter()
-        .filter_map(|id| link_name(id, entities))
-        .collect();
-    if !related.is_empty() {
-        out.push_str("## Related\n");
-        for l in &related {
-            out.push_str(&format!("- {l}\n"));
-        }
-        out.push('\n');
-    }
-
-    // Incoming edges, importers apart from the rest (each omitted if empty)
-    for (heading, imported) in [("Imported by", true), ("Mentioned in", false)] {
-        let refby: Vec<String> = edges
-            .incoming
+    // Each list section is omitted if empty.
+    list_section(
+        &mut out,
+        "Related",
+        edges
+            .outgoing
             .iter()
-            .filter(|id| edges.imported_by.contains(*id) == imported)
-            .filter_map(|id| link_name(id, entities))
-            .collect();
-        if !refby.is_empty() {
-            out.push_str(&format!("## {heading}\n"));
-            for l in &refby {
-                out.push_str(&format!("- {l}\n"));
-            }
-            out.push('\n');
-        }
+            .filter_map(|id| link_name(id, entities)),
+    );
+    // Incoming edges, importers apart from the rest
+    for (heading, imported) in [("Imported by", true), ("Mentioned in", false)] {
+        list_section(
+            &mut out,
+            heading,
+            edges
+                .incoming
+                .iter()
+                .filter(|id| edges.imported_by.contains(*id) == imported)
+                .filter_map(|id| link_name(id, entities)),
+        );
     }
 
     // Code-only sections
     if let SourceKind::Code { .. } = entity.kind {
-        if !entity.symbols.is_empty() {
-            out.push_str("## Exports\n");
-            for s in &entity.symbols {
-                out.push_str(&format!("- `{s}`\n"));
-            }
-            out.push('\n');
-        }
-        if !entity.imports.is_empty() {
-            out.push_str("## Imports\n");
-            for i in &entity.imports {
-                out.push_str(&format!("- {i}\n"));
-            }
-            out.push('\n');
-        }
+        list_section(
+            &mut out,
+            "Exports",
+            entity.symbols.iter().map(|s| format!("`{s}`")),
+        );
+        list_section(&mut out, "Imports", entity.imports.iter().cloned());
     }
 
     // Body (omit if empty)
@@ -349,15 +332,28 @@ pub fn render_page(
 
     // Notes (human-owned, always present so there is a home for hand edits)
     out.push_str("## Notes\n");
-    if preserved_notes.trim().is_empty() {
-        out.push_str(NOTES_PLACEHOLDER);
-        out.push('\n');
+    let notes = preserved_notes.trim();
+    out.push_str(if notes.is_empty() {
+        NOTES_PLACEHOLDER
     } else {
-        out.push_str(preserved_notes.trim());
-        out.push('\n');
-    }
+        notes
+    });
+    out.push('\n');
 
     out
+}
+
+/// `## heading` and one `- item` line each, then a blank line; nothing when `items` is empty.
+fn list_section(out: &mut String, heading: &str, items: impl IntoIterator<Item = String>) {
+    let mut items = items.into_iter().peekable();
+    if items.peek().is_none() {
+        return;
+    }
+    out.push_str(&format!("## {heading}\n"));
+    for item in items {
+        out.push_str(&format!("- {item}\n"));
+    }
+    out.push('\n');
 }
 
 pub(crate) fn render_fingerprint(
