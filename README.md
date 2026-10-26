@@ -22,11 +22,15 @@ gives byte-identical output on any machine.
 Not a semantic search engine: matching is lexical, by names, words and imports. Not a language
 server: calls are resolved by name and argument count, without types.
 
+In the examples, long lines are shortened with `…`, and a `└` line names the parts of the line
+above it; it is not output.
+
 ```
 $ wiki callers calls.rs resolve_calls --dir .wiki
 callers of resolve_calls  wiki/src/calls.rs:195-262 — 1 functions in 1 files
 wiki/src/lib.rs
   137-437  fn  compile_inner  calls resolve_calls at 302
+  └ the caller's lines        └ the line of the call
 ```
 
 ## Contents
@@ -106,31 +110,34 @@ To try the compiler on its own, on a generated corpus:
 
     wiki generate demo_raw --files 12 --seed 42
     wiki compile demo_raw demo_wiki
-    wiki search gradient --dir demo_wiki
+    wiki search gradient --dir demo_wiki --limit 2
     wiki neighbors gradient_descent --max-tokens 800 --dir demo_wiki
 
 ```
 $ wiki compile demo_raw demo_wiki
 Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans, 0 large
+                      └ a page no other page links to
 
-$ wiki search gradient --dir demo_wiki
-gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with Learning Rate Schedule in production pipelines.
+$ wiki search gradient --dir demo_wiki --limit 2
+gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with…
+└ id              └ path                └ title — summary
     Gradient Descent is often paired with Learning Rate Schedule in prod…
-layer_normalization  layer_normalization.txt  Layer Normalization — Layer Normalization builds directly on the ideas behind Gradient Descent.
-    Layer Normalization builds directly on the ideas behind Gradient Descent. When debugging Layer Normalization, engineers trac…
-learning_rate_schedule  learning_rate_schedule.txt  Learning Rate Schedule — Learning Rate Schedule builds directly on the ideas behind Backpropagation.
-    …tion Mechanism. Learning Rate Schedule is often paired with Gradient Descent in production pipelines. Numbers here are approxim…
+    └ the matching text
+layer_normalization  layer_normalization.txt  Layer Normalization — Layer Normalization builds…
+    Layer Normalization builds directly on the ideas behind Gradient Descent. When debugging…
 ```
 
 On code the same search names symbols with line ranges. Against this repository:
 
 ```
 $ wiki search "call edges" --dir .wiki --limit 1
-calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time (`resolve_calls`), followed at query time (`Wiki::calls`).
-  wiki/src/calls.rs:284-308  callers_index  pub(crate) fn callers_index<'a>(code: impl Iterator<Item = (&'a str, &'a [CodeItem])>) -> BTreeMap<String, Vec<Caller>>  — Every function's callers, keyed by its `path:start-end`: the `calls` edges turned around, each list tests last, then by…
-  wiki/src/calls.rs:341-479  Wiki::call_walk  fn call_walk(&self, id: &str, symbol: &str, depth: Option<usize>, max_tokens: Option<usize>, up: bool) -> Result<String, String>  — `calls`, or with `up` `callers`.
-  wiki/src/calls.rs:22-31  family  fn family(e: &Entity) -> &str  — The languages whose code calls each other: a page's code language, with every JavaScript dialect and component format a…
+calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
+└ id   └ path             └ title — summary
+  wiki/src/calls.rs:284-308  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  └ path:lines               └ name         └ signature                                        └ doc
+  wiki/src/calls.rs:341-479  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  wiki/src/calls.rs:22-31  family  fn family(e: &Entity) -> &str  — The languages whose code…
 ```
 
 ## Usage
@@ -479,17 +486,21 @@ directory. If nothing matches, the error lists the closest ids. `neighbors` and 
 ```
 $ wiki page calls.rs --dir .wiki
 # Calls (calls)
+  └ title (id)
 wiki/src/calls.rs  code:rust
-Call edges between code items: matched by name at compile time (`resolve_calls`), followed at query time (`Wiki::calls`).
+└ source           └ kind
+Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
   crate::query::Wiki
   …
-15-20  fn  fn owner_key(owner: &str) -> &str  — The last segment of an owner, generics dropped: `Outer.Inner` and `a::Inner<T>` are both `Inner`.
-36-48  type  struct Index<'a>  — What call sites resolve against: every function by name, every page by module name, every type name.
+15-20  fn  fn owner_key(owner: &str) -> &str  — The last segment of an owner, generics dropped…
+36-48  type  struct Index<'a>  — What call sites resolve against: every function by name, every…
 Index:
+└ the methods of Index
   51-104  method  fn new(entities: &'a BTreeMap<String, Entity>) -> Self
   …
-195-262  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills every function item's `calls` from its `call_sites`, which it empties.
+195-262  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills…
+└ lines  └ kind, signature                                                                 └ doc
 ```
 
 Item lines are `start-end  kind  signature`, then `  → twin` for a paired C++ declaration or
