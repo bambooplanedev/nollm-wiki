@@ -342,9 +342,10 @@ each exposed tool costs schema tokens on every request.
 `wiki://llms.txt`.
 
 **Freshness.** With `--source` the server compiles the project itself. An existing wiki is served
-at once while the compile runs in the background; with none, the first compile runs before serving
-and a failure exits. It then watches the project and recompiles incrementally on edits (ignored
-paths such as `target/`, build dirs and `.git` never trigger it). Each tool call waits up to 5 s
+at once while the compile runs in the background, and a call waits at most 1 s for that first
+compile; with none, the first compile runs before serving and a failure exits. It then watches
+the project and recompiles incrementally on edits (ignored paths such as `target/`, build dirs and
+`.git` never trigger it). Each tool call waits up to 5 s
 until edits made before it are compiled. If a recompile fails or is still running, the last good
 snapshot keeps serving and results gain a line `wiki may be stale: <reason>`. Short-lived barrier
 files, one per call, live in `<dir>/.serve/`. Without `--source`,
