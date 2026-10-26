@@ -5,7 +5,8 @@
 //! tool call first creates a barrier file and waits for its event — events
 //! arrive in order, so every edit made before the call has been counted by
 //! then — and then waits for the compiled generation to reach the event
-//! generation it saw. Both waits share one 5 s bound.
+//! generation it saw. Both waits share one 5 s bound, of which a call spends
+//! at most 1 s on the start-up compile before answering from the old wiki.
 
 use crate::query::Wiki;
 use crate::watch::{self, WatchSet};
@@ -18,6 +19,13 @@ use std::time::{Duration, Instant};
 /// How long a tool call waits for a fresh snapshot before answering from the
 /// one it has.
 const WAIT: Duration = Duration::from_secs(5);
+
+/// How much of `WAIT` a call gives the start-up compile: enough for a small
+/// project, while a large one answers from the old wiki without the full wait.
+const START_WAIT: Duration = Duration::from_secs(1);
+
+/// The stale reason while a compile has yet to catch up.
+const RUNNING: &str = "recompile still running";
 
 /// Barrier files go in this subdirectory of `--dir`: it stays writable when
 /// the `--dir` root is not, and no `.md` name there is a page the prune knows.
@@ -123,11 +131,18 @@ impl Live {
     }
 
     /// The snapshot holding every edit made before this call, and why it may
-    /// not (the last compile failed, or the wait ran out). Blocks up to 5 s.
+    /// not (the last compile failed, or the wait ran out). Blocks up to 5 s,
+    /// or 1 s while the start-up compile runs.
     pub fn fresh(&self) -> (Arc<Wiki>, Option<String>) {
         let deadline = Instant::now() + WAIT;
         let left = || deadline.saturating_duration_since(Instant::now());
         let mut s = self.lock();
+        if s.compiled_gen == 0 {
+            s = self.wait(s, START_WAIT, |s| s.compiled_gen == 0);
+            if s.compiled_gen == 0 {
+                return (Arc::clone(&s.wiki), Some(RUNNING.to_string()));
+            }
+        }
         s.barrier_sent += 1;
         let token = s.barrier_sent;
         // Created under the lock, so tokens reach the watcher in token order;
@@ -144,7 +159,7 @@ impl Live {
         s = self.wait(s, left(), |s| s.compiled_gen < target);
         let timed_out = s.compiled_gen < target || (wrote && s.barrier_seen < token);
         let stale = if timed_out {
-            Some("recompile still running".to_string())
+            Some(RUNNING.to_string())
         } else {
             s.stale.clone()
         };
