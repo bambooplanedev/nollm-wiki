@@ -1,5 +1,8 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
+use regex::Regex;
+use std::sync::LazyLock;
+
 use crate::formats::{derive_name_from_path, summarize, Extractor};
 use crate::model::{basename, days_in_month, slugify, Entity, SourceKind};
 
@@ -210,10 +213,22 @@ fn parse_list(v: &str) -> Vec<String> {
         .collect()
 }
 
+/// The first `# H1`, cleaned for a title: images dropped (a linked image
+/// leaves an empty link, dropped too), links reduced to their text, code
+/// spans untouched. `None` when nothing is left.
 fn first_h1(body: &str) -> Option<String> {
-    body.lines()
+    static IMAGE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(`[^`]*`)|!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
+    static LINK: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(`[^`]*`)|\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
+    let h = body
+        .lines()
         .map(str::trim)
-        .find_map(|l| l.strip_prefix("# ").map(|h| h.trim().to_string()))
+        .find_map(|l| l.strip_prefix("# "))?;
+    let h = IMAGE.replace_all(h, "$1");
+    let h = LINK.replace_all(&h, "$1$2");
+    let h = h.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!h.is_empty()).then_some(h)
 }
 
 #[cfg(test)]
@@ -238,6 +253,35 @@ mod tests {
 
     fn extract_fm(line: &str) -> Entity {
         MarkdownExtractor.extract("n.md", &format!("---\n{line}\n---\n\nBody.\n"))
+    }
+
+    fn h1(md: &str) -> Entity {
+        MarkdownExtractor.extract("docs/readme.md", md)
+    }
+
+    #[test]
+    fn h1_badges_and_links_are_cleaned() {
+        let e = h1("# Node Version Manager [![build status](https://x/y.svg)](https://x/z) [![ci][3]](https://q) [![a](i.svg)][4]\n\n[3]: u\n");
+        assert_eq!(
+            (e.name.as_str(), e.id.as_str()),
+            ("Node Version Manager", "node_version_manager")
+        );
+        assert_eq!(h1("# Using [Foo](x) here\n").name, "Using Foo here");
+        assert_eq!(
+            h1("# Using [Foo][r] here ![img][r]\n").name,
+            "Using Foo here"
+        );
+        assert_eq!(h1("# Call `a[0](x)` now\n").name, "Call `a[0](x)` now");
+        assert_eq!(h1("# <b>Hi</b>\n").name, "<b>Hi</b>");
+    }
+
+    #[test]
+    fn badge_only_h1_falls_back_to_file_stem_and_front_matter_wins() {
+        assert_eq!(
+            h1("# [![a](i.svg)](l)\n").name,
+            derive_name_from_path("docs/readme.md")
+        );
+        assert_eq!(h1("---\ntitle: A [b](c)\n---\n# X\n").name, "A [b](c)");
     }
 
     #[test]

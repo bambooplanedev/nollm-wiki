@@ -174,6 +174,9 @@ per question is noise-level: treat single results as anecdotes.
 - **Long titles give long ids.** An id over 200 bytes (a long H1, a
   transliterated Cyrillic title) is cut and ends in a 16-hex hash of the
   full slug, so it fits a file name but no longer reads as the whole title.
+- **H1 titles are cleaned of Markdown links and images only.** Images and
+  badges are dropped and `[text](url)` becomes `text` (code spans are kept);
+  HTML tags and other emphasis marks stay in the title and the id.
 - **A date comes only from front matter or a dated file name, and only for
   markdown pages.** Never from git or mtime, so a note without either shows
   no `updated`.
