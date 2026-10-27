@@ -253,7 +253,7 @@ pub fn upsert_block(path: &Path, begin: &str, block: &str, shipped: &[&str]) -> 
 
 /// Takes out `block` (or an earlier release's, one of `shipped`) and the blank line
 /// [`upsert_block`] put before it; deletes the file (and the directories it leaves empty) when
-/// nothing else is left.
+/// nothing else is left. Another block under the same begin line is foreign.
 pub fn remove_block(root: &Path, path: &Path, block: &str, shipped: &[&str]) -> Result<Outcome> {
     let Some(text) = read_opt(path)? else {
         return Ok(Outcome::AlreadyThere);
@@ -262,7 +262,12 @@ pub fn remove_block(root: &Path, path: &Path, block: &str, shipped: &[&str]) -> 
         .chain(shipped.iter().copied())
         .find(|b| text.contains(b))
     else {
-        return Ok(Outcome::AlreadyThere);
+        let begin = block.lines().next().unwrap_or_default();
+        return Ok(if text.lines().any(|l| l == begin) {
+            foreign("holds another wiki block")
+        } else {
+            Outcome::AlreadyThere
+        });
     };
     let rest = if let Some(i) = text.find(&format!("\n\n{block}")) {
         format!("{}{}", &text[..=i], &text[i + 2 + block.len()..])
@@ -487,9 +492,12 @@ mod tests {
         assert_eq!(fs::read_to_string(&p).unwrap(), "# Mine\n");
         fs::write(&p, "<!-- b -->\nedited\n<!-- /b -->\n").unwrap();
         assert!(is_foreign(&upsert_block(&p, begin, new, &[old]).unwrap()));
+        assert!(is_foreign(
+            &remove_block(d.path(), &p, new, &[old]).unwrap()
+        ));
         assert_eq!(
-            remove_block(d.path(), &p, new, &[old]).unwrap(),
-            Outcome::AlreadyThere
+            fs::read_to_string(&p).unwrap(),
+            "<!-- b -->\nedited\n<!-- /b -->\n"
         );
 
         let f = d.path().join("s/SKILL.md");

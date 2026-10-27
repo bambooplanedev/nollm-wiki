@@ -914,6 +914,11 @@ fn setup_keeps_hand_edited_block() {
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert_eq!(read(&agents), edited);
     assert!(out(&a).contains("holds another wiki block"), "{}", out(&a));
+    let a = f
+        .setup(&["--remove", "--agent", "codex", "--scope", "repo"])
+        .code(1);
+    assert_eq!(read(&agents), edited);
+    assert!(out(&a).contains("holds another wiki block"), "{}", out(&a));
 
     let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
