@@ -171,8 +171,9 @@ per question is noise-level: treat single results as anecdotes.
 
 ## Notes and ids
 
-- **Transliterated ids can be long.** A Cyrillic title becomes a Latin id
-  with no length cap yet.
+- **Long titles give long ids.** An id over 200 bytes (a long H1, a
+  transliterated Cyrillic title) is cut and ends in a 16-hex hash of the
+  full slug, so it fits a file name but no longer reads as the whole title.
 - **A date comes only from front matter or a dated file name, and only for
   markdown pages.** Never from git or mtime, so a note without either shows
   no `updated`.

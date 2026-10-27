@@ -1028,3 +1028,34 @@ fn memory_files_join_the_watch_set() {
         .watch_set
         .relevant(&input.join(".agents/memory/new.md")));
 }
+
+/// A title whose slug exceeds the file-name limit (255 bytes on common file
+/// systems) still compiles: its id is capped and stays reachable.
+#[test]
+fn a_very_long_title_compiles_to_a_short_reachable_id() {
+    let long = "word ".repeat(60); // 300 chars
+    let cyr = "слово ".repeat(60); // 660 bytes of UTF-8
+    let (_d, w) = common::compiled_wiki(&[
+        ("long.md", &format!("# {long}\n\nBody of the long page.\n")),
+        ("twin_a.md", &format!("# {long} alpha\n\nTwin A.\n")),
+        ("twin_b.md", &format!("# {long} beta\n\nTwin B.\n")),
+        ("cyr.md", &format!("# {cyr}\n\nКириличне тіло.\n")),
+    ]);
+    let mut ids = BTreeSet::new();
+    for (path, q) in [
+        ("long.md", "word"),
+        ("twin_a.md", "alpha"),
+        ("twin_b.md", "beta"),
+        ("cyr.md", "слово"),
+    ] {
+        let hit = w
+            .search(q, None, 50)
+            .into_iter()
+            .find(|h| h.path == path)
+            .unwrap_or_else(|| panic!("{path} not found by search"));
+        assert!(hit.id.len() <= 200, "{path}: id is {} bytes", hit.id.len());
+        assert!(w.page(&hit.id).is_some(), "{path}: page {} missing", hit.id);
+        ids.insert(hit.id);
+    }
+    assert_eq!(ids.len(), 4, "capped ids must stay unique: {ids:?}");
+}

@@ -450,7 +450,9 @@ fn fold_char(c: char) -> Option<&'static str> {
 /// collapsed to a single `_`, no leading/trailing `_`. An apostrophe between
 /// two Cyrillic letters and a combining mark vanish without a separator. A name
 /// with no letter or digit left falls back to a deterministic `page_<hash>` so
-/// it is never empty (and never silently dropped by slug dedup). Single pass.
+/// it is never empty (and never silently dropped by slug dedup). A slug longer
+/// than `MAX_ID_LEN` is cut and suffixed with a hash of the full slug, so it
+/// fits a file name and stays distinct. Single pass.
 pub fn slugify(name: &str) -> String {
     let chars: Vec<char> = name.chars().collect();
     let cyrillic = |c: Option<&char>| c.is_some_and(|c| ('\u{400}'..='\u{4FF}').contains(c));
@@ -491,10 +493,22 @@ pub fn slugify(name: &str) -> String {
     }
     if out.is_empty() {
         format!("page_{}", &to_hex(&hash_str(name))[..16])
+    } else if out.len() > MAX_ID_LEN {
+        // Too long for a file name: keep a prefix and add a hash of the whole slug.
+        let hash = &to_hex(&hash_str(&out))[..16];
+        let mut cut = MAX_ID_LEN - hash.len() - 1;
+        while !out.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}_{hash}", out[..cut].trim_end_matches('_'))
     } else {
         out
     }
 }
+
+/// Longest id in bytes. The id is a file name (`<id>.md`, written via
+/// `<id>.md.tmp`), and common file systems cap a name at 255 bytes.
+pub const MAX_ID_LEN: usize = 200;
 
 /// Repo-relative, forward-slash-normalized path string. Falls back to the raw
 /// path (lossy) if `path` is not under `root`.
@@ -608,6 +622,19 @@ mod tests {
         assert_eq!(s.len(), "page_".len() + 16);
         assert_eq!(s, slugify("→→→")); // deterministic
         assert_ne!(slugify("→→→"), slugify("★★★")); // distinct names → distinct slugs
+    }
+
+    #[test]
+    fn slugify_caps_long_slugs_with_a_hash_of_the_whole() {
+        let fits = "a".repeat(MAX_ID_LEN);
+        assert_eq!(slugify(&fits), fits); // a slug that fits is untouched
+        let long = "word ".repeat(60);
+        let s = slugify(&long);
+        assert_eq!(s.len(), MAX_ID_LEN);
+        assert!(s.starts_with("word_word_"), "{s}");
+        assert_eq!(s, slugify(&long)); // deterministic
+        assert_ne!(s, slugify(&format!("{long} x"))); // same prefix, distinct id
+        assert_eq!(slugify(&s), s); // an id resolves to itself
     }
 
     #[test]
