@@ -437,7 +437,7 @@ impl<'a> ImportResolver<'a> {
         }
         if literal {
             let dir = from.rsplit_once('/').map_or("", |(d, _)| d);
-            for base in [dir, ""] {
+            for base in ["", dir] {
                 if let Some(id) = self.by_path.get(normalize(base, tail).as_str()) {
                     return BTreeSet::from([(*id).to_string()]);
                 }
@@ -770,6 +770,16 @@ mod tests {
         ];
         // Exact path wins over the suffix match that would be ambiguous.
         assert_eq!(imports_of(files, "main"), ["utils"]);
+    }
+
+    #[test]
+    fn source_literal_prefers_the_project_root_over_the_importing_dir() {
+        let files = vec![
+            sh("c", "bin/c.sh", &["lib/y.sh"]),
+            sh("y", "lib/y.sh", &[]),
+            sh("y2", "bin/lib/y.sh", &[]),
+        ];
+        assert_eq!(imports_of(files, "c"), ["y"]);
     }
 
     #[test]

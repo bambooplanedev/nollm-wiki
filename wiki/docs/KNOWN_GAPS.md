@@ -225,3 +225,4 @@ per question is noise-level: treat single results as anecdotes.
 - A git failure such as `safe.directory` reads as "not a git repo", so no
   local memory.
 - A new repo has no local memory until its first commit.
+- Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
