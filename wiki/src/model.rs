@@ -154,6 +154,7 @@ impl CodeItemKind {
             CodeItemKind::Type => "type",
             CodeItemKind::Value => "value",
             CodeItemKind::Module => "module",
+            CodeItemKind::TopLevel => "top_level",
         }
     }
 }
@@ -173,6 +174,11 @@ pub enum CodeItemKind {
     Value,
     /// A module declaration.
     Module,
+    /// A shell file's `<top level>`: the pseudo-caller of its calls outside
+    /// every function. It is no symbol: search and the outline skip it; only
+    /// `callers` shows it.
+    #[serde(rename = "top_level")]
+    TopLevel,
 }
 
 /// One definition of a code page and where it lives. Field order is the
@@ -513,6 +519,7 @@ mod tests {
             CodeItemKind::Type,
             CodeItemKind::Value,
             CodeItemKind::Module,
+            CodeItemKind::TopLevel,
         ] {
             assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
         }

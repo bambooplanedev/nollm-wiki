@@ -89,3 +89,25 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
     }
     out
 }
+
+/// A shell file's `<top level>` item, spanning lines `1..=last`; the caller
+/// of every call outside a function.
+pub(crate) fn top_level_item(last: usize) -> CodeItem {
+    CodeItem {
+        kind: CodeItemKind::TopLevel,
+        name: "<top level>".to_string(),
+        owner: None,
+        signature: "<top level>".to_string(),
+        start_line: 1,
+        end_line: last,
+        doc: None,
+        doc_text: None,
+        public: false,
+        twin: None,
+        test: false,
+        calls: Vec::new(),
+        call_lines: Vec::new(),
+        call_sites: Vec::new(),
+        arity: None,
+    }
+}

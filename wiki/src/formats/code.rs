@@ -959,7 +959,12 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
         });
     }
-    attach_call_sites(&mut items, tree.root_node(), text);
+    attach_call_sites(
+        &mut items,
+        tree.root_node(),
+        text,
+        spec.lang_name == "shell",
+    );
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
     // plain lexicographic order on the rendered signature, and within a group
@@ -1012,14 +1017,17 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 }
 
 /// Gives each call in the tree to the narrowest function item whose lines
-/// hold it. A call outside every function (a static initializer) is dropped.
-fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
+/// hold it. A call outside every function (a static initializer) is dropped,
+/// except in a shell file: there it goes to the file's `<top level>` item,
+/// pushed last. A shell call inside a parse-ERROR node has no caller.
+fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: bool) {
     let fns: Vec<usize> = (0..items.len())
         .filter(|&i| matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method))
         .collect();
-    if fns.is_empty() {
+    if fns.is_empty() && !shell {
         return;
     }
+    let mut top_level: Vec<CallSite> = Vec::new();
     let aliases = import_aliases(root, text);
     // An alias a parameter or receiver of an enclosing function shadows
     // (Go's `func (m *T)` beside an import `m`) stays as written.
@@ -1056,6 +1064,7 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
                     s
                 }),
             "token_tree" => macro_call_site(node, text),
+            "command" if shell => shell_call_site(node, text),
             _ => None,
         };
         let Some(mut site) = site else {
@@ -1072,10 +1081,34 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
             .iter()
             .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
             .min_by_key(|&&i| items[i].end_line - items[i].start_line);
-        if let Some(&i) = holder {
-            items[i].call_sites.push(site);
+        if shell && std::iter::successors(node.parent(), Node::parent).any(|a| a.is_error()) {
+            continue;
+        }
+        match holder {
+            Some(&i) => items[i].call_sites.push(site),
+            None if shell => top_level.push(site),
+            None => {}
         }
     }
+    if !top_level.is_empty() {
+        let mut item = super::extract_shell::top_level_item(text.lines().count().max(1));
+        item.call_sites = top_level;
+        items.push(item);
+    }
+}
+
+/// A shell `command` whose word is a plain name; a variable, a path or a
+/// quoted word names no function. The arguments are not counted.
+fn shell_call_site(node: Node, text: &str) -> Option<CallSite> {
+    let name = text.get(node.child_by_field_name("name")?.byte_range())?;
+    name.chars()
+        .all(|c| c.is_alphanumeric() || "_:.-+@".contains(c))
+        .then(|| CallSite {
+            name: name.to_string(),
+            via: CallVia::Bare,
+            args: None,
+            line: 0,
+        })
 }
 
 /// What a call's `function` node names, in any grammar this file dispatches

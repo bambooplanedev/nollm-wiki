@@ -23,7 +23,9 @@ fn owner_key(owner: &str) -> &str {
 /// every JavaScript dialect and component format as one.
 fn family(e: &Entity) -> &str {
     match &e.kind {
-        SourceKind::Code { lang } if matches!(lang.as_str(), "rust" | "python" | "cpp" | "go") => {
+        SourceKind::Code { lang }
+            if matches!(lang.as_str(), "rust" | "python" | "cpp" | "go" | "shell") =>
+        {
             lang
         }
         _ => "ecma",

@@ -162,3 +162,139 @@ fn a_comment_inside_a_function_body_is_no_summary() {
     let (_d, _, out) = compiled(&[("ship.sh", src)]);
     assert_ne!(entry(&out, "ship")["summary"], "inner note about things");
 }
+
+fn callers_text(wiki: &wiki::query::Wiki, id: &str, symbol: &str, depth: Option<usize>) -> String {
+    wiki.callers(id, symbol, depth, None).unwrap()
+}
+
+#[test]
+fn shell_call_resolves_within_project() {
+    let (_d, wiki) = compiled_wiki(&[
+        ("a.sh", "helper() {\n  :\n}\n"),
+        ("b.sh", "run_it() {\n  helper x\n}\n"),
+    ]);
+    let text = callers_text(&wiki, "a", "helper", None);
+    assert!(
+        text.contains("b.sh\n  1-3  fn  run_it  calls helper at 2"),
+        "{text}"
+    );
+}
+
+#[test]
+fn top_level_call_has_top_level_caller() {
+    let src = "helper start\n\nrun_it() {\n  helper x\n}\n\nhelper end\n";
+    let (_d, wiki) = compiled_wiki(&[("a.sh", "helper() { :; }\n"), ("b.sh", src)]);
+    let text = callers_text(&wiki, "a", "helper", None);
+    assert!(
+        text.contains("  1-7  top_level  <top level>  calls helper at 1, 7"),
+        "{text}"
+    );
+    assert!(text.contains("run_it"), "positive control: {text}");
+    // Nothing calls the top level: with depth 2 it stays a leaf.
+    assert_eq!(text, callers_text(&wiki, "a", "helper", Some(2)));
+    assert!(
+        text.starts_with("callers of helper  a.sh:1-1 — 2 functions"),
+        "{text}"
+    );
+}
+
+#[test]
+fn top_level_chain_stops_at_top_level() {
+    // `inner` is called only by `outer`; `outer` only at top level.
+    let src = "inner() { :; }\nouter() {\n  inner\n}\nouter\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = callers_text(&wiki, "s", "inner", Some(3));
+    assert!(text.contains("outer"), "{text}");
+    assert!(text.contains("<top level>"), "{text}");
+    assert!(text.contains("2 functions"), "{text}");
+}
+
+#[test]
+fn top_level_item_is_not_a_symbol() {
+    let src = "helper() { :; }\ntop_call_marker() { :; }\nhelper\ntop_call_marker\n";
+    let (_d, out_wiki) = {
+        let (d, _, out) = compiled(&[("s.sh", src)]);
+        let w = wiki::query::Wiki::load(&out).unwrap();
+        let idx = index_entries(&out);
+        // `defined` and the page's exports never name it.
+        let e = idx.iter().find(|e| e["id"] == "s").unwrap();
+        let defined = e["defined"].to_string();
+        assert!(defined.contains("helper"), "positive control: {defined}");
+        assert!(!defined.contains("top level"), "{defined}");
+        let md = std::fs::read_to_string(out.join("s.md")).unwrap();
+        assert!(md.contains("helper()") && !md.contains("top level"), "{md}");
+        (d, w)
+    };
+    let wiki = out_wiki;
+    // The item exists for `callers` ...
+    assert!(wiki.items("s").iter().any(|i| i.name == "<top level>"));
+    // ... but search lists the real function and not it.
+    for q in ["helper", "top", "top level", "<top level>"] {
+        for h in wiki.search(q, None, 10) {
+            assert!(
+                h.symbols.iter().all(|s| !s.name.contains("top level")),
+                "{q}"
+            );
+        }
+    }
+    let hit = wiki.search("helper", None, 10);
+    assert!(hit
+        .iter()
+        .any(|h| h.symbols.iter().any(|s| s.name == "helper")));
+    // The outline lists the function and not the top level.
+    let outline = wiki.outline("s", None).unwrap();
+    assert!(outline.contains("helper()"), "{outline}");
+    assert!(!outline.contains("top level"), "{outline}");
+    // Cut by a budget the outline still hides it.
+    let tight = wiki.outline("s", Some(30)).unwrap();
+    assert!(!tight.contains("top level"), "{tight}");
+}
+
+#[test]
+fn script_with_only_top_level_calls_has_no_outline_items() {
+    let (_d, wiki) = compiled_wiki(&[("a.sh", "helper() { :; }\n"), ("run.sh", "helper\n")]);
+    assert!(!wiki.outline("run", None).unwrap().contains("top level"));
+    assert!(wiki
+        .search("top level", None, 10)
+        .iter()
+        .all(|h| h.symbols.is_empty()));
+    assert!(callers_text(&wiki, "a", "helper", None).contains("<top level>"));
+}
+
+#[test]
+fn neighbors_symbol_never_lists_top_level() {
+    let src = "leaf() { :; }\nmid() {\n  leaf\n}\nmid\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = wiki.calls("s", "mid", None, None).unwrap();
+    assert!(text.contains("leaf"), "positive control: {text}");
+    assert!(!text.contains("top level"), "{text}");
+}
+
+#[test]
+fn bash_log_does_not_resolve_to_ts() {
+    let (_d, wiki) = compiled_wiki(&[
+        ("x.sh", "go() {\n  log hi\n}\nlog hi\n"),
+        ("y.ts", "export function log(m: string) {}\n"),
+    ]);
+    let text = callers_text(&wiki, "y", "log", None);
+    assert!(text.contains("0 functions"), "{text}");
+    // Positive control: a shell `log` is found by shell.
+    let (_d, wiki) = compiled_wiki(&[("x.sh", "log() { :; }\ngo() {\n  log hi\n}\n")]);
+    assert!(callers_text(&wiki, "x", "log", None).contains("go"));
+}
+
+#[test]
+fn call_in_parse_error_has_no_caller() {
+    // The unclosed `foo=(` makes the rest of the file an ERROR node.
+    let src = "helper() { :; }\nok() {\n  helper fine\n}\nfoo=(\n  helper broken\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = callers_text(&wiki, "s", "helper", None);
+    assert!(
+        text.contains("ok  calls helper at 3"),
+        "positive control: {text}"
+    );
+    assert!(
+        !text.contains("top level") && !text.contains("at 6"),
+        "{text}"
+    );
+}

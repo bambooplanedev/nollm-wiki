@@ -7,7 +7,7 @@
 //! token budget shrinks it.
 
 use crate::manifest::{largest_fit, token_estimate};
-use crate::model::{one_line, CodeItem, SourceKind};
+use crate::model::{one_line, CodeItem, CodeItemKind, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
 
@@ -63,6 +63,7 @@ impl Keep {
         let tests = self.tests;
         items
             .iter()
+            .filter(|i| i.kind != CodeItemKind::TopLevel)
             .filter(move |i| tests || !i.test)
             .take(self.lines)
     }
@@ -149,8 +150,8 @@ fn budget(o: &Outline, full: String, max: usize) -> String {
         // How many things the cut removes; a page of only tests keeps them.
         let n = match what {
             "test items" => {
-                let n = items.iter().filter(|i| i.test).count();
-                if n == items.len() {
+                let n = Keep::ALL.items(items).filter(|i| i.test).count();
+                if n == Keep::ALL.items(items).count() {
                     0
                 } else {
                     keep.tests = false;
@@ -228,7 +229,7 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
     let imports = imports.iter().map(|i| one_line(i)).collect();
     let body = match SourceKind::parse(&e.kind) {
         Some(SourceKind::Code { .. }) => match w.items(id) {
-            [] => Body::NoItems,
+            items if items.iter().all(|i| i.kind == CodeItemKind::TopLevel) => Body::NoItems,
             items => Body::Items(items),
         },
         Some(SourceKind::Markdown) => {
