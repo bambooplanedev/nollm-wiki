@@ -125,7 +125,8 @@ per question is noise-level: treat single results as anecdotes.
   could.
 - **Shell (`.sh`, `.bash`) lists only function definitions.** A function
   passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
-  of `f`, and a call inside a part the grammar could not parse has no caller.
+  of `f`, and a call in a part the grammar could not parse has no caller (unless a
+  fully parsed function encloses it inside that part).
   A file with parse errors gets its functions from a line regex: no doc, and
   a span that ends at the next `}` in column 0. Shell pages are reached by
   path only, never by module stem or defined name. A same-named page in

@@ -300,6 +300,17 @@ fn call_in_parse_error_has_no_caller() {
 }
 
 #[test]
+fn call_in_parsed_function_inside_error_keeps_its_caller() {
+    // The unclosed `x() {` makes the rest of the file an ERROR node holding
+    // the well formed `f`, so its call keeps `f` as caller.
+    let src = "g() { :; }\nx() {\nf() {\n  g\n}\ng broken\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = callers_text(&wiki, "s", "g", None);
+    assert!(text.contains("f  calls g at 4"), "{text}");
+    assert!(!text.contains("top level") && !text.contains("at 6"), "{text}");
+}
+
+#[test]
 fn source_and_dot_arguments_are_imports() {
     let src = "source lib/a.sh\n. \"${R}\"/b.sh\nbuiltin source c.sh\necho source e.sh\nsource\n";
     let (_d, _, out) = compiled(&[("m.sh", src)]);

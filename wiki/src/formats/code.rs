@@ -1019,7 +1019,8 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 /// Gives each call in the tree to the narrowest function item whose lines
 /// hold it. A call outside every function (a static initializer) is dropped,
 /// except in a shell file: there it goes to the file's `<top level>` item,
-/// pushed last. A shell call inside a parse-ERROR node has no caller.
+/// pushed last. A shell call has no caller when a parse-ERROR node is closer
+/// to it than any function definition.
 fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: bool) {
     let fns: Vec<usize> = (0..items.len())
         .filter(|&i| matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method))
@@ -1081,7 +1082,13 @@ fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: b
             .iter()
             .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
             .min_by_key(|&&i| items[i].end_line - items[i].start_line);
-        if shell && std::iter::successors(node.parent(), Node::parent).any(|a| a.is_error()) {
+        // An ERROR node met before any function definition: the tree is not
+        // to be trusted for who holds this call.
+        if shell
+            && std::iter::successors(node.parent(), Node::parent)
+                .find(|a| a.is_error() || a.kind() == "function_definition")
+                .is_some_and(|a| a.is_error())
+        {
             continue;
         }
         match holder {
