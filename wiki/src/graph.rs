@@ -274,6 +274,9 @@ impl<'a> ImportResolver<'a> {
             }
             let path = e.source_path.as_str();
             by_path.insert(path, id.as_str());
+            if crate::formats::code::is_shell(path) {
+                continue;
+            }
             if let Some(root) = local_crate_root(path) {
                 local_roots.insert(root);
             }

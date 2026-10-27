@@ -123,6 +123,13 @@ per question is noise-level: treat single results as anecdotes.
   directory. Repeated basenames across directories do not pair, and a lone
   cross-directory `x.h`/`x.cpp` with a coincidental free-function key
   could.
+- **Shell (`.sh`, `.bash`) lists only function definitions.** A function
+  passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
+  of `f`, and a call inside a part the grammar could not parse has no caller.
+  A file with parse errors gets its functions from a line regex: no doc, and
+  a span that ends at the next `}` in column 0. Shell pages are reached by
+  path only, never by module stem or defined name. A same-named page in
+  another directory still shortens ids by directory, as any two pages do.
 - **tree-sitter-cpp misparses some `requires` clauses** (a grammar bug).
 
 ## Comment docs

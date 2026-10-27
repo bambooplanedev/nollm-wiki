@@ -93,6 +93,10 @@ pub(crate) struct LangSpec {
     /// Vue or Svelte script uses `default_shape`; a `lang` script uses that
     /// language's own spec.
     pub(crate) shape: fn(Node) -> Shape,
+    /// A signature the language writes itself (shell: `name()` whatever the
+    /// definition's spelling), given the definition and its name. `None`
+    /// builds it from the source.
+    pub(crate) fixed_signature: fn(Node, &str) -> Option<String>,
 }
 
 impl LangSpec {
@@ -121,6 +125,7 @@ impl LangSpec {
             body_doc: no_body_doc,
             query_gates_visibility: false,
             shape: default_shape,
+            fixed_signature: |_, _| None,
         }
     }
 }
@@ -294,6 +299,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "vue" => super::extract_vue::vue_spec(),
         "svelte" => super::extract_svelte::svelte_spec(),
         "go" => super::extract_simple::go_spec(),
+        "sh" | "bash" => super::extract_shell::shell_spec(),
         _ if is_cpp(ext) => super::extract_cpp::cpp_spec(),
         _ => return None,
     })
@@ -322,15 +328,23 @@ pub(crate) fn ext_of(rel_path: &str) -> String {
 ///
 /// A C header declares a component's public surface and is what `#include`
 /// names, so it outranks a C++-only header, which outranks the translation
-/// unit implementing either. A TOTAL order, not a binary: with every header at
+/// unit implementing either; a shell script ranks last, so it never takes the
+/// name from a same-named Python or C++ page. A TOTAL order, not a binary: with every header at
 /// one rank, adding `foo.hpp` beside `foo.h` would tie at the top, dissolve
 /// the strict win in `disambiguate_ids`, and rename the pre-existing page.
 pub(crate) fn source_rank(source_path: &str) -> u8 {
     match ext_of(source_path).as_str() {
         "h" => 0,
         "hpp" | "hh" | "hxx" => 1,
+        "sh" | "bash" => 3,
         _ => 2,
     }
+}
+
+/// A shell script: reached only by its path (`source`), never by a module
+/// stem or a defined name, so `import deploy` in Python cannot link `deploy.sh`.
+pub(crate) fn is_shell(source_path: &str) -> bool {
+    matches!(ext_of(source_path).as_str(), "sh" | "bash")
 }
 
 /// Every extension `CodeExtractor` claims. Shared by `extensions()` and by
@@ -338,7 +352,7 @@ pub(crate) fn source_rank(source_path: &str) -> u8 {
 /// a missing entry would strip that language of all symbols and imports.
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
-    "hxx", "h",
+    "hxx", "h", "sh", "bash",
 ];
 
 /// Each language's query, compiled once per process instead of once per file.
@@ -934,6 +948,17 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     items.sort_by(|a, b| {
         (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
     });
+    if spec.lang_name == "shell" && tree.root_node().has_error() {
+        let missed = super::extract_shell::missed_functions(text, &items);
+        for it in &missed {
+            let (n, sig) = (it.name.clone(), it.signature.clone());
+            collected.push((n.clone(), ItemKind::FreeDef, n, sig));
+        }
+        items.extend(missed);
+        items.sort_by(|a, b| {
+            (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
+        });
+    }
     attach_call_sites(&mut items, tree.root_node(), text);
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
@@ -1852,6 +1877,12 @@ fn build_signature(
     spec: &LangSpec,
     shape: &Shape,
 ) -> String {
+    if let Some(sig) = name
+        .and_then(|n| text.get(n.byte_range()))
+        .and_then(|n| (spec.fixed_signature)(def, n))
+    {
+        return sig;
+    }
     let root = (spec.sig_start)(def);
     let start = root.start_byte();
     let end = shape
@@ -2024,6 +2055,12 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "py" => line
                 .strip_prefix("\"\"\"")
                 .map(|s| s.trim_end_matches("\"\"\"")),
+            // A shebang is no doc, but it may open the file: skipped as a gap.
+            "sh" | "bash" => Some(if line.starts_with("#!") {
+                ""
+            } else {
+                line.strip_prefix('#').unwrap_or("")
+            }),
             "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
