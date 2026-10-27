@@ -23,7 +23,7 @@ const HINT_MEMORY_LONG: usize = 6;
 const HINT_MEMORY_SHORT: usize = 4;
 const HINT_MEMORY_RATIO: f64 = 2.0;
 
-const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines:\n";
+const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines, and read them before you run grep:\n";
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
 /// `text`, then one `memory: path — summary` line for the best memory note

@@ -194,6 +194,8 @@ tree first — start here.\n\n\
 - Code symbols with their line ranges: `items.json` (keyed by page id).\n\
 - A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
 - What a function calls, through all levels: `wiki neighbors <id> --symbol <fn>`.\n\
+- Do not call grep, find or ls in the same turn as `search`: read its answer first.\n\
+- Where something is defined or handled: `search`. Who calls a function: `callers`. For every occurrence of a literal string (an env var, a message, a config key), grep.\n\
 - Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Imported by / Mentioned in / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )

@@ -831,3 +831,128 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(read(&f.root().join("AGENTS.md")).contains("<!-- wiki:navigation -->"));
 }
+
+const OLD_NAV: &str = include_str!("../src/setup/shipped/navigation-1.md");
+const OLD_SKILLS: [&str; 5] = [
+    include_str!("../src/setup/shipped/skill-1.md"),
+    include_str!("../src/setup/shipped/skill-2.md"),
+    include_str!("../src/setup/shipped/skill-3.md"),
+    include_str!("../src/setup/shipped/skill-4.md"),
+    include_str!("../src/setup/shipped/skill-5.md"),
+];
+
+fn nav_block(nav: &str) -> String {
+    format!("<!-- wiki:navigation -->\n{nav}<!-- /wiki:navigation -->\n")
+}
+
+fn memory_part(skill: &str) -> Option<String> {
+    let (_, rules) = skill.split_once("\n# Memory\n")?;
+    Some(format!(
+        "---\nname: wiki-memory\ndescription: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.\n---\n\n# Memory\n{rules}"
+    ))
+}
+
+#[test]
+fn setup_upgrades_previous_release() {
+    // Codex: the block in AGENTS.md.
+    let f = fixture(true, false);
+    codex_stub(&f);
+    let agents = f.root().join("AGENTS.md");
+    fs::write(&agents, format!("# Team rules\n\n{}", nav_block(OLD_NAV))).unwrap();
+    f.setup(&["--agent", "codex", "--scope", "repo"]).success();
+    let now = read(&agents);
+    assert_eq!(now, format!("# Team rules\n\n{}", nav_block(NAV)));
+    assert_eq!(now.matches("<!-- wiki:navigation -->").count(), 1);
+
+    // pi, repo scope: every earlier skill, with the memory folder filled in.
+    let skill_file = ".agents/skills/wiki-navigation/SKILL.md";
+    // Claude Code: the memory-only skill cut from every earlier skill that has a Memory section.
+    let mem_file = ".claude/skills/wiki-memory/SKILL.md";
+    for (i, old) in OLD_SKILLS.iter().enumerate() {
+        let f = fixture(true, true);
+        let p = f.root().join(skill_file);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, old.replace("<memory-dir>", ".agents/memory")).unwrap();
+        let m = f.root().join(mem_file);
+        if let Some(old_mem) = memory_part(&old.replace("<memory-dir>", ".agents/memory")) {
+            fs::create_dir_all(m.parent().unwrap()).unwrap();
+            fs::write(&m, old_mem).unwrap();
+        }
+        let a = f
+            .setup(&["--agent", "claude,pi", "--scope", "repo"])
+            .success();
+        assert_eq!(
+            read(&p),
+            skill(".agents/memory"),
+            "skill-{}: {}",
+            i + 1,
+            out(&a)
+        );
+        assert_eq!(read(&m), memory_skill(".agents/memory"), "skill-{}", i + 1);
+    }
+
+    // Local scope without a memory folder: the variant without the Memory section.
+    for (i, old) in OLD_SKILLS.iter().enumerate() {
+        let f = fixture(true, true);
+        let p = f.root().join(skill_file);
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let head = old.split_once("\n# Memory\n").map_or(*old, |(h, _)| h);
+        fs::write(&p, head).unwrap();
+        f.setup(&["--agent", "pi", "--scope", "local"]).success();
+        let want = SKILL.split_once("\n# Memory\n").unwrap().0;
+        assert_eq!(read(&p), want, "skill-{}", i + 1);
+    }
+}
+
+#[test]
+fn setup_keeps_hand_edited_block() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    let agents = f.root().join("AGENTS.md");
+    let edited = nav_block(&OLD_NAV.replace("exact", "approximate"));
+    fs::write(&agents, &edited).unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert_eq!(read(&agents), edited);
+    assert!(out(&a).contains("holds another wiki block"), "{}", out(&a));
+
+    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let mine = OLD_SKILLS[4].replace("<memory-dir>", ".agents/memory") + "my line\n";
+    fs::write(&p, &mine).unwrap();
+    f.setup(&["--agent", "pi", "--scope", "repo"]).code(1);
+    assert_eq!(read(&p), mine);
+}
+
+#[test]
+fn remove_takes_out_old_block() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    let agents = f.root().join("AGENTS.md");
+    fs::write(&agents, format!("# Team rules\n\n{}", nav_block(OLD_NAV))).unwrap();
+    f.setup(&["--remove", "--agent", "codex", "--scope", "repo"])
+        .success();
+    assert_eq!(read(&agents), "# Team rules\n");
+
+    let f = fixture(true, false);
+    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, OLD_SKILLS[3].replace("<memory-dir>", ".agents/memory")).unwrap();
+    f.setup(&["--remove", "--agent", "pi", "--scope", "repo"])
+        .success();
+    assert!(!p.exists());
+}
+
+#[test]
+fn the_search_first_rules_are_in_every_copy() {
+    let agents = wiki::manifest::render_agents_md("proj");
+    for (name, text) in [
+        ("navigation.md", NAV),
+        ("SKILL.md", SKILL),
+        ("INSTRUCTIONS", wiki::serve::INSTRUCTIONS),
+        ("render_agents_md", agents.as_str()),
+    ] {
+        assert!(text.contains("same turn as `search`"), "{name}");
+        assert!(text.contains("`callers`"), "{name}");
+        assert!(text.contains("every occurrence of a literal"), "{name}");
+    }
+}

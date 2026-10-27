@@ -15,7 +15,13 @@ description: Find where something is or how it works in this project's code. Use
    function that one calls, with its lines. To see what calls a function,
    call `callers` (`mcp__wiki__callers`) with the path and `symbol`
    instead of grepping for its name.
-4. Only if search finds nothing relevant, try other words (a name, an
+4. Do not call grep, find or ls in the same turn as `search`. Wait for the
+   `search` answer and read it first; most of the time it already holds what
+   you need.
+5. Pick the tool by the question: where something is defined or handled,
+   `search`; who calls a function, `callers`; every occurrence of a literal
+   string (an env var, a message, a config key), grep.
+6. Only if search finds nothing relevant, try other words (a name, an
    abbreviation), then fall back to grep.
 
 # Memory
