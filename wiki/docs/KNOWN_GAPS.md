@@ -137,6 +137,10 @@ per question is noise-level: treat single results as anecdotes.
   a span that ends at the next `}` in column 0. Shell pages are reached by
   path only, never by module stem or defined name. A same-named page in
   another directory still shortens ids by directory, as any two pages do.
+  In a file with parse errors, the line regex also reads function-like
+  text in a here-document as a function, and that text can become the page
+  summary. The blanking pass reads `$((1<<n))` as a here-document start and
+  skips the rest of that file: the recovery is lost, never a wrong edge.
 - **tree-sitter-cpp misparses some `requires` clauses** (a grammar bug).
 
 ## Comment docs

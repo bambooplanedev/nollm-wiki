@@ -2100,8 +2100,11 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "py" => line
                 .strip_prefix("\"\"\"")
                 .map(|s| s.trim_end_matches("\"\"\"")),
-            // A shebang is no doc, but it may open the file: skipped as a gap.
-            "sh" | "bash" if line.starts_with("#!") => Some(""),
+            // A shebang or a `# shellcheck` directive is no doc, but may open
+            // the file: skipped as a gap.
+            "sh" | "bash" if line.starts_with("#!") || line.starts_with("# shellcheck ") => {
+                Some("")
+            }
             "sh" | "bash" => line.strip_prefix('#'),
             "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))

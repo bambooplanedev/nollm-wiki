@@ -961,3 +961,32 @@ fn the_search_first_rules_are_in_every_copy() {
         assert!(text.contains("every occurrence of a literal"), "{name}");
     }
 }
+
+#[test]
+fn setup_and_remove_clear_every_shipped_claude_navigation_skill() {
+    for (i, old) in OLD_SKILLS.iter().enumerate() {
+        for remove in [false, true] {
+            let f = fixture(true, true);
+            let p = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(&p, old.replace("<memory-dir>", ".agents/memory")).unwrap();
+            let mut args = vec!["--agent", "claude", "--scope", "repo"];
+            if remove {
+                args.insert(0, "--remove");
+            }
+            let a = f.setup(&args).success();
+            assert!(!p.exists(), "skill-{} remove={remove}: {}", i + 1, out(&a));
+        }
+    }
+}
+
+#[test]
+fn setup_removes_a_lone_old_agents_md_beside_claude_md() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
+    fs::write(f.root().join("AGENTS.md"), nav_block(OLD_NAV)).unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
+    assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
+}

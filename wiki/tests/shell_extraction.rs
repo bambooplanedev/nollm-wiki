@@ -62,10 +62,7 @@ fn comment_above_function_is_its_doc() {
 #[test]
 fn leading_comment_is_page_summary() {
     let src = "#!/usr/bin/env bash\n# Builds and ships the release.\n\nfoo() { :; }\n";
-    let (_d, out_dir, _) = {
-        let (d, _, out) = compiled(&[("ship.sh", src)]);
-        (d, out.clone(), ())
-    };
+    let (_d, _, out_dir) = compiled(&[("ship.sh", src)]);
     assert_eq!(
         entry(&out_dir, "ship")["summary"],
         "Builds and ships the release."
@@ -95,9 +92,8 @@ fn non_shell(out: &std::path::Path) -> BTreeMap<String, String> {
             )
         })
         .filter(|(_, p)| {
-            !std::path::Path::new(p)
-                .extension()
-                .is_some_and(|e| e == "sh")
+            let ext = std::path::Path::new(p).extension();
+            ext != Some("sh".as_ref()) && ext != Some("bash".as_ref())
         })
         .collect()
 }
@@ -262,6 +258,16 @@ fn script_with_only_top_level_calls_has_no_outline_items() {
 }
 
 #[test]
+fn top_level_only_script_is_not_told_to_recompile() {
+    let (_d, wiki) = compiled_wiki(&[("run.sh", "set -e\nsource ./a.sh\n")]);
+    let text = wiki.outline("run", None).unwrap();
+    assert!(
+        text.contains("no functions") && !text.contains("recompile"),
+        "{text}"
+    );
+}
+
+#[test]
 fn neighbors_symbol_never_lists_top_level() {
     let src = "leaf() { :; }\nmid() {\n  leaf\n}\nmid\n";
     let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
@@ -315,11 +321,11 @@ fn call_in_parsed_function_inside_error_keeps_its_caller() {
 
 #[test]
 fn source_and_dot_arguments_are_imports() {
-    let src = "source lib/a.sh\n. \"${R}\"/b.sh\nbuiltin source c.sh\necho source e.sh\nsource\n";
+    let src = "\\. d.sh\nsource lib/a.sh\n. \"${R}\"/b.sh\nbuiltin source c.sh\necho source e.sh\nsource\n";
     let (_d, _, out) = compiled(&[("m.sh", src)]);
     let page = std::fs::read_to_string(out.join("m.md")).unwrap();
     let got = common::section(&page, "Imports");
-    assert_eq!(got, ["${R}\"/b.sh", "c.sh", "lib/a.sh"], "{page}");
+    assert_eq!(got, ["${R}\"/b.sh", "c.sh", "d.sh", "lib/a.sh"], "{page}");
 }
 
 /// `trigger` is a line tree-sitter-bash 0.25 rejects though bash accepts it.
@@ -329,8 +335,9 @@ fn grammar_gap_is_rewritten(trigger: &str) {
     let src = format!("g() {{ :; }}\n{trigger}\n# Calls g.\nf() {{\n  g\n  }}\nh() {{ :; }}\n");
     let (_d, wiki) = compiled_wiki(&[("s.sh", &src)]);
     let text = callers_text(&wiki, "s", "g", None);
+    let k = trigger.lines().count() - 1;
     assert!(
-        text.contains("3-6  fn  f  calls g at 5"),
+        text.contains(&format!("{}-{}  fn  f  calls g at {}", 3 + k, 6 + k, 5 + k)),
         "{trigger}: {text}"
     );
     let f = items(&wiki, "s")
@@ -339,7 +346,7 @@ fn grammar_gap_is_rewritten(trigger: &str) {
         .unwrap();
     assert_eq!(
         (f.2, f.3, f.4.as_deref()),
-        (3, 6, Some("Calls g.")),
+        (3 + k, 6 + k, Some("Calls g.")),
         "{trigger}"
     );
 }
@@ -347,6 +354,12 @@ fn grammar_gap_is_rewritten(trigger: &str) {
 #[test]
 fn case_pattern_with_glob_and_quote_is_rewritten() {
     grammar_gap_is_rewritten("case $P in a*' '*) x ;; esac");
+}
+
+#[test]
+fn multi_line_case_pattern_is_rewritten() {
+    // The nvm.sh form: the glob-and-quote pattern sits on its own line.
+    grammar_gap_is_rewritten("case $P in\n  --only=*' '*)\n    x ;;\nesac");
 }
 
 #[test]
@@ -367,4 +380,21 @@ fn clean_file_is_not_rewritten() {
     let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
     let text = callers_text(&wiki, "s", "h", None);
     assert!(text.contains("f  calls h at 4"), "{text}");
+}
+
+#[test]
+fn backslash_dot_import_links_the_sourced_page() {
+    let (_d, _, out) = compiled(&[("main.sh", "\\. ./lib.sh\n"), ("lib.sh", "x() { :; }\n")]);
+    let lib = std::fs::read_to_string(out.join("lib.md")).unwrap();
+    assert!(
+        lib.contains("## Imported by") && lib.contains("[[main"),
+        "{lib}"
+    );
+}
+
+#[test]
+fn shellcheck_directive_is_no_summary() {
+    let src = "#!/bin/bash\n# shellcheck disable=SC2034\n# Deploys things.\n\nfoo() { :; }\n";
+    let (_d, _, out) = compiled(&[("d.sh", src)]);
+    assert_eq!(entry(&out, "d")["summary"], "Deploys things.");
 }

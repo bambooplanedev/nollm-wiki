@@ -15,6 +15,9 @@ use crate::rewrite::mask_fenced_code;
 /// before `items.json` existed.
 const NO_ITEMS: &str = "no items — recompile with a current wiki for symbol lines";
 
+/// The last line of a code page whose items are all top-level calls.
+const NO_FUNCTIONS: &str = "no functions";
+
 /// What a page's outline can show, before any cut.
 struct Outline<'a> {
     /// `# {title} ({id})`, `{path}  {kind}`, then the summary when there is
@@ -28,8 +31,8 @@ struct Outline<'a> {
 enum Body<'a> {
     /// A text page: nothing below the header.
     Empty,
-    /// A code page with no items.
-    NoItems,
+    /// A code page with no items: the line that says so.
+    NoItems(&'static str),
     /// A code page's items, in `items.json` order.
     Items(&'a [CodeItem]),
     /// A markdown page's ATX headings as `(level, text)`, in body order.
@@ -229,7 +232,10 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
     let imports = imports.iter().map(|i| one_line(i)).collect();
     let body = match SourceKind::parse(&e.kind) {
         Some(SourceKind::Code { .. }) => match w.items(id) {
-            items if items.iter().all(|i| i.kind == CodeItemKind::TopLevel) => Body::NoItems,
+            [] => Body::NoItems(NO_ITEMS),
+            items if items.iter().all(|i| i.kind == CodeItemKind::TopLevel) => {
+                Body::NoItems(NO_FUNCTIONS)
+            }
             items => Body::Items(items),
         },
         Some(SourceKind::Markdown) => {
@@ -270,7 +276,7 @@ fn render(o: &Outline, keep: &Keep) -> String {
     }
     match &o.body {
         Body::Empty => {}
-        Body::NoItems => out.push(NO_ITEMS.into()),
+        Body::NoItems(line) => out.push((*line).into()),
         Body::Items(items) => {
             let mut run: Option<&str> = None;
             for it in keep.items(items) {
