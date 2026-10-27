@@ -7,13 +7,16 @@
 //! token budget shrinks it.
 
 use crate::manifest::{largest_fit, token_estimate};
-use crate::model::{one_line, CodeItem, SourceKind};
+use crate::model::{one_line, CodeItem, CodeItemKind, SourceKind};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
 
 /// The last line of a code page whose items are unknown: a wiki compiled
 /// before `items.json` existed.
 const NO_ITEMS: &str = "no items — recompile with a current wiki for symbol lines";
+
+/// The last line of a code page whose items are all top-level calls.
+const NO_FUNCTIONS: &str = "no functions";
 
 /// What a page's outline can show, before any cut.
 struct Outline<'a> {
@@ -28,8 +31,8 @@ struct Outline<'a> {
 enum Body<'a> {
     /// A text page: nothing below the header.
     Empty,
-    /// A code page with no items.
-    NoItems,
+    /// A code page with no items: the line that says so.
+    NoItems(&'static str),
     /// A code page's items, in `items.json` order.
     Items(&'a [CodeItem]),
     /// A markdown page's ATX headings as `(level, text)`, in body order.
@@ -63,6 +66,7 @@ impl Keep {
         let tests = self.tests;
         items
             .iter()
+            .filter(|i| i.kind != CodeItemKind::TopLevel)
             .filter(move |i| tests || !i.test)
             .take(self.lines)
     }
@@ -149,8 +153,8 @@ fn budget(o: &Outline, full: String, max: usize) -> String {
         // How many things the cut removes; a page of only tests keeps them.
         let n = match what {
             "test items" => {
-                let n = items.iter().filter(|i| i.test).count();
-                if n == items.len() {
+                let n = Keep::ALL.items(items).filter(|i| i.test).count();
+                if n == Keep::ALL.items(items).count() {
                     0
                 } else {
                     keep.tests = false;
@@ -228,7 +232,10 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
     let imports = imports.iter().map(|i| one_line(i)).collect();
     let body = match SourceKind::parse(&e.kind) {
         Some(SourceKind::Code { .. }) => match w.items(id) {
-            [] => Body::NoItems,
+            [] => Body::NoItems(NO_ITEMS),
+            items if items.iter().all(|i| i.kind == CodeItemKind::TopLevel) => {
+                Body::NoItems(NO_FUNCTIONS)
+            }
             items => Body::Items(items),
         },
         Some(SourceKind::Markdown) => {
@@ -269,7 +276,7 @@ fn render(o: &Outline, keep: &Keep) -> String {
     }
     match &o.body {
         Body::Empty => {}
-        Body::NoItems => out.push(NO_ITEMS.into()),
+        Body::NoItems(line) => out.push((*line).into()),
         Body::Items(items) => {
             let mut run: Option<&str> = None;
             for it in keep.items(items) {

@@ -722,7 +722,7 @@ impl Wiki {
         let mut f = SymbolFields::default();
         for item in items
             .iter()
-            .filter(|i| !i.test && i.kind != CodeItemKind::Module)
+            .filter(|i| !i.test && !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
         {
             let whole = item.name.to_lowercase();
             if !title_words.contains(&whole.as_str()) {
@@ -819,7 +819,7 @@ impl Wiki {
         let mut scored: Vec<(f64, &CodeItem)> = self
             .items(id)
             .iter()
-            .filter(|i| i.kind != CodeItemKind::Module)
+            .filter(|i| !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
             .map(|i| (Self::item_score(i, tokens, query_words, idf), i))
             .filter(|(s, _)| *s > 0.0)
             .collect();

@@ -28,6 +28,16 @@ const CMD: &str = "wiki";
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
 /// `--remove` takes out exactly them.
 const NAV_RULES: &str = include_str!("navigation.md");
+/// Every earlier release's `navigation.md` and `SKILL.md` (from git history), so setup can
+/// upgrade or remove what an older `wiki` wrote while a hand-edited copy stays foreign.
+const SHIPPED_NAV: &[&str] = &[include_str!("shipped/navigation-1.md")];
+const SHIPPED_SKILLS: &[&str] = &[
+    include_str!("shipped/skill-1.md"),
+    include_str!("shipped/skill-2.md"),
+    include_str!("shipped/skill-3.md"),
+    include_str!("shipped/skill-4.md"),
+    include_str!("shipped/skill-5.md"),
+];
 const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
 const NAV_END: &str = "<!-- /wiki:navigation -->";
 
@@ -299,18 +309,30 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let local_memory = memory::local_dir(root);
     // The skill's Memory section names the scope's folder; local scope without a local folder
     // gets no section (naming the committable repo folder would defeat the scope).
-    let skill_text = match (&local_memory, local) {
-        (Some(d), true) => SKILL_TEMPLATE.replace("<memory-dir>", &memory::display_path(d)),
-        (None, true) => SKILL_TEMPLATE
+    let render = |template: &str| match (&local_memory, local) {
+        (Some(d), true) => template.replace("<memory-dir>", &memory::display_path(d)),
+        (None, true) => template
             .split_once("\n# Memory\n")
-            .map_or(SKILL_TEMPLATE, |(head, _)| head)
+            .map_or(template, |(head, _)| head)
             .to_string(),
-        _ => SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR),
+        _ => template.replace("<memory-dir>", memory::REPO_DIR),
     };
+    let memory_of = |text: &str| {
+        text.split_once("\n# Memory\n")
+            .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"))
+    };
+    let skill_text = render(SKILL_TEMPLATE);
     let skill_text = skill_text.as_str();
-    let memory_skill = skill_text
-        .split_once("\n# Memory\n")
-        .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"));
+    let memory_skill = memory_of(skill_text);
+    let old_skills: Vec<String> = SHIPPED_SKILLS.iter().map(|t| render(t)).collect();
+    let old_skills: Vec<&str> = old_skills.iter().map(String::as_str).collect();
+    let old_memory_skills: Vec<String> = old_skills.iter().filter_map(|t| memory_of(t)).collect();
+    let old_memory_skills: Vec<&str> = old_memory_skills.iter().map(String::as_str).collect();
+    let old_blocks: Vec<String> = SHIPPED_NAV
+        .iter()
+        .map(|n| format!("{NAV_BEGIN}\n{n}{NAV_END}\n"))
+        .collect();
+    let old_blocks: Vec<&str> = old_blocks.iter().map(String::as_str).collect();
     if !opts.remove {
         let folder = match (&local_memory, local) {
             (Some(d), true) => Some(d.clone()),
@@ -396,19 +418,20 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let block = format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n");
                 let res = || {
                     if opts.remove {
-                        edit::remove_block(root, &path, &block)
+                        edit::remove_block(root, &path, &block, &old_blocks)
                     } else {
-                        edit::upsert_block(&path, NAV_BEGIN, &block)
+                        edit::upsert_block(&path, NAV_BEGIN, &block, &old_blocks)
                     }
                 };
                 let what = "AGENTS.md wiki navigation steps";
                 // pi reads AGENTS.md instead of CLAUDE.md when both exist, so
                 // beside a CLAUDE.md the steps get no AGENTS.md of their own; one
                 // an earlier setup created holds only them and goes.
-                let lone = std::fs::read_to_string(&path).is_ok_and(|t| t == block);
+                let lone = std::fs::read_to_string(&path)
+                    .is_ok_and(|t| t == block || old_blocks.contains(&t.as_str()));
                 if !opts.remove && root.join("CLAUDE.md").exists() && (lone || !path.exists()) {
                     if lone {
-                        edit::remove_block(root, &path, &block)?;
+                        edit::remove_block(root, &path, &block, &old_blocks)?;
                         r.line("removed AGENTS.md: it held only the wiki steps and hid CLAUDE.md from pi")?;
                     }
                     r.skip(
@@ -426,12 +449,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 continue;
             }
         };
-        let (skill, text) = if pi {
-            (Path::new(".agents").join(SKILL_DIR), Some(skill_text))
+        let (skill, text, shipped) = if pi {
+            (
+                Path::new(".agents").join(SKILL_DIR),
+                Some(skill_text),
+                &old_skills,
+            )
         } else {
             (
                 Path::new(".claude").join(MEMORY_SKILL_DIR),
                 memory_skill.as_deref(),
+                &old_memory_skills,
             )
         };
         // MCP
@@ -463,9 +491,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let file = skill.join("SKILL.md");
             let res = || {
                 if opts.remove {
-                    edit::remove_file(root, &root.join(&file), text)
+                    edit::remove_file(root, &root.join(&file), text, shipped)
                 } else {
-                    edit::write_file(&root.join(&file), text)
+                    edit::write_file(&root.join(&file), text, shipped)
                 }
             };
             let what = format!("{} skill for {name}", file.display());
@@ -478,10 +506,11 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         let old = Path::new(".claude").join(SKILL_DIR).join("SKILL.md");
         let old_file = old.to_string_lossy();
         if !pi
-            && std::fs::read_to_string(root.join(&old)).is_ok_and(|t| t == skill_text)
+            && std::fs::read_to_string(root.join(&old))
+                .is_ok_and(|t| t == skill_text || old_skills.contains(&t.as_str()))
             && !(r.guard_tracked && tracked(root, &old_file))
         {
-            edit::remove_file(root, &root.join(&old), skill_text)?;
+            edit::remove_file(root, &root.join(&old), skill_text, &old_skills)?;
             r.line(&format!(
                 "removed {old_file}: the server instructions carry its steps"
             ))?;
@@ -493,9 +522,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &content)
+                        edit::remove_file(root, &path, &content, &[])
                     } else {
-                        edit::write_file(&path, &content)
+                        edit::write_file(&path, &content, &[])
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");

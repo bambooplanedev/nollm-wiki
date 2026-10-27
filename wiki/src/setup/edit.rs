@@ -192,9 +192,15 @@ pub fn remove_item(root: &Path, path: &Path, parents: &[&str], item: &Value) -> 
     Ok(out)
 }
 
-pub fn write_file(path: &Path, content: &str) -> Result<Outcome> {
+/// Writes `content`. A file holding any of `shipped` (an earlier release's text) is upgraded in
+/// place; any other content is foreign.
+pub fn write_file(path: &Path, content: &str, shipped: &[&str]) -> Result<Outcome> {
     match read_opt(path)? {
         Some(s) if s == content => Ok(Outcome::AlreadyThere),
+        Some(s) if shipped.contains(&s.as_str()) => {
+            std::fs::write(path, content)?;
+            Ok(Outcome::Done)
+        }
         Some(_) => Ok(foreign("file has other content")),
         None => {
             create_parent(path)?;
@@ -204,11 +210,13 @@ pub fn write_file(path: &Path, content: &str) -> Result<Outcome> {
     }
 }
 
-/// Removes `path` when it holds exactly `content`, then the parent directories it leaves empty, up to but excluding `root`.
-pub fn remove_file(root: &Path, path: &Path, content: &str) -> Result<Outcome> {
+/// Removes `path` when it holds exactly `content` or one of `shipped`, then the parent directories it leaves empty, up to but excluding `root`.
+pub fn remove_file(root: &Path, path: &Path, content: &str, shipped: &[&str]) -> Result<Outcome> {
     match read_opt(path)? {
         None => return Ok(Outcome::AlreadyThere),
-        Some(s) if s != content => return Ok(foreign("file has other content")),
+        Some(s) if s != content && !shipped.contains(&s.as_str()) => {
+            return Ok(foreign("file has other content"))
+        }
         Some(_) => {}
     }
     std::fs::remove_file(path)?;
@@ -217,11 +225,16 @@ pub fn remove_file(root: &Path, path: &Path, content: &str) -> Result<Outcome> {
 }
 
 /// Adds `block` (which starts with the line `begin`) to a text file, after a blank line when the
-/// file has other content. A file holding another block that starts with `begin` is foreign.
-pub fn upsert_block(path: &Path, begin: &str, block: &str) -> Result<Outcome> {
+/// file has other content. An earlier release's block (one of `shipped`) is replaced in place; a
+/// file holding any other block that starts with `begin` is foreign.
+pub fn upsert_block(path: &Path, begin: &str, block: &str, shipped: &[&str]) -> Result<Outcome> {
     let mut text = read_opt(path)?.unwrap_or_default();
     if text.contains(block) {
         return Ok(Outcome::AlreadyThere);
+    }
+    if let Some(old) = shipped.iter().find(|s| text.contains(**s)) {
+        std::fs::write(path, text.replacen(old, block, 1))?;
+        return Ok(Outcome::Done);
     }
     if text.lines().any(|l| l == begin) {
         return Ok(foreign("holds another wiki block"));
@@ -238,18 +251,29 @@ pub fn upsert_block(path: &Path, begin: &str, block: &str) -> Result<Outcome> {
     Ok(Outcome::Done)
 }
 
-/// Takes out `block` and the blank line [`upsert_block`] put before it; deletes the file (and the
-/// directories it leaves empty) when nothing else is left.
-pub fn remove_block(root: &Path, path: &Path, block: &str) -> Result<Outcome> {
+/// Takes out `block` (or an earlier release's, one of `shipped`) and the blank line
+/// [`upsert_block`] put before it; deletes the file (and the directories it leaves empty) when
+/// nothing else is left. Another block under the same begin line is foreign.
+pub fn remove_block(root: &Path, path: &Path, block: &str, shipped: &[&str]) -> Result<Outcome> {
     let Some(text) = read_opt(path)? else {
         return Ok(Outcome::AlreadyThere);
     };
+    let Some(block) = std::iter::once(block)
+        .chain(shipped.iter().copied())
+        .find(|b| text.contains(b))
+    else {
+        let begin = block.lines().next().unwrap_or_default();
+        return Ok(if text.lines().any(|l| l == begin) {
+            foreign("holds another wiki block")
+        } else {
+            Outcome::AlreadyThere
+        });
+    };
     let rest = if let Some(i) = text.find(&format!("\n\n{block}")) {
         format!("{}{}", &text[..=i], &text[i + 2 + block.len()..])
-    } else if let Some(i) = text.find(block) {
-        format!("{}{}", &text[..i], &text[i + block.len()..])
     } else {
-        return Ok(Outcome::AlreadyThere);
+        let i = text.find(block).expect("found above");
+        format!("{}{}", &text[..i], &text[i + block.len()..])
     };
     if rest.trim().is_empty() {
         std::fs::remove_file(path)?;
@@ -395,21 +419,21 @@ mod tests {
         let p = root.join(".claude/skills/wiki-navigation/SKILL.md");
         fs::create_dir_all(root.join(".claude")).unwrap();
         fs::write(root.join(".claude/settings.json"), "{}").unwrap();
-        assert_eq!(write_file(&p, "body").unwrap(), Outcome::Done);
-        assert_eq!(write_file(&p, "body").unwrap(), Outcome::AlreadyThere);
-        assert!(is_foreign(&write_file(&p, "other").unwrap()));
-        assert!(is_foreign(&remove_file(root, &p, "other").unwrap()));
-        assert_eq!(remove_file(root, &p, "body").unwrap(), Outcome::Done);
+        assert_eq!(write_file(&p, "body", &[]).unwrap(), Outcome::Done);
+        assert_eq!(write_file(&p, "body", &[]).unwrap(), Outcome::AlreadyThere);
+        assert!(is_foreign(&write_file(&p, "other", &[]).unwrap()));
+        assert!(is_foreign(&remove_file(root, &p, "other", &[]).unwrap()));
+        assert_eq!(remove_file(root, &p, "body", &[]).unwrap(), Outcome::Done);
         assert!(!root.join(".claude/skills").exists());
         assert!(root.join(".claude").exists());
         assert_eq!(
-            remove_file(root, &p, "body").unwrap(),
+            remove_file(root, &p, "body", &[]).unwrap(),
             Outcome::AlreadyThere
         );
 
         fs::remove_file(root.join(".claude/settings.json")).unwrap();
-        write_file(&p, "body").unwrap();
-        remove_file(root, &p, "body").unwrap();
+        write_file(&p, "body", &[]).unwrap();
+        remove_file(root, &p, "body", &[]).unwrap();
         assert!(!root.join(".claude").exists());
         assert!(root.exists());
     }
@@ -420,29 +444,77 @@ mod tests {
         let p = d.path().join("AGENTS.md");
         let (begin, block) = ("<!-- b -->", "<!-- b -->\nrules\n<!-- /b -->\n");
         fs::write(&p, "# Mine\n").unwrap();
-        assert_eq!(upsert_block(&p, begin, block).unwrap(), Outcome::Done);
+        assert_eq!(upsert_block(&p, begin, block, &[]).unwrap(), Outcome::Done);
         assert_eq!(
             fs::read_to_string(&p).unwrap(),
             format!("# Mine\n\n{block}")
         );
         assert_eq!(
-            upsert_block(&p, begin, block).unwrap(),
+            upsert_block(&p, begin, block, &[]).unwrap(),
             Outcome::AlreadyThere
         );
         let other = "<!-- b -->\nold\n<!-- /b -->\n";
-        assert!(is_foreign(&upsert_block(&p, begin, other).unwrap()));
-        assert_eq!(remove_block(d.path(), &p, block).unwrap(), Outcome::Done);
+        assert!(is_foreign(&upsert_block(&p, begin, other, &[]).unwrap()));
+        assert_eq!(
+            remove_block(d.path(), &p, block, &[]).unwrap(),
+            Outcome::Done
+        );
         assert_eq!(fs::read_to_string(&p).unwrap(), "# Mine\n");
         assert_eq!(
-            remove_block(d.path(), &p, block).unwrap(),
+            remove_block(d.path(), &p, block, &[]).unwrap(),
             Outcome::AlreadyThere
         );
 
         let q = d.path().join("new/AGENTS.md");
-        upsert_block(&q, begin, block).unwrap();
+        upsert_block(&q, begin, block, &[]).unwrap();
         assert_eq!(fs::read_to_string(&q).unwrap(), block);
-        remove_block(d.path(), &q, block).unwrap();
+        remove_block(d.path(), &q, block, &[]).unwrap();
         assert!(!d.path().join("new").exists());
+    }
+
+    #[test]
+    fn shipped_texts_are_upgraded_and_removed_but_edits_are_foreign() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("AGENTS.md");
+        let (begin, old, new) = (
+            "<!-- b -->",
+            "<!-- b -->\nold\n<!-- /b -->\n",
+            "<!-- b -->\nnew\n<!-- /b -->\n",
+        );
+        fs::write(&p, format!("# Mine\n\n{old}")).unwrap();
+        assert_eq!(upsert_block(&p, begin, new, &[old]).unwrap(), Outcome::Done);
+        assert_eq!(fs::read_to_string(&p).unwrap(), format!("# Mine\n\n{new}"));
+        fs::write(&p, format!("# Mine\n\n{old}")).unwrap();
+        assert_eq!(
+            remove_block(d.path(), &p, new, &[old]).unwrap(),
+            Outcome::Done
+        );
+        assert_eq!(fs::read_to_string(&p).unwrap(), "# Mine\n");
+        fs::write(&p, "<!-- b -->\nedited\n<!-- /b -->\n").unwrap();
+        assert!(is_foreign(&upsert_block(&p, begin, new, &[old]).unwrap()));
+        assert!(is_foreign(
+            &remove_block(d.path(), &p, new, &[old]).unwrap()
+        ));
+        assert_eq!(
+            fs::read_to_string(&p).unwrap(),
+            "<!-- b -->\nedited\n<!-- /b -->\n"
+        );
+
+        let f = d.path().join("s/SKILL.md");
+        fs::create_dir_all(f.parent().unwrap()).unwrap();
+        fs::write(&f, "v1").unwrap();
+        assert_eq!(write_file(&f, "v2", &["v1"]).unwrap(), Outcome::Done);
+        assert_eq!(fs::read_to_string(&f).unwrap(), "v2");
+        fs::write(&f, "mine").unwrap();
+        assert!(is_foreign(&write_file(&f, "v2", &["v1"]).unwrap()));
+        assert!(is_foreign(
+            &remove_file(d.path(), &f, "v2", &["v1"]).unwrap()
+        ));
+        fs::write(&f, "v1").unwrap();
+        assert_eq!(
+            remove_file(d.path(), &f, "v2", &["v1"]).unwrap(),
+            Outcome::Done
+        );
     }
 
     #[test]

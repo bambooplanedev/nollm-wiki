@@ -93,6 +93,10 @@ pub(crate) struct LangSpec {
     /// Vue or Svelte script uses `default_shape`; a `lang` script uses that
     /// language's own spec.
     pub(crate) shape: fn(Node) -> Shape,
+    /// A signature the language writes itself (shell: `name()` whatever the
+    /// definition's spelling), given the definition and its name. `None`
+    /// builds it from the source.
+    pub(crate) fixed_signature: fn(Node, &str) -> Option<String>,
 }
 
 impl LangSpec {
@@ -121,6 +125,7 @@ impl LangSpec {
             body_doc: no_body_doc,
             query_gates_visibility: false,
             shape: default_shape,
+            fixed_signature: |_, _| None,
         }
     }
 }
@@ -294,6 +299,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
         "vue" => super::extract_vue::vue_spec(),
         "svelte" => super::extract_svelte::svelte_spec(),
         "go" => super::extract_simple::go_spec(),
+        "sh" | "bash" => super::extract_shell::shell_spec(),
         _ if is_cpp(ext) => super::extract_cpp::cpp_spec(),
         _ => return None,
     })
@@ -322,15 +328,23 @@ pub(crate) fn ext_of(rel_path: &str) -> String {
 ///
 /// A C header declares a component's public surface and is what `#include`
 /// names, so it outranks a C++-only header, which outranks the translation
-/// unit implementing either. A TOTAL order, not a binary: with every header at
+/// unit implementing either; a shell script ranks last, so it never takes the
+/// name from a same-named Python or C++ page. A TOTAL order, not a binary: with every header at
 /// one rank, adding `foo.hpp` beside `foo.h` would tie at the top, dissolve
 /// the strict win in `disambiguate_ids`, and rename the pre-existing page.
 pub(crate) fn source_rank(source_path: &str) -> u8 {
     match ext_of(source_path).as_str() {
         "h" => 0,
         "hpp" | "hh" | "hxx" => 1,
+        "sh" | "bash" => 3,
         _ => 2,
     }
+}
+
+/// A shell script: reached only by its path (`source`), never by a module
+/// stem or a defined name, so `import deploy` in Python cannot link `deploy.sh`.
+pub(crate) fn is_shell(source_path: &str) -> bool {
+    matches!(ext_of(source_path).as_str(), "sh" | "bash")
 }
 
 /// Every extension `CodeExtractor` claims. Shared by `extensions()` and by
@@ -338,7 +352,7 @@ pub(crate) fn source_rank(source_path: &str) -> u8 {
 /// a missing entry would strip that language of all symbols and imports.
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
-    "hxx", "h",
+    "hxx", "h", "sh", "bash",
 ];
 
 /// Each language's query, compiled once per process instead of once per file.
@@ -849,7 +863,12 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     } else {
         let mut parser = Parser::new();
         parser.set_language(&spec.language).ok()?;
-        parser.parse(text, None)?
+        let tree = parser.parse(text, None)?;
+        if spec.lang_name == "shell" {
+            super::extract_shell::reparse(&mut parser, text, tree)
+        } else {
+            tree
+        }
     };
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),
@@ -934,7 +953,23 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     items.sort_by(|a, b| {
         (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
     });
-    attach_call_sites(&mut items, tree.root_node(), text);
+    if spec.lang_name == "shell" && tree.root_node().has_error() {
+        let missed = super::extract_shell::missed_functions(text, &items);
+        for it in &missed {
+            let (n, sig) = (it.name.clone(), it.signature.clone());
+            collected.push((n.clone(), ItemKind::FreeDef, n, sig));
+        }
+        items.extend(missed);
+        items.sort_by(|a, b| {
+            (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
+        });
+    }
+    attach_call_sites(
+        &mut items,
+        tree.root_node(),
+        text,
+        spec.lang_name == "shell",
+    );
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
     // plain lexicographic order on the rendered signature, and within a group
@@ -987,14 +1022,18 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 }
 
 /// Gives each call in the tree to the narrowest function item whose lines
-/// hold it. A call outside every function (a static initializer) is dropped.
-fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
+/// hold it. A call outside every function (a static initializer) is dropped,
+/// except in a shell file: there it goes to the file's `<top level>` item,
+/// pushed last. A shell call has no caller when a parse-ERROR node is closer
+/// to it than any function definition.
+fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: bool) {
     let fns: Vec<usize> = (0..items.len())
         .filter(|&i| matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method))
         .collect();
-    if fns.is_empty() {
+    if fns.is_empty() && !shell {
         return;
     }
+    let mut top_level: Vec<CallSite> = Vec::new();
     let aliases = import_aliases(root, text);
     // An alias a parameter or receiver of an enclosing function shadows
     // (Go's `func (m *T)` beside an import `m`) stays as written.
@@ -1031,6 +1070,7 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
                     s
                 }),
             "token_tree" => macro_call_site(node, text),
+            "command" if shell => shell_call_site(node, text),
             _ => None,
         };
         let Some(mut site) = site else {
@@ -1047,10 +1087,40 @@ fn attach_call_sites(items: &mut [CodeItem], root: Node, text: &str) {
             .iter()
             .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
             .min_by_key(|&&i| items[i].end_line - items[i].start_line);
-        if let Some(&i) = holder {
-            items[i].call_sites.push(site);
+        // An ERROR node met before any function definition: the tree is not
+        // to be trusted for who holds this call.
+        if shell
+            && std::iter::successors(node.parent(), Node::parent)
+                .find(|a| a.is_error() || a.kind() == "function_definition")
+                .is_some_and(|a| a.is_error())
+        {
+            continue;
+        }
+        match holder {
+            Some(&i) => items[i].call_sites.push(site),
+            None if shell => top_level.push(site),
+            None => {}
         }
     }
+    if !top_level.is_empty() {
+        let mut item = super::extract_shell::top_level_item(text.lines().count().max(1));
+        item.call_sites = top_level;
+        items.push(item);
+    }
+}
+
+/// A shell `command` whose word is a plain name; a variable, a path or a
+/// quoted word names no function. The arguments are not counted.
+fn shell_call_site(node: Node, text: &str) -> Option<CallSite> {
+    let name = text.get(node.child_by_field_name("name")?.byte_range())?;
+    name.chars()
+        .all(|c| c.is_alphanumeric() || "_:.-+@".contains(c))
+        .then(|| CallSite {
+            name: name.to_string(),
+            via: CallVia::Bare,
+            args: None,
+            line: 0,
+        })
 }
 
 /// What a call's `function` node names, in any grammar this file dispatches
@@ -1852,6 +1922,12 @@ fn build_signature(
     spec: &LangSpec,
     shape: &Shape,
 ) -> String {
+    if let Some(sig) = name
+        .and_then(|n| text.get(n.byte_range()))
+        .and_then(|n| (spec.fixed_signature)(def, n))
+    {
+        return sig;
+    }
     let root = (spec.sig_start)(def);
     let start = root.start_byte();
     let end = shape
@@ -2024,6 +2100,12 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
             "py" => line
                 .strip_prefix("\"\"\"")
                 .map(|s| s.trim_end_matches("\"\"\"")),
+            // A shebang or a `# shellcheck` directive is no doc, but may open
+            // the file: skipped as a gap.
+            "sh" | "bash" if line.starts_with("#!") || line.starts_with("# shellcheck ") => {
+                Some("")
+            }
+            "sh" | "bash" => line.strip_prefix('#'),
             "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }

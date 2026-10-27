@@ -204,7 +204,13 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         let imports: BTreeSet<String> = ent
             .imports
             .iter()
-            .flat_map(|imp| resolver.resolve(imp))
+            .flat_map(|imp| {
+                if crate::formats::code::is_shell(&ent.source_path) {
+                    resolver.resolve_source(imp, &ent.source_path)
+                } else {
+                    resolver.resolve(imp)
+                }
+            })
             .filter(|tid| tid != eid)
             .collect();
         for tid in &imports {
@@ -274,6 +280,9 @@ impl<'a> ImportResolver<'a> {
             }
             let path = e.source_path.as_str();
             by_path.insert(path, id.as_str());
+            if crate::formats::code::is_shell(path) {
+                continue;
+            }
             if let Some(root) = local_crate_root(path) {
                 local_roots.insert(root);
             }
@@ -383,8 +392,15 @@ impl<'a> ImportResolver<'a> {
         if path.is_empty() {
             return BTreeSet::new();
         }
-        let mut hits: Vec<&str> = self
-            .by_path
+        let mut hits = self.suffix_hits(path);
+        hits.sort_unstable();
+        hits.truncate(1);
+        hits.into_iter().map(str::to_string).collect()
+    }
+
+    /// Ids of the pages whose `source_path` ends in `path` on a `/` boundary.
+    fn suffix_hits(&self, path: &str) -> Vec<&'a str> {
+        self.by_path
             .iter()
             .filter(|(src, _)| {
                 src.ends_with(path)
@@ -392,11 +408,62 @@ impl<'a> ImportResolver<'a> {
                         || src.as_bytes()[src.len() - path.len() - 1] == b'/')
             })
             .map(|(_, id)| *id)
-            .collect();
-        hits.sort_unstable();
-        hits.truncate(1);
-        hits.into_iter().map(str::to_string).collect()
+            .collect()
     }
+
+    /// The page a shell `source` / `.` argument names, by path only.
+    ///
+    /// Quotes are dropped. A literal path is tried as written, relative to
+    /// the importing file's directory and then the project root. Otherwise
+    /// (a variable in the way) only the tail after the last expansion is
+    /// used. A suffix match counts only when exactly one page matches; an
+    /// empty tail (`source "$1"`) gives no edge.
+    fn resolve_source(&self, imp: &str, from: &str) -> BTreeSet<String> {
+        let arg: String = imp.chars().filter(|c| !matches!(c, '"' | '\'')).collect();
+        let literal = !arg.contains('$');
+        let tail = match arg.rfind('$') {
+            None => &arg[..],
+            Some(d) => {
+                let name = arg[d + 1..]
+                    .find(|c: char| !(c.is_alphanumeric() || c == '_'))
+                    .map_or(arg.len(), |i| d + 1 + i);
+                let close = arg.rfind(['}', ')']).map_or(0, |i| i + 1);
+                &arg[name.max(close)..]
+            }
+        };
+        let tail = tail.trim_start_matches("./").trim_start_matches('/');
+        if tail.is_empty() {
+            return BTreeSet::new();
+        }
+        if literal {
+            let dir = from.rsplit_once('/').map_or("", |(d, _)| d);
+            for base in ["", dir] {
+                if let Some(id) = self.by_path.get(normalize(base, tail).as_str()) {
+                    return BTreeSet::from([(*id).to_string()]);
+                }
+            }
+        }
+        let tail = tail.trim_start_matches("../");
+        match self.suffix_hits(tail)[..] {
+            [id] => BTreeSet::from([id.to_string()]),
+            _ => BTreeSet::new(),
+        }
+    }
+}
+
+/// `base/rel` with `.` and `..` components folded away.
+fn normalize(base: &str, rel: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    for c in base.split('/').chain(rel.split('/')) {
+        match c {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            c => parts.push(c),
+        }
+    }
+    parts.join("/")
 }
 
 /// Does an import string name a C/C++ include, as opposed to a module path?
@@ -672,6 +739,89 @@ mod tests {
         assert_eq!(local_crate_root("src/lib.rs"), None);
         assert_eq!(local_crate_root("wiki/src/graph.rs"), None);
         assert_eq!(local_crate_root("wiki/lib.rs"), None);
+    }
+
+    fn sh(id: &str, path: &str, imports: &[&str]) -> Entity {
+        let mut e = code(id, id, path, "");
+        e.kind = SourceKind::Code {
+            lang: "shell".into(),
+        };
+        e.imports = imports.iter().map(|s| (*s).to_string()).collect();
+        e
+    }
+
+    fn imports_of(files: Vec<Entity>, id: &str) -> Vec<String> {
+        let g = build_graph(&map(files));
+        g.edges[id].imports.iter().cloned().collect()
+    }
+
+    #[test]
+    fn source_literal_path_gives_one_edge() {
+        let files = vec![
+            sh(
+                "main",
+                "main.sh",
+                &["lib/utils.sh", "./lib/utils.sh", "\"lib/utils.sh\""],
+            ),
+            sh("utils", "lib/utils.sh", &[]),
+            sh("lib", "lib.sh", &[]),
+            sh("sh", "sh.sh", &[]),
+            sh("other", "x/lib/utils.sh", &[]),
+        ];
+        // Exact path wins over the suffix match that would be ambiguous.
+        assert_eq!(imports_of(files, "main"), ["utils"]);
+    }
+
+    #[test]
+    fn source_literal_prefers_the_project_root_over_the_importing_dir() {
+        let files = vec![
+            sh("c", "bin/c.sh", &["lib/y.sh"]),
+            sh("y", "lib/y.sh", &[]),
+            sh("y2", "bin/lib/y.sh", &[]),
+        ];
+        assert_eq!(imports_of(files, "c"), ["y"]);
+    }
+
+    #[test]
+    fn source_literal_is_relative_to_the_importing_dir() {
+        let files = vec![
+            sh("main", "bin/main.sh", &["../lib/a.sh", "b.sh"]),
+            sh("a", "lib/a.sh", &[]),
+            sh("b", "bin/b.sh", &[]),
+            sh("b2", "other/b.sh", &[]),
+        ];
+        assert_eq!(imports_of(files, "main"), ["a", "b"]);
+    }
+
+    #[test]
+    fn source_tail_after_variable_resolves() {
+        for imp in [
+            "\"${ROOT}\"/lib/x.sh",
+            "$DIR/lib/x.sh",
+            "\"$(dirname \"$0\")/lib/x.sh\"",
+        ] {
+            let files = vec![sh("main", "main.sh", &[imp]), sh("x", "lib/x.sh", &[])];
+            assert_eq!(imports_of(files, "main"), ["x"], "{imp}");
+        }
+    }
+
+    #[test]
+    fn source_ambiguous_or_empty_tail_gives_no_edge() {
+        let files = vec![
+            sh("main", "main.sh", &["$DIR/x.sh", "\"$1\"", "$DIR/"]),
+            sh("a", "a/x.sh", &[]),
+            sh("b", "b/x.sh", &[]),
+        ];
+        assert_eq!(imports_of(files, "main"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn python_import_does_not_link_shell() {
+        let mut app = code("app", "app", "app.py", "");
+        app.imports = vec!["deploy".into(), "helper".into()];
+        let mut d = sh("deploy", "deploy.sh", &[]);
+        d.defined = vec!["helper".into()];
+        assert_eq!(imports_of(vec![app, d], "app"), Vec::<String>::new());
     }
 
     #[test]

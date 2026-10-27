@@ -42,7 +42,10 @@ what you are looking for and `kind: \"code\"`; each symbol line is \
 the ranges are exact, do not re-derive them with grep. `page` with a path \
 lists a module's symbols with their lines; `neighbors` with a path and \
 `symbol` lists every function that one calls, with its lines; `callers` lists \
-the functions that call it. If search finds \
+the functions that call it. Do not call grep, find or ls in the same turn as \
+`search`: read its answer first. Use `search` for where something is defined \
+or handled, `callers` for who calls a function, grep for every occurrence of a \
+literal string (an env var, a message, a config key). If search finds \
 nothing relevant, try other words (a name, an abbreviation) before grep. \
 Paths are relative to the project root; line ranges are 1-based and \
 inclusive. Pages are also resources under wiki://page/<id>.";
@@ -259,7 +262,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive."
+        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive."
     )]
     async fn search(
         &self,
@@ -303,7 +306,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
+        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to, not grep; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
     )]
     async fn neighbors(
         &self,
@@ -336,7 +339,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name. Calls are matched by name and argument count, not by type. `depth` goes up more levels."
+        description = "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name; use it, not grep, to find who calls a function. Calls are matched by name and argument count, not by type. `depth` goes up more levels."
     )]
     async fn callers(
         &self,
