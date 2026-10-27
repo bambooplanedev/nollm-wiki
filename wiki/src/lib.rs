@@ -20,7 +20,7 @@ pub mod setup;
 pub mod walk;
 pub mod watch;
 
-use crate::formats::code::{module_stem, source_rank};
+use crate::formats::code::{is_shell, module_stem, source_rank};
 use crate::formats::Registry;
 use crate::model::{
     basename, slugify, title_case, title_from_slug, Entity, LintReport, SourceKind,
@@ -760,13 +760,23 @@ fn disambiguate_taken(extracted: &mut [Entity], taken: &BTreeSet<String>) {
                 let same_dir = group
                     .iter()
                     .all(|&i| parent_segments(&extracted[i].source_path) == first_parents);
-                let can_deepen = group
-                    .iter()
-                    .any(|&i| depth[i] < parent_segments(&extracted[i].source_path).len());
+                // A non-shell page that strictly outranks shell pages keeps
+                // its id: only the shell pages are qualified.
+                let pinned = strict_winner(group, &key).filter(|&w| {
+                    !is_shell(&extracted[w].source_path)
+                        && group
+                            .iter()
+                            .all(|&i| i == w || is_shell(&extracted[i].source_path))
+                });
+                let can_deepen = group.iter().any(|&i| {
+                    Some(i) != pinned && depth[i] < parent_segments(&extracted[i].source_path).len()
+                });
 
                 if !same_dir && can_deepen {
                     for &i in group {
-                        if depth[i] < parent_segments(&extracted[i].source_path).len() {
+                        if Some(i) != pinned
+                            && depth[i] < parent_segments(&extracted[i].source_path).len()
+                        {
                             depth[i] += 1;
                             changed = true;
                         }

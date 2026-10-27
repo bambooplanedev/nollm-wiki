@@ -139,3 +139,26 @@ fn shell_pages_stay_out_of_import_resolution() {
     }
     assert_eq!(non_shell(&out_a), non_shell(&out_b));
 }
+
+#[test]
+fn shell_page_in_another_directory_does_not_rename_the_existing_page() {
+    let base = [("a/run.py", "def go():\n    pass\n")];
+    let (_a, _, out_a) = compiled(&base);
+    let (_b, _, out_b) = compiled(&[base[0], ("b/run.sh", "go() { :; }\n")]);
+    assert_eq!(non_shell(&out_a), non_shell(&out_b));
+    assert_eq!(index_entries(&out_b).len(), 2);
+}
+
+#[test]
+fn summary_is_the_header_comment_only() {
+    let src = "#!/bin/sh\n# Ships the release.\n\nfoo() {\n  # inner note\n  :\n}\n";
+    let (_d, _, out) = compiled(&[("ship.sh", src)]);
+    assert_eq!(entry(&out, "ship")["summary"], "Ships the release.");
+}
+
+#[test]
+fn a_comment_inside_a_function_body_is_no_summary() {
+    let src = "foo() {\n  # inner note about things\n  :\n}\n";
+    let (_d, _, out) = compiled(&[("ship.sh", src)]);
+    assert_ne!(entry(&out, "ship")["summary"], "inner note about things");
+}
