@@ -177,6 +177,8 @@ per question is noise-level: treat single results as anecdotes.
 - **H1 titles are cleaned of Markdown links and images only.** Images and
   badges are dropped and `[text](url)` becomes `text` (code spans are kept);
   HTML tags and other emphasis marks stay in the title and the id.
+  A `[text][ref]` form is a link only when the file defines `[ref]: ...`.
+  Brackets nested in alt text and URLs containing parentheses are not parsed.
 - **A date comes only from front matter or a dated file name, and only for
   markdown pages.** Never from git or mtime, so a note without either shows
   no `updated`.

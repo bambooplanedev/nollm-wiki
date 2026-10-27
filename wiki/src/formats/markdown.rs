@@ -1,6 +1,7 @@
 //! Markdown extractor: `---` frontmatter (title, created, description, aliases, tags), first `# H1` as a title fallback, then the body.
 
 use regex::Regex;
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use crate::formats::{derive_name_from_path, summarize, Extractor};
@@ -215,18 +216,55 @@ fn parse_list(v: &str) -> Vec<String> {
 
 /// The first `# H1`, cleaned for a title: images dropped (a linked image
 /// leaves an empty link, dropped too), links reduced to their text, code
-/// spans untouched. `None` when nothing is left.
+/// spans and escapes untouched. A `[text][ref]` form counts only when the
+/// document defines `[ref]: ...`. `None` when nothing is left.
 fn first_h1(body: &str) -> Option<String> {
-    static IMAGE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(`[^`]*`)|!\[[^\]]*\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
-    static LINK: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(`[^`]*`)|\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])").unwrap());
+    static IMAGE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(`[^`]*`|\\.)|!\[([^\]]*)\](?:\([^)]*\)|\[([^\]]*)\])").unwrap()
+    });
+    static LINK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(`[^`]*`|\\.)|\[([^\]]*)\](?:\([^)]*\)|\[([^\]]*)\])").unwrap()
+    });
+    static DEF: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?m)^ {0,3}\[([^\]]+)\]:").unwrap());
     let h = body
         .lines()
         .map(str::trim)
         .find_map(|l| l.strip_prefix("# "))?;
-    let h = IMAGE.replace_all(h, "$1");
-    let h = LINK.replace_all(&h, "$1$2");
+    let norm = |l: &str| {
+        l.split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let defs: BTreeSet<String> = DEF.captures_iter(body).map(|c| norm(&c[1])).collect();
+    // Keeps the match unless it is a code span/escape or a link whose reference is defined.
+    let pass = |re: &Regex, text_group: usize, h: &str, keep_text: bool| {
+        re.replace_all(h, |c: &regex::Captures| {
+            let whole = c[0].to_string();
+            if c.get(1).is_some() {
+                return whole;
+            }
+            let text = c.get(text_group).map_or("", |m| m.as_str());
+            let label = c.get(text_group + 1);
+            match label {
+                Some(l)
+                    if !defs.contains(&norm(if l.as_str().is_empty() {
+                        text
+                    } else {
+                        l.as_str()
+                    })) =>
+                {
+                    whole
+                }
+                _ if keep_text => text.to_string(),
+                _ => String::new(),
+            }
+        })
+        .into_owned()
+    };
+    let h = pass(&IMAGE, 2, h, false);
+    let h = pass(&LINK, 2, &h, true);
     let h = h.split_whitespace().collect::<Vec<_>>().join(" ");
     (!h.is_empty()).then_some(h)
 }
@@ -261,18 +299,40 @@ mod tests {
 
     #[test]
     fn h1_badges_and_links_are_cleaned() {
-        let e = h1("# Node Version Manager [![build status](https://x/y.svg)](https://x/z) [![ci][3]](https://q) [![a](i.svg)][4]\n\n[3]: u\n");
+        let e = h1("# Node Version Manager [![build status](https://x/y.svg)](https://x/z) [![ci][3]](https://q) [![a](i.svg)][4]\n\n[3]: u\n[4]: u\n");
         assert_eq!(
             (e.name.as_str(), e.id.as_str()),
             ("Node Version Manager", "node_version_manager")
         );
         assert_eq!(h1("# Using [Foo](x) here\n").name, "Using Foo here");
         assert_eq!(
-            h1("# Using [Foo][r] here ![img][r]\n").name,
+            h1("# Using [Foo][r] here ![img][r]\n\n[r]: u\n").name,
             "Using Foo here"
         );
         assert_eq!(h1("# Call `a[0](x)` now\n").name, "Call `a[0](x)` now");
         assert_eq!(h1("# <b>Hi</b>\n").name, "<b>Hi</b>");
+    }
+
+    #[test]
+    fn plain_brackets_and_escapes_keep_the_h1() {
+        for h in [
+            "Array[int] notes",
+            "Matrix a[i][j]",
+            "See [1][2]",
+            "[x] todo",
+            r"Esc \[a](b)",
+        ] {
+            assert_eq!(h1(&format!("# {h}\n")).name, h, "{h}");
+        }
+        // a reference is a link only when the document defines it (case-insensitive)
+        assert_eq!(
+            h1("# See [one][R] ![i][R]\n\n[r]: http://x\n").name,
+            "See one"
+        );
+        assert_eq!(
+            h1("# See [one][R2]\n\n[r]: http://x\n").name,
+            "See [one][R2]"
+        );
     }
 
     #[test]
