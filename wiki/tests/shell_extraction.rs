@@ -298,3 +298,12 @@ fn call_in_parse_error_has_no_caller() {
         "{text}"
     );
 }
+
+#[test]
+fn source_and_dot_arguments_are_imports() {
+    let src = "source lib/a.sh\n. \"${R}\"/b.sh\nbuiltin source c.sh\necho source e.sh\nsource\n";
+    let (_d, _, out) = compiled(&[("m.sh", src)]);
+    let page = std::fs::read_to_string(out.join("m.md")).unwrap();
+    let got = common::section(&page, "Imports");
+    assert_eq!(got, ["${R}\"/b.sh", "c.sh", "lib/a.sh"], "{page}");
+}

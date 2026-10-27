@@ -7,7 +7,14 @@ use regex::Regex;
 use std::sync::LazyLock;
 use tree_sitter::Node;
 
-const QUERY: &str = r"(function_definition name: (word) @name) @def";
+/// Functions, plus the argument of `source` / `.` / `builtin source` as `@import`.
+const QUERY: &str = r#"
+(function_definition name: (word) @name) @def
+((command name: (command_name) @cmd . argument: (_) @import)
+  (#any-of? @cmd "source" "." "\\."))
+((command name: (command_name) @cmd . argument: (word) @sub . argument: (_) @import)
+  (#eq? @cmd "builtin") (#eq? @sub "source"))
+"#;
 
 pub(crate) fn shell_spec() -> LangSpec {
     LangSpec {
