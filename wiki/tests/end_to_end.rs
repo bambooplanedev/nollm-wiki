@@ -1059,3 +1059,15 @@ fn a_very_long_title_compiles_to_a_short_reachable_id() {
     }
     assert_eq!(ids.len(), 4, "capped ids must stay unique: {ids:?}");
 }
+
+#[test]
+fn badge_h1_page_resolves_by_its_clean_title() {
+    let (_d, w) = common::compiled_wiki(&[(
+        "README.md",
+        "# Node Version Manager [![build](https://x/b.svg)](https://x/ci)\n\nBody.\n",
+    )]);
+    assert_eq!(
+        w.resolve("Node Version Manager").unwrap(),
+        "node_version_manager"
+    );
+}
