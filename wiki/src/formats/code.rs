@@ -863,7 +863,12 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     } else {
         let mut parser = Parser::new();
         parser.set_language(&spec.language).ok()?;
-        parser.parse(text, None)?
+        let tree = parser.parse(text, None)?;
+        if spec.lang_name == "shell" {
+            super::extract_shell::reparse(&mut parser, text, tree)
+        } else {
+            tree
+        }
     };
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),

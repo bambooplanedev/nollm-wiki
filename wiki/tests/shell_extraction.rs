@@ -307,7 +307,10 @@ fn call_in_parsed_function_inside_error_keeps_its_caller() {
     let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
     let text = callers_text(&wiki, "s", "g", None);
     assert!(text.contains("f  calls g at 4"), "{text}");
-    assert!(!text.contains("top level") && !text.contains("at 6"), "{text}");
+    assert!(
+        !text.contains("top level") && !text.contains("at 6"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -317,4 +320,51 @@ fn source_and_dot_arguments_are_imports() {
     let page = std::fs::read_to_string(out.join("m.md")).unwrap();
     let got = common::section(&page, "Imports");
     assert_eq!(got, ["${R}\"/b.sh", "c.sh", "lib/a.sh"], "{page}");
+}
+
+/// `trigger` is a line tree-sitter-bash 0.25 rejects though bash accepts it.
+/// After it, `f`'s call keeps `f` as caller, and the doc and the span of the
+/// indented-brace `f` come from the tree, not the line-regex fallback.
+fn grammar_gap_is_rewritten(trigger: &str) {
+    let src = format!("g() {{ :; }}\n{trigger}\n# Calls g.\nf() {{\n  g\n  }}\nh() {{ :; }}\n");
+    let (_d, wiki) = compiled_wiki(&[("s.sh", &src)]);
+    let text = callers_text(&wiki, "s", "g", None);
+    assert!(
+        text.contains("3-6  fn  f  calls g at 5"),
+        "{trigger}: {text}"
+    );
+    let f = items(&wiki, "s")
+        .into_iter()
+        .find(|i| i.0 == "f()")
+        .unwrap();
+    assert_eq!(
+        (f.2, f.3, f.4.as_deref()),
+        (3, 6, Some("Calls g.")),
+        "{trigger}"
+    );
+}
+
+#[test]
+fn case_pattern_with_glob_and_quote_is_rewritten() {
+    grammar_gap_is_rewritten("case $P in a*' '*) x ;; esac");
+}
+
+#[test]
+fn bracket_in_expansion_pattern_is_rewritten() {
+    grammar_gap_is_rewritten("r=${r%%]*}");
+}
+
+#[test]
+fn semicolon_in_expansion_word_is_rewritten() {
+    grammar_gap_is_rewritten("echo \"${out:+$out;}1\"");
+}
+
+#[test]
+fn clean_file_is_not_rewritten() {
+    // The grammar takes this file; a rewrite would blank the `;` and merge
+    // the two calls into one word.
+    let src = "g() { :; }\nh() { :; }\nf() {\n  o=${o:-\"`g;h`\"}\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = callers_text(&wiki, "s", "h", None);
+    assert!(text.contains("f  calls h at 4"), "{text}");
 }

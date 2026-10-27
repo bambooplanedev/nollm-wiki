@@ -1,11 +1,13 @@
 //! Shell (`.sh`, `.bash`): functions only, each listed as `name()`. The doc of
 //! a function is the `#` run directly above it; a file the grammar can't fully
-//! parse gets its functions from a line regex (`missed_functions`).
+//! parse is parsed again from a blanked copy (`reparse`), and gets the
+//! functions still missing from a line regex (`missed_functions`).
 use super::code::{LangSpec, Lead};
 use crate::model::{CodeItem, CodeItemKind};
+use regex::bytes::Regex as BytesRegex;
 use regex::Regex;
 use std::sync::LazyLock;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser, Tree};
 
 /// Functions, plus the argument of `source` / `.` / `builtin source` as `@import`.
 const QUERY: &str = r#"
@@ -116,5 +118,168 @@ pub(crate) fn top_level_item(last: usize) -> CodeItem {
         call_lines: Vec::new(),
         call_sites: Vec::new(),
         arity: None,
+    }
+}
+
+/// For a tree with ERROR nodes: the tree of `blanked(text)` when it has fewer
+/// ERROR lines, else `tree`. Its nodes index `text` itself: the copy has the
+/// same length and changes only ASCII bytes, never a newline.
+pub(crate) fn reparse(parser: &mut Parser, text: &str, tree: Tree) -> Tree {
+    if !tree.root_node().has_error() {
+        return tree;
+    }
+    let copy = blanked(text);
+    match parser.parse(&copy, None) {
+        Some(t) if error_lines(t.root_node()) < error_lines(tree.root_node()) => t,
+        _ => tree,
+    }
+}
+
+/// Lines covered by the outermost ERROR nodes.
+fn error_lines(n: Node) -> usize {
+    if n.is_error() {
+        return n.end_position().row - n.start_position().row + 1;
+    }
+    n.children(&mut n.walk()).map(error_lines).sum()
+}
+
+static CASE: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new(r"(?:^|[\s;(])case\s.*\sin(?:\s|$)").unwrap());
+static ESAC: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new(r"(?:^|[\s;])esac\b").unwrap());
+static HEREDOC: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new(r#"(?:^|[^<])<<-?\s*["']?([A-Za-z_][A-Za-z0-9_]*)"#).unwrap());
+/// A case item's pattern: the text up to the first `)` before a blank.
+static ITEM: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new(r"^\s*(?:\|\s*)?\(?\s*(.*?)\)(?:\s|$)").unwrap());
+/// Words of plain, quoted or escaped text joined by `|`.
+static PATTERN: LazyLock<BytesRegex> = LazyLock::new(|| {
+    let w = r#"(?:"[^"]*"|'[^']*'|\\.|[^\s"'|()])+"#;
+    BytesRegex::new(&format!(r"^(?:{w}\s*\|\s*)*{w}$")).unwrap()
+});
+static COMMAND: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"^\s*(?:if|while|until|for|case|echo|printf|local|export|return)\b").unwrap()
+});
+static EXPANSION: LazyLock<BytesRegex> = LazyLock::new(|| {
+    BytesRegex::new(r"\$\{#?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9@*#?$!-])(?:\[[^\]]*\])?").unwrap()
+});
+
+/// `text` with what tree-sitter-bash 0.25 rejects though bash takes it turned
+/// to `_`: a case pattern holding a glob and a quote, `[ ] {` in a
+/// `${v#pat}` / `${v%pat}` / `${v/pat}` pattern, `;` in a `${v:+word}` word.
+/// Comments and here-document bodies stay as they are.
+fn blanked(text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    let (mut depth, mut heredoc) = (0usize, None::<Vec<u8>>);
+    for line in text.as_bytes().split_inclusive(|&c| c == b'\n') {
+        let mut b = line.to_vec();
+        if let Some(h) = &heredoc {
+            if line.trim_ascii() == h.as_slice() {
+                heredoc = None;
+            }
+        } else if !line.trim_ascii_start().starts_with(b"#") {
+            if depth > 0 {
+                blank_case_pattern(&mut b);
+            }
+            let opened = CASE.find(&b).map(|m| m.end());
+            depth = (depth + CASE.find_iter(&b).count()).saturating_sub(ESAC.find_iter(&b).count());
+            if let Some(e) = opened {
+                blank_case_pattern(&mut b[e..]);
+            }
+            blank_expansions(&mut b);
+            heredoc = HEREDOC.captures(&b).map(|c| c[1].to_vec());
+        }
+        out.extend(b);
+    }
+    debug_assert_eq!(out.len(), text.len());
+    out
+}
+
+fn blank_case_pattern(b: &mut [u8]) {
+    let Some(r) = ITEM.captures(b).and_then(|c| c.get(1)).map(|g| g.range()) else {
+        return;
+    };
+    let pat = &b[r.clone()];
+    let has = |set: &[u8]| pat.iter().any(|c| set.contains(c));
+    if !has(b"\"'")
+        || !has(b"*?[")
+        || has(b"`")
+        || pat.windows(2).any(|w| w == b"$(")
+        || !PATTERN.is_match(pat)
+        || COMMAND.is_match(pat)
+    {
+        return;
+    }
+    let mut quote = None;
+    for c in &mut b[r] {
+        match quote {
+            Some(q) if *c == q => quote = None,
+            None if *c == b'"' || *c == b'\'' => quote = Some(*c),
+            None if b"| \t".contains(c) => continue,
+            _ => {}
+        }
+        if c.is_ascii() {
+            *c = b'_';
+        }
+    }
+}
+
+fn blank_expansions(b: &mut [u8]) {
+    let starts: Vec<usize> = EXPANSION.find_iter(b).map(|m| m.end()).collect();
+    for i in starts {
+        let Some(e) = close(b, i) else { continue };
+        match b[i] {
+            b'#' | b'%' | b'/' => blank_in(b, i + 1, e, b"[]{"),
+            b':' if i + 1 < e && b"-+=?".contains(&b[i + 1]) => blank_in(b, i + 2, e, b";"),
+            _ => {}
+        }
+    }
+}
+
+/// Index of the `}` closing the `${` whose body starts at `i`.
+fn close(b: &[u8], mut i: usize) -> Option<usize> {
+    let mut depth = 0;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => i += 1,
+            b'$' if b.get(i + 1) == Some(&b'{') => (depth, i) = (depth + 1, i + 1),
+            b'}' if depth == 0 => return Some(i),
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// `set` bytes in `b[i..j]` to `_`, nested `${…}` and `$(…)` left alone.
+fn blank_in(b: &mut [u8], mut i: usize, j: usize, set: &[u8]) {
+    while i < j {
+        match (b[i], b.get(i + 1).copied()) {
+            (b'\\', Some(n)) if i + 1 < j => {
+                if set.contains(&n) {
+                    b[i + 1] = b'_';
+                }
+                i += 1;
+            }
+            (b'$', Some(b'{')) if i + 1 < j => i = close(b, i + 2).unwrap_or(j),
+            (b'$', Some(b'(')) if i + 1 < j => {
+                let mut depth = 0;
+                i += 1;
+                while i < b.len() {
+                    match b[i] {
+                        b'\\' => i += 1,
+                        b'(' => depth += 1,
+                        b')' if depth == 1 => break,
+                        b')' => depth -= 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            (c, _) if set.contains(&c) => b[i] = b'_',
+            _ => {}
+        }
+        i += 1;
     }
 }

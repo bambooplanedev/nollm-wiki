@@ -127,7 +127,13 @@ per question is noise-level: treat single results as anecdotes.
   passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
   of `f`, and a call in a part the grammar could not parse has no caller (unless a
   fully parsed function encloses it inside that part).
-  A file with parse errors gets its functions from a line regex: no doc, and
+  tree-sitter-bash 0.25 rejects some code bash takes: a case pattern with a
+  glob and a quote (`*' '*)`), `[ ] {` in a `${v#pat}` pattern, `;` in a
+  `${v:+word}` word. A file with such errors is parsed again from a copy
+  with those bytes blanked, same length and lines, and that tree is used
+  when it has fewer ERROR lines; other gaps (e.g. `${v:$((n-1))}`, `[` in
+  an extglob inside `[[ ]]`) still leave ERROR nodes.
+  Functions the tree still misses come from a line regex: no doc, and
   a span that ends at the next `}` in column 0. Shell pages are reached by
   path only, never by module stem or defined name. A same-named page in
   another directory still shortens ids by directory, as any two pages do.
