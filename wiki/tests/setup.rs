@@ -385,7 +385,10 @@ fn setup_upgrades_and_removes_a_pi_hook_from_an_earlier_release() {
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, &old).unwrap();
     f.setup(&args).success();
-    assert_ne!(read(&file), old);
+    assert_eq!(
+        read(&file),
+        include_str!("../src/setup/wiki-hint.ts").replace("<cmd>", "wiki")
+    );
     fs::write(&file, &old).unwrap();
     f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert!(!file.exists());
