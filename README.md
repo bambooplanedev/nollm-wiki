@@ -187,9 +187,11 @@ names them. Codex is set up only when named: its MCP config is global.
   a `UserPromptSubmit` entry (`wiki hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/wiki-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
-  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`.
-- `--remove` deletes exactly what setup wrote, hooks included, and Codex's
-  server only when it is the one setup added. Ignore lines, `.wiki/` and memory notes stay.
+  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`. Up to 0.4 the hook
+  was opt-in with `--hook`, which is gone: rerunning setup after an upgrade adds the hook (in a
+  committed `.claude/settings.json` with `--scope repo`), unless `--no-hook` is given.
+- `--remove` deletes exactly what setup wrote, hooks included, and Codex's server only when it is
+  the one setup added. Ignore lines, `.wiki/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both

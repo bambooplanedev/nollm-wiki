@@ -376,6 +376,22 @@ fn setup_remove_undoes_the_default_hooks() {
 }
 
 #[test]
+fn setup_upgrades_and_removes_a_pi_hook_from_an_earlier_release() {
+    let f = fixture(true, true);
+    let r = f.root();
+    let file = r.join(".pi/extensions/wiki-hint/index.ts");
+    let old = include_str!("../src/setup/shipped/wiki-hint-1.ts").replace("<cmd>", "wiki");
+    let args = ["--agent", "pi", "--scope", "repo"];
+    fs::create_dir_all(file.parent().unwrap()).unwrap();
+    fs::write(&file, &old).unwrap();
+    f.setup(&args).success();
+    assert_ne!(read(&file), old);
+    fs::write(&file, &old).unwrap();
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(!file.exists());
+}
+
+#[test]
 fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
     let f = fixture(true, true);
     real_git(&f);

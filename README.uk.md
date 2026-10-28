@@ -193,9 +193,11 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
   Code отримує запис `UserPromptSubmit` (`wiki hint --claude-hook`) у `.claude/settings.json`
   (`settings.local.json` з `--scope local`); pi — `.pi/extensions/wiki-hint/index.ts`. Хук мовчить,
   коли вікі немає, її не прочитати або нічого не збіглося, і ніколи не блокує запит. `--no-hook` його
-  не ставить; хук, поставлений раніше, лишається до `--remove`.
-- `--remove` видаляє рівно те, що записав setup, разом із хуками, а сервер Codex
-  — лише якщо це той, що додав setup. Рядки в ignore-файлах, `.wiki/` і нотатки памʼяті лишаються.
+  не ставить; хук, поставлений раніше, лишається до `--remove`. До 0.4 включно хук ставився лише
+  з `--hook`, якого більше немає: повторний setup після оновлення додає хук (з `--scope repo` — у
+  закомічений `.claude/settings.json`), якщо не передати `--no-hook`.
+- `--remove` видаляє рівно те, що записав setup, разом із хуками, а сервер Codex — лише якщо це
+  той, що додав setup. Рядки в ignore-файлах, `.wiki/` і нотатки памʼяті лишаються.
 
 У проєкті з `CLAUDE.md` і без `AGENTS.md` `--agent codex` додає сервер Codex, але пропускає правила
 навігації (код виходу 1) і не створює `AGENTS.md`: коли є обидва файли, pi читає лише `AGENTS.md`,
