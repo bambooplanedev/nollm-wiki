@@ -659,17 +659,20 @@ fn symbol_lines_are_unique_per_page() {
 }
 
 #[test]
-fn weak_lines_are_cut_response_wide() {
-    // `other` matches one token by doc only: below 0.3 of the best line in
-    // the response, though it is the best line of its own page.
+fn a_weak_page_keeps_only_its_best_line() {
+    // b's lines are below 0.3 of the best line in the response: b still
+    // shows its own best line, but not the weaker doc-only one.
     let (_d, w) = code_fixture(&[
         ("src/a.rs", "pub fn zebra_quokka() {}\n"),
-        ("src/b.rs", "/// Mentions quokka.\nfn other() {}\n"),
+        (
+            "src/b.rs",
+            "fn quokka_thing() {}\n/// Mentions quokka.\nfn other() {}\n",
+        ),
     ]);
     let hits = w.search("zebra quokka", None, 10);
     assert!(hits.iter().any(|h| h.id == "b"), "b is still a page hit");
     let names: Vec<String> = symbol_lines(&hits).into_iter().map(|l| l.3).collect();
-    assert_eq!(names, ["zebra_quokka"]);
+    assert_eq!(names, ["zebra_quokka", "quokka_thing"]);
 }
 
 #[test]

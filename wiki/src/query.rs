@@ -762,7 +762,7 @@ impl Wiki {
     /// Symbol lines per page at most.
     const SYMBOLS_PER_PAGE: usize = 3;
     /// A line is shown only if it scores at least this share of the best line
-    /// in the whole response.
+    /// in the whole response, or is (tied for) its page's best.
     const MIN_REL_SYMBOL: f64 = 0.3;
 
     fn item_score(
@@ -1203,7 +1203,8 @@ impl Wiki {
     }
 
     /// Gives each code hit its symbol lines (`page_symbols`), keeping only
-    /// lines at or above `MIN_REL_SYMBOL` of the response's best line.
+    /// lines at or above `MIN_REL_SYMBOL` of the response's best line, and
+    /// always the page's own best, so a listed page never comes back bare.
     fn expand(
         &self,
         hits: &mut [Hit],
@@ -1228,9 +1229,10 @@ impl Wiki {
             .fold(0.0, f64::max);
         for (hit, lines) in hits.iter_mut().zip(per_hit) {
             let mut docs = BTreeSet::new();
+            let own = lines.first().map_or(0.0, |(s, _)| *s);
             hit.symbols = lines
                 .into_iter()
-                .filter(|(s, _)| *s >= Self::MIN_REL_SYMBOL * best)
+                .filter(|(s, _)| *s >= own || *s >= Self::MIN_REL_SYMBOL * best)
                 .map(|(_, i)| SymbolLine {
                     path: hit.path.clone(),
                     start_line: i.start_line,
