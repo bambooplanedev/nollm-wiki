@@ -35,7 +35,10 @@ per question is noise-level: treat single results as anecdotes.
   without; p 1.0 and 0.11 per model),
   but the hint's first line was a distractor in 5 of 6 tasks, and the
   agent read that file first: one extra file read where the hint ranks a
-  look-alike in another file above the target.
+  look-alike in another file above the target. The agent reads every
+  candidate file of the hint in its first turn; neither a doc on each
+  hint line nor a header that says "read the one that fits" stopped it
+  from reading a same-named twin.
 - **Claude Code agents grep more without the navigation skill.** Over 24
   Haiku runs on the project above, tools loaded up front and no skill gave 48
   Grep/Glob calls against 20 for the skill setup with deferred tools, yet a
