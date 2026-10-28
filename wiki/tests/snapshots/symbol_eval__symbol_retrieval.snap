@@ -23,7 +23,7 @@ excerpt around the earliest occurrence            DocOnly      tune           1 
 temp file rename half-written page                DocOnly      tune           1           1     587  src/rewrite.rs
 html elements that never take a closing tag       DocOnly      held           1           1     504  src/formats/extract_vue.rs
 ids within hops along either edge direction       DocOnly      tune           1           1     353  src/query.rs
-path outside output real source change            DocOnly      tune           1           1     471  src/watch.rs
+path outside output real source change            DocOnly      tune           1           1     483  src/watch.rs
 lazily reloading handle loaded snapshot           DocOnly      held           1           1     376  src/serve.rs
 where is the snippet built                        Stopwords    tune           1           1     335  src/query.rs
 how do we write a page atomically                 Stopwords    tune           1           1     585  src/rewrite.rs
@@ -57,7 +57,7 @@ a stray backtick does not re pair later lines     TestTarget   tune           1 
 pagerank is deterministic and sums to about one   TestTarget   tune           1           1     408  src/graph.rs
 stale page files lists orphaned on disk only      TestTarget   held           1           1     473  src/lib.rs
 
-tune  file_hit@1=35/35 (1.0000) file_hit@3=35/35 (1.0000) mrr@10=1.0000 symbol_hit@3=35/35 (1.0000) tokens=429.6 tokens_json=705.5
+tune  file_hit@1=35/35 (1.0000) file_hit@3=35/35 (1.0000) mrr@10=1.0000 symbol_hit@3=35/35 (1.0000) tokens=429.9 tokens_json=705.9
 held  file_hit@1=17/17 (1.0000) file_hit@3=17/17 (1.0000) mrr@10=1.0000 symbol_hit@3=17/17 (1.0000) tokens=446.4 tokens_json=724.8
 class Name: file_hit@3=9/9 symbol_hit@3=9/9
 class NameWords: file_hit@3=6/6 symbol_hit@3=6/6

@@ -143,9 +143,9 @@ enum Command {
         /// Where the files go (asked when omitted and stdin is a terminal).
         #[arg(long)]
         scope: Option<Scope>,
-        /// Also install the prompt hook.
+        /// Skip the prompt hook (installed by default for Claude Code and pi).
         #[arg(long)]
-        hook: bool,
+        no_hook: bool,
         /// Undo what setup wrote (ignore lines and `.wiki/` stay).
         #[arg(long)]
         remove: bool,
@@ -422,14 +422,14 @@ fn main() -> Result<()> {
         Command::Setup {
             agent,
             scope,
-            hook,
+            no_hook,
             remove,
         } => {
             let scope = scope.map_or_else(ask_scope, Ok)?;
             let opts = SetupOptions {
                 agents: agent,
                 scope,
-                hook,
+                hook: !no_hook,
                 remove,
             };
             let root = std::env::current_dir()?;
