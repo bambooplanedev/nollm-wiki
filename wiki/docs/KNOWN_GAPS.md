@@ -26,9 +26,11 @@ per question is noise-level: treat single results as anecdotes.
 - **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
   questions that ask for a call path. `symbol` is named only in the skill
   and the tool description; see the previous point.
-- **The hook trades tools for hints.** With `wiki setup --hook` the agent
+- **The hook trades tools for hints.** With the prompt hook the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
-  line is not corrected by a search.
+  line is not corrected by a search. On question tasks over three fixture
+  repos (2026-10-28, two OpenRouter models) this cost no correctness and
+  cut lines read; on edit tasks it is not measured.
 - **Claude Code agents grep more without the navigation skill.** Over 24
   Haiku runs on the project above, tools loaded up front and no skill gave 48
   Grep/Glob calls against 20 for the skill setup with deferred tools, yet a

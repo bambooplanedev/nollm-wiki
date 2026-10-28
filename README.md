@@ -60,7 +60,7 @@ wiki/src/lib.rs
 - **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page`, `neighbors` and `callers` to Claude Code, pi, Cursor, Codex or any MCP client.
 - **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
-  Claude Code, pi, Cursor and Codex, and with `--hook` adds the matching code lines to each prompt.
+  Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
 - **Agent memory.** Notes an agent writes in `.agents/memory/` (or a per-user folder) become
   searchable pages that rank above code, with dates, aliases and `supersedes:`.
 - **Languages.** Rust, Python, C++, Go, JavaScript, TypeScript, `.vue` and `.svelte` scripts,
@@ -161,7 +161,7 @@ surrounding pages matter.
 
 `wiki setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook] [--remove]
+    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
 
 It compiles `.` into `.wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
 each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory rules).
@@ -183,12 +183,12 @@ names them. Codex is set up only when named: its MCP config is global.
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
 - Without `--scope`, setup asks on a terminal and fails without one.
-- `--hook` — also adds the wiki's code lines for each prompt before the model runs. Claude Code gets
+- The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`wiki hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/wiki-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
-  prompt.
-- `--remove` deletes exactly what setup wrote, hooks included even without `--hook`, and Codex's
+  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`.
+- `--remove` deletes exactly what setup wrote, hooks included, and Codex's
   server only when it is the one setup added. Ignore lines, `.wiki/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the

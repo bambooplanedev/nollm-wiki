@@ -360,13 +360,13 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 #[test]
-fn setup_hook_remove_without_hook_flag_undoes_hooks() {
+fn setup_remove_undoes_the_default_hooks() {
     let f = fixture(true, true);
     let r = f.root();
     fs::create_dir_all(r.join(".claude")).unwrap();
     fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
     let args = ["--agent", "claude,pi", "--scope", "repo"];
-    f.setup(&[&args[..], &["--hook"]].concat()).success();
+    f.setup(&args).success();
     f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
     assert!(!r.join(".pi/extensions").exists());
@@ -502,12 +502,12 @@ fn prompt_hooks(p: &Path) -> serde_json::Value {
 }
 
 #[test]
-fn setup_hook_repo_adds_claude_hook_and_pi_extension() {
+fn setup_repo_adds_claude_hook_and_pi_extension_by_default() {
     let f = fixture(true, true);
     let r = f.root();
     fs::create_dir_all(r.join(".claude")).unwrap();
     fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
-    f.setup(&["--agent", "claude,pi", "--scope", "repo", "--hook"])
+    f.setup(&["--agent", "claude,pi", "--scope", "repo"])
         .success();
     let echo = serde_json::json!({"type": "command", "command": "echo hi"});
     assert_eq!(
@@ -520,10 +520,10 @@ fn setup_hook_repo_adds_claude_hook_and_pi_extension() {
 }
 
 #[test]
-fn setup_hook_local_uses_settings_local() {
+fn setup_local_hook_uses_settings_local() {
     let f = fixture(true, true);
     let r = f.root();
-    f.setup(&["--agent", "claude,pi", "--scope", "local", "--hook"])
+    f.setup(&["--agent", "claude,pi", "--scope", "local"])
         .success();
     assert_eq!(
         prompt_hooks(&r.join(".claude/settings.local.json")),
@@ -537,22 +537,27 @@ fn setup_hook_local_uses_settings_local() {
 }
 
 #[test]
+fn setup_no_hook_installs_no_hook() {
+    let f = fixture(true, true);
+    let r = f.root();
+    f.setup(&["--agent", "claude,pi", "--scope", "repo", "--no-hook"])
+        .success();
+    assert!(!r.join(".claude/settings.json").exists());
+    assert!(!r.join(".pi/extensions").exists());
+    // The old opt-in flag is gone.
+    f.setup(&["--agent", "claude", "--scope", "repo", "--hook"])
+        .failure();
+}
+
+#[test]
 fn setup_hook_remove_keeps_other_hooks() {
     let f = fixture(true, true);
     let r = f.root();
     fs::create_dir_all(r.join(".claude")).unwrap();
     fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
-    let args = ["--agent", "claude,pi", "--scope", "repo", "--hook"];
+    let args = ["--agent", "claude,pi", "--scope", "repo"];
     f.setup(&args).success();
-    f.setup(&[
-        "--remove",
-        "--agent",
-        "claude,pi",
-        "--scope",
-        "repo",
-        "--hook",
-    ])
-    .success();
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
     assert!(!r.join(".pi/extensions").exists());
 }
