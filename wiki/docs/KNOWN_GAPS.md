@@ -30,7 +30,12 @@ per question is noise-level: treat single results as anecdotes.
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search. On question tasks over three fixture
   repos (2026-10-28, two OpenRouter models) this cost no correctness and
-  cut lines read; on edit tasks it is not measured.
+  cut lines read. On edit tasks with distractors next to the target it
+  cost no significant correctness either (PASS 55/60 with it, 60/60
+  without; p 1.0 and 0.11 per model),
+  but the hint's first line was a distractor in 5 of 6 tasks, and the
+  agent read that file first: one extra file read where the hint ranks a
+  look-alike in another file above the target.
 - **Claude Code agents grep more without the navigation skill.** Over 24
   Haiku runs on the project above, tools loaded up front and no skill gave 48
   Grep/Glob calls against 20 for the skill setup with deferred tools, yet a
