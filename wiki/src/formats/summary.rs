@@ -76,7 +76,7 @@ fn is_list_item(line: &str) -> bool {
 /// Truncate to the first sentence terminator (`.`/`!`/`?`), inclusive; else
 /// whole line. A terminator counts only when followed by whitespace or the
 /// end of the line, so `index.json` or `v1.2` inside a sentence does not end
-/// it.
+/// it, and neither does the dot of an initialism (`e.g.`, `i.e.`, `U.S.`).
 fn first_sentence(line: &str) -> String {
     let line = line.trim();
     let end = line
@@ -84,12 +84,25 @@ fn first_sentence(line: &str) -> String {
         .find(|&(i, c)| {
             matches!(c, '.' | '!' | '?')
                 && line[i + 1..].chars().next().is_none_or(char::is_whitespace)
+                && !ends_in_initialism(&line[..=i])
         })
         .map(|(i, _)| i);
     match end {
         Some(idx) => line[..=idx].trim().to_string(),
         None => line.to_string(),
     }
+}
+
+/// `text` ends in two or more single letters each followed by a dot.
+fn ends_in_initialism(text: &str) -> bool {
+    let word = text.rsplit(char::is_whitespace).next().unwrap_or("");
+    let word = word.trim_start_matches(|c: char| !c.is_alphabetic());
+    let pairs: Vec<&str> = word.split_inclusive('.').collect();
+    pairs.len() >= 2
+        && pairs.iter().all(|p| {
+            let mut cs = p.chars();
+            cs.next().is_some_and(char::is_alphabetic) && cs.as_str() == "."
+        })
 }
 
 #[cfg(test)]
@@ -123,6 +136,19 @@ mod tests {
         );
         assert_eq!(first_sentence("Bump to v1.2"), "Bump to v1.2");
         assert_eq!(first_sentence("Done!Next"), "Done!Next");
+    }
+
+    #[test]
+    fn an_initialism_does_not_end_the_sentence() {
+        assert_eq!(
+            first_sentence("Price in admin tables, e.g. 12.50 EUR. Uses a dot."),
+            "Price in admin tables, e.g. 12.50 EUR."
+        );
+        assert_eq!(
+            first_sentence("Ships to the U.S. only. Rest."),
+            "Ships to the U.S. only."
+        );
+        assert_eq!(first_sentence("Read a file. Then go."), "Read a file.");
     }
 
     #[test]
