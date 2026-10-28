@@ -85,7 +85,7 @@ From a [release](https://github.com/bambooplanedev/llm-wiki-nollm/releases): dow
 for your platform (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`) and
 put the `wiki` binary in a directory on your `PATH`, since agents start it as plain `wiki`:
 
-    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.4.0/wiki-v0.4.0-aarch64-apple-darwin.tar.gz | tar -xz
+    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.5.0/wiki-v0.5.0-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
 From source:
@@ -708,6 +708,31 @@ tokens are means per run; Grep/Glob calls are totals over the runs.
 
 On the same project, Haiku read the line range `search` gave in 57 of 58 file reads. More, with
 the cases where agents still fall back to grep: [wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md).
+
+The prompt hook and large files, 2026-10-28. These runs use two hosted models through OpenRouter
+(qwen3.8-27b and deepseek-v4.1-flash, reasoning effort low) in
+[llm-harness-builder](https://github.com/bambooplanedev/llm-harness-builder), on small fixture repos
+written for the purpose, 5 runs per task. Lines read are means per run.
+
+Questions ("where is X handled, and what value does it use"), wiki and navigation rules in both
+columns, without and with the hook:
+
+| model | repo | correct, without / with hook | lines read, without / with hook |
+|---|---|---|---|
+| deepseek-v4.1-flash | C++, four 500-600-line files | 22/25 / 25/25 | 171 / 80 |
+| deepseek-v4.1-flash | shell test harness | 10/10 / 10/10 | 310 / 230 |
+| deepseek-v4.1-flash | Python and TypeScript shop | 15/15 / 15/15 | 27 / 12 |
+| qwen3.8-27b | C++, four 500-600-line files | 25/25 / 25/25 | 57 / 24 |
+| qwen3.8-27b | shell test harness | 10/10 / 10/10 | 284 / 59 |
+| qwen3.8-27b | Python and TypeScript shop | 15/15 / 15/15 | 9 / 2 |
+
+Edits next to look-alikes (6 tasks, 30 runs per model): passing runs without / with the hook were
+30/30 / 29/30 for deepseek and 30/30 / 26/30 for qwen, whose misses were its own tool-call markup
+leaking into the edit text; lines read 37 / 48 and 37 / 61, one extra small file where the hint
+ranked a look-alike first.
+
+Large files, same C++ repo, without and with the wiki: runs that read a 500-plus-line file whole
+went from 14/25 to 0/25 for both models, lines read from 386 to 70 (qwen) and 551 to 184 (deepseek).
 
 ## Limitations
 
