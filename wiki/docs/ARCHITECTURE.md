@@ -599,7 +599,9 @@ matching:
   with a doc match (a compile-time assert pins it). Per page the top 3
   (`SYMBOLS_PER_PAGE`) distinct items are kept, ties by line; across the
   response a line must score at least 0.3 (`MIN_REL_SYMBOL`) of the best
-  line. Page score and order are not changed by expansion. A `SymbolLine`
+  line, except a page's own best line(s), which always show: a page with
+  any matching item keeps its best one. Page score and order are not
+  changed by expansion. A `SymbolLine`
   carries `path`, the 1-based inclusive line range, `owner::name`, the
   signature, and the doc, which is dropped when an earlier line of the
   same page shows the same one. C++ gives each declarator of a shared
