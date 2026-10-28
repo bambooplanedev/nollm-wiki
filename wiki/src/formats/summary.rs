@@ -149,6 +149,17 @@ mod tests {
             "Ships to the U.S. only."
         );
         assert_eq!(first_sentence("Read a file. Then go."), "Read a file.");
+        assert_eq!(first_sentence("Use plan B. Then go."), "Use plan B.");
+        assert_eq!(
+            first_sentence("Logs, caches, etc. Then go."),
+            "Logs, caches, etc."
+        );
+        // A sentence that really ends on an initialism runs on: after `e.g.` a
+        // capital is as common as after a real end, so the two look the same.
+        assert_eq!(
+            first_sentence("Made in the U.S. Next one."),
+            "Made in the U.S. Next one."
+        );
     }
 
     #[test]
