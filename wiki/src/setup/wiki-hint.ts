@@ -1,4 +1,4 @@
-// Adds the project wiki's code lines for the prompt before the model runs (wiki setup --hook).
+// Adds the project wiki's code lines for the prompt before the model runs (installed by wiki setup unless --no-hook).
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

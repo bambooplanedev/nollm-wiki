@@ -23,6 +23,8 @@ description: Save or update a note in this project's memory: a decision, a fact 
 ";
 const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
+/// Every earlier release's pi hook, so setup can upgrade or remove what an older `wiki` wrote.
+const SHIPPED_PI_HOOKS: &[&str] = &[include_str!("shipped/wiki-hint-1.ts")];
 /// The command the agents run.
 const CMD: &str = "wiki";
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
@@ -519,12 +521,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         if opts.hook || opts.remove {
             if pi {
                 let content = PI_HOOK.replace("<cmd>", CMD);
+                let shipped: Vec<String> = SHIPPED_PI_HOOKS
+                    .iter()
+                    .map(|h| h.replace("<cmd>", CMD))
+                    .collect();
+                let shipped: Vec<&str> = shipped.iter().map(String::as_str).collect();
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &content, &[])
+                        edit::remove_file(root, &path, &content, &shipped)
                     } else {
-                        edit::write_file(&path, &content, &[])
+                        edit::write_file(&path, &content, &shipped)
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
