@@ -1204,7 +1204,7 @@ impl Wiki {
 
     /// Gives each code hit its symbol lines (`page_symbols`), keeping only
     /// lines at or above `MIN_REL_SYMBOL` of the response's best line, and
-    /// always the page's own best, so a listed page never comes back bare.
+    /// always the page's own best, so a page with any matching item keeps one.
     fn expand(
         &self,
         hits: &mut [Hit],

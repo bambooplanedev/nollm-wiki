@@ -676,6 +676,19 @@ fn a_weak_page_keeps_only_its_best_line() {
 }
 
 #[test]
+fn a_page_keeps_a_second_line_above_the_response_cut() {
+    // `zebra_quokka_cache` is not a's best line, but it scores well above
+    // 0.3 of the response's best, so the response-wide rule keeps it.
+    let (_d, w) = code_fixture(&[(
+        "src/a.rs",
+        "pub fn zebra_quokka() {}\npub fn zebra_quokka_cache() {}\n",
+    )]);
+    let hits = w.search("zebra quokka", None, 10);
+    let names: Vec<String> = symbol_lines(&hits).into_iter().map(|l| l.3).collect();
+    assert!(names.iter().any(|n| n == "zebra_quokka_cache"), "{names:?}");
+}
+
+#[test]
 fn whole_name_outranks_an_earlier_word_match() {
     // `resolve_link` matches `resolve` by a word and sits first in the file;
     // the method named exactly `resolve` must still be the first line.
