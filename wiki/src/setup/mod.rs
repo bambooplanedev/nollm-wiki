@@ -364,10 +364,25 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             };
             r.item(&what, false, Ok(o))?;
         }
+        let agent_dirs = memory::agent_dirs(root);
+        for d in &agent_dirs {
+            let state = if d.is_dir() {
+                "found"
+            } else {
+                "not yet created"
+            };
+            r.line(&format!(
+                "agent memory folder {} ({state})",
+                memory::display_path(d)
+            ))?;
+        }
+        if agent_dirs.is_empty() {
+            r.line("no agent memory folders found")?;
+        }
         let wiki = root.join(".wiki");
         let c = CompileOptions {
             incremental: true,
-            memory: vec![],
+            memory: agent_dirs,
             ..CompileOptions::default()
         };
         let res = compile(root, &wiki, &c)?;

@@ -39,10 +39,21 @@ fn spawn(
     path: &std::path::Path,
     extra: &[&str],
 ) -> (Child, ChildStdin, Receiver<String>) {
+    spawn_env(flag, path, extra, &[])
+}
+
+/// `spawn` with `env` set for the server.
+fn spawn_env(
+    flag: &str,
+    path: &std::path::Path,
+    extra: &[&str],
+    env: &[(&str, &std::path::Path)],
+) -> (Child, ChildStdin, Receiver<String>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
         .args(["serve", flag])
         .arg(path)
         .args(extra)
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1051,6 +1062,43 @@ fn external_memory_folder_created_after_start_is_watched() {
     std::fs::write(mem.join("late.md"), "# Late\n\nechidnalate\n").unwrap();
     let ids = hit_ids(&search(&mut stdin, &stdout, 3, "echidnalate"));
     assert!(ids.iter().any(|id| id.contains("late")), "ids: {ids:?}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn agent_folder_created_after_start_is_picked_up() {
+    let project = source_project();
+    let config = tempfile::tempdir().unwrap();
+    let slug = wiki::memory::claude_slug(&wiki::memory::display_path(
+        &project.path().canonicalize().unwrap(),
+    ));
+    let slot = config.path().join("projects").join(slug);
+    std::fs::create_dir_all(&slot).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_env(
+        "--source",
+        project.path(),
+        &[],
+        &[("CLAUDE_CONFIG_DIR", config.path())],
+    );
+    initialize(&mut stdin, &stdout);
+    assert_eq!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "quokkanote")),
+        [] as [String; 0]
+    );
+
+    // A transcript beside the memory folder is not a change to the wiki.
+    std::fs::write(slot.join("abc.jsonl"), "{\"quokkanote\": 1}\n").unwrap();
+    std::thread::sleep(Duration::from_millis(500));
+    let resp = search(&mut stdin, &stdout, 3, "quokkanote");
+    assert_eq!(hit_ids(&resp), [] as [String; 0]);
+    assert!(stale_block(&resp).is_none(), "{resp}");
+
+    std::fs::create_dir_all(slot.join("memory")).unwrap();
+    std::fs::write(slot.join("memory/n.md"), "# N\n\nquokkanote\n").unwrap();
+    let ids = hit_ids(&search(&mut stdin, &stdout, 4, "quokkanote"));
+    assert_ne!(ids, [] as [String; 0]);
 
     drop(stdin);
     let _ = child.wait();

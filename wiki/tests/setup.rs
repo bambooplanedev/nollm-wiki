@@ -52,10 +52,14 @@ impl Fixture {
             .env("HOME", self.home())
             .env("XDG_DATA_HOME", self.home())
             .env("LOCALAPPDATA", self.home())
+            .env("CLAUDE_CONFIG_DIR", self.claude_config())
             .assert()
     }
     fn home(&self) -> PathBuf {
         self.tmp.path().join("home")
+    }
+    fn claude_config(&self) -> PathBuf {
+        self.tmp.path().join("claude-config")
     }
     /// Where local memory of the fixture's repo lives (needs real git and a commit).
     fn local_memory(&self) -> PathBuf {
@@ -221,7 +225,10 @@ fn setup_twice_is_a_no_op() {
     f.setup(&args).success();
     let before = files(&f.root());
     let a = f.setup(&args).success();
-    for l in out(&a).lines().filter(|l| !l.starts_with("Compiled")) {
+    for l in out(&a)
+        .lines()
+        .filter(|l| !l.starts_with("Compiled") && !l.starts_with("agent memory folder"))
+    {
         assert!(l.starts_with("already set up:"), "{l}");
     }
     assert_eq!(files(&f.root()), before);
@@ -609,6 +616,46 @@ fn committed() -> Fixture {
 }
 
 #[test]
+fn setup_and_serve_find_the_claude_memory_folder() {
+    let f = committed();
+    let slug = wiki::memory::claude_slug(&wiki::memory::display_path(
+        &f.root().canonicalize().unwrap(),
+    ));
+    let mem = f.claude_config().join("projects").join(slug).join("memory");
+    fs::create_dir_all(mem.join("logs")).unwrap();
+    fs::write(mem.join("n.md"), "# Kelp\n\nKelp forest notes.\n").unwrap();
+    fs::write(mem.join("logs/x.md"), "# Log\n\nsession log\n").unwrap();
+    let shown = wiki::memory::display_path(&mem.canonicalize().unwrap());
+    let a = f.setup(&["--agent", "pi", "--scope", "repo"]).success();
+    assert!(
+        out(&a).contains(&format!("agent memory folder {shown} (found)")),
+        "{}",
+        out(&a)
+    );
+    let index = read(&f.root().join(".wiki/index.json"));
+    assert!(index.contains(&format!("{shown}/n.md")), "{index}");
+    assert!(index.contains("\"memory\": true"), "{index}");
+    assert!(!index.contains("logs/x.md"), "{index}");
+
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", ".", "out"])
+        .current_dir(f.root())
+        .env("CLAUDE_CONFIG_DIR", f.claude_config())
+        .assert()
+        .success();
+    let plain = read(&f.root().join("out/index.json"));
+    assert!(!plain.contains("n.md"), "{plain}");
+}
+
+#[test]
+fn setup_without_the_claude_memory_folder_says_not_yet_created() {
+    let f = committed();
+    let a = f.setup(&["--agent", "pi", "--scope", "repo"]).success();
+    assert!(out(&a).contains("(not yet created)"), "{}", out(&a));
+}
+
+#[test]
 #[ignore = "replaced in Task 5"]
 fn setup_local_creates_the_data_dir_folder_compiles_it_and_remove_keeps_it() {
     let f = committed();
@@ -793,7 +840,10 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     assert_eq!(read(&agents), format!("# Team rules\n\n{block}"));
 
     let a = f.setup(&args).success();
-    for l in out(&a).lines().filter(|l| !l.starts_with("Compiled")) {
+    for l in out(&a)
+        .lines()
+        .filter(|l| !l.starts_with("Compiled") && !l.starts_with("agent memory folder"))
+    {
         assert!(l.starts_with("already set up:"), "{l}");
     }
 

@@ -577,8 +577,8 @@ pub fn search_lines(hits: &[Hit]) -> String {
 /// Start the MCP server over stdio and block until the client disconnects.
 /// With `source`, the server compiles it into `dir` and keeps recompiling.
 /// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]). `memory`
-/// lists the external memory folders: `["none"]` or `[]` for no folder
-/// (discovery comes with `agent_dirs`), else exactly those folders.
+/// lists the external memory folders: `["none"]` for no folder, `[]` for
+/// the discovered [`crate::memory::agent_dirs`], else exactly those folders.
 pub fn run(
     dir: &Path,
     source: Option<&Path>,
@@ -606,6 +606,7 @@ pub fn run(
         Some(source) => {
             let memory = match memory {
                 [none] if none == "none" => Vec::new(),
+                [] => crate::memory::agent_dirs(source),
                 dirs => dirs
                     .iter()
                     .map(|d| crate::memory::resolve(Path::new(d)))

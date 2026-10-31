@@ -119,7 +119,7 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
         /// With `--source`, an agent memory folder to include (repeatable), or
-        /// `none` for no external folder.
+        /// `none` for no external folder; without it, Claude Code's memory folder of the project.
         #[arg(long, value_name = "none|DIR", requires = "source")]
         memory: Vec<String>,
     },
