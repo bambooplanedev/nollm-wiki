@@ -285,6 +285,18 @@ impl Hit {
 /// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
 /// marker counts only when whitespace or the line end follows it, so
 /// `#include`, `#[derive]`, `*ptr` and `*note*` stay intact.
+/// Whether a page sits under a folder of other people's code.
+fn is_vendored(path: &str) -> bool {
+    const FOLDERS: [&str; 5] = [
+        "third_party",
+        "third-party",
+        "vendor",
+        "vendored",
+        "node_modules",
+    ];
+    path.split('/').any(|part| FOLDERS.contains(&part))
+}
+
 fn strip_comment_marker(line: &str) -> &str {
     let l = line.trim_start();
     let marker_end = |r: &str| r.is_empty() || r.starts_with(char::is_whitespace);
@@ -1097,20 +1109,49 @@ impl Wiki {
         limit: Option<usize>,
         scope: MemoryScope,
     ) -> Vec<Hit> {
+        self.search_terms(q, kind, tag, limit, scope, None)
+    }
+
+    /// Code pages for a prompt rather than a query: vendored pages are out,
+    /// and only its `terms` rarest words that occur at all count, since most
+    /// of a prompt's words say how to work, not what to find.
+    pub(crate) fn search_prompt(&self, q: &str, limit: usize, terms: usize) -> Vec<Hit> {
+        self.search_terms(
+            q,
+            Some(&KindFilter::Code),
+            None,
+            Some(limit),
+            MemoryScope::Without,
+            Some(terms),
+        )
+    }
+
+    fn search_terms(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+        scope: MemoryScope,
+        prompt_terms: Option<usize>,
+    ) -> Vec<Hit> {
         let (tokens, query_words) = Self::query_tokens(q);
         let dates = query_dates(q);
         let passes = |e: &Entry| {
-            (match scope {
-                MemoryScope::With => true,
-                MemoryScope::Without => !e.memory,
-                MemoryScope::Only => e.memory,
-            }) && kind.is_none_or(|f| {
-                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
-            }) && tag.is_none_or(|t| {
-                e.tags
-                    .iter()
-                    .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
-            })
+            !(prompt_terms.is_some() && is_vendored(&e.path))
+                && (match scope {
+                    MemoryScope::With => true,
+                    MemoryScope::Without => !e.memory,
+                    MemoryScope::Only => e.memory,
+                })
+                && kind.is_none_or(|f| {
+                    (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
+                })
+                && tag.is_none_or(|t| {
+                    e.tags
+                        .iter()
+                        .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+                })
         };
         if tokens.is_empty() {
             let Some(_) = tag else {
@@ -1152,10 +1193,17 @@ impl Wiki {
         // `avglen == 0` needs every filtered page's body to be missing on
         // disk; guard once here rather than divide by zero per page.
         let avglen = if avglen > 0.0 { avglen } else { 1.0 };
-        let idf: Vec<f64> = df
+        let mut idf: Vec<f64> = df
             .iter()
             .map(|&d| (1.0 + (n_f - d as f64 + 0.5) / (d as f64 + 0.5)).ln())
             .collect();
+        if let Some(terms) = prompt_terms {
+            let mut seen: Vec<usize> = (0..tokens.len()).filter(|&i| df[i] > 0).collect();
+            seen.sort_by_key(|&i| df[i]);
+            for &i in seen.iter().skip(terms) {
+                idf[i] = 0.0;
+            }
+        }
         let mut ranked: Vec<(Hit, f64)> = candidates
             .into_iter()
             .map(|c| {
@@ -1196,6 +1244,9 @@ impl Wiki {
                 .then_with(|| b_pr.total_cmp(a_pr))
                 .then_with(|| a.id.cmp(&b.id))
         });
+        if prompt_terms.is_some() {
+            ranked.retain(|(h, _)| h.score > 0.0);
+        }
         ranked.truncate(limit);
         let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
         self.expand(&mut hits, &tokens, &query_words, &idf[..tokens.len()]);

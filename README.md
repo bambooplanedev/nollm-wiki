@@ -559,7 +559,9 @@ counted. Exits 1 when any link is broken, so `lint` can gate a build.
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
 `path:start-end  name  signature` lines from the best-matching code pages, at most 2 per page,
-without docs, tests or a line whose range holds another of the page's lines. Prints nothing and
+without docs, tests or a line whose range holds another of the page's lines; a page with no such
+line gets `path  title`. Only the text's 24 rarest words rank the pages, and vendored folders
+(`third_party`, `vendor`, `node_modules`) are left out. Prints nothing and
 exits 0 when the wiki is missing or nothing matches, so a hook can run it on every prompt.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
