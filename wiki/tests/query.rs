@@ -1454,6 +1454,24 @@ fn tail_ratio_branch_needs_a_positive_note_score() {
 }
 
 #[test]
+fn tail_scores_use_the_project_scale() {
+    // Same page count; only the project page that also says `migration`
+    // differs, so a notes-only scale would give the note the same score.
+    let tail_score = |extra: &str| {
+        let (_d, w) = code_fixture(&[
+            ("a.rs", "pub fn other() {}\n"),
+            ("b.rs", extra),
+            (".agents/memory/m.md", &note("Migration plan", "", "x")),
+        ]);
+        let hits = w.search("migration", None, 10);
+        hits.iter().find(|h| h.memory).expect("tail note").score
+    };
+    let alone = tail_score("pub fn unrelated() {}\n");
+    let shared = tail_score("/// migration\npub fn migrate() {}\n");
+    assert!(shared < alone, "{shared} vs {alone}");
+}
+
+#[test]
 fn tail_ratio_branch_skips_a_note_the_code_outscores() {
     let (_d, w) = code_fixture(&[
         (

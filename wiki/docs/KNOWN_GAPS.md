@@ -246,8 +246,8 @@ per question is noise-level: treat single results as anecdotes.
   watched; restart the server once it exists.
 - Windows slugging (`C:/` paths, the `\\?\` prefix) is covered by unit tests only;
   CI is Linux.
-- The tail's ratio compares a note score from the notes-only index with a code
-  score from the project index, so it depends on corpus size, until the offline
-  measurement says otherwise.
+- The tail's note scores share the project's idf scale (statistics over project
+  pages plus notes) while the code list keeps its own, notes left out; the two
+  scales differ only by the notes' share of the corpus.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.

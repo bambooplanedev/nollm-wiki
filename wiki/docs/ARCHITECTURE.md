@@ -581,11 +581,12 @@ matching:
   (newer `updated` first on a tie), after the hits and outside `limit`,
   whatever `kind`; with `tag` set a note must carry it. A note enters the tail
   through `passes_gate`, which `wiki hint` shares: it is not superseded, and
-  a query word of `gate_len()` (6) or more characters is in its title, aliases
+  a query word of `gate_len()` (8) or more characters is in its title, aliases
   or summary (`names_page`), or the query writes its `updated` day
   (`dated_on`), or its score is at least `MEMORY_GATE_RATIO` (2) times the
-  best code hit's. The note score comes from the notes-only index and the code
-  score from the project index, so the ratio compares two scales. The
+  best code hit's. Note scores come from `MemoryScope::Only`, whose `N`, `df`
+  and `avglen` count project pages and notes alike, so the ratio compares
+  scores on the project's scale; only the candidates are notes. The
   environment variable `WIKI_MEMORY_GATE` sets the gate length; it exists for
   measurement and is not a user setting. `lines` prints a tail row as
   `memory: <path> — <summary>` (the title when the summary is empty), JSON
