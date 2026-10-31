@@ -379,8 +379,9 @@ Agents keep notes as Markdown files. The wiki compiles the folders they write to
   always includes it.
 - **The agents' own folders.** `serve --source` and `wiki setup` look for them. Today that is Claude
   Code's `<config dir>/projects/<slug>/memory/`, where the config dir is `CLAUDE_CONFIG_DIR` or
-  `~/.claude` and `<slug>` is the path of the repo's main checkout with every character other than
-  a letter or digit written as `-` (cut at 200 characters with a hash, as Claude Code does). A
+  `~/.claude` and `<slug>` is the path of the repo's main checkout with every UTF-16 unit that is not
+  an ASCII letter or digit written as `-` (so a Cyrillic or accented letter is one `-`, a character
+  outside the BMP two), cut at 200 units with a hash, as Claude Code does. A
   worktree or a subdirectory therefore shares the folder of its main checkout. A `logs/` folder
   inside it is skipped, and so is `MEMORY.md`.
 - **`--memory DIR`** (repeatable) for any other folder. On `serve`, `--memory none` turns the
@@ -409,11 +410,14 @@ A note can retire an older one with `supersedes:` in its front matter (titles, a
 its line (`"superseded_by"` in JSON). Only memory notes are matched,
 a name that matches nothing is ignored, and with several superseders the smallest id is shown.
 
-Front matter on any Markdown page: `aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
+Front matter on any Markdown page: `title:` is the title (else the first `# heading`, else the file
+name) and `description:` is the one-line summary that `memory:` rows print and the gate matches on;
+`aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
 block list; tags are lowercased with any `#` stripped. The page's date is read from `updated`,
 `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name
 starting `YYYY-MM-DD`. Cyrillic query words are stemmed, so another grammatical form of a word still
-matches.
+matches. A text page over about 16,000 characters (4000 tokens) is reported by `wiki lint` as `large`
+(see [lint](#lint)).
 
 pi's skill carries these rules (`<memory-dir>` is `.agents/memory`); copy them into the agent's
 instructions file if it has no skill:
