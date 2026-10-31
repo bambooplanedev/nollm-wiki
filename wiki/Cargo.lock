@@ -473,6 +473,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "frostem"
+version = "2.20261016.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a838a11c149cb7972e34b040676633bc6c3769f8077ce6349a87ab4eb39bf4b"
+
+[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1557,6 +1563,7 @@ dependencies = [
  "blake3",
  "clap",
  "criterion",
+ "frostem",
  "ignore",
  "insta",
  "notify",

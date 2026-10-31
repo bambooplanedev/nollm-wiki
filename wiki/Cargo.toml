@@ -36,6 +36,7 @@ tree-sitter-bash = "0.25"
 tree-sitter-cpp = "0.23"
 rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemars"] }
 tokio = { version = "1", features = ["rt"] }
+frostem = { version = "=2.20261016.1", default-features = false, features = ["english", "ukrainian"] }
 
 [dev-dependencies]
 insta = "1"

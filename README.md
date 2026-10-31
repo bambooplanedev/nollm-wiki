@@ -401,8 +401,9 @@ a name that matches nothing is ignored, and with several superseders the smalles
 Front matter on any Markdown page: `aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
 block list; tags are lowercased with any `#` stripped. The page's date is read from `updated`,
 `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name
-starting `YYYY-MM-DD`. Cyrillic query words are stemmed, so another grammatical form of a word still
-matches.
+starting `YYYY-MM-DD`. Another grammatical form of a word still matches (`provisioning` finds
+`brew_provision`, `сторінок` finds `Сторінка`): query and field words are compared by their Snowball
+stem, English or Ukrainian by script, below an exact or prefix match in rank.
 
 The skill carries these rules; copy them into the agent's instructions file if it has no skill:
 
