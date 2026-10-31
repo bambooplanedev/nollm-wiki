@@ -85,7 +85,10 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 /// Most memory notes `search` lists after the code hits.
 pub(crate) const MEMORY_TAIL: usize = 2;
 /// Default gate length: a query word this long naming a note lets it in.
-pub(crate) const MEMORY_GATE_LEN: usize = 6;
+/// 8 from the offline measurement (2026-10-31: 114 memory and 105 code
+/// queries on three corpora): 6 and 4 put a note under 30-97% of code
+/// queries, 8 under 3-32% at 75 of 114 notes found against 86 at 6.
+pub(crate) const MEMORY_GATE_LEN: usize = 8;
 /// A note whose score is at least this many times the best code hit's
 /// passes the gate without a name.
 pub(crate) const MEMORY_GATE_RATIO: f64 = 2.0;
