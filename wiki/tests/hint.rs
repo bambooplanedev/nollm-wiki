@@ -177,10 +177,31 @@ fn hint_adds_one_memory_line_after_the_code_lines() {
 }
 
 #[test]
-fn hint_memory_line_needs_a_title_alias_or_summary_match() {
+fn hint_memory_line_comes_from_the_body_when_no_code_competes() {
     let tmp = project_with_memory();
-    // Only the body says zebra: no memory line, and no code either.
-    assert_eq!(hint_in(&tmp, "zebra"), "");
+    // Only the body says zebra and no code does: the ratio branch lets it in.
+    let out = hint_in(&tmp, "zebra");
+    assert!(memory_line(&out).is_some(), "{out}");
+    assert_eq!(out.lines().count(), 2, "{out}");
+}
+
+#[test]
+fn hint_gate_length_comes_from_the_env() {
+    let tmp = project_with_memory();
+    let prompt = "rota where are member creds loaded";
+    // `rota` (4 characters) names the note's title only under a gate of 4.
+    let gated = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", prompt, "--dir"])
+        .arg(tmp.path().join(".wiki"))
+        .env("WIKI_MEMORY_GATE", "4")
+        .assert()
+        .success();
+    let gated = String::from_utf8(gated.get_output().stdout.clone()).unwrap();
+    assert!(gated.contains("load_member_creds"), "{gated}");
+    assert!(memory_line(&gated).is_some(), "{gated}");
+    let plain = hint_in(&tmp, prompt);
+    assert!(memory_line(&plain).is_none(), "{plain}");
 }
 
 #[test]
@@ -210,13 +231,17 @@ fn hint_code_lines_are_the_same_with_and_without_memory() {
 
 #[test]
 fn hint_memory_gate_ignores_short_words() {
-    let tmp = project_of(&[(
-        ".agents/memory/n.md",
-        "---\ntitle: Що робити в релізі\n---\n\nРелізний чекліст.\n",
-    )]);
+    // Code that says the short words loudly, so the ratio branch fails too.
+    let tmp = project_of(&[
+        ("src/lib.rs", "/// Що в що в що в що.\npub fn shcho() {}\n"),
+        (
+            ".agents/memory/n.md",
+            "---\ntitle: Що робити в релізі\n---\n\nРелізний чекліст.\n",
+        ),
+    ]);
     let dir = tmp.path().join(".wiki");
-    assert_eq!(hint(&dir, "що в"), "");
-    assert!(hint(&dir, "що в релізі").contains("memory: "));
+    assert!(!hint(&dir, "що в").contains("memory: "));
+    assert!(hint(&dir, "що в чекліст").contains("memory: "));
 }
 
 #[test]
@@ -262,7 +287,8 @@ fn hint_memory_line_skips_a_short_word_the_code_outscores() {
 #[test]
 fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
     let tmp = project_with_memory();
-    // `vault` (5 characters) hits the title; no code page mentions it.
+    // `vault` (5 characters) is under the gate length, but no code page
+    // mentions it, so the note's own score passes the ratio branch.
     let out = hint_in(&tmp, "vault");
     assert!(memory_line(&out).is_some(), "{out}");
 }

@@ -518,7 +518,8 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or
 /// the snippet (four-space indent) when the page has no symbols.
-/// No hits render as one `no matches` line.
+/// A memory note renders as the hook's one line, `memory: path — summary`
+/// (the title when there is no summary). No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
     if hits.is_empty() {
         return "no matches\n".to_string();
@@ -526,6 +527,20 @@ pub fn search_lines(hits: &[Hit]) -> String {
     // Fields are one-line text; collapse any newline or tab they carry.
     let mut out = String::new();
     for h in hits {
+        if h.memory {
+            let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
+            out.push_str(&format!(
+                "memory: {} — {}",
+                h.path,
+                one_line(said.unwrap_or(&h.title))
+            ));
+            // Only a tag listing shows a superseded note.
+            if let Some(by) = &h.superseded_by {
+                out.push_str(&format!(" (superseded by {by})"));
+            }
+            out.push('\n');
+            continue;
+        }
         out.push_str(&format!("{}  {}  ", h.id, h.path));
         if let Some(u) = &h.updated {
             out.push_str(&format!("{u}  "));
@@ -650,6 +665,36 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(state.snapshot()).0.list_pages().len()
+    }
+
+    #[test]
+    fn search_lines_prints_a_memory_hit_as_a_hook_line() {
+        let hit = |memory: bool, summary: Option<&str>| Hit {
+            id: "n".into(),
+            title: "Vault".into(),
+            path: "/m/n.md".into(),
+            summary: summary.map(String::from),
+            updated: Some("2026-10-23".into()),
+            score: 1.0,
+            snippet: Some("snip".into()),
+            symbols: vec![],
+            memory,
+            superseded_by: None,
+        };
+        assert_eq!(
+            search_lines(&[hit(true, Some("Rotate nightly."))]),
+            "memory: /m/n.md — Rotate nightly.\n"
+        );
+        assert_eq!(
+            search_lines(&[hit(true, None)]),
+            "memory: /m/n.md — Vault\n"
+        );
+        let mut plain = hit(false, Some("sum"));
+        plain.snippet = None;
+        assert_eq!(
+            search_lines(&[plain]),
+            "n  /m/n.md  2026-10-23  Vault — sum\n"
+        );
     }
 
     #[test]

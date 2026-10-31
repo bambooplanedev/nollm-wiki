@@ -1304,36 +1304,174 @@ fn cyrillic_query_words_match_another_grammatical_form() {
         .any(|h| h.id == "shliuz"));
 }
 
+/// `(id, score, symbol lines)` of the non-memory hits, for exact comparison.
+fn code_part(hits: &[wiki::query::Hit]) -> Vec<CodeHitKey> {
+    hits.iter()
+        .filter(|h| !h.memory)
+        .map(|h| (h.id.clone(), h.score, symbol_lines(std::slice::from_ref(h))))
+        .collect()
+}
+
+type CodeHitKey = (String, f64, Vec<(String, usize, usize, String)>);
+
 #[test]
-fn memory_boost_lifts_a_note_above_code_with_a_higher_raw_score() {
+fn code_hits_are_identical_with_and_without_notes() {
     let code = "//! zebra\npub fn zebra() { /* zebra zebra */ }\n";
     let body = "---\ntitle: Note\n---\n\nOnce a zebra, then filler words follow.\n";
-    let (_d, plain) = code_fixture(&[("a.rs", code), ("note.md", body)]);
-    let raw = plain.search("zebra", None, 10);
-    assert_eq!(raw[0].id, "a");
-    let raw_note = raw.iter().find(|h| h.id == "note").unwrap().score;
-    let (_d, w) = code_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
-    let hits = w.search("zebra", None, 10);
-    assert_eq!(hits[0].id, "note");
-    assert!((hits[0].score - 4.0 * raw_note).abs() < 1e-9);
+    // As a project doc the note is in the index: it is a code-part hit.
+    let (_d, doc) = code_fixture(&[("a.rs", code), ("note.md", body)]);
+    assert!(doc
+        .search("zebra", None, 10)
+        .iter()
+        .any(|h| h.id == "note" && !h.memory));
+    let (_d, with) = code_fixture(&[("a.rs", code), (".agents/memory/note.md", body)]);
+    let (_d, without) = code_fixture(&[("a.rs", code)]);
+    assert_eq!(
+        code_part(&with.search("zebra", None, 10)),
+        code_part(&without.search("zebra", None, 10))
+    );
+}
+
+/// A code page and three notes whose titles say `giraffe`: two dated with
+/// equal text, one undated.
+fn giraffe_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        (
+            ".agents/memory/a.md",
+            &note("Giraffe Aaa", "updated: 2026-01-01\n", "x"),
+        ),
+        (
+            ".agents/memory/b.md",
+            &note("Giraffe Bbb", "updated: 2026-03-01\n", "x"),
+        ),
+        (".agents/memory/c.md", &note("Giraffe Ccc", "", "x")),
+    ])
 }
 
 #[test]
-fn equal_scores_order_memory_then_date_then_pagerank_without_a_cycle() {
-    // Same words, so equal scores; pagerank differs by link count.
-    let note = |t: &str, u: &str| format!("---\ntitle: {t}\nupdated: {u}\n---\n\nzebra\n");
-    let (_d, w) = code_fixture(&[
-        (".agents/memory/a.md", &note("Aaa", "2026-01-01")),
-        (".agents/memory/b.md", &note("Bbb", "2026-03-01")),
-        ("c.md", "---\ntitle: Ccc\n---\n\nzebra\n"),
-        ("d.md", "[[Ccc]] [[Ccc]] [[Aaa]]\n"),
-    ]);
+fn notes_come_after_code_as_a_tail_of_at_most_two() {
+    let (_d, w) = giraffe_fixture();
+    let hits = w.search("giraffe", None, 10);
+    let rows: Vec<_> = hits.iter().map(|h| (h.id.as_str(), h.memory)).collect();
+    // Equal scores: the newer `updated` first, the undated note cut.
+    assert_eq!(
+        rows,
+        [("a", false), ("giraffe_bbb", true), ("giraffe_aaa", true)]
+    );
+}
+
+#[test]
+fn tail_is_independent_of_kind_and_limit() {
+    let (_d, w) = giraffe_fixture();
+    let code = KindFilter::parse("code").unwrap();
     let ids: Vec<_> = w
-        .search("zebra", None, 10)
+        .search("giraffe", Some(&code), 1)
         .into_iter()
         .map(|h| h.id)
         .collect();
-    assert_eq!(&ids[..3], ["bbb", "aaa", "ccc"]);
+    assert_eq!(ids, ["a", "giraffe_bbb", "giraffe_aaa"]);
+}
+
+/// Loud code (`zebra` five times) and four notes: `rotation` only in the
+/// title, an alias, the summary, or the body.
+fn rotation_fixture() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    common::compiled(&[
+        (
+            "src/lib.rs",
+            "/// zebra zebra zebra zebra zebra\npub fn zebra_loud() {}\n",
+        ),
+        (".agents/memory/t.md", &note("Rotation plan", "", "x")),
+        (
+            ".agents/memory/a.md",
+            &note("Alpha", "aliases: [rotation]\n", "x"),
+        ),
+        (
+            ".agents/memory/s.md",
+            &note("Sigma", "", "Rotation weekly.\n\nfiller"),
+        ),
+        (
+            ".agents/memory/b.md",
+            &note("Bee", "", "Filler first.\n\nThe rotation happens here."),
+        ),
+    ])
+}
+
+#[test]
+fn tail_gate_long_word_in_title_alias_or_summary() {
+    let (_d, _raw, out) = rotation_fixture();
+    let w = Wiki::load(&out).unwrap();
+    let named = ["rotation_plan", "alpha", "sigma"];
+    let tail: Vec<_> = w
+        .search("rotation zebra", None, 10)
+        .into_iter()
+        .filter(|h| h.memory)
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(tail.len(), 2, "{tail:?}");
+    assert!(
+        tail.iter().all(|id| named.contains(&id.as_str())),
+        "{tail:?}"
+    );
+    // A four-character word passes only under `WIKI_MEMORY_GATE=4`, read once
+    // per process, so through the binary.
+    let lines = assert_cmd::Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["search", "rota zebra", "--dir"])
+        .arg(&out)
+        .env("WIKI_MEMORY_GATE", "4")
+        .assert()
+        .success();
+    let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();
+    let tail: Vec<_> = lines
+        .lines()
+        .filter(|l| l.starts_with("memory: "))
+        .collect();
+    assert_eq!(tail.len(), 2, "{lines}");
+    assert!(
+        tail.iter()
+            .all(|l| ["t.md", "a.md", "s.md"].iter().any(|f| l.contains(f))),
+        "{lines}"
+    );
+}
+
+#[test]
+fn tail_ratio_branch_needs_a_positive_note_score() {
+    let (_d, w) = code_fixture(&[
+        ("a.rs", "pub fn other() {}\n"),
+        (
+            ".agents/memory/b.md",
+            &note("Bee", "", "Filler first.\n\nThe rotation happens here."),
+        ),
+    ]);
+    let ids: Vec<_> = w
+        .search("rotation", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(ids, ["bee"]);
+    assert!(w.search("walrus", None, 10).is_empty());
+}
+
+#[test]
+fn tail_ratio_branch_skips_a_note_the_code_outscores() {
+    let (_d, w) = code_fixture(&[
+        (
+            "src/rotation.rs",
+            "//! Rotation rotation rotation.\n/// Rotation of rotation keys.\npub fn rotation() {}\n",
+        ),
+        (
+            ".agents/memory/b.md",
+            &note("Bee", "", "Filler first.\n\nThe rotation happens here."),
+        ),
+    ]);
+    let hits = w.search("rotation", None, 10);
+    assert!(!hits.is_empty());
+    assert!(hits.iter().all(|h| !h.memory), "{:?}", ids_of(&hits));
+}
+
+fn ids_of(hits: &[wiki::query::Hit]) -> Vec<&str> {
+    hits.iter().map(|h| h.id.as_str()).collect()
 }
 
 #[test]
@@ -1342,49 +1480,54 @@ fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
         |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
     let (_d, w) = code_fixture(&[
         (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
-        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
         (".agents/memory/c.md", &note("Ccc", "")),
+        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
     ]);
     let ids: Vec<_> = w
         .search("zebra", None, 10)
         .into_iter()
+        .filter(|h| h.memory)
         .map(|h| h.id)
         .collect();
-    assert_eq!(ids, ["bbb", "aaa", "ccc"]);
+    // The undated note loses the tie to both and falls out of the tail of two.
+    assert_eq!(ids, ["bbb", "aaa"]);
 }
 
 #[test]
-fn memory_passes_code_and_docs_filters_but_not_exact_code_kind() {
+fn memory_tail_ignores_kind_and_the_code_part_respects_it() {
     let (_d, w) = code_fixture(&[
-        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
-        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        (
+            ".agents/memory/note.md",
+            "---\ntitle: Giraffe note\n---\n\ngiraffe\n",
+        ),
     ]);
     let ids = |f: &str| {
         let f = KindFilter::parse(f).unwrap();
-        let mut v: Vec<_> = w
-            .search("zebra", Some(&f), 10)
+        w.search("giraffe", Some(&f), 10)
             .into_iter()
             .map(|h| h.id)
-            .collect();
-        v.sort();
-        v
+            .collect::<Vec<_>>()
     };
-    assert_eq!(ids("code"), ["a", "note"]);
-    assert_eq!(ids("docs"), ["note"]);
-    assert_eq!(ids("markdown"), ["note"]);
-    assert_eq!(ids("code:rust"), ["a"]);
+    assert_eq!(ids("code"), ["a", "giraffe_note"]);
+    assert_eq!(ids("docs"), ["giraffe_note"]);
+    assert_eq!(ids("markdown"), ["giraffe_note"]);
+    assert_eq!(ids("code:rust"), ["a", "giraffe_note"]);
 }
 
 #[test]
 fn memory_flag_shows_in_json_only_on_memory_hits() {
     let (_d, w) = code_fixture(&[
-        ("a.rs", "//! zebra\npub fn zebra() {}\n"),
-        (".agents/memory/note.md", "---\ntitle: Note\n---\n\nzebra\n"),
+        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        (
+            ".agents/memory/note.md",
+            "---\ntitle: Giraffe note\n---\n\ngiraffe\n",
+        ),
     ]);
     let j: serde_json::Value =
-        serde_json::from_str(&wiki::serve::search_json(w.search("zebra", None, 10))).unwrap();
-    assert_eq!(j[0]["memory"], true);
-    assert!(j[1].get("memory").is_none());
+        serde_json::from_str(&wiki::serve::search_json(w.search("giraffe", None, 10))).unwrap();
+    assert!(j[0].get("memory").is_none());
+    assert_eq!(j[1]["memory"], true);
 }
 
 #[test]
@@ -1454,57 +1597,59 @@ fn two_superseders_resolve_to_the_smaller_id() {
 }
 
 #[test]
-fn superseded_note_loses_boost_and_tie_key() {
-    // The old note holds the words in its description, the new one in the body.
-    let old = note("Old", "description: nightly benchmarks nightly\n", "filler");
-    let new = note("New", "supersedes: Old\n", "benchmarks run nightly");
+fn superseded_note_never_enters_the_tail() {
     let (_d, w) = code_fixture(&[
-        (".agents/memory/old.md", &old),
-        (".agents/memory/new.md", &new),
+        (".agents/memory/t.md", &note("Old Title", "", "rotation")),
+        (
+            ".agents/memory/a.md",
+            &note("Aliased", "aliases: [Former Name]\n", "rotation"),
+        ),
+        (".agents/memory/s.md", &note("Slugged Note", "", "rotation")),
+        ("proj.md", &note("Project Page", "", "x")),
+        (
+            ".agents/memory/new.md",
+            &note(
+                "New",
+                "supersedes:\n  - old title\n  - FORMER NAME\n  - slugged_note\n",
+                "rotation",
+            ),
+        ),
     ]);
-    let hits = w.search("nightly benchmarks", None, 10);
-    assert_eq!(hits[0].id, "new");
-    assert_eq!(hits[1].superseded_by.as_deref(), Some("new"));
-    assert_eq!(hits[0].superseded_by, None);
-    // Without the boost the old note's raw score stays unmultiplied.
-    let (_d, plain) = code_fixture(&[("old.md", &old), ("new.md", &new)]);
-    let raw = plain.search("nightly benchmarks", None, 10);
-    let raw_old = raw.iter().find(|h| h.id == "old").unwrap().score;
-    assert!((hits[1].score - raw_old).abs() < 1e-9, "{}", hits[1].score);
+    let ids: Vec<_> = w
+        .search("rotation", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(ids, ["new"]);
 }
 
 #[test]
-fn superseded_note_does_not_win_the_memory_first_tie() {
-    let same = |t: &str, extra: &str| note(t, extra, "zebra");
+fn tag_listing_is_unchanged_by_the_tail() {
     let (_d, w) = code_fixture(&[
-        ("c.md", &same("Ccc", "")),
-        (".agents/memory/a.md", &same("Aaa", "")),
-        (".agents/memory/b.md", &same("Bbb", "supersedes: Aaa\n")),
-    ]);
-    let hits = w.search("zebra", None, 10);
-    // Bbb (live memory) first; then the superseded note ties plain code by id.
-    assert_eq!(hits[0].id, "bbb");
-    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
-    assert_eq!(ids[1..], ["aaa", "ccc"], "{ids:?}");
-}
-
-#[test]
-fn search_output_marks_only_superseded_hits() {
-    let (_d, w) = code_fixture(&[
-        (".agents/memory/old.md", &note("Old", "", "zebra")),
+        ("proj.md", &note("Proj", "tags: [ops]\n", "zebra")),
+        (
+            ".agents/memory/old.md",
+            &note("Old", "tags: [ops]\n", "zebra"),
+        ),
         (
             ".agents/memory/new.md",
             &note("New", "supersedes: Old\n", "zebra"),
         ),
     ]);
-    let hits = w.search("zebra", None, 10);
+    let hits = w.search_tagged("", None, Some("ops"), None);
+    let rows: Vec<_> = hits
+        .iter()
+        .map(|h| (h.id.as_str(), h.superseded_by.as_deref()))
+        .collect();
+    assert_eq!(rows, [("old", Some("new")), ("proj", None)]);
     let lines = wiki::serve::search_lines(&hits);
-    let line = |id: &str| lines.lines().find(|l| l.starts_with(id)).unwrap();
-    assert!(!line("new  ").contains("superseded"), "{lines}");
-    assert!(line("old  ").ends_with(" (superseded by new)"), "{lines}");
+    assert!(
+        lines.lines().any(|l| l.ends_with(" (superseded by new)")),
+        "{lines}"
+    );
     let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(hits)).unwrap();
-    assert!(j[0].get("superseded_by").is_none());
-    assert_eq!(j[1]["superseded_by"], "new");
+    assert_eq!(j[0]["superseded_by"], "new");
+    assert!(j[1].get("superseded_by").is_none());
 }
 
 fn journals() -> (tempfile::TempDir, Wiki) {
@@ -1534,13 +1679,13 @@ fn a_date_in_the_query_ranks_the_note_of_that_day_first() {
         "stand 2026-10-12",
     ] {
         let hits = w.search(q, None, 10);
-        assert_eq!(hits[0].updated.as_deref(), Some("2026-10-12"), "{q}");
+        let first_note = hits.iter().find(|h| h.memory).unwrap();
+        assert_eq!(first_note.updated.as_deref(), Some("2026-10-12"), "{q}");
     }
     // No date: the three journals tie, newest first.
-    assert_eq!(
-        w.search("stand", None, 10)[0].updated.as_deref(),
-        Some("2026-10-19")
-    );
+    let hits = w.search("journal stand", None, 10);
+    let first_note = hits.iter().find(|h| h.memory).unwrap();
+    assert_eq!(first_note.updated.as_deref(), Some("2026-10-19"));
 }
 
 #[test]
@@ -1595,7 +1740,9 @@ fn a_date_lifts_only_the_notes_it_hits_and_a_missed_date_changes_nothing() {
     let hit = scores("stand 12 жовтня");
     assert_eq!(hit[0].0, "alpha");
     assert!(hit[0].1 > hit[1].1);
-    assert!((hit[1].1 - hit[2].1).abs() < 1e-12);
+    // Beta and gamma tie unlifted; the newer is the second of the tail of two.
+    assert_eq!(hit.len(), 2);
+    assert_eq!(hit[1].0, "gamma");
     // Dated 25 October: nothing; same scores as the non-date "250".
     assert_eq!(scores("stand 25 жовтня"), scores("stand 250 жовтня"));
 }
