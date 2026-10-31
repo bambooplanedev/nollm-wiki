@@ -31,9 +31,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    under `output` (`is_under`, so a nested output dir can't feed its own
    generated pages back in as sources) before extraction runs. Produces
    `Vec<SourceFile>`. Memory folders (`.agents/memory` in the input, plus
-   `CompileOptions.memory`) are walked separately by `walk::walk_memory`:
-   ignore rules off, hidden files and `MEMORY.md` skipped, markdown and text
-   only; their pages carry `memory: true` and, for an external folder,
+   each of `CompileOptions.memory`, a list) are walked separately by
+   `walk::walk_memory`: ignore rules off, hidden files, `MEMORY.md` and a
+   top-level `logs/` folder skipped, markdown and text only; their pages carry `memory: true` and, for an external folder,
    absolute `/` paths.
 2. **Extract** (`formats::Registry`, in parallel via `rayon`) — dispatches
    each file to the `Extractor` registered for its extension and produces an
@@ -149,7 +149,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
-| `src/memory.rs` | Where agent memory lives: `REPO_DIR`, the per-user data dir per OS (`data_dir_for`, env-driven), the repo key (`repo_key`: smallest root commit; a shallow clone hashes the git common dir; a repo without commits has no key), `local_dir`, `resolve` and `display_path` for stable external paths. |
+| `src/memory.rs` | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `data_dir_for`, `data_dir`, `repo_key` and `local_dir` (the old per-user folder under the root commit) stay only to render the `wiki-memory` skill earlier releases wrote, so `setup` can remove it; they go one release after 0.6. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering; produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
@@ -175,9 +175,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`; `limit` 5 by default)/`neighbors`/`page` tools, plus `lint` when `--tools` names it (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot; stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation, and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound); while the start-up compile of an existing wiki runs, a call waits at most 1 s for it and then answers from the old wiki. |
-| `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search plus, when the prompt names a memory note in its title, aliases or summary, one gated memory line (a matching word of 6+ characters, or of 4+ while the note's unboosted score is at least 2x the best code page's); pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `HINT_LINE_CHARS`; empty when nothing matches. `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
+| `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search plus, when the prompt passes the shared memory gate (`Wiki::passes_gate`, the one `search`'s tail uses), one `memory: <path> — <summary>` line; pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `HINT_LINE_CHARS`; empty when nothing matches. `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki`, creates the memory folder for the scope, then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config), Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), the skill (pi: `wiki-navigation`, its Memory section rendered with the folder; Claude Code: `wiki-memory`, that Memory section alone, none without a folder, and an untouched old `wiki-navigation` copy removed) and the ignore lines; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
+| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.wiki` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config), Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `wiki-navigation` skill (its Memory section names `.agents/memory`) and the ignore lines; Claude Code gets no skill, and the `wiki-memory` skill or old `wiki-navigation` copy an earlier release wrote is removed when untouched; `--remove` undoes only what it wrote. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files, marked text blocks and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/setup/navigation.md` | The navigation steps `setup` writes into `AGENTS.md` for Codex. |
@@ -571,10 +571,25 @@ matching:
   note whose `updated` is that day (any year when none is given) scores
   `W_TITLE` for it, with its own `df`/IDF; the words of the date still match
   as usual. `wiki hint` lets such a hit through its gate (`dated_on`).
-- Hits sort descending by score (`total_cmp`; a memory note's score is
-  multiplied by `MEMORY_BOOST`, ×4), then memory notes before project pages,
-  then among memory notes newest `updated` first, then descending by PageRank,
-  then ascending by id.
+- Hits sort descending by score (`total_cmp`), then by PageRank descending,
+  then ascending by id. PageRank is computed over project pages only: a
+  note's links still render but never move a code page.
+- `search_tagged` with a query ranks the code and docs as if no notes
+  existed (`MemoryScope::Without`: `search_terms` drops notes before `N`,
+  `df` and `avglen` are counted), then `memory_tail` appends up to
+  `MEMORY_TAIL` (2) live notes from `MemoryScope::Only`, best score first
+  (newer `updated` first on a tie), after the hits and outside `limit`,
+  whatever `kind`; with `tag` set a note must carry it. A note enters the tail
+  through `passes_gate`, which `wiki hint` shares: it is not superseded, and
+  a query word of `gate_len()` (6) or more characters is in its title, aliases
+  or summary (`names_page`), or the query writes its `updated` day
+  (`dated_on`), or its score is at least `MEMORY_GATE_RATIO` (2) times the
+  best code hit's. The note score comes from the notes-only index and the code
+  score from the project index, so the ratio compares two scales. The
+  environment variable `WIKI_MEMORY_GATE` sets the gate length; it exists for
+  measurement and is not a user setting. `lines` prints a tail row as
+  `memory: <path> — <summary>` (the title when the summary is empty), JSON
+  as a full hit; tag-only listings have no tail and mark a superseded note.
 - The searched body text is the rendered page's parsed sections minus
   generated chrome (`Metadata`, `Related`, `Imported by`, `Mentioned in`,
   `Notes`) —

@@ -64,8 +64,9 @@ wiki/src/lib.rs
 - **Налаштування однією командою.** `wiki setup` встановлює сервер і те, що каже агентові ним
   користуватися, для Claude Code, pi, Cursor і Codex, і хук, що додає до кожного запиту відповідні
   рядки коду.
-- **Памʼять агента.** Нотатки, які агент пише в `.agents/memory/` (або в теку користувача), стають
-  сторінками для пошуку, що ранжуються вище за код, з датами, псевдонімами та `supersedes:`.
+- **Памʼять агента.** Нотатки з `.agents/memory/` і з тек, у які агенти вже пишуть самі (поки що
+  Claude Code), стають сторінками для пошуку, що йдуть після знайденого коду, з датами, псевдонімами
+  та `supersedes:`.
 - **Мови.** Rust, Python, C++, Go, JavaScript, TypeScript, скрипти `.vue` і `.svelte`, Markdown і
   простий текст.
 - **Детермінізм.** Побайтово однаковий результат між запусками, машинами й кількістю потоків;
@@ -82,7 +83,6 @@ wiki/src/lib.rs
 - Або Rust 1.88 чи новіший, щоб зібрати з коду. Windows не перевірявся.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `wiki setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
-- Для локальної памʼяті агента: `git` і репозиторій хоча б з одним комітом.
 
 ## Встановлення
 
@@ -156,7 +156,7 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 
 | агент | що записує `wiki setup` | що каже йому користуватися вікі |
 |---|---|---|
-| Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local), скіл `wiki-memory` | інструкції сервера; інструменти завантажуються одразу |
+| Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local) | інструкції сервера; інструменти завантажуються одразу |
 | pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл (інструкцій сервера pi не показує) |
 | Cursor | `.cursor/mcp.json` | описи інструментів (у наших прогонах їх вистачило) |
 | Codex | `codex mcp add` (глобально), [правила навігації](#правила-навігації) в `AGENTS.md` | `AGENTS.md` |
@@ -170,21 +170,23 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 
 Команда компілює `.` у `.wiki`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `wiki-navigation` (як шукати код і правила
-памʼяті). Claude Code отримує лише скіл `wiki-memory` з правилами памʼяті: інструкції сервера, де ті
-самі кроки навігації, Claude Code показує й так, а сервер позначає свої інструменти для
-завантаження одразу, а не через `ToolSearch`. Codex не читає ні того, ні того, тож отримує правила
+памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він показує й так,
+а сервер позначає свої інструменти для завантаження одразу, а не через `ToolSearch`; власну памʼять
+Claude Code вікі читає сама. Codex не читає ні того, ні того, тож отримує правила
 навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. Агенти визначаються автоматично
 (`.claude/`, `CLAUDE.md` чи `claude` у `PATH`; `.pi/` чи `pi` у `PATH`; тека `.cursor/`), якщо
 `--agent` їх не називає. Codex налаштовується лише тоді, коли його названо: його MCP-конфіг
 глобальний.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `AGENTS.md`, `.claude/skills/wiki-memory/SKILL.md`,
+  `.cursor/mcp.json`, `AGENTS.md`,
   `.agents/skills/wiki-navigation/SKILL.md` і `.wiki/` у `.gitignore`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
   `claude mcp add-json wiki … --scope local`, інші файли записуються, а ті, що setup створив,
-  вносяться в `.git/info/exclude`. Файл, який git уже відстежує, пропускається; для нього беріть
+  вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`. Файл, який git уже відстежує, пропускається; для нього беріть
   `--scope repo`.
+- Обидва варіанти створюють `.agents/memory/` і прибирають скіл `wiki-memory`, який записав
+  попередній випуск.
 - Обидва варіанти додають сервер для Codex командою `codex mcp add wiki -- wiki serve --source .`,
   яка пише в `~/.codex/config.toml`: MCP-конфігу на рівні проєкту Codex не має, а сервер запускає в
   теці, де запущений сам, тож один запис працює для всіх проєктів.
@@ -222,8 +224,8 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
     claude mcp add-json wiki '{"command":"wiki","args":["serve","--source","."]}' --scope local
 
 або запис `mcpServers` з розділу [MCP-сервер](#mcp-сервер) у `.mcp.json` проєкту. Claude Code
-показує інструкції сервера з кроками навігації, тож для пошуку коду скіл не потрібен; правила
-памʼяті — у розділі [Памʼять агента](#памʼять-агента).
+показує інструкції сервера з кроками навігації, тож для пошуку коду скіл не потрібен; вікі читає
+власну памʼять Claude Code, див. [Памʼять агента](#памʼять-агента).
 
 #### pi
 
@@ -343,8 +345,9 @@ args = ["serve", "--source", "."]
 - `--dir <out>` (`<project>/.wiki` з `--source`, інакше `out`) — скомпільована вікі, яку віддавати.
 - `--tools <list>` (`search,page,neighbors,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
-- `--memory <none|DIR>` — з `--source`: `none` не бере локальну теку памʼяті цього репозиторію, а
-  `DIR` бере іншу замість неї; `DIR`, якої немає на момент старту, не відстежується.
+- `--memory <none|DIR>` (можна повторювати) — з `--source`: `none` вимикає пошук тек памʼяті
+  агентів, а `DIR` бере їх замість нього (`none` разом із `DIR` — помилка використання); `DIR`, якої
+  немає на момент старту, не відстежується. `.agents/memory` компілюється завжди.
 
 | Інструмент | Параметри | Повертає |
 |---|---|---|
@@ -375,35 +378,45 @@ CLI не обмежує, а `search` повертає 5 результатів �
 
 ### Памʼять агента
 
-Агент може тримати свої нотатки як Markdown-файли в теці, яку компілює вікі, і шукати в них через
-`search`, перш ніж писати нове. `wiki setup` створює теку й розповідає про неї агентові у скілі:
+Агенти тримають нотатки як Markdown-файли. Вікі компілює теки, у які вони пишуть, а `search` і
+`wiki hint` показують відповідні нотатки після коду. Джерела:
 
-- **Для репозиторію** (`--scope repo`): `.agents/memory/` у проєкті. Тека комітиться, тож нотатки
-  бачать усі, хто має репозиторій. `wiki compile` завжди її включає.
-- **Локально** (`--scope local`): тека поза робочою копією, у теці даних користувача:
-  `%LOCALAPPDATA%\wiki\memory\<key>` на Windows, `~/Library/Application Support/wiki/memory/<key>`
-  на macOS, `$XDG_DATA_HOME` (інакше `~/.local/share`)`/wiki/memory/<key>` деінде. `<key>` — це
-  кореневий коміт репозиторію, тож усі worktree і клони одного репозиторію ділять одну теку. Резервних
-  копій цієї теки ніщо не робить, і вона переживає `git clean`. Тека, що не є git-репозиторієм, локальної памʼяті не
-  має.
+- **`.agents/memory/`** у проєкті. `wiki setup` створює її в обох режимах; з `--scope local` ще й
+  вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `wiki compile`
+  завжди її включає.
+- **Власні теки агентів.** Їх шукають `serve --source` і `wiki setup`. Поки що це
+  `<config dir>/projects/<slug>/memory/` Claude Code, де config dir — це `CLAUDE_CONFIG_DIR` або
+  `~/.claude`, а `<slug>` — шлях основної робочої копії репозиторію, у якому кожен символ, що не є
+  літерою чи цифрою, замінено на `-` (довше за 200 символів обрізається з хешем, як у Claude Code).
+  Тож worktree чи підтека ділять теку своєї основної копії. Тека `logs/` усередині пропускається,
+  як і `MEMORY.md`.
+- **`--memory DIR`** (можна повторювати) для будь-якої іншої теки. У `serve` `--memory none`
+  вимикає пошук, а `--memory DIR` бере теки замість нього.
 
-`serve --source` і `wiki setup` включають локальну теку. Звичайний `wiki compile . out` — ні, щоб
-опублікований сайт ніколи не ніс приватних нотаток; для нього передайте `--memory local` або
-`--memory DIR` для будь-якої теки (якщо теку не знайдено, буде попередження, і компіляція піде
-далі). Тож звичайний `wiki compile . .wiki` прибирає локальну памʼять з `.wiki` до наступної
-перекомпіляції сервером, а `wiki hint` читає саме `.wiki`.
+Звичайний `wiki compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
+агентів, тож опублікований сайт ніколи не несе приватних нотаток. Тому звичайний
+`wiki compile . .wiki` прибирає нотатки агентів з `.wiki` до наступної перекомпіляції сервером, а
+`wiki hint` читає саме `.wiki`.
 
-Сторінки памʼяті ранжуються вище за код (їхня оцінка множиться на 4), проходять фільтри `code` і
-`docs` у `search`, і їх знаходять ті самі інструменти, що й будь-яку сторінку. Коли запит називає
-нотатку, `wiki hint` додає до рядків коду один рядок `memory:` (див. [hint](#hint)).
+Міграція: `compile --memory local` більше не існує, а нотатки з теки користувача попередніх
+випусків більше не компілюються. Перенесіть їх у `.agents/memory` або передайте
+`--memory <та тека>`.
+
+`search` показує код і документи так, ніби нотаток немає, а потім до двох нотаток, по одній на
+рядок, як `memory: <path> — <summary>`. Нотатка показується, коли слово запиту з шести чи більше
+символів є в її назві, псевдонімах чи описі, або запит називає день її `updated`, або вона набирає
+щонайменше вдвічі більше за найкращий збіг у коді. Нотатки проходять фільтри `code` і `docs`, а
+`wiki hint` додає один рядок `memory:` за тим самим правилом (див. [hint](#hint)). Нотатки ніколи не
+зсувають ранг сторінки коду: PageRank і медіана для `llms.txt` рахуються лише за сторінками
+проєкту.
 
 Дата в запиті знаходить нотатки памʼяті за той день: `12 жовтня`, `October 12`, `12.10`,
 `2026-10-12` (українські, російські та англійські назви місяців; `DD.MM` потребує двох цифр дня і
 місяця; без року підходить будь-який рік). Сторінки проєкту за датою не знаходяться ніколи.
 
 Нотатка може замінити старішу через `supersedes:` у front matter (назви, псевдоніми чи
-ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка втрачає підсилення, `search` дописує
-` (superseded by <id>)` після її рядка (`"superseded_by"` у JSON), а `wiki hint` її ніколи не показує.
+ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка ніколи не зʼявляється після рядків коду, а `wiki hint` її не показує; список за тегом
+дописує ` (superseded by <id>)` після її рядка (`"superseded_by"` у JSON).
 Зіставляються лише нотатки памʼяті, імʼя, що ні з чим не збіглося, ігнорується, а коли таких нотаток
 кілька, показується найменший ідентифікатор.
 
@@ -413,23 +426,19 @@ YAML-список; теги переводяться в нижній регіс�
 глибше, потім з назви файлу, що починається з `YYYY-MM-DD`. Кириличні слова запиту зводяться до
 основи, тож інша граматична форма слова теж дає збіг.
 
-Скіл містить ці правила; якщо в агента скілів немає, скопіюйте їх у його файл інструкцій. Правила
-англійською, бо їх читає агент:
+Ці правила містить скіл pi (`<memory-dir>` — це `.agents/memory`); якщо в агента скілів немає,
+скопіюйте їх у його файл інструкцій. Правила англійською, бо їх читає агент:
 
 ```
-Memory notes live in <folder> (.agents/memory, or the local folder setup named), one markdown file per fact or topic.
-- Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
-- Name the file for what it says. The title is the front-matter `title:`,
-  else the first `# heading`, else the file name; any script works.
-- A note not written in English needs English `aliases:`: agents search in English.
-- Front matter, all optional: `title:`, `description:` (one line, the search
-  summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
-  ignored).
+Notes about this project live in `<memory-dir>`; `search` lists up to two of them after the code
+hits, each on a `memory:` line, and the prompt hook adds one.
+
+- Write one note per fact or topic, named for what it says.
+- A note not written in English needs English `aliases:` in its front matter
+  (search words are English).
 - A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
-- Mention a related note by its exact title or alias, or as `[[title]]`.
-- Search before writing. Update the note that exists instead of adding a copy.
+- Search first; update the note that exists instead of adding a copy.
 - When a decision changes, update its note. If you write a new note instead, add `supersedes: <old note's title>` to it.
-- `MEMORY.md` is optional and is not searched.
 ```
 
 ### CLI
@@ -463,9 +472,8 @@ Memory notes live in <folder> (.agents/memory, or the local folder setup named),
 - `--emit-json` — ще й записати `graph.json` (граф вузлів і ребер).
 - `--project <NAME>` (за замовчуванням імʼя вхідної теки) — назва проєкту в `index.json`,
   `llms.txt` і `AGENTS.md`. Без нього `compile .` і `compile "$PWD"` назвуть проєкт по-різному.
-- `--memory <local|DIR>` — ще й компілювати теку памʼяті агента як позначені сторінки памʼяті:
-  `local` — тека цього репозиторію в теці даних користувача, або будь-яка тека. `<INPUT>/.agents/memory`
-  компілюється завжди.
+- `--memory <DIR>` (можна повторювати) — ще й компілювати теку памʼяті агента як позначені
+  сторінки памʼяті. `<INPUT>/.agents/memory` компілюється завжди; `--memory local` — помилка.
 - `--watch` — скомпілювати раз, а потім стежити за `<INPUT>` і перекомпільовувати після змін. Події
   групуються з затримкою 150 мс, події під `<OUTPUT>` ігноруються, а кожен прогін пише
   `recompiled: N pages (M written)` у stderr.
@@ -480,7 +488,8 @@ Memory notes live in <folder> (.agents/memory, or the local folder setup named),
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
-  `docs`.
+  `docs`; до двох, що проходять поріг, йдуть після збігів рядками `memory:` (див.
+  [Памʼять агента](#памʼять-агента)).
 - `--tag <tag>` — лише сторінки з цим тегом (`#` і регістр не враховуються; `a` збігається і з `a/b`). Без
   запиту дає список усіх таких сторінок. Потрібен запит або `--tag`.
 - `--limit <N>` (`10` із запитом) — максимальна кількість результатів.
@@ -580,8 +589,8 @@ Index:
 
 Коли запит називає нотатку памʼяті її назвою, псевдонімом чи описом, після рядків коду йде один рядок
 `memory: <path> — <summary>`. Для нього потрібне слово запиту з шести чи більше літер у цьому
-збігу, або з чотирьох-пʼяти літер, якщо нотатка набрала щонайменше вдвічі більше за найкращу
-сторінку коду (до підсилення памʼяті), або дата в запиті, що збігається з днем `updated` нотатки.
+збігу, або дата в запиті, що збігається з днем `updated` нотатки, або оцінка нотатки щонайменше
+вдвічі вища за найкращу сторінку коду.
 
 #### generate
 
