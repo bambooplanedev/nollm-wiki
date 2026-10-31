@@ -1304,6 +1304,77 @@ fn cyrillic_query_words_match_another_grammatical_form() {
         .any(|h| h.id == "shliuz"));
 }
 
+#[test]
+fn an_english_word_form_finds_the_page_and_the_exact_form_still_wins() {
+    let (_dir, w) = common::compiled_wiki(&[
+        (
+            "provision.md",
+            "# Brew Provision
+
+Arms a brew run.
+",
+        ),
+        (
+            "sorted.md",
+            "# Sorted Walk
+
+The tree, in order.
+",
+        ),
+        (
+            "sorting.md",
+            "# Sorting Graph
+
+Ranks by sorting.
+",
+        ),
+        (
+            "other.md",
+            "# Other
+
+Nothing here.
+",
+        ),
+    ]);
+    // `provisioning` shares its stem with `provision`; no prefix connects them.
+    assert!(w
+        .search("provisioning", None, 10)
+        .iter()
+        .any(|h| h.id == "brew_provision"));
+    // `sorted` says exactly what one page says; the stem-only page follows.
+    let ids: Vec<_> = w
+        .search("sorted", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert_eq!(ids, ["sorted_walk", "sorting_graph"]);
+}
+
+#[test]
+fn a_ukrainian_word_form_finds_the_page() {
+    let (_dir, w) = common::compiled_wiki(&[
+        (
+            "a.md",
+            "# Сторінка
+
+Нотатка.
+",
+        ),
+        (
+            "b.md",
+            "# Ринок
+
+Огляд.
+",
+        ),
+    ]);
+    // Genitive plural: the stem joins it, no prefix does.
+    assert!(w
+        .search("сторінок", None, 10)
+        .iter()
+        .any(|h| h.id == "storinka"));
+}
+
 /// `(id, score, symbol lines)` of the non-memory hits, for exact comparison.
 fn code_part(hits: &[wiki::query::Hit]) -> Vec<CodeHitKey> {
     hits.iter()

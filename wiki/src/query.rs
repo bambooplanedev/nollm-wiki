@@ -350,16 +350,39 @@ pub struct SymbolLine {
 
 /// The search fields a page earns from its items (`Wiki::symbol_fields`),
 /// built once in `Wiki::load`.
+/// A searchable field: its words (`Wiki::field_words`) and their stems,
+/// computed once per field so the stem tier compares strings, not stemmer
+/// output, per query token.
+#[derive(Default, Debug)]
+struct Field {
+    words: Vec<String>,
+    stems: Vec<String>,
+}
+
+impl Field {
+    /// The field of a lowercased text.
+    fn new(lower: &str) -> Field {
+        Field::of(Wiki::field_words(lower))
+    }
+
+    fn of(words: Vec<String>) -> Field {
+        let stems = words.iter().map(|w| Wiki::stem(w)).collect();
+        Field { words, stems }
+    }
+}
+
 #[derive(Default)]
 struct SymbolFields {
     /// Whole item names, lowercased, each also as `owner::name`.
     whole: BTreeSet<String>,
     /// Words of the names, none of them in `whole` or the page's title.
     words: BTreeSet<String>,
+    /// The stems of `words`, for the stem tier.
+    word_stems: BTreeSet<String>,
     /// Words of the items' docs.
-    doc_words: Vec<String>,
-    /// Words of the items' whole docs, scored below `doc_words`.
-    doc_rest_words: Vec<String>,
+    doc: Field,
+    /// Words of the items' whole docs, scored below `doc`.
+    doc_rest: Field,
     /// The word sets of multi-word item names (`name_words`, unfiltered).
     name_sets: BTreeSet<BTreeSet<String>>,
 }
@@ -611,42 +634,70 @@ impl Wiki {
         tokens
     }
 
-    /// Cut a Cyrillic grammatical ending (longest first) when at least four
-    /// letters remain, so another form of a word still matches. Other tokens
-    /// are returned unchanged.
+    /// Snowball stem of a token, part by part: each run of alphanumeric
+    /// characters is stemmed on its own (Ukrainian for Cyrillic, English
+    /// otherwise) and the separators between them stay, so `mcp-сервери`
+    /// gives `mcp-сервер`. Lowercase input, as the stemmers expect.
+    ///
+    /// Memoised process-wide: a search stems every field word of every
+    /// page, and the same words recur across pages. The memo holds one
+    /// entry per distinct word seen, the corpus vocabulary at most. Without
+    /// it a hint on a 3,142-page wiki took 2.0 s against 0.96 s before
+    /// stemming.
     fn stem(token: &str) -> String {
-        const ENDINGS: [&str; 38] = [
-            "ами", "ями", "ові", "еві", "ого", "ому", "ими", "іми", "ій", "ий", "ою", "ею", "ів",
-            "їв", "ах", "ях", "ам", "ям", "ом", "ем", "ої", "а", "я", "і", "ї", "и", "у", "ю", "о",
-            "е", "є", "ь", "ити", "ати", "ють", "ують", "ться", "ся",
-        ];
-        if !token.chars().any(|c| ('\u{400}'..='\u{4FF}').contains(&c)) {
-            return token.to_string();
-        }
-        let len = token.chars().count();
-        ENDINGS
-            .iter()
-            .filter(|e| token.ends_with(**e) && len - e.chars().count() >= 4)
-            .max_by_key(|e| e.chars().count())
-            .map_or_else(
-                || token.to_string(),
-                |e| token[..token.len() - e.len()].to_string(),
-            )
+        Self::with_stem(token, str::to_string)
     }
 
-    /// `tokenize`, then `stem` each word and dedupe again; with the query's
-    /// word set as typed, each token split like a name: (stemmed, words).
-    fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
-        let raw = Self::tokenize(query);
-        let mut stemmed: Vec<String> = Vec::new();
-        for t in &raw {
-            let s = Self::stem(t);
-            if !stemmed.contains(&s) {
-                stemmed.push(s);
+    /// `f` applied to the memoised stem of `token`, without copying it out.
+    fn with_stem<T>(token: &str, f: impl FnOnce(&str) -> T) -> T {
+        static MEMO: std::sync::OnceLock<
+            std::sync::RwLock<std::collections::HashMap<String, String>>,
+        > = std::sync::OnceLock::new();
+        let memo = MEMO.get_or_init(Default::default);
+        if let Some(hit) = memo.read().unwrap().get(token) {
+            return f(hit);
+        }
+        let stemmed = Self::stem_uncached(token);
+        let out = f(&stemmed);
+        memo.write().unwrap().insert(token.to_string(), stemmed);
+        out
+    }
+
+    fn stem_uncached(token: &str) -> String {
+        let mut out = String::with_capacity(token.len());
+        let mut part = String::new();
+        let flush = |part: &mut String, out: &mut String| {
+            if part.is_empty() {
+                return;
+            }
+            let cyrillic = part.chars().any(|c| ('\u{400}'..='\u{4FF}').contains(&c));
+            let algorithm = if cyrillic {
+                frostem::Algorithm::Ukrainian
+            } else {
+                frostem::Algorithm::English
+            };
+            out.push_str(&frostem::Stemmer::new(algorithm).stem(part));
+            part.clear();
+        };
+        for c in token.chars() {
+            if c.is_alphanumeric() {
+                part.push(c);
+            } else {
+                flush(&mut part, &mut out);
+                out.push(c);
             }
         }
-        let words = raw.iter().flat_map(|t| Self::field_words(t)).collect();
-        (stemmed, words)
+        flush(&mut part, &mut out);
+        out
+    }
+
+    /// `tokenize`, with the query's word set as typed, each token split
+    /// like a name: (tokens, words). Word forms meet in `field_tier`, not
+    /// here: a token stays as typed so an exact hit keeps its full weight.
+    fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
+        let tokens = Self::tokenize(query);
+        let words = tokens.iter().flat_map(|t| Self::field_words(t)).collect();
+        (tokens, words)
     }
 
     /// The words of an identifier, lowercased: split on `_`/`-`, at a
@@ -719,7 +770,47 @@ impl Wiki {
             .all(|p| words.iter().any(|w| w.starts_with(p)))
     }
 
-    /// Whether any query token of `q` (stemmed, as `search` reads it) hits
+    /// The share of a field's weight a stem-only hit earns: below an exact
+    /// or prefix hit, so `sorted` still prefers the page that says `sorted`
+    /// over one that says `sorting`. 0.3 measured 2026-10-31 against 0.5:
+    /// same symbol and retrieval evals, hint precision 12/18 vs 11/18.
+    pub(crate) const STEM_TIER: f64 = 0.3;
+
+    /// How well query token `t` hits a field: 1.0 by `field_hit` (exact or
+    /// prefix), `STEM_TIER` when every alphanumeric part of `t` shares its
+    /// Snowball stem with a word of the field (`provisioning` ↔
+    /// `provision`, `сторінок` ↔ `сторінка`), else 0.0.
+    fn field_tier(field: &Field, t: &str) -> f64 {
+        if Self::field_hit(&field.words, t) {
+            return 1.0;
+        }
+        let shares_stem = t
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|p| !p.is_empty())
+            .all(|p| Self::with_stem(p, |sp| field.stems.iter().any(|s| s == sp)));
+        if shares_stem {
+            Self::STEM_TIER
+        } else {
+            0.0
+        }
+    }
+
+    /// The best `field_tier` of `t` over several fields (aliases, headings).
+    fn best_tier(fields: &[Field], t: &str) -> f64 {
+        fields
+            .iter()
+            .map(|w| Self::field_tier(w, t))
+            .fold(0.0, f64::max)
+    }
+
+    /// Whether a whole word of `words` has the stem of `t`: the stem tier of
+    /// the whole-term name-word match (`levels` ↔ `level`).
+    fn shares_stem<'a>(words: impl IntoIterator<Item = &'a String>, t: &str) -> bool {
+        let st = Self::stem(t);
+        words.into_iter().any(|w| Self::with_stem(w, |sw| sw == st))
+    }
+
+    /// Whether any query token of `q` (as typed, as `search` reads it) hits
     /// the title, an alias or the summary of page `id` by `field_hit`'s
     /// prefix rule; tokens under `min_len` characters are skipped (`в`, `що`,
     /// `the` hit nearly every note). The body is not looked at: a hint gates
@@ -732,13 +823,13 @@ impl Wiki {
         let fields = std::iter::once(e.title.as_str())
             .chain(e.aliases.iter().map(String::as_str))
             .chain(e.summary.as_deref())
-            .map(|f| Self::field_words(&f.to_lowercase()))
+            .map(|f| Field::new(&f.to_lowercase()))
             .collect::<Vec<_>>();
         Self::query_tokens(q)
             .0
             .iter()
             .filter(|t| t.chars().count() >= min_len)
-            .any(|t| fields.iter().any(|w| Self::field_hit(w, t)))
+            .any(|t| fields.iter().any(|w| Self::field_tier(w, t) > 0.0))
     }
 
     /// Whether `q` writes a date and page `id` is a memory note dated that day.
@@ -780,11 +871,15 @@ impl Wiki {
                     .into_iter()
                     .filter(|w| !title_words.contains(&w.as_str())),
             );
-            f.doc_words.extend(Self::lower_words(item.doc.as_deref()));
-            f.doc_rest_words
+            f.doc.words.extend(Self::lower_words(item.doc.as_deref()));
+            f.doc_rest
+                .words
                 .extend(Self::lower_words(item.doc_text.as_deref()));
         }
         f.words.retain(|w| !f.whole.contains(w));
+        f.word_stems = f.words.iter().map(|w| Self::stem(w)).collect();
+        f.doc = Field::of(std::mem::take(&mut f.doc.words));
+        f.doc_rest = Field::of(std::mem::take(&mut f.doc_rest.words));
         f
     }
 
@@ -817,8 +912,8 @@ impl Wiki {
         // The query's words are this item's name words, in any order.
         let spelled =
             words.len() > 1 && words.iter().cloned().collect::<BTreeSet<_>>() == *query_words;
-        let doc = Self::lower_words(item.doc.as_deref());
-        let doc_rest = Self::lower_words(item.doc_text.as_deref());
+        let doc = Field::of(Self::lower_words(item.doc.as_deref()));
+        let doc_rest = Field::of(Self::lower_words(item.doc_text.as_deref()));
         let score: f64 = tokens
             .iter()
             .zip(idf)
@@ -827,15 +922,16 @@ impl Wiki {
                     Self::IW_WHOLE
                 } else if words.contains(t) {
                     Self::IW_NAME_WORD
+                } else if Self::shares_stem(&words, t) {
+                    Self::IW_NAME_WORD * Self::STEM_TIER
                 } else {
                     0.0
                 };
-                let doc = if !doc.is_empty() && Self::field_hit(&doc, t) {
-                    Self::IW_DOC
-                } else if !doc_rest.is_empty() && Self::field_hit(&doc_rest, t) {
-                    Self::IW_DOC_REST
+                let doc_tier = Self::field_tier(&doc, t);
+                let doc = if doc_tier > 0.0 {
+                    Self::IW_DOC * doc_tier
                 } else {
-                    0.0
+                    Self::IW_DOC_REST * Self::field_tier(&doc_rest, t)
                 };
                 idf_t * (name + doc)
             })
@@ -948,18 +1044,16 @@ impl Wiki {
         df: &mut [usize],
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
-        let title_words = Self::field_words(&title);
+        let title_field = Field::new(&title);
         // The query is this page's whole title, in any order.
-        let whole_title = *query_words == title_words.iter().cloned().collect();
-        let alias_words: Vec<Vec<String>> = e
+        let whole_title = *query_words == title_field.words.iter().cloned().collect();
+        let alias_fields: Vec<Field> = e
             .aliases
             .iter()
-            .map(|a| Self::field_words(&a.to_lowercase()))
+            .map(|a| Field::new(&a.to_lowercase()))
             .collect();
-        let summary_words: Option<Vec<String>> = e
-            .summary
-            .as_deref()
-            .map(|s| Self::field_words(&s.to_lowercase()));
+        let summary_field: Option<Field> =
+            e.summary.as_deref().map(|s| Field::new(&s.to_lowercase()));
         let symbols = self.symbol_fields.get(&e.id);
         // The query's words are one item's name words, in any order.
         let whole_symbol = symbols.is_some_and(|f| f.name_sets.contains(query_words));
@@ -976,8 +1070,7 @@ impl Wiki {
             })
             .map(|k| k.to_lowercase())
             .collect();
-        let heading_words: Vec<Vec<String>> =
-            headings.iter().map(|h| Self::field_words(h)).collect();
+        let heading_fields: Vec<Field> = headings.iter().map(|h| Field::new(h)).collect();
         let content = Self::content_text(&sections);
         let content_lower = content.to_lowercase();
         let len = content.split_whitespace().count();
@@ -988,10 +1081,9 @@ impl Wiki {
         for (i, t) in tokens.iter().enumerate() {
             let t = t.as_str();
             let mut weight = 0.0;
-            let title_hit = Self::field_hit(&title_words, t);
-            if title_hit {
-                weight += Self::W_NAME;
-            }
+            let title_tier = Self::field_tier(&title_field, t);
+            let title_hit = title_tier > 0.0;
+            weight += Self::W_NAME * title_tier;
             if whole_title {
                 weight += Self::W_TITLE;
             }
@@ -1013,9 +1105,7 @@ impl Wiki {
             if in_one_name && !title_hit {
                 weight += Self::W_IN_ONE_NAME;
             }
-            if alias_words.iter().any(|w| Self::field_hit(w, t)) {
-                weight += Self::W_ALIAS;
-            }
+            weight += Self::W_ALIAS * Self::best_tier(&alias_fields, t);
             // Whole-term equality, never `contains`: `to` must not hit
             // `token_estimate`, `wiki` must not hit `WikiError`.
             if let Some(f) = symbols {
@@ -1023,22 +1113,21 @@ impl Wiki {
                     weight += Self::W_SYMBOL;
                 } else if f.words.contains(t) {
                     weight += Self::W_SYMBOL_WORD;
+                } else if Self::with_stem(t, |st| f.word_stems.contains(st)) {
+                    weight += Self::W_SYMBOL_WORD * Self::STEM_TIER;
                 }
-                if Self::field_hit(&f.doc_words, t) {
-                    weight += Self::W_SYMBOL_DOC;
-                } else if Self::field_hit(&f.doc_rest_words, t) {
-                    weight += Self::W_SYMBOL_DOC_REST;
+                let doc = Self::field_tier(&f.doc, t);
+                if doc > 0.0 {
+                    weight += Self::W_SYMBOL_DOC * doc;
+                } else {
+                    weight += Self::W_SYMBOL_DOC_REST * Self::field_tier(&f.doc_rest, t);
                 }
             }
-            if summary_words
-                .as_deref()
-                .is_some_and(|w| Self::field_hit(w, t))
-            {
-                weight += Self::W_SUMMARY;
-            }
-            if heading_words.iter().any(|w| Self::field_hit(w, t)) {
-                weight += Self::W_HEADING;
-            }
+            weight += Self::W_SUMMARY
+                * summary_field
+                    .as_ref()
+                    .map_or(0.0, |w| Self::field_tier(w, t));
+            weight += Self::W_HEADING * Self::best_tier(&heading_fields, t);
             // match_indices is non-overlapping — the spec'd counting rule.
             // `tf` may exceed `len` for short tokens ("on" in "one",
             // "long"); `tf'` saturates, so that is harmless.
@@ -1646,7 +1735,9 @@ impl Wiki {
 // line, even when the word's side also matches by doc; a title match must
 // outrank a whole-name match; words inside a longer name rank below both.
 const _: () = assert!(
-    Wiki::W_IN_ONE_NAME < Wiki::W_SYMBOL
+    Wiki::STEM_TIER > 0.0
+        && Wiki::STEM_TIER < 1.0
+        && Wiki::W_IN_ONE_NAME < Wiki::W_SYMBOL
         && Wiki::W_SYMBOL < Wiki::W_NAME
         && Wiki::W_SYMBOL > Wiki::W_SYMBOL_WORD + Wiki::W_SYMBOL_DOC
         && Wiki::W_SYMBOL_WORD > Wiki::W_SYMBOL_DOC
@@ -1665,29 +1756,52 @@ mod tests {
     }
 
     #[test]
-    fn stem_cuts_a_cyrillic_ending_but_keeps_four_letters() {
+    fn stem_is_snowball_chosen_by_script_per_part() {
         for (word, stem) in [
+            // English: Snowball's English algorithm.
+            ("provisioning", "provis"),
+            ("provision", "provis"),
+            ("render", "render"),
+            // Ukrainian: Snowball's Ukrainian algorithm; the fixed ending
+            // list never joined `сторінок` with `сторінка`.
+            ("сторінок", "сторінк"),
+            ("сторінками", "сторінк"),
             ("конкурентів", "конкурент"),
-            ("конкуренти", "конкурент"),
-            ("куратором", "куратор"),
-            ("куратор", "куратор"),
-            ("агенти", "агент"),
-            ("позначки", "позначк"),
-            ("мова", "мова"),
-            ("routes", "routes"),
+            // Each alphanumeric part on its own; separators stay.
             ("mcp-сервери", "mcp-сервер"),
+            ("token_estimates", "token_estim"),
         ] {
             assert_eq!(Wiki::stem(word), stem, "{word}");
         }
     }
 
     #[test]
-    fn query_tokens_stem_dedupe_and_keep_the_typed_words() {
+    fn field_tier_puts_exact_and_prefix_above_a_shared_stem() {
+        let w = |s: &str| super::Field::new(s);
+        // Exact and prefix hits score the full field weight.
+        assert_eq!(Wiki::field_tier(&w("provisioning"), "provisioning"), 1.0);
+        assert_eq!(Wiki::field_tier(&w("provisioning"), "provision"), 1.0);
+        // A word form that only shares the stem scores the stem tier.
+        assert_eq!(
+            Wiki::field_tier(&w("provision"), "provisioning"),
+            Wiki::STEM_TIER
+        );
+        assert_eq!(
+            Wiki::field_tier(&w("сторінка"), "сторінок"),
+            Wiki::STEM_TIER
+        );
+        // Every part must connect; a shared prefix alone is still not a hit.
+        assert_eq!(Wiki::field_tier(&w("rewrite"), "write"), 0.0);
+        assert_eq!(Wiki::field_tier(&w("soak"), "brew_provisioning"), 0.0);
+    }
+
+    #[test]
+    fn query_tokens_keep_the_words_as_typed() {
         let owned = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
         let set = |v: &[&str]| v.iter().map(ToString::to_string).collect::<BTreeSet<_>>();
         assert_eq!(
             Wiki::query_tokens("агента агентом"),
-            (owned(&["агент"]), set(&["агента", "агентом"]))
+            (owned(&["агента", "агентом"]), set(&["агента", "агентом"]))
         );
         assert_eq!(
             Wiki::query_tokens("MCP token_estimate"),
@@ -1820,7 +1934,7 @@ mod tests {
             ])
         );
         assert_eq!(f.words, set(&["needs", "of", "store", "suffix", "summary"]));
-        assert_eq!(f.doc_words, ["writes", "atomically"]);
+        assert_eq!(f.doc.words, ["writes", "atomically"]);
     }
 
     fn d(year: Option<u32>, month: u32, day: u32) -> QueryDate {

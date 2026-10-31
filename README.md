@@ -418,9 +418,10 @@ name) and `description:` is the one-line summary that `memory:` rows print and t
 `aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
 block list; tags are lowercased with any `#` stripped. The page's date is read from `updated`,
 `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name
-starting `YYYY-MM-DD`. Cyrillic query words are stemmed, so another grammatical form of a word still
-matches. A text page over about 16,000 characters (4000 tokens) is reported by `wiki lint` as `large`
-(see [lint](#lint)).
+starting `YYYY-MM-DD`. Another grammatical form of a word still matches (`provisioning` finds
+`brew_provision`, `сторінок` finds `Сторінка`): query and field words are compared by their Snowball
+stem, English or Ukrainian by script, below an exact or prefix match in rank. A text page over about
+16,000 characters (4000 tokens) is reported by `wiki lint` as `large` (see [lint](#lint)).
 
 pi's skill carries these rules (`<memory-dir>` is `.agents/memory`); copy them into the agent's
 instructions file if it has no skill:
