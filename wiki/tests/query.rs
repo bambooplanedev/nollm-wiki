@@ -1746,3 +1746,27 @@ fn a_date_lifts_only_the_notes_it_hits_and_a_missed_date_changes_nothing() {
     // Dated 25 October: nothing; same scores as the non-date "250".
     assert_eq!(scores("stand 25 жовтня"), scores("stand 250 жовтня"));
 }
+
+#[test]
+fn tail_keeps_the_newest_of_many_equal_notes() {
+    // Twelve journals with the same text: the smallest ids are the oldest.
+    let files: Vec<(String, String)> = (1..=12)
+        .map(|d| {
+            (
+                format!(".agents/memory/day{d:02}.md"),
+                format!("---\ntitle: Day {d:02}\nupdated: 2026-10-{d:02}\n---\n\nstand run\n"),
+            )
+        })
+        .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
+    let (_d, w) = code_fixture(&refs);
+    let ups: Vec<_> = w
+        .search("stand", None, 10)
+        .into_iter()
+        .map(|h| h.updated.unwrap())
+        .collect();
+    assert_eq!(ups, ["2026-10-12", "2026-10-11"]);
+}

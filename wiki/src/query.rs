@@ -1140,24 +1140,18 @@ impl Wiki {
             return Vec::new();
         }
         let n = gate_len();
-        let mut tail: Vec<Hit> = self
-            .search_scoped(q, None, tag, Some(10), MemoryScope::Only)
+        self.search_scoped(q, None, tag, Some(10), MemoryScope::Only)
             .into_iter()
             .filter(|h| self.passes_gate(h, q, best_code, n))
-            .collect();
-        tail.sort_by(|a, b| {
-            b.score
-                .total_cmp(&a.score)
-                .then_with(|| b.updated.cmp(&a.updated))
-        });
-        tail.truncate(MEMORY_TAIL);
-        tail
+            .take(MEMORY_TAIL)
+            .collect()
     }
 
     /// `search_tagged` over the memory notes only, all but them, or both,
     /// with no tail. A memory note passes the `code` and `docs` groups
     /// whatever its real kind (agents filter by `code`); an exact kind
-    /// matches its real kind.
+    /// matches its real kind. With `MemoryScope::Only`, of two equal-scored
+    /// notes the later `updated` comes first (dated before undated).
     pub(crate) fn search_scoped(
         &self,
         q: &str,
@@ -1283,6 +1277,14 @@ impl Wiki {
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
+                .then_with(|| {
+                    // Notes alone: newest first; never touches the code list.
+                    if scope == MemoryScope::Only {
+                        b.updated.cmp(&a.updated)
+                    } else {
+                        std::cmp::Ordering::Equal
+                    }
+                })
                 .then_with(|| b_pr.total_cmp(a_pr))
                 .then_with(|| a.id.cmp(&b.id))
         });

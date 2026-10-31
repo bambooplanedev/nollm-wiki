@@ -376,3 +376,19 @@ fn hint_names_a_page_with_no_matching_symbol() {
         "{out}"
     );
 }
+
+#[test]
+fn hint_memory_line_takes_the_newer_of_two_equal_notes() {
+    let tmp = project_of(&[
+        (
+            ".agents/memory/a.md",
+            "---\ntitle: Aaa\nupdated: 2026-01-01\n---\n\nzebra rule.\n",
+        ),
+        (
+            ".agents/memory/b.md",
+            "---\ntitle: Bbb\nupdated: 2026-03-01\n---\n\nzebra rule.\n",
+        ),
+    ]);
+    let out = hint_in(&tmp, "zebra");
+    assert!(memory_line(&out).unwrap().contains("b.md"), "{out}");
+}
