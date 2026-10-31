@@ -224,7 +224,20 @@ pub fn build_graph(entities: &BTreeMap<String, Entity>) -> Graph {
         }
     }
 
-    let pagerank = pagerank(&edges);
+    // Notes shape the edges but never the ranking: PageRank sees project pages only.
+    let project: BTreeMap<String, Edges> = edges
+        .iter()
+        .filter(|(id, _)| !entities[*id].memory)
+        .map(|(id, e)| {
+            let outgoing = e.outgoing.iter().filter(|t| !entities[*t].memory);
+            let kept = Edges {
+                outgoing: outgoing.cloned().collect(),
+                ..Edges::default()
+            };
+            (id.clone(), kept)
+        })
+        .collect();
+    let pagerank = pagerank(&project);
     Graph { edges, pagerank }
 }
 
@@ -720,6 +733,19 @@ mod tests {
         assert!(g.edges["a"].outgoing.contains("b"));
         assert!(g.edges["b"].incoming.contains("a"));
         assert!(g.edges["b"].outgoing.is_empty());
+    }
+
+    #[test]
+    fn pagerank_ignores_memory_pages() {
+        let a = ent("a", "Alpha", "nothing");
+        let b = ent("b", "Beta", "mentions Alpha");
+        let without = build_graph(&map(vec![a.clone(), b.clone()]));
+        let mut m = ent("m", "Memo", "Alpha Alpha Alpha");
+        m.memory = true;
+        let with = build_graph(&map(vec![a, b, m]));
+        assert!(with.edges["a"].incoming.contains("m"));
+        assert_eq!(with.pagerank["a"], without.pagerank["a"]);
+        assert_eq!(with.pagerank.get("m"), None);
     }
 
     #[test]

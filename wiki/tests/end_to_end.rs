@@ -884,6 +884,56 @@ fn repo_memory_folder_compiles_flagged_and_project_pages_are_not() {
 }
 
 #[test]
+fn index_json_pagerank_of_project_pages_is_unchanged_by_notes() {
+    let dir = tempdir().unwrap();
+    let run = |name: &str, note: bool| {
+        let input = dir.path().join(name).join("raw");
+        let output = dir.path().join(name).join("out");
+        write(&input, "doc.md", "---\ntitle: Doc\n---\n\nProject doc.\n");
+        write(&input, "other.md", "---\ntitle: Other\n---\n\nSee Doc.\n");
+        if note {
+            write(
+                &input,
+                ".agents/memory/n.md",
+                "---\ntitle: N\n---\n\n[[Doc]]\n",
+            );
+        }
+        compile(&input, &output, &CompileOptions::default()).unwrap();
+        output
+    };
+    let plain = run("plain", false);
+    let noted = run("noted", true);
+    let ranks = |out: &std::path::Path| -> Vec<(String, String)> {
+        index_entries(out)
+            .iter()
+            .filter(|e| e["memory"] != true)
+            .map(|e| (e["title"].to_string(), e["pagerank"].to_string()))
+            .collect()
+    };
+    assert_eq!(ranks(&plain), ranks(&noted));
+    let note = index_entries(&noted)
+        .into_iter()
+        .find(|e| e["title"] == "N")
+        .unwrap();
+    assert_eq!(note["pagerank"], 0.0);
+    let docs = |out: &std::path::Path| -> Vec<String> {
+        let t = fs::read_to_string(out.join("llms.txt")).unwrap();
+        let sec = t
+            .split("## Docs")
+            .nth(1)
+            .unwrap()
+            .split("## Optional")
+            .next()
+            .unwrap();
+        sec.lines()
+            .filter(|l| l.starts_with("- "))
+            .map(String::from)
+            .collect()
+    };
+    assert_eq!(docs(&plain), docs(&noted));
+}
+
+#[test]
 fn memory_folder_excluded_by_git_is_still_compiled() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");

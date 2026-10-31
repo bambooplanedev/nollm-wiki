@@ -167,7 +167,12 @@ pub fn render_llms_txt(m: &Manifest) -> String {
     ));
 
     // Split by centrality: below-median pagerank goes under ## Optional.
-    let mut ranks: Vec<f64> = m.entries.iter().map(|e| e.pagerank).collect();
+    let mut ranks: Vec<f64> = m
+        .entries
+        .iter()
+        .filter(|e| !e.memory)
+        .map(|e| e.pagerank)
+        .collect();
     ranks.sort_by(f64::total_cmp);
     let median = ranks.get(ranks.len() / 2).copied().unwrap_or(0.0);
 
