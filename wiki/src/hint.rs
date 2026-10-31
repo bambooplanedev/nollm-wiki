@@ -8,6 +8,9 @@ use std::collections::HashSet;
 const HINT_LINES: usize = 8;
 /// Code pages searched for a hint.
 const HINT_PAGES: usize = 5;
+/// Rarest prompt words that rank the pages (the bench keyed prompts have up
+/// to 30 and rank the same at 24; at 16 they lose two answers).
+const HINT_TERMS: usize = 24;
 /// A page is kept when its score is at least this share of the best page's.
 const HINT_MIN_REL: f64 = 0.5;
 /// Longest line, in characters, before it is cut with `…`.
@@ -26,35 +29,36 @@ const HINT_MEMORY_RATIO: f64 = 2.0;
 const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines, and read them before you run grep:\n";
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
-/// `text`, then one `memory: path — summary` line for the best memory note
+/// `text` (`path  title` for a page with no such line, such as a script
+/// whose matching code sits outside any function), then one `memory: path — summary` line for the best memory note
 /// whose title, alias or summary the text names with a long word or clearly
 /// outscores the code; empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
-    let hits = wiki.search_scoped(
-        text,
-        Some(&KindFilter::Code),
-        None,
-        Some(HINT_PAGES),
-        MemoryScope::Without,
-    );
+    let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let mut seen = HashSet::new();
     let mut out = String::new();
-    let symbols = hits
-        .iter()
-        .filter(|h| h.score >= HINT_MIN_REL * best)
-        .flat_map(|h| page_lines(&h.symbols))
-        .filter(|s| seen.insert((s.path.clone(), s.start_line, s.end_line)))
-        .take(HINT_LINES);
-    for s in symbols {
-        push_line(
-            &mut out,
-            &format!(
-                "{}:{}-{}  {}  {}",
-                s.path, s.start_line, s.end_line, s.name, s.signature
-            ),
-        );
+    let mut left = HINT_LINES;
+    for h in hits.iter().filter(|h| h.score >= HINT_MIN_REL * best) {
+        let mut lines = page_lines(&h.symbols).peekable();
+        if lines.peek().is_none() && left > 0 {
+            push_line(&mut out, &format!("{}  {}", h.path, h.title));
+            left -= 1;
+        }
+        for s in lines.filter(|s| seen.insert((s.path.clone(), s.start_line, s.end_line))) {
+            if left == 0 {
+                break;
+            }
+            push_line(
+                &mut out,
+                &format!(
+                    "{}:{}-{}  {}  {}",
+                    s.path, s.start_line, s.end_line, s.name, s.signature
+                ),
+            );
+            left -= 1;
+        }
     }
     // Only a field match: a body match is too cheap in a note-heavy language.
     let note = wiki

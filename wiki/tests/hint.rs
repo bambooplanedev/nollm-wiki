@@ -291,3 +291,62 @@ fn hint_shows_the_journal_of_a_date_in_the_prompt() {
     assert!(memory_line(&out).unwrap().contains("2026-10-12"), "{out}");
     assert!(memory_line(&hint_in(&tmp, "Що сталося зі стендом?")).is_none());
 }
+
+#[test]
+fn hint_skips_vendored_code() {
+    let tmp = project_of(&[
+        (
+            "third_party/cli/cli.hpp",
+            "void parse_flags_a() {}\nvoid parse_flags_b() {}\n",
+        ),
+        ("vendor/lib/lib.rs", "pub fn parse_flags_c() {}\n"),
+        ("src/args.rs", "pub fn parse_flags_d() {}\n"),
+    ]);
+    let out = hint_in(&tmp, "parse flags");
+    assert!(out.contains("src/args.rs"), "{out}");
+    assert!(!out.contains("third_party/"), "{out}");
+    assert!(!out.contains("vendor/"), "{out}");
+}
+
+#[test]
+fn hint_of_a_long_prompt_counts_only_its_rare_words() {
+    // Three pages hold 30 common prompt words; 24 rarer words have a page each.
+    let common: Vec<String> = (0..30).map(|i| format!("common{i:02}")).collect();
+    let rare: Vec<String> = (0..24).map(|i| format!("rare{i:02}")).collect();
+    let body = common
+        .iter()
+        .map(|w| format!("fn {w}() {{}}"))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    let mut files: Vec<(String, String)> = (0..3)
+        .map(|i| (format!("src/process{i}.rs"), body.clone()))
+        .collect();
+    files.extend(
+        rare.iter()
+            .map(|w| (format!("src/{w}.rs"), format!("fn {w}() {{}}\n"))),
+    );
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(n, b)| (n.as_str(), b.as_str()))
+        .collect();
+    let tmp = project_of(&refs);
+    let out = hint_in(&tmp, &format!("{} {}", common.join(" "), rare.join(" ")));
+    assert!(out.contains("src/rare"), "{out}");
+    assert!(!out.contains("src/process"), "{out}");
+}
+
+#[test]
+fn hint_names_a_page_with_no_matching_symbol() {
+    let tmp = project_of(&[(
+        "scripts/run.sh",
+        "#!/bin/sh\n# Launch the engine.\nexec engine --sky-secret \"$KEY\"\n",
+    )]);
+    let out = hint_in(&tmp, "sky-secret");
+    assert!(
+        out.lines().any(|l| l.starts_with("scripts/run.sh ")),
+        "{out}"
+    );
+}
