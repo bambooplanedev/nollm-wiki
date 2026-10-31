@@ -1,7 +1,7 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
 use crate::model::{one_line, KindFilter};
-use crate::query::{MemoryScope, SymbolLine, Wiki, MEMORY_BOOST};
+use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki};
 use std::collections::HashSet;
 
 /// Most symbol lines a hint prints.
@@ -18,21 +18,14 @@ const HINT_LINE_CHARS: usize = 160;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
 const HINT_PAGE_LINES: usize = 2;
-/// A prompt word of at least this many characters naming a note is enough
-/// for its memory line.
-const HINT_MEMORY_LONG: usize = 6;
-/// A shorter word (down to this length) also counts when the note's score is
-/// at least `HINT_MEMORY_RATIO` times the best code page's.
-const HINT_MEMORY_SHORT: usize = 4;
-const HINT_MEMORY_RATIO: f64 = 2.0;
 
 const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines, and read them before you run grep:\n";
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
 /// `text` (`path  title` for a page with no such line, such as a script
 /// whose matching code sits outside any function), then one `memory: path — summary` line for the best memory note
-/// whose title, alias or summary the text names with a long word or clearly
-/// outscores the code; empty when neither exists.
+/// that passes `Wiki::passes_gate`, the gate `search` uses for its tail;
+/// empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS);
@@ -60,7 +53,6 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
             left -= 1;
         }
     }
-    // Only a field match: a body match is too cheap in a note-heavy language.
     let note = wiki
         .search_scoped(
             text,
@@ -70,13 +62,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
             MemoryScope::Only,
         )
         .into_iter()
-        .find(|h| {
-            h.superseded_by.is_none()
-                && (wiki.dated_on(&h.id, text)
-                    || wiki.names_page(&h.id, text, HINT_MEMORY_LONG)
-                    || (h.score / MEMORY_BOOST >= HINT_MEMORY_RATIO * best
-                        && wiki.names_page(&h.id, text, HINT_MEMORY_SHORT)))
-        });
+        .find(|h| wiki.passes_gate(h, text, best, gate_len()));
     if let Some(h) = note {
         let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
         push_line(

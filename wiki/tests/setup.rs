@@ -13,13 +13,9 @@ fn skill(dir: &str) -> String {
     SKILL.replace("<memory-dir>", dir)
 }
 
-/// The memory-only skill setup writes for Claude Code.
+/// The memory-only skill the last release that had one wrote for Claude Code, naming `dir`.
 fn memory_skill(dir: &str) -> String {
-    let full = skill(dir);
-    let (_, rules) = full.split_once("\n# Memory\n").unwrap();
-    format!(
-        "---\nname: wiki-memory\ndescription: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.\n---\n\n# Memory\n{rules}"
-    )
+    memory_part(&OLD_SKILLS[5].replace("<memory-dir>", dir)).unwrap()
 }
 const ENTRY: &str = "{\n  \"command\": \"wiki\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
 
@@ -52,12 +48,16 @@ impl Fixture {
             .env("HOME", self.home())
             .env("XDG_DATA_HOME", self.home())
             .env("LOCALAPPDATA", self.home())
+            .env("CLAUDE_CONFIG_DIR", self.claude_config())
             .assert()
     }
     fn home(&self) -> PathBuf {
         self.tmp.path().join("home")
     }
-    /// Where local memory of the fixture's repo lives (needs real git and a commit).
+    fn claude_config(&self) -> PathBuf {
+        self.tmp.path().join("claude-config")
+    }
+    /// Where an earlier release kept local memory of the fixture's repo (needs real git and a commit).
     fn local_memory(&self) -> PathBuf {
         let env = |k: &str| {
             ["HOME", "XDG_DATA_HOME", "LOCALAPPDATA"]
@@ -176,11 +176,7 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
                 .replace('\n', "\n    ")
         )
     );
-    assert_eq!(
-        read(&r.join(".claude/skills/wiki-memory/SKILL.md")),
-        memory_skill(".agents/memory")
-    );
-    assert!(!r.join(".claude/skills/wiki-navigation").exists());
+    assert!(!r.join(".claude/skills").exists());
     assert_eq!(
         read(&r.join(".agents/skills/wiki-navigation/SKILL.md")),
         skill(".agents/memory")
@@ -198,10 +194,6 @@ fn setup_replaces_an_untouched_claude_navigation_skill() {
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(!old.exists(), "{}", out(&a));
     assert!(out(&a).contains("removed .claude/skills/wiki-navigation/SKILL.md"));
-    assert!(f
-        .root()
-        .join(".claude/skills/wiki-memory/SKILL.md")
-        .exists());
 }
 
 #[test]
@@ -221,7 +213,10 @@ fn setup_twice_is_a_no_op() {
     f.setup(&args).success();
     let before = files(&f.root());
     let a = f.setup(&args).success();
-    for l in out(&a).lines().filter(|l| !l.starts_with("Compiled")) {
+    for l in out(&a)
+        .lines()
+        .filter(|l| !l.starts_with("Compiled") && !l.starts_with("agent memory folder"))
+    {
         assert!(l.starts_with("already set up:"), "{l}");
     }
     assert_eq!(files(&f.root()), before);
@@ -234,10 +229,6 @@ fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     fs::write(f.root().join(".mcp.json"), foreign).unwrap();
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).code(1);
     assert_eq!(read(&f.root().join(".mcp.json")), foreign);
-    assert_eq!(
-        read(&f.root().join(".claude/skills/wiki-memory/SKILL.md")),
-        memory_skill(".agents/memory")
-    );
     assert!(out(&a).contains("skipped"));
 }
 
@@ -255,10 +246,11 @@ fn setup_local_uses_claude_cli_and_git_exclude() {
         ".wiki/",
         "/.pi/mcp.json",
         "/.agents/skills/wiki-navigation/",
+        "/.agents/memory/",
     ] {
         assert!(ex.lines().any(|x| x == l), "{l} missing in {ex}");
     }
-    // No local memory here (no commit), so Claude Code gets no skill.
+    // Claude Code keeps its own memory, so it gets no skill.
     assert!(!f.root().join(".claude/skills").exists());
     assert!(!f.root().join(".gitignore").exists());
 }
@@ -584,14 +576,21 @@ fn setup_hook_remove_keeps_other_hooks() {
 #[test]
 fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     let f = fixture(true, true);
-    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    let args = ["--agent", "claude,pi", "--scope", "repo"];
+    let a = f.setup(&args).success();
     assert!(f.root().join(".agents/memory").is_dir());
-    assert!(out(&a).contains("memory folder"), "{}", out(&a));
-    let text = read(&f.root().join(".claude/skills/wiki-memory/SKILL.md"));
+    let o = out(&a);
+    assert!(o.contains("memory folder"), "{o}");
+    assert!(
+        o.contains("agent memory folder") || o.contains("no agent memory folders found"),
+        "{o}"
+    );
+    assert!(!f.root().join(".claude/skills/wiki-memory").exists());
+    let text = read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md"));
     assert!(text.contains("`.agents/memory`"), "{text}");
     assert!(!text.contains("<memory-dir>"));
     // Re-running recognises its own skill and the folder.
-    let b = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    let b = f.setup(&args).success();
     assert!(
         out(&b).contains("already set up: memory folder"),
         "{}",
@@ -599,7 +598,7 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     );
 }
 
-/// A fixture with real git and a commit, so local memory has a key.
+/// A fixture with real git and a commit, so the old per-user memory folder has a key.
 fn committed() -> Fixture {
     let f = fixture(true, true);
     real_git(&f);
@@ -609,107 +608,129 @@ fn committed() -> Fixture {
 }
 
 #[test]
-fn setup_local_creates_the_data_dir_folder_compiles_it_and_remove_keeps_it() {
+fn setup_and_serve_find_the_claude_memory_folder() {
     let f = committed();
-    let dir = f.local_memory();
-    let note = dir.join("tide.md");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(&note, "# Tide table\n\nHarbour tide notes.\n").unwrap();
-    let a = f
-        .setup(&["--agent", "claude", "--scope", "local"])
-        .success();
-    assert!(!f.root().join(".agents/memory").exists());
-    let shown = wiki::memory::display_path(&dir.canonicalize().unwrap());
-    let text = read(&f.root().join(".claude/skills/wiki-memory/SKILL.md"));
+    let slug = wiki::memory::claude_slug(&wiki::memory::display_path(
+        &f.root().canonicalize().unwrap(),
+    ));
+    let mem = f.claude_config().join("projects").join(slug).join("memory");
+    fs::create_dir_all(mem.join("logs")).unwrap();
+    fs::write(mem.join("n.md"), "# Kelp\n\nKelp forest notes.\n").unwrap();
+    fs::write(mem.join("logs/x.md"), "# Log\n\nsession log\n").unwrap();
+    let shown = wiki::memory::display_path(&mem.canonicalize().unwrap());
+    let a = f.setup(&["--agent", "pi", "--scope", "repo"]).success();
     assert!(
-        text.contains(&format!("`{}`", wiki::memory::display_path(&dir))),
-        "{text}"
+        out(&a).contains(&format!("agent memory folder {shown} (found)")),
+        "{}",
+        out(&a)
     );
     let index = read(&f.root().join(".wiki/index.json"));
-    assert!(index.contains(&format!("{shown}/tide.md")), "{index}");
+    assert!(index.contains(&format!("{shown}/n.md")), "{index}");
     assert!(index.contains("\"memory\": true"), "{index}");
-    assert!(f.claude_log().contains("--scope local"));
-    assert!(out(&a).contains("memory folder"));
-    f.setup(&["--remove", "--agent", "claude", "--scope", "local"])
+    assert!(!index.contains("logs/x.md"), "{index}");
+
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", ".", "out"])
+        .current_dir(f.root())
+        .env("CLAUDE_CONFIG_DIR", f.claude_config())
+        .assert()
         .success();
+    let plain = read(&f.root().join("out/index.json"));
+    assert!(!plain.contains("n.md"), "{plain}");
+}
+
+#[test]
+fn setup_without_the_claude_memory_folder_says_not_yet_created() {
+    let f = committed();
+    let a = f.setup(&["--agent", "pi", "--scope", "repo"]).success();
+    assert!(out(&a).contains("(not yet created)"), "{}", out(&a));
+}
+
+#[test]
+fn setup_local_creates_agents_memory_and_excludes_it() {
+    let f = committed();
+    let args = ["--agent", "pi", "--scope", "local"];
+    f.setup(&args).success();
+    let dir = f.root().join(".agents/memory");
+    assert!(dir.is_dir());
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.lines().any(|l| l == "/.agents/memory/"), "{ex}");
+    assert_eq!(
+        read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md")),
+        skill(".agents/memory")
+    );
+    let note = dir.join("tide.md");
+    fs::write(&note, "# Tide table\n\nHarbour tide notes.\n").unwrap();
+    f.setup(&args).success();
+    let index = read(&f.root().join(".wiki/index.json"));
+    assert!(index.contains(".agents/memory/tide.md"), "{index}");
+    assert!(index.contains("\"memory\": true"), "{index}");
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert!(note.is_file());
 }
 
 #[test]
-fn setup_local_creates_the_empty_folder() {
-    let f = committed();
-    f.setup(&["--agent", "claude", "--scope", "local"])
-        .success();
-    assert!(f.local_memory().is_dir());
-}
-
-fn no_memory_section(f: &Fixture) {
-    let text = read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md"));
-    assert!(
-        !text.contains("Memory") && !text.contains("<memory-dir>"),
-        "{text}"
-    );
-    assert!(!f.root().join(".agents/memory").exists());
-}
-
-#[test]
-fn setup_local_without_a_git_repo_says_so_and_continues() {
+fn setup_local_outside_git_still_creates_agents_memory() {
     let f = fixture(true, true);
     real_git(&f);
     fs::remove_dir_all(f.root().join(".git")).unwrap();
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(f.root().join(".agents/memory").is_dir());
     assert!(
-        out(&a).contains("no local memory: not a git repo"),
+        out(&a).contains("not a git repository: nothing to exclude"),
         "{}",
         out(&a)
     );
-    no_memory_section(&f);
 }
 
-#[test]
-fn setup_local_in_a_repo_with_no_commits_says_so_and_continues() {
-    let f = fixture(true, true);
-    real_git(&f);
-    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+/// Puts `text` where an earlier release wrote Claude Code's memory skill, then runs setup in
+/// `scope` twice and `--remove` once: the skill goes on the first run, in both modes, and the
+/// memory folder stays.
+fn old_memory_skill_goes(f: &Fixture, scope: &str, text: &str) {
+    let p = f.root().join(".claude/skills/wiki-memory/SKILL.md");
+    let put = || {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, text).unwrap();
+    };
+    put();
+    let args = ["--agent", "claude", "--scope", scope];
+    let a = f.setup(&args).success();
+    assert!(!p.exists(), "{}", out(&a));
     assert!(
-        out(&a).contains("no local memory: no commits yet"),
+        out(&a).contains(
+            "removed .claude/skills/wiki-memory/SKILL.md: Claude Code keeps its own memory, which the wiki now reads"
+        ),
         "{}",
         out(&a)
     );
-    no_memory_section(&f);
+    f.setup(&args).success();
+    put();
+    let a = f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(!p.exists(), "{}", out(&a));
+    assert!(f.root().join(".agents/memory").is_dir());
 }
 
 #[test]
-fn setup_local_without_git_on_path_says_so() {
-    let f = fixture(true, true);
-    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
-    assert!(
-        out(&a).contains("no local memory: git is not on PATH"),
-        "{}",
-        out(&a)
-    );
-    no_memory_section(&f);
-}
-
-#[test]
-fn setup_local_without_a_data_dir_says_so() {
+fn setup_local_removes_an_old_local_scope_memory_skill() {
     let f = committed();
-    let a = Command::cargo_bin("wiki")
-        .unwrap()
-        .args(["setup", "--agent", "pi", "--scope", "local"])
-        .current_dir(f.root())
-        .env("PATH", f.bin())
-        .env_remove("HOME")
-        .env_remove("XDG_DATA_HOME")
-        .env_remove("LOCALAPPDATA")
-        .assert()
-        .success();
-    assert!(
-        out(&a).contains("no local memory: no data dir"),
-        "{}",
-        out(&a)
-    );
-    no_memory_section(&f);
+    let old = wiki::memory::display_path(&f.local_memory());
+    old_memory_skill_goes(&f, "local", &memory_skill(&old));
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.lines().any(|l| l == "/.agents/memory/"), "{ex}");
+
+    // pi's skill from then named the per-user folder; setup upgrades it.
+    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    fs::write(&p, OLD_SKILLS[5].replace("<memory-dir>", &old)).unwrap();
+    f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert_eq!(read(&p), skill(".agents/memory"));
+}
+
+#[test]
+fn setup_removes_an_old_repo_scope_memory_skill() {
+    let f = committed();
+    old_memory_skill_goes(&f, "repo", &memory_skill(".agents/memory"));
 }
 
 #[test]
@@ -719,10 +740,6 @@ fn setup_local_twice_reports_everything_already_there() {
     f.setup(&args).success();
     let o = out(&f.setup(&args).success());
     assert!(o.contains("already set up: memory folder"), "{o}");
-    assert!(
-        o.contains("already set up: .claude/skills/wiki-memory/SKILL.md"),
-        "{o}"
-    );
     assert!(!o.contains("skipped"), "{o}");
 }
 
@@ -792,7 +809,10 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     assert_eq!(read(&agents), format!("# Team rules\n\n{block}"));
 
     let a = f.setup(&args).success();
-    for l in out(&a).lines().filter(|l| !l.starts_with("Compiled")) {
+    for l in out(&a)
+        .lines()
+        .filter(|l| !l.starts_with("Compiled") && !l.starts_with("agent memory folder"))
+    {
         assert!(l.starts_with("already set up:"), "{l}");
     }
 
@@ -857,12 +877,13 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
 }
 
 const OLD_NAV: &str = include_str!("../src/setup/shipped/navigation-1.md");
-const OLD_SKILLS: [&str; 5] = [
+const OLD_SKILLS: [&str; 6] = [
     include_str!("../src/setup/shipped/skill-1.md"),
     include_str!("../src/setup/shipped/skill-2.md"),
     include_str!("../src/setup/shipped/skill-3.md"),
     include_str!("../src/setup/shipped/skill-4.md"),
     include_str!("../src/setup/shipped/skill-5.md"),
+    include_str!("../src/setup/shipped/skill-6.md"),
 ];
 
 fn nav_block(nav: &str) -> String {
@@ -890,7 +911,8 @@ fn setup_upgrades_previous_release() {
 
     // pi, repo scope: every earlier skill, with the memory folder filled in.
     let skill_file = ".agents/skills/wiki-navigation/SKILL.md";
-    // Claude Code: the memory-only skill cut from every earlier skill that has a Memory section.
+    // Claude Code: the memory-only skill cut from every earlier skill that has a Memory section,
+    // which setup now removes.
     let mem_file = ".claude/skills/wiki-memory/SKILL.md";
     for (i, old) in OLD_SKILLS.iter().enumerate() {
         let f = fixture(true, true);
@@ -912,10 +934,11 @@ fn setup_upgrades_previous_release() {
             i + 1,
             out(&a)
         );
-        assert_eq!(read(&m), memory_skill(".agents/memory"), "skill-{}", i + 1);
+        assert!(!m.exists(), "skill-{}", i + 1);
     }
 
-    // Local scope without a memory folder: the variant without the Memory section.
+    // Local scope without a local folder wrote the variant without the Memory section; now the
+    // Memory section names `.agents/memory` in both scopes.
     for (i, old) in OLD_SKILLS.iter().enumerate() {
         let f = fixture(true, true);
         let p = f.root().join(skill_file);
@@ -923,8 +946,7 @@ fn setup_upgrades_previous_release() {
         let head = old.split_once("\n# Memory\n").map_or(*old, |(h, _)| h);
         fs::write(&p, head).unwrap();
         f.setup(&["--agent", "pi", "--scope", "local"]).success();
-        let want = SKILL.split_once("\n# Memory\n").unwrap().0;
-        assert_eq!(read(&p), want, "skill-{}", i + 1);
+        assert_eq!(read(&p), skill(".agents/memory"), "skill-{}", i + 1);
     }
 }
 

@@ -61,8 +61,8 @@ wiki/src/lib.rs
   `search`, `page`, `neighbors` and `callers` to Claude Code, pi, Cursor, Codex or any MCP client.
 - **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
-- **Agent memory.** Notes an agent writes in `.agents/memory/` (or a per-user folder) become
-  searchable pages that rank above code, with dates, aliases and `supersedes:`.
+- **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
+  Code's) become searchable pages, listed after the code hits, with dates, aliases and `supersedes:`.
 - **Languages.** Rust, Python, C++, Go, JavaScript, TypeScript, `.vue` and `.svelte` scripts,
   Markdown and plain text.
 - **Deterministic.** Byte-identical output across runs, machines and thread counts; incremental
@@ -77,7 +77,6 @@ wiki/src/lib.rs
 - Or Rust 1.88 or later to build from source. Windows is not tested.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `wiki setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
-- For local agent memory: `git`, in a repository with at least one commit.
 
 ## Installation
 
@@ -151,7 +150,7 @@ surrounding pages matter.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
-| Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local), the `wiki-memory` skill | the server's instructions; tools load up front |
+| Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
 | pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `codex mcp add` (global), the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
@@ -165,20 +164,22 @@ surrounding pages matter.
 
 It compiles `.` into `.wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
 each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory rules).
-Claude Code gets only a `wiki-memory` skill with the memory rules: it shows the server's
-instructions, which carry the same navigation steps, and the server marks its tools to load up
-front instead of behind a `ToolSearch` call. Codex reads neither, so it gets the navigation rules
+Claude Code gets no skill: it shows the server's instructions, which carry the same navigation
+steps, and the server marks its tools to load up front instead of behind a `ToolSearch` call; its
+own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
 names them. Codex is set up only when named: its MCP config is global.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `AGENTS.md`, `.claude/skills/wiki-memory/SKILL.md`,
+  `.cursor/mcp.json`, `AGENTS.md`,
   `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
-  created are listed in `.git/info/exclude`. A file git already tracks is skipped; use
+  created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
   `--scope repo` for it.
+- Either scope creates `.agents/memory/`, and removes the `wiki-memory` skill an earlier release
+  wrote.
 - Either scope adds Codex's server with `codex mcp add wiki -- wiki serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
@@ -216,7 +217,7 @@ print mode), and Cursor loads a new server only after you approve it (its MCP se
 
 or the `mcpServers` entry of [MCP server](#mcp-server) in the project's `.mcp.json`. Claude Code
 shows the server's instructions, which carry the navigation steps, so no skill is needed for
-finding code; the memory rules are in [Agent memory](#agent-memory).
+finding code; the wiki reads Claude Code's own memory, see [Agent memory](#agent-memory).
 
 #### pi
 
@@ -336,13 +337,16 @@ that does not, such as Claude Desktop, give the project's absolute path.
 - `--dir <out>` (`<project>/.wiki` with `--source`, else `out`) — the compiled wiki to serve.
 - `--tools <list>` (`search,page,neighbors,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
-- `--memory <none|DIR>` — with `--source`, `none` leaves out this repo's local agent memory folder
-  and `DIR` replaces it; a `DIR` that does not exist at start is not watched.
+- `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off the discovery of the agents'
+  memory folders and a `DIR` replaces it (`none` with a `DIR` is a usage error); a `DIR` that does
+  not exist at start is picked up when it appears if its parent exists (the parent is watched
+  recursively; a missing parent needs a restart). On Linux the parent watch costs one inotify watch
+  per directory under it, so pass an existing folder when the parent is large. `.agents/memory` is always compiled.
 
 | Tool | Parameters | Returns |
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
-| `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page |
+| `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
@@ -369,57 +373,68 @@ request.
 
 ### Agent memory
 
-An agent can keep its notes as Markdown files in a folder the wiki compiles, then `search` them
-before it writes. `wiki setup` creates the folder and tells the agent about it in the skill:
+Agents keep notes as Markdown files. The wiki compiles the folders they write to, and `search` and
+`wiki hint` show the matching notes after the code. The sources:
 
-- **Repo scope** (`--scope repo`): `.agents/memory/` in the project. It is committed, so everyone
-  with the repo sees the notes. `wiki compile` always includes it.
-- **Local scope** (`--scope local`): a folder outside the checkout, in the per-user data dir:
-  `%LOCALAPPDATA%\wiki\memory\<key>` on Windows, `~/Library/Application Support/wiki/memory/<key>`
-  on macOS, `$XDG_DATA_HOME` (else `~/.local/share`)`/wiki/memory/<key>` elsewhere. `<key>` is the
-  repo's root commit, so every worktree and clone of one repo shares it. Nothing backs it up, and
-  it survives `git clean`. A directory that is not a git repo has no local memory.
+- **`.agents/memory/`** in the project. `wiki setup` creates it in both scopes; in `--scope local`
+  it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `wiki compile`
+  always includes it.
+- **The agents' own folders.** `serve --source` and `wiki setup` look for them. Today that is Claude
+  Code's `<config dir>/projects/<slug>/memory/`, where the config dir is `CLAUDE_CONFIG_DIR` or
+  `~/.claude` and `<slug>` is the path of the repo's main checkout with every UTF-16 unit that is not
+  an ASCII letter or digit written as `-` (so a Cyrillic or accented letter is one `-`, a character
+  outside the BMP two), cut at 200 units with a hash, as Claude Code does. A
+  worktree or a subdirectory therefore shares the folder of its main checkout. A `logs/` folder
+  inside it is skipped, and so is `MEMORY.md`.
+- **`--memory DIR`** (repeatable) for any other folder. On `serve`, `--memory none` turns the
+  discovery off and `--memory DIR` replaces it.
 
-`serve --source` and `wiki setup` include the local folder. A plain `wiki compile . out` does not,
-so a published site never carries private notes; pass `--memory local` for it, or `--memory DIR`
-for any folder (without a resolvable one it warns and goes on). So a plain `wiki compile . .wiki`
-drops local memory from `.wiki` until the server recompiles, and `wiki hint` reads `.wiki`.
+A plain `wiki compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
+agents' folders, so a published site never carries private notes. So a plain `wiki compile . .wiki`
+drops the agents' notes from `.wiki` until the server recompiles, and `wiki hint` reads `.wiki`.
 
-Memory pages rank above code (their score is multiplied by 4), pass the `code` and `docs` filters of
-`search`, and are found by the same tools as any page. When a prompt names a note, `wiki hint` adds
-one `memory:` line to its code lines (see [hint](#hint)).
+Migration: `compile --memory local` is gone, and notes in the per-user folder of earlier releases
+are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
+
+`search` lists the code and docs exactly as if no notes existed, then up to two notes, one per line,
+as `memory: <path> — <summary>`, each followed by its snippet on an indented line. A note is listed when a query word of four or more characters is
+in its title, aliases or summary, or the query writes the note's `updated` day, or the note scores
+at least twice the best code hit, both scores counted on the project's scale (project pages plus
+notes). Notes pass the `code` and `docs` filters, and `wiki hint` adds
+one `memory:` line by the same rule (see [hint](#hint)). Notes never move a code page's rank:
+PageRank and the `llms.txt` median count project pages only.
 
 A date in a query finds the memory notes dated that day: `12 жовтня`, `October 12`, `12.10`,
 `2026-10-12` (Ukrainian, Russian and English month names; `DD.MM` needs a two-digit day and month;
 without a year every year matches). Project pages are never matched by date.
 
 A note can retire an older one with `supersedes:` in its front matter (titles, aliases or ids, in
-`aliases:` syntax). The older note then gets no boost, `search` prints ` (superseded by <id>)` after
-its line (`"superseded_by"` in JSON), and `wiki hint` never shows it. Only memory notes are matched,
+`aliases:` syntax). The older note then never appears after the code hits and `wiki hint` never shows it; a tag listing prints ` (superseded by <id>)` after
+its line (`"superseded_by"` in JSON). Only memory notes are matched,
 a name that matches nothing is ignored, and with several superseders the smallest id is shown.
 
-Front matter on any Markdown page: `aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
+Front matter on any Markdown page: `title:` is the title (else the first `# heading`, else the file
+name) and `description:` is the one-line summary that `memory:` rows print and the gate matches on;
+`aliases:` and `tags:` are written `a, b`, `[a, b]` or a YAML
 block list; tags are lowercased with any `#` stripped. The page's date is read from `updated`,
 `modified` or `date`, then the same keys in a `metadata:` block one level deep, then a file name
 starting `YYYY-MM-DD`. Cyrillic query words are stemmed, so another grammatical form of a word still
-matches.
+matches. A text page over about 16,000 characters (4000 tokens) is reported by `wiki lint` as `large`
+(see [lint](#lint)).
 
-The skill carries these rules; copy them into the agent's instructions file if it has no skill:
+pi's skill carries these rules (`<memory-dir>` is `.agents/memory`); copy them into the agent's
+instructions file if it has no skill:
 
 ```
-Memory notes live in <folder> (.agents/memory, or the local folder setup named), one markdown file per fact or topic.
-- Keep a note under about 16,000 characters (`wiki lint` reports `large` above that).
-- Name the file for what it says. The title is the front-matter `title:`,
-  else the first `# heading`, else the file name; any script works.
-- A note not written in English needs English `aliases:`: agents search in English.
-- Front matter, all optional: `title:`, `description:` (one line, the search
-  summary), `aliases:`, `tags:`, `updated: YYYY-MM-DD` (date of the last change; other formats are
-  ignored).
+Notes about this project live in `<memory-dir>`; `search` lists up to two of them after the code
+hits, each on a `memory:` line, and the prompt hook adds one.
+
+- Write one note per fact or topic, named for what it says.
+- A note not written in English needs English `aliases:` in its front matter
+  (search words are English).
 - A journal note is named `YYYY-MM-DD.md` and has the date in its H1.
-- Mention a related note by its exact title or alias, or as `[[title]]`.
-- Search before writing. Update the note that exists instead of adding a copy.
+- Search first; update the note that exists instead of adding a copy.
 - When a decision changes, update its note. If you write a new note instead, add `supersedes: <old note's title>` to it.
-- `MEMORY.md` is optional and is not searched.
 ```
 
 ### CLI
@@ -453,8 +468,8 @@ recompile.
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
   `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project
   differently.
-- `--memory <local|DIR>` — also compile an agent memory folder as flagged memory pages: `local` for
-  this repo's per-user folder, or a directory. `<INPUT>/.agents/memory` is always compiled.
+- `--memory <DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
+  `<INPUT>/.agents/memory` is always compiled; `--memory local` is an error.
 - `--watch` — compile once, then keep watching `<INPUT>` and recompile on change. Events are
   debounced for 150 ms, events under `<OUTPUT>` are ignored, and each run reports
   `recompiled: N pages (M written)` on stderr.
@@ -468,7 +483,8 @@ clean directory.
     wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir out] [QUERY]
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
-  `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`.
+  `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
+  `memory:` lines, each with its snippet line (see [Agent memory](#agent-memory)).
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
   no query, lists every such page. A query or `--tag` is required.
 - `--limit <N>` (`10` with a query) — maximum number of hits.
@@ -566,11 +582,10 @@ exits 0 when the wiki is missing or nothing matches, so a hook can run it on eve
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
-When the prompt names a memory note in its title, an alias or its summary, one
-`memory: <path> — <summary>` line follows the code lines. It needs a prompt word of six or more
-characters in that match, or one of four or five characters while the note scores at least twice
-the best code page (before the memory boost), or a date in the prompt that is the note's `updated`
-day.
+One `memory: <path> — <summary>` line follows the code lines when the prompt matches a memory note
+in its title, an alias or its summary and any of three holds. It needs a prompt word of four or more
+characters in that match, or a date in the prompt that is the note's `updated` day, or the note
+scoring at least twice the best code page.
 
 #### generate
 

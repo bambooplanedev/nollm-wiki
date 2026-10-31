@@ -145,7 +145,7 @@ fn project_with_memory() -> TempDir {
         ),
         (
             ".agents/memory/vault.md",
-            "---\ntitle: Vault rotation\naliases: [keyring]\n---\n\nCredentials rotate nightly.\n\nBody mentions member and zebra and loaded things.\n",
+            "---\ntitle: Vault rotation\naliases: [keyrings, lookups]\n---\n\nCredentials rotate overnight.\n\nBody mentions member and zebra and loaded things.\n",
         ),
     ])
 }
@@ -158,8 +158,8 @@ fn memory_line(out: &str) -> Option<&str> {
 fn hint_adds_one_memory_line_after_the_code_lines() {
     let tmp = project_with_memory();
     let dir = tmp.path().join(".wiki");
-    // Title word, alias word and summary word (all 6+ characters) each gate the line in.
-    for prompt in ["rotation", "keyring", "nightly"] {
+    // Title word, alias word and summary word (all 8+ characters) each gate the line in.
+    for prompt in ["rotation", "keyrings", "overnight"] {
         let out = hint(&dir, &format!("{prompt} where are member creds loaded"));
         assert!(out.starts_with("Code locations"), "{out}");
         assert_eq!(out.matches("memory: ").count(), 1, "{out}");
@@ -167,7 +167,7 @@ fn hint_adds_one_memory_line_after_the_code_lines() {
         assert!(
             memory_line(&out)
                 .unwrap()
-                .contains("Credentials rotate nightly."),
+                .contains("Credentials rotate overnight."),
             "{out}"
         );
         assert!(memory_line(&out)
@@ -177,10 +177,43 @@ fn hint_adds_one_memory_line_after_the_code_lines() {
 }
 
 #[test]
-fn hint_memory_line_needs_a_title_alias_or_summary_match() {
+fn hint_memory_line_comes_from_the_body_when_no_code_competes() {
     let tmp = project_with_memory();
-    // Only the body says zebra: no memory line, and no code either.
-    assert_eq!(hint_in(&tmp, "zebra"), "");
+    // Only the body says zebra and no code does: the ratio branch lets it in.
+    let out = hint_in(&tmp, "zebra");
+    assert!(memory_line(&out).is_some(), "{out}");
+    assert_eq!(out.lines().count(), 2, "{out}");
+}
+
+#[test]
+fn hint_gate_length_comes_from_the_env() {
+    let tmp = project_with_memory();
+    let prompt = "rota where are member creds loaded";
+    // `rota` (4 characters) names the note's title at the default gate (4)
+    // and not under a gate of 8.
+    let plain = hint_in(&tmp, prompt);
+    assert!(plain.contains("load_member_creds"), "{plain}");
+    assert!(memory_line(&plain).is_some(), "{plain}");
+    let gated = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", prompt, "--dir"])
+        .arg(tmp.path().join(".wiki"))
+        .env("WIKI_MEMORY_GATE", "8")
+        .assert()
+        .success();
+    let gated = String::from_utf8(gated.get_output().stdout.clone()).unwrap();
+    assert!(gated.contains("load_member_creds"), "{gated}");
+    assert!(memory_line(&gated).is_none(), "{gated}");
+    // `0` is rejected: it behaves like the default gate.
+    let zero = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", prompt, "--dir"])
+        .arg(tmp.path().join(".wiki"))
+        .env("WIKI_MEMORY_GATE", "0")
+        .assert()
+        .success();
+    let zero = String::from_utf8(zero.get_output().stdout.clone()).unwrap();
+    assert!(memory_line(&zero).is_some(), "{zero}");
 }
 
 #[test]
@@ -210,13 +243,17 @@ fn hint_code_lines_are_the_same_with_and_without_memory() {
 
 #[test]
 fn hint_memory_gate_ignores_short_words() {
-    let tmp = project_of(&[(
-        ".agents/memory/n.md",
-        "---\ntitle: Що робити в релізі\n---\n\nРелізний чекліст.\n",
-    )]);
+    // Code that says the short words loudly, so the ratio branch fails too.
+    let tmp = project_of(&[
+        ("src/lib.rs", "/// Що в що в що в що.\npub fn shcho() {}\n"),
+        (
+            ".agents/memory/n.md",
+            "---\ntitle: Що робити в релізі\n---\n\nКонтрольний список релізу.\n",
+        ),
+    ]);
     let dir = tmp.path().join(".wiki");
-    assert_eq!(hint(&dir, "що в"), "");
-    assert!(hint(&dir, "що в релізі").contains("memory: "));
+    assert!(!hint(&dir, "що в").contains("memory: "));
+    assert!(hint(&dir, "що в контрольний").contains("memory: "));
 }
 
 #[test]
@@ -237,16 +274,16 @@ fn hint_never_shows_a_superseded_note() {
 }
 
 /// A code page that says `cache` in every doc line, plus a note naming it once
-/// (`cache` is 5 characters, `keyring` 7).
+/// (`cache` is 5 characters, `keyrings` 8).
 fn project_with_loud_code() -> TempDir {
     project_of(&[
         (
             "src/lib.rs",
-            "/// Cache cache cache: the cache of cached cache entries.\npub fn cache_cache() {}\n\n/// Cache keyring keyring lookups.\npub fn cache_keyring() {}\n",
+            "/// Cache cache cache evi: the cache of cached cache entries.\npub fn cache_cache() {}\n\n/// Cache keyrings keyrings lookups.\npub fn cache_keyring() {}\n",
         ),
         (
             ".agents/memory/n.md",
-            "---\ntitle: Eviction notes\naliases: [keyring]\n---\n\nEntries live in the cache.\n",
+            "---\ntitle: Eviction notes\naliases: [keyrings]\n---\n\nEntries are evicted overnight.\n\nSee evi.\n",
         ),
     ])
 }
@@ -254,15 +291,20 @@ fn project_with_loud_code() -> TempDir {
 #[test]
 fn hint_memory_line_skips_a_short_word_the_code_outscores() {
     let tmp = project_with_loud_code();
-    let out = hint_in(&tmp, "cache");
+    // `evi` (3 characters) is in the note's body only, under the gate, and
+    // the code outscores the note; `evic` (4) names its title and passes.
+    let out = hint_in(&tmp, "cache evi");
     assert!(out.contains("cache_cache"), "{out}");
     assert!(memory_line(&out).is_none(), "{out}");
+    let out = hint_in(&tmp, "cache evic");
+    assert!(memory_line(&out).is_some(), "{out}");
 }
 
 #[test]
 fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
     let tmp = project_with_memory();
-    // `vault` (5 characters) hits the title; no code page mentions it.
+    // `vault` (5 characters) is under the gate length, but no code page
+    // mentions it, so the note's own score passes the ratio branch.
     let out = hint_in(&tmp, "vault");
     assert!(memory_line(&out).is_some(), "{out}");
 }
@@ -270,7 +312,7 @@ fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
 #[test]
 fn hint_memory_line_keeps_a_long_word_the_code_outscores() {
     let tmp = project_with_loud_code();
-    let out = hint_in(&tmp, "cache keyring");
+    let out = hint_in(&tmp, "cache keyrings");
     assert!(out.contains("cache_keyring"), "{out}");
     assert!(memory_line(&out).is_some(), "{out}");
 }
@@ -349,4 +391,20 @@ fn hint_names_a_page_with_no_matching_symbol() {
         out.lines().any(|l| l.starts_with("scripts/run.sh ")),
         "{out}"
     );
+}
+
+#[test]
+fn hint_memory_line_takes_the_newer_of_two_equal_notes() {
+    let tmp = project_of(&[
+        (
+            ".agents/memory/a.md",
+            "---\ntitle: Aaa\nupdated: 2026-01-01\n---\n\nzebra rule.\n",
+        ),
+        (
+            ".agents/memory/b.md",
+            "---\ntitle: Bbb\nupdated: 2026-03-01\n---\n\nzebra rule.\n",
+        ),
+    ]);
+    let out = hint_in(&tmp, "zebra");
+    assert!(memory_line(&out).unwrap().contains("b.md"), "{out}");
 }

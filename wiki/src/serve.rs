@@ -359,15 +359,15 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
+        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
     )]
     async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
         let full = p.full.unwrap_or(false);
-        let max_tokens = p
-            .max_tokens
-            .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
         let (wiki, stale) = self.state.snapshot().await;
         let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+            let max_tokens = p
+                .max_tokens
+                .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
             wiki.page_text(&id, full, max_tokens)
                 .ok_or_else(|| crate::query::unknown_page(&p.id, &[]))
         }));
@@ -518,7 +518,8 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or
 /// the snippet (four-space indent) when the page has no symbols.
-/// No hits render as one `no matches` line.
+/// A memory note renders as the hook's one line, `memory: path — summary`
+/// (the title when there is no summary). No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
     if hits.is_empty() {
         return "no matches\n".to_string();
@@ -526,6 +527,23 @@ pub fn search_lines(hits: &[Hit]) -> String {
     // Fields are one-line text; collapse any newline or tab they carry.
     let mut out = String::new();
     for h in hits {
+        if h.memory {
+            let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
+            out.push_str(&format!(
+                "memory: {} — {}",
+                h.path,
+                one_line(said.unwrap_or(&h.title))
+            ));
+            // Only a tag listing shows a superseded note.
+            if let Some(by) = &h.superseded_by {
+                out.push_str(&format!(" (superseded by {by})"));
+            }
+            out.push('\n');
+            if let Some(sn) = &h.snippet {
+                out.push_str(&format!("    {}\n", one_line(sn)));
+            }
+            continue;
+        }
         out.push_str(&format!("{}  {}  ", h.id, h.path));
         if let Some(u) = &h.updated {
             out.push_str(&format!("{u}  "));
@@ -561,13 +579,15 @@ pub fn search_lines(hits: &[Hit]) -> String {
 
 /// Start the MCP server over stdio and block until the client disconnects.
 /// With `source`, the server compiles it into `dir` and keeps recompiling.
-/// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]).
+/// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]). `memory`
+/// lists the external memory folders: `["none"]` for no folder, `[]` for
+/// the discovered [`crate::memory::agent_dirs`], else exactly those folders.
 pub fn run(
     dir: &Path,
     source: Option<&Path>,
     jobs: Option<usize>,
     tools: Option<&[String]>,
-    memory: Option<&str>,
+    memory: &[String],
 ) -> Result<(), WikiError> {
     let tools: Vec<&str> = match tools {
         None => DEFAULT_TOOLS.to_vec(),
@@ -587,13 +607,13 @@ pub fn run(
     };
     let state = match source {
         Some(source) => {
-            // The repo's local folder unless `none`; `DIR` replaces it.
             let memory = match memory {
-                Some("none") => None,
-                Some(d) => Some(crate::memory::resolve(Path::new(d))?),
-                None => crate::memory::local_dir(source)
-                    .map(|d| crate::memory::resolve(&d))
-                    .transpose()?,
+                [none] if none == "none" => Vec::new(),
+                [] => crate::memory::agent_dirs(source),
+                dirs => dirs
+                    .iter()
+                    .map(|d| crate::memory::resolve(Path::new(d)))
+                    .collect::<Result<_, _>>()?,
             };
             let opts = CompileOptions {
                 incremental: true,
@@ -650,6 +670,45 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(state.snapshot()).0.list_pages().len()
+    }
+
+    #[test]
+    fn search_lines_prints_a_memory_hit_as_a_hook_line() {
+        let hit = |memory: bool, summary: Option<&str>| Hit {
+            id: "n".into(),
+            title: "Vault".into(),
+            path: "/m/n.md".into(),
+            summary: summary.map(String::from),
+            updated: Some("2026-10-23".into()),
+            score: 1.0,
+            snippet: Some("snip".into()),
+            symbols: vec![],
+            memory,
+            superseded_by: None,
+        };
+        assert_eq!(
+            search_lines(&[hit(true, Some("Rotate nightly."))]),
+            "memory: /m/n.md — Rotate nightly.\n    snip\n"
+        );
+        assert_eq!(
+            search_lines(&[hit(true, None)]),
+            "memory: /m/n.md — Vault\n    snip\n"
+        );
+        let mut bare = hit(true, Some("Rotate nightly."));
+        bare.snippet = None;
+        assert_eq!(search_lines(&[bare]), "memory: /m/n.md — Rotate nightly.\n");
+        let mut long = hit(true, Some("Rotate nightly."));
+        long.snippet = Some("…the port is\n4471…".into());
+        assert_eq!(
+            search_lines(&[long]),
+            "memory: /m/n.md — Rotate nightly.\n    …the port is 4471…\n"
+        );
+        let mut plain = hit(false, Some("sum"));
+        plain.snippet = None;
+        assert_eq!(
+            search_lines(&[plain]),
+            "n  /m/n.md  2026-10-23  Vault — sum\n"
+        );
     }
 
     #[test]

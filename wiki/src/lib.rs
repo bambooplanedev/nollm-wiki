@@ -49,8 +49,9 @@ pub struct CompileOptions {
     pub emit_json: bool,
     pub jobs: Option<usize>,
     pub project: Option<String>,
-    /// An extra agent memory folder (absolute), compiled as flagged pages.
-    pub memory: Option<PathBuf>,
+    /// Extra agent memory folders (absolute), compiled as flagged pages;
+    /// a missing one is skipped but still watched.
+    pub memory: Vec<PathBuf>,
 }
 
 impl Default for CompileOptions {
@@ -61,7 +62,7 @@ impl Default for CompileOptions {
             emit_json: false,
             jobs: None,
             project: None,
-            memory: None,
+            memory: Vec::new(),
         }
     }
 }
@@ -159,22 +160,22 @@ fn compile_inner(
     let registry = Registry::with_defaults();
     let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p));
 
-    // Memory folders: the repo's `.agents/memory` and the optional extra
-    // folder. Both are walked with every ignore rule off (they are usually
-    // git-excluded on purpose); markdown and text only. The main walk may
-    // reach the in-tree one (`--no-ignore`), so its files are dropped there
-    // and come back only from the memory walk, flagged. One folder given
-    // twice is walked once.
+    // Memory folders: the repo's `.agents/memory` and the extra folders.
+    // All are walked with every ignore rule off (they are usually
+    // git-excluded on purpose); markdown and text only, never `logs/`. The
+    // main walk may reach the in-tree one (`--no-ignore`), so its files are
+    // dropped there and come back only from the memory walk, flagged. One
+    // folder given twice is walked once.
     let in_tree = input.join(memory::REPO_DIR);
     let mut roots: Vec<(PathBuf, bool)> = Vec::new();
     if in_tree.is_dir() {
         roots.push((in_tree.clone(), true));
     }
-    if let Some(extra) = opts.memory.as_ref().filter(|d| d.is_dir()) {
-        let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
-            (Ok(a), Ok(b)) => a == b,
-            _ => a == b,
-        };
+    let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    };
+    for extra in opts.memory.iter().filter(|d| d.is_dir()) {
         if !roots.iter().any(|(r, _)| same(r, extra)) {
             roots.push((extra.clone(), false));
         }
@@ -199,7 +200,9 @@ fn compile_inner(
     let mut memory_files = Vec::new();
     let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
     for (root, in_repo) in &roots {
-        let w = walk::walk_memory(root, &|p| registry.handles(p) && is_note(p));
+        let w = walk::walk_memory(root, &|p| {
+            registry.handles(p) && is_note(p) && !p.starts_with("logs/")
+        });
         dirs.extend(w.dirs.into_iter().filter(|d| !is_under(d, output)));
         let abs_root = std::path::absolute(root)?;
         for mut sf in w
@@ -225,7 +228,7 @@ fn compile_inner(
             .map(|sf| sf.abs_path.clone()),
         dirs,
     )
-    .with_memory(std::iter::once(in_tree).chain(opts.memory.clone()));
+    .with_memory(std::iter::once(in_tree).chain(opts.memory.iter().cloned()));
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))

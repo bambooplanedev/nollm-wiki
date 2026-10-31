@@ -82,9 +82,32 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
     tag_filter(arg).ok_or_else(|| format!("empty tag {arg:?}"))
 }
 
-/// Multiplies a memory page's final score, so a note outranks code that
-/// matches the same words.
-pub(crate) const MEMORY_BOOST: f64 = 4.0;
+/// Most memory notes `search` lists after the code hits.
+pub(crate) const MEMORY_TAIL: usize = 2;
+/// Default gate length: a query word this long naming a note lets it in.
+/// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
+/// tasks): Haiku searches with short code-shaped words, so at 8 the note
+/// never appeared in 14 of 60 runs and 42 were right against 51 with the
+/// old boost; at 4, 49 of 60 (parity) with the code list still untouched.
+/// Offline, 4 puts a note under most code queries (about +540 bytes per
+/// answer on this repo); 8 under 3-32% but found 75 of 114 notes to 103.
+pub(crate) const MEMORY_GATE_LEN: usize = 4;
+/// A note whose score is at least this many times the best code hit's
+/// passes the gate without a name.
+pub(crate) const MEMORY_GATE_RATIO: f64 = 2.0;
+
+/// The gate length: `WIKI_MEMORY_GATE` when set to a number, else
+/// `MEMORY_GATE_LEN`; read once per process.
+pub(crate) fn gate_len() -> usize {
+    static LEN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LEN.get_or_init(|| {
+        std::env::var("WIKI_MEMORY_GATE")
+            .ok()
+            .and_then(|v| v.trim().parse().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(MEMORY_GATE_LEN)
+    })
+}
 
 /// A calendar date written in a query; `year` is `None` when not given.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -250,9 +273,9 @@ pub struct Hit {
     /// `YYYY-MM-DD` of the page's last change, when known.
     pub updated: Option<String>,
     pub score: f64,
-    /// The page is an agent memory note; its score carries `MEMORY_BOOST`.
+    /// The page is an agent memory note (a tail row of `search`).
     pub memory: bool,
-    /// The id of the note that supersedes this one; it gets no boost.
+    /// The id of the note that supersedes this one; it never enters the tail.
     pub superseded_by: Option<String>,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, item name, summary, or a
@@ -459,6 +482,11 @@ impl Wiki {
         self.items
             .iter()
             .filter_map(|(id, items)| Some((self.entries.get(id)?.path.as_str(), items.as_slice())))
+    }
+
+    /// Whether `id` is an agent memory note.
+    pub(crate) fn is_memory(&self, id: &str) -> bool {
+        self.entries.get(id).is_some_and(|e| e.memory)
     }
 
     /// A page's rendered Markdown body by id, as it was when loaded.
@@ -1084,6 +1112,10 @@ impl Wiki {
     /// it narrows the corpus statistics too. With no query tokens and a tag,
     /// lists every page that passes both filters by path, score 0 — `limit`
     /// truncates only when given; with a query the default is 10.
+    ///
+    /// With a query the hits are ranked as if no memory notes existed, then
+    /// `memory_tail` appends up to `MEMORY_TAIL` notes (not counted in
+    /// `limit`, whatever `kind`).
     pub fn search_tagged(
         &self,
         q: &str,
@@ -1091,16 +1123,47 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
-        self.search_scoped(q, kind, tag, limit, MemoryScope::With)
+        if Self::query_tokens(q).0.is_empty() {
+            return self.search_scoped(q, kind, tag, limit, MemoryScope::With);
+        }
+        let mut hits = self.search_scoped(q, kind, tag, limit, MemoryScope::Without);
+        let best = hits.first().map_or(0.0, |h| h.score);
+        hits.extend(self.memory_tail(q, tag, best));
+        hits
     }
 
-    /// `search_tagged` over the memory notes only, all but them, or both.
-    /// A memory note passes the `code` and `docs` groups whatever its real
-    /// kind (agents filter by `code`); an exact kind matches its real kind.
-    /// Memory hits' scores are multiplied by `MEMORY_BOOST` (a superseded
-    /// note gets neither the boost nor the tie keys), and of two
-    /// equal-scored notes the later `updated` comes first (dated before
-    /// undated).
+    /// Whether note hit `h` may be shown for `q`: it is not superseded, and a
+    /// query word of at least `n` characters names it (`names_page`), or `q`
+    /// writes its date (`dated_on`), or its own score is positive and at
+    /// least `MEMORY_GATE_RATIO` times `best_code`.
+    pub(crate) fn passes_gate(&self, h: &Hit, q: &str, best_code: f64, n: usize) -> bool {
+        h.superseded_by.is_none()
+            && (self.names_page(&h.id, q, n)
+                || self.dated_on(&h.id, q)
+                || (h.score > 0.0 && h.score >= MEMORY_GATE_RATIO * best_code))
+    }
+
+    /// The memory notes `search` lists after its code hits: the best ten
+    /// notes for `q` (narrowed to `tag`) that pass the gate at `gate_len`,
+    /// by score, the later `updated` first on a tie (dated before undated),
+    /// at most `MEMORY_TAIL`. Empty when `q` has no word.
+    pub(crate) fn memory_tail(&self, q: &str, tag: Option<&str>, best_code: f64) -> Vec<Hit> {
+        if !q.chars().any(char::is_alphanumeric) {
+            return Vec::new();
+        }
+        let n = gate_len();
+        self.search_scoped(q, None, tag, Some(10), MemoryScope::Only)
+            .into_iter()
+            .filter(|h| self.passes_gate(h, q, best_code, n))
+            .take(MEMORY_TAIL)
+            .collect()
+    }
+
+    /// `search_tagged` over the memory notes only, all but them, or both,
+    /// with no tail. A memory note passes the `code` and `docs` groups
+    /// whatever its real kind (agents filter by `code`); an exact kind
+    /// matches its real kind. With `MemoryScope::Only`, of two equal-scored
+    /// notes the later `updated` comes first (dated before undated).
     pub(crate) fn search_scoped(
         &self,
         q: &str,
@@ -1137,13 +1200,13 @@ impl Wiki {
     ) -> Vec<Hit> {
         let (tokens, query_words) = Self::query_tokens(q);
         let dates = query_dates(q);
-        let passes = |e: &Entry| {
+        let in_scope = |e: &Entry| match scope {
+            MemoryScope::With => true,
+            MemoryScope::Without => !e.memory,
+            MemoryScope::Only => e.memory,
+        };
+        let filtered = |e: &Entry| {
             !(prompt_terms.is_some() && is_vendored(&e.path))
-                && (match scope {
-                    MemoryScope::With => true,
-                    MemoryScope::Without => !e.memory,
-                    MemoryScope::Only => e.memory,
-                })
                 && kind.is_none_or(|f| {
                     (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
                 })
@@ -1153,6 +1216,7 @@ impl Wiki {
                         .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
                 })
         };
+        let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
                 return Vec::new();
@@ -1167,13 +1231,23 @@ impl Wiki {
         }
         let limit = limit.unwrap_or(10);
 
-        // Pass 1: facts per page, statistics over every filtered page.
+        // Pass 1: facts per page, statistics over every filtered page. Notes
+        // alone are scored on the project's scale (statistics over project
+        // pages plus notes), so the tail's ratio to the best code hit does
+        // not shrink as the project grows; `Without` keeps notes out of them.
+        let counted = |e: &Entry| {
+            if scope == MemoryScope::Only {
+                filtered(e)
+            } else {
+                passes(e)
+            }
+        };
         let mut n = 0usize;
         let mut total_len = 0usize;
         let mut df = vec![0usize; tokens.len() + dates.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
-            if !passes(e) {
+            if !counted(e) {
                 continue;
             }
             let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut df);
@@ -1181,7 +1255,9 @@ impl Wiki {
             // over hits alone would change with the query.
             n += 1;
             total_len += len;
-            candidates.extend(candidate);
+            if in_scope(e) {
+                candidates.extend(candidate);
+            }
         }
         if candidates.is_empty() {
             return Vec::new();
@@ -1219,23 +1295,16 @@ impl Wiki {
                         idf_t * (weight + Self::W_BODY * tf_norm)
                     })
                     .sum();
-                let total = if c.entry.memory && c.entry.superseded_by.is_none() {
-                    base * MEMORY_BOOST
-                } else {
-                    base
-                };
-                let hit = Hit::from_entry(c.entry, total, c.snippet);
+                let hit = Hit::from_entry(c.entry, base, c.snippet);
                 (hit, c.entry.pagerank)
             })
             .collect();
-        // Only live notes (not superseded) take the memory tie keys.
-        let live = |h: &Hit| h.memory && h.superseded_by.is_none();
         ranked.sort_by(|(a, a_pr), (b, b_pr)| {
             b.score
                 .total_cmp(&a.score)
-                .then_with(|| live(b).cmp(&live(a)))
                 .then_with(|| {
-                    if live(a) {
+                    // Notes alone: newest first; never touches the code list.
+                    if scope == MemoryScope::Only {
                         b.updated.cmp(&a.updated)
                     } else {
                         std::cmp::Ordering::Equal

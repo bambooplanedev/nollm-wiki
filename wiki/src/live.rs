@@ -95,10 +95,20 @@ impl Live {
             paths.push((barriers.as_path(), RecursiveMode::NonRecursive));
         }
         // A memory folder outside the source is its own watch; one that does
-        // not exist yet is left to the next start.
-        if let Some(mem) = live.opts.memory.as_deref().filter(|m| m.is_dir()) {
-            if !is_under(mem, &live.source) {
-                paths.push((mem, RecursiveMode::Recursive));
+        // not exist yet is watched through its parent, so creating it counts.
+        for mem in live
+            .opts
+            .memory
+            .iter()
+            .filter(|m| !is_under(m, &live.source))
+        {
+            let target = if mem.is_dir() {
+                Some(mem.as_path())
+            } else {
+                mem.parent().filter(|p| p.is_dir())
+            };
+            if let Some(t) = target {
+                paths.push((t, RecursiveMode::Recursive));
             }
         }
         let hook = Arc::clone(&live);
@@ -307,6 +317,36 @@ mod tests {
             barrier_token(dir, &dir.join(format!("{}7", barrier_prefix()))),
             None
         );
+    }
+
+    #[test]
+    fn a_transcript_beside_a_missing_memory_folder_does_not_recompile() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let slot = tempfile::tempdir().unwrap();
+        let slot = slot.path().canonicalize().unwrap();
+        let opts = CompileOptions {
+            incremental: true,
+            memory: vec![slot.join("memory")],
+            ..CompileOptions::default()
+        };
+        let live = Live::start(src.path(), out.path(), opts).unwrap();
+        let _ = live.fresh();
+        let gens = |l: &Live| {
+            let s = l.lock();
+            (s.event_gen, s.compiled_gen)
+        };
+        let before = gens(&live);
+
+        std::fs::write(slot.join("abc.jsonl"), "{}\n").unwrap();
+        std::thread::sleep(watch::DEBOUNCE * 4);
+        assert_eq!(gens(&live), before);
+
+        std::fs::create_dir(slot.join("memory")).unwrap();
+        std::fs::write(slot.join("memory/n.md"), "# N\n\nnote\n").unwrap();
+        let _ = live.fresh();
+        assert!(gens(&live).1 > before.1);
     }
 
     #[test]

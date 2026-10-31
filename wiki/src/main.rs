@@ -39,10 +39,10 @@ enum Command {
         /// (default: the input directory's basename).
         #[arg(long)]
         project: Option<String>,
-        /// Also compile an agent memory folder as flagged memory pages:
-        /// `local` for this repo's per-user folder, or a directory.
-        #[arg(long, value_name = "local|DIR")]
-        memory: Option<String>,
+        /// Also compile an agent memory folder as flagged memory pages
+        /// (repeatable).
+        #[arg(long, value_name = "DIR")]
+        memory: Vec<String>,
     },
     Neighbors {
         id: String,
@@ -118,11 +118,10 @@ enum Command {
         /// callers, lint (default: search,page,neighbors,callers).
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
-        /// With `--source`, the agent memory folder to include: `none` for no
-        /// local folder, or a directory instead of it (default: this repo's
-        /// per-user folder).
+        /// With `--source`, an agent memory folder to include (repeatable), or
+        /// `none` for no external folder; without it, Claude Code's memory folder of the project.
         #[arg(long, value_name = "none|DIR", requires = "source")]
-        memory: Option<String>,
+        memory: Vec<String>,
     },
     /// Print the code locations for a task text; silent when there is nothing to say.
     Hint {
@@ -179,6 +178,14 @@ fn ask_scope() -> Result<Scope> {
     }
 }
 
+/// Exit with a clap usage error (status 2).
+fn usage_error(msg: &str) -> ! {
+    use clap::CommandFactory;
+    Cli::command()
+        .error(clap::error::ErrorKind::ArgumentConflict, msg)
+        .exit()
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -192,22 +199,21 @@ fn main() -> Result<()> {
             project,
             memory: memory_arg,
         } => {
-            let memory = match memory_arg.as_deref() {
-                None => None,
-                Some("local") => wiki::memory::local_dir(&input)
-                    .map(|d| wiki::memory::resolve(&d))
-                    .transpose()
-                    .context("resolve local memory")?,
-                Some(dir) => Some(
-                    wiki::memory::resolve(std::path::Path::new(dir)).context("resolve --memory")?,
-                ),
-            };
-            if let Some(arg) = &memory_arg {
-                if memory.as_ref().is_none_or(|d| !d.is_dir()) {
+            if memory_arg.iter().any(|a| a == "local") {
+                usage_error(
+                    "--memory local is no longer supported; pass the folder as --memory DIR",
+                );
+            }
+            let mut memory = Vec::new();
+            for arg in &memory_arg {
+                let d =
+                    wiki::memory::resolve(std::path::Path::new(arg)).context("resolve --memory")?;
+                if !d.is_dir() {
                     eprintln!(
                         "warning: --memory {arg}: no such memory folder; compiling without it"
                     );
                 }
+                memory.push(d);
             }
             let opts = CompileOptions {
                 incremental,
@@ -378,18 +384,15 @@ fn main() -> Result<()> {
             tools,
             memory,
         } => {
+            if memory.len() > 1 && memory.iter().any(|m| m == "none") {
+                usage_error("--memory none cannot be combined with a folder");
+            }
             let dir = dir.unwrap_or_else(|| {
                 source
                     .as_ref()
                     .map_or_else(|| "out".into(), |s| s.join(".wiki"))
             });
-            wiki::serve::run(
-                &dir,
-                source.as_deref(),
-                cli.jobs,
-                tools.as_deref(),
-                memory.as_deref(),
-            )?;
+            wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
         }
         Command::Hint {
             text,
