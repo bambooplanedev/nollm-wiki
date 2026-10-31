@@ -581,7 +581,7 @@ matching:
   (newer `updated` first on a tie), after the hits and outside `limit`,
   whatever `kind`; with `tag` set a note must carry it. A note enters the tail
   through `passes_gate`, which `wiki hint` shares: it is not superseded, and
-  a query word of `gate_len()` (8) or more characters is in its title, aliases
+  a query word of `gate_len()` (4) or more characters is in its title, aliases
   or summary (`names_page`), or the query writes its `updated` day
   (`dated_on`), or its score is at least `MEMORY_GATE_RATIO` (2) times the
   best code hit's. Note scores come from `MemoryScope::Only`, whose `N`, `df`
