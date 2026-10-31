@@ -395,9 +395,10 @@ Migration: `compile --memory local` is gone, and notes in the per-user folder of
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
 
 `search` lists the code and docs exactly as if no notes existed, then up to two notes, one per line,
-as `memory: <path> — <summary>`. A note is listed when a query word of six or more characters is
+as `memory: <path> — <summary>`. A note is listed when a query word of eight or more characters is
 in its title, aliases or summary, or the query writes the note's `updated` day, or the note scores
-at least twice the best code hit. Notes pass the `code` and `docs` filters, and `wiki hint` adds
+at least twice the best code hit, both scores counted on the project's scale (project pages plus
+notes). Notes pass the `code` and `docs` filters, and `wiki hint` adds
 one `memory:` line by the same rule (see [hint](#hint)). Notes never move a code page's rank:
 PageRank and the `llms.txt` median count project pages only.
 
@@ -580,7 +581,7 @@ exits 0 when the wiki is missing or nothing matches, so a hook can run it on eve
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
 When the prompt names a memory note in its title, an alias or its summary, one
-`memory: <path> — <summary>` line follows the code lines. It needs a prompt word of six or more
+`memory: <path> — <summary>` line follows the code lines. It needs a prompt word of eight or more
 characters in that match, or a date in the prompt that is the note's `updated` day, or the note
 scoring at least twice the best code page.
 

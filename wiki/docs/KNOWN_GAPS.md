@@ -248,6 +248,8 @@ per question is noise-level: treat single results as anecdotes.
   CI is Linux.
 - The tail's note scores share the project's idf scale (statistics over project
   pages plus notes) while the code list keeps its own, notes left out; the two
-  scales differ only by the notes' share of the corpus.
+  scales differ only by the notes' share of the corpus. Measured trade-off: on
+  this repo's real notes it raised code-query noise from 2 to 6 of 60, while
+  recall over all three measured corpora rose from 75 to 80 of 114.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
