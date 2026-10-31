@@ -601,3 +601,37 @@ fn serve_memory_none_with_a_dir_is_an_error() {
             "--memory none cannot be combined with a folder",
         ));
 }
+
+#[test]
+fn cli_page_on_a_memory_note_prints_its_text_but_a_doc_prints_headings() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join(".agents/memory")).unwrap();
+    let body = "# Heading\n\nIntro.\n\nThe port is zorblax4471.\n";
+    fs::write(
+        input.join(".agents/memory/note.md"),
+        format!("---\ntitle: Note\n---\n\n{body}"),
+    )
+    .unwrap();
+    fs::write(input.join("doc.md"), body).unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let page = |id: &str| {
+        let o = Command::cargo_bin("wiki")
+            .unwrap()
+            .args(["page", id, "--dir", output.to_str().unwrap()])
+            .assert()
+            .success();
+        String::from_utf8(o.get_output().stdout.clone()).unwrap()
+    };
+    let note = common::index_entries(&output)
+        .into_iter()
+        .find(|e| e["memory"] == true)
+        .unwrap();
+    assert!(page(note["id"].as_str().unwrap()).contains("zorblax4471"));
+    let doc = page("./doc.md");
+    assert!(
+        doc.contains("Heading") && !doc.contains("zorblax4471"),
+        "{doc}"
+    );
+}

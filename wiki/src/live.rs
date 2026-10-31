@@ -320,6 +320,36 @@ mod tests {
     }
 
     #[test]
+    fn a_transcript_beside_a_missing_memory_folder_does_not_recompile() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let slot = tempfile::tempdir().unwrap();
+        let slot = slot.path().canonicalize().unwrap();
+        let opts = CompileOptions {
+            incremental: true,
+            memory: vec![slot.join("memory")],
+            ..CompileOptions::default()
+        };
+        let live = Live::start(src.path(), out.path(), opts).unwrap();
+        let _ = live.fresh();
+        let gens = |l: &Live| {
+            let s = l.lock();
+            (s.event_gen, s.compiled_gen)
+        };
+        let before = gens(&live);
+
+        std::fs::write(slot.join("abc.jsonl"), "{}\n").unwrap();
+        std::thread::sleep(watch::DEBOUNCE * 4);
+        assert_eq!(gens(&live), before);
+
+        std::fs::create_dir(slot.join("memory")).unwrap();
+        std::fs::write(slot.join("memory/n.md"), "# N\n\nnote\n").unwrap();
+        let _ = live.fresh();
+        assert!(gens(&live).1 > before.1);
+    }
+
+    #[test]
     fn a_panicking_compile_is_an_error() {
         let r: Result<(), WikiError> = unpanicked(|| panic!("boom"));
         assert_eq!(r.unwrap_err().to_string(), "the compile panicked");

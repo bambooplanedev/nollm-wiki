@@ -359,15 +359,15 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
+        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
     )]
     async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
         let full = p.full.unwrap_or(false);
-        let max_tokens = p
-            .max_tokens
-            .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
         let (wiki, stale) = self.state.snapshot().await;
         let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+            let max_tokens = p
+                .max_tokens
+                .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
             wiki.page_text(&id, full, max_tokens)
                 .ok_or_else(|| crate::query::unknown_page(&p.id, &[]))
         }));
@@ -539,6 +539,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 out.push_str(&format!(" (superseded by {by})"));
             }
             out.push('\n');
+            if let Some(sn) = &h.snippet {
+                out.push_str(&format!("    {}\n", one_line(sn)));
+            }
             continue;
         }
         out.push_str(&format!("{}  {}  ", h.id, h.path));
@@ -685,11 +688,20 @@ mod tests {
         };
         assert_eq!(
             search_lines(&[hit(true, Some("Rotate nightly."))]),
-            "memory: /m/n.md — Rotate nightly.\n"
+            "memory: /m/n.md — Rotate nightly.\n    snip\n"
         );
         assert_eq!(
             search_lines(&[hit(true, None)]),
-            "memory: /m/n.md — Vault\n"
+            "memory: /m/n.md — Vault\n    snip\n"
+        );
+        let mut bare = hit(true, Some("Rotate nightly."));
+        bare.snippet = None;
+        assert_eq!(search_lines(&[bare]), "memory: /m/n.md — Rotate nightly.\n");
+        let mut long = hit(true, Some("Rotate nightly."));
+        long.snippet = Some("…the port is\n4471…".into());
+        assert_eq!(
+            search_lines(&[long]),
+            "memory: /m/n.md — Rotate nightly.\n    …the port is 4471…\n"
         );
         let mut plain = hit(false, Some("sum"));
         plain.snippet = None;

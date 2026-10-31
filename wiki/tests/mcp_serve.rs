@@ -1088,12 +1088,13 @@ fn agent_folder_created_after_start_is_picked_up() {
         [] as [String; 0]
     );
 
-    // A transcript beside the memory folder is not a change to the wiki.
+    // A transcript beside the memory folder is never a page (that it does
+    // not recompile is checked in-process by live.rs).
     std::fs::write(slot.join("abc.jsonl"), "{\"quokkanote\": 1}\n").unwrap();
-    std::thread::sleep(Duration::from_millis(500));
-    let resp = search(&mut stdin, &stdout, 3, "quokkanote");
-    assert_eq!(hit_ids(&resp), [] as [String; 0]);
-    assert!(stale_block(&resp).is_none(), "{resp}");
+    assert_eq!(
+        hit_ids(&search(&mut stdin, &stdout, 3, "quokkanote")),
+        [] as [String; 0]
+    );
 
     std::fs::create_dir_all(slot.join("memory")).unwrap();
     std::fs::write(slot.join("memory/n.md"), "# N\n\nquokkanote\n").unwrap();

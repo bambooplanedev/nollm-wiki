@@ -12,9 +12,9 @@ use std::process::Command;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/wiki-navigation";
-/// Claude Code's skill: the Memory section of `SKILL.md` only. Claude Code
-/// shows the server instructions, which carry the navigation steps; a
-/// navigation skill cost a turn per task there.
+/// Claude Code's memory-only skill (this head and an earlier `SKILL.md`'s Memory section) that
+/// earlier releases wrote. Claude Code keeps its own memory, which the wiki reads, so setup now
+/// only removes it.
 const MEMORY_SKILL_DIR: &str = "skills/wiki-memory";
 const MEMORY_SKILL_HEAD: &str = "---
 name: wiki-memory
@@ -39,6 +39,7 @@ const SHIPPED_SKILLS: &[&str] = &[
     include_str!("shipped/skill-3.md"),
     include_str!("shipped/skill-4.md"),
     include_str!("shipped/skill-5.md"),
+    include_str!("shipped/skill-6.md"),
 ];
 const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
 const NAV_END: &str = "<!-- /wiki:navigation -->";
@@ -308,27 +309,29 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let local_memory = memory::local_dir(root);
-    // The skill's Memory section names the scope's folder; local scope without a local folder
-    // gets no section (naming the committable repo folder would defeat the scope).
-    let render = |template: &str| match (&local_memory, local) {
-        (Some(d), true) => template.replace("<memory-dir>", &memory::display_path(d)),
-        (None, true) => template
-            .split_once("\n# Memory\n")
-            .map_or(template, |(head, _)| head)
-            .to_string(),
-        _ => template.replace("<memory-dir>", memory::REPO_DIR),
-    };
-    let memory_of = |text: &str| {
-        text.split_once("\n# Memory\n")
-            .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"))
-    };
-    let skill_text = render(SKILL_TEMPLATE);
+    let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
     let skill_text = skill_text.as_str();
-    let memory_skill = memory_of(skill_text);
-    let old_skills: Vec<String> = SHIPPED_SKILLS.iter().map(|t| render(t)).collect();
+    // Earlier releases' skills named `.agents/memory`, or in local scope the per-user folder, or
+    // (local scope without that folder) had no Memory section.
+    let old_local = memory::local_dir(root).map(|d| memory::display_path(&d));
+    let old_skills: Vec<String> = SHIPPED_SKILLS
+        .iter()
+        .flat_map(|t| {
+            let head = t.split_once("\n# Memory\n").map_or(*t, |(h, _)| h);
+            [
+                Some(t.replace("<memory-dir>", memory::REPO_DIR)),
+                old_local.as_ref().map(|d| t.replace("<memory-dir>", d)),
+                Some(head.to_string()),
+            ]
+        })
+        .flatten()
+        .collect();
     let old_skills: Vec<&str> = old_skills.iter().map(String::as_str).collect();
-    let old_memory_skills: Vec<String> = old_skills.iter().filter_map(|t| memory_of(t)).collect();
+    let old_memory_skills: Vec<String> = old_skills
+        .iter()
+        .filter_map(|t| t.split_once("\n# Memory\n"))
+        .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"))
+        .collect();
     let old_memory_skills: Vec<&str> = old_memory_skills.iter().map(String::as_str).collect();
     let old_blocks: Vec<String> = SHIPPED_NAV
         .iter()
@@ -336,34 +339,16 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         .collect();
     let old_blocks: Vec<&str> = old_blocks.iter().map(String::as_str).collect();
     if !opts.remove {
-        let folder = match (&local_memory, local) {
-            (Some(d), true) => Some(d.clone()),
-            (None, true) => {
-                let why = if find_on_path("git").is_none() {
-                    "git is not on PATH"
-                } else if memory::data_dir().is_none() {
-                    "no data dir (set HOME, XDG_DATA_HOME or LOCALAPPDATA)"
-                } else if memory::is_git_repo(root) {
-                    "no commits yet"
-                } else {
-                    "not a git repo"
-                };
-                r.line(&format!("no local memory: {why}; no memory folder created"))?;
-                None
-            }
-            _ => Some(root.join(memory::REPO_DIR)),
+        let d = root.join(memory::REPO_DIR);
+        let what = format!("memory folder {}", memory::display_path(&d));
+        let existed = d.is_dir();
+        std::fs::create_dir_all(&d)?;
+        let o = if existed {
+            Outcome::AlreadyThere
+        } else {
+            Outcome::Done
         };
-        if let Some(d) = folder {
-            let what = format!("memory folder {}", memory::display_path(&d));
-            let existed = d.is_dir();
-            std::fs::create_dir_all(&d)?;
-            let o = if existed {
-                Outcome::AlreadyThere
-            } else {
-                Outcome::Done
-            };
-            r.item(&what, false, Ok(o))?;
-        }
+        r.item(&what, false, Ok(o))?;
         let agent_dirs = memory::agent_dirs(root);
         for d in &agent_dirs {
             let state = if d.is_dir() {
@@ -396,7 +381,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("warning: wiki is not on PATH; the agents will not find it until it is")?;
     }
     let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
-    let mut ignore = vec![".wiki/".to_string()];
+    // Local scope only: repo scope puts just `.wiki/` in `.gitignore`.
+    let mut ignore = vec![".wiki/".to_string(), format!("/{}/", memory::REPO_DIR)];
     let mut cursor_added = false;
 
     for agent in agents {
@@ -462,19 +448,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 continue;
             }
         };
-        let (skill, text, shipped) = if pi {
-            (
-                Path::new(".agents").join(SKILL_DIR),
-                Some(skill_text),
-                &old_skills,
-            )
-        } else {
-            (
-                Path::new(".claude").join(MEMORY_SKILL_DIR),
-                memory_skill.as_deref(),
-                &old_memory_skills,
-            )
-        };
         // MCP
         if pi || !local {
             let (file, value) = if pi {
@@ -499,35 +472,52 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let o = claude_local_mcp(root, &entry, opts.remove);
             r.item("Claude Code local wiki server", false, Ok(o))?;
         }
-        // Skill
-        if let Some(text) = text {
+        // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
+        // steps (a navigation skill cost a turn per task there), and keeps its own memory.
+        if pi {
+            let skill = Path::new(".agents").join(SKILL_DIR);
             let file = skill.join("SKILL.md");
             let res = || {
                 if opts.remove {
-                    edit::remove_file(root, &root.join(&file), text, shipped)
+                    edit::remove_file(root, &root.join(&file), skill_text, &old_skills)
                 } else {
-                    edit::write_file(&root.join(&file), text, shipped)
+                    edit::write_file(&root.join(&file), skill_text, &old_skills)
                 }
             };
             let what = format!("{} skill for {name}", file.display());
             if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
                 ignore.push(format!("/{}/", skill.display()));
             }
+        } else {
+            // The skills an earlier setup wrote for Claude Code, if untouched (and, in local
+            // scope, not tracked by git).
+            for (dir, current, shipped, why) in [
+                (
+                    SKILL_DIR,
+                    Some(skill_text),
+                    &old_skills,
+                    "the server instructions carry its steps",
+                ),
+                (
+                    MEMORY_SKILL_DIR,
+                    old_memory_skills.first().copied(),
+                    &old_memory_skills,
+                    "Claude Code keeps its own memory, which the wiki now reads",
+                ),
+            ] {
+                let Some(current) = current else { continue };
+                let old = Path::new(".claude").join(dir).join("SKILL.md");
+                let old_file = old.to_string_lossy();
+                if std::fs::read_to_string(root.join(&old))
+                    .is_ok_and(|t| t == current || shipped.contains(&t.as_str()))
+                    && !(r.guard_tracked && tracked(root, &old_file))
+                {
+                    edit::remove_file(root, &root.join(&old), current, shipped)?;
+                    r.line(&format!("removed {old_file}: {why}"))?;
+                }
+            }
         }
-        // The navigation skill an earlier setup wrote for Claude Code, if
-        // untouched (and, in local scope, not tracked by git).
-        let old = Path::new(".claude").join(SKILL_DIR).join("SKILL.md");
-        let old_file = old.to_string_lossy();
-        if !pi
-            && std::fs::read_to_string(root.join(&old))
-                .is_ok_and(|t| t == skill_text || old_skills.contains(&t.as_str()))
-            && !(r.guard_tracked && tracked(root, &old_file))
-        {
-            edit::remove_file(root, &root.join(&old), skill_text, &old_skills)?;
-            r.line(&format!(
-                "removed {old_file}: the server instructions carry its steps"
-            ))?;
-        }
+
         // Hook (`--remove` always looks, so it undoes a hook installed earlier)
         if opts.hook || opts.remove {
             if pi {

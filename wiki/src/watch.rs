@@ -294,6 +294,16 @@ mod tests {
     }
 
     #[test]
+    fn a_sibling_of_a_missing_memory_folder_is_not_relevant() {
+        let slot = PathBuf::from("/c/projects/-proj");
+        let w = WatchSet::new(Path::new("/proj"), [], [PathBuf::from("/proj")])
+            .with_memory([slot.join("memory")]);
+        assert!(!w.relevant(&slot.join("abc.jsonl")));
+        assert!(w.relevant(&slot.join("memory")));
+        assert!(w.relevant(&slot.join("memory/new.md")));
+    }
+
+    #[test]
     fn external_memory_files_are_relevant() {
         let (d, _r, w) = compiled();
         let ext = d.path().canonicalize().unwrap().join("ext");

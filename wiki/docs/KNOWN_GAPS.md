@@ -231,26 +231,32 @@ per question is noise-level: treat single results as anecdotes.
 
 ## Agent memory
 
-- A local memory folder created or recreated after `serve --source` started is
-  not watched until the server restarts; a note added to a folder it already
-  watches is picked up.
-- A plain `wiki compile . .wiki` drops local memory pages until the server
+- A plain `wiki compile . .wiki` drops the agents' notes until the server
   recompiles, so `wiki hint` loses the memory line meanwhile.
-- Windows paths (data dir, `\\?\` prefix, `C:/` page paths) are covered by unit
-  tests only; CI is Linux.
-- The local key is the root commit, so a worktree checked out on an orphan
-  branch gets a different, empty local memory; a shallow clone keys on its
-  git dir and is not shared with re-clones.
-- Forks of one project share local memory (same root commit).
-- Setup's exact-match contract: a skill text from an older release (before the
-  Memory section) is reported as foreign and left alone; delete it and re-run.
-- Local memory is not backed up and a local-scope skill names a machine path.
 - `compile --watch` does not watch an external `--memory` folder.
-- `--no-ignore` walks `.wiki/`, whose pages can hold local-memory text.
+- `--no-ignore` walks `.wiki/`, whose pages can hold memory text.
 - `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
-- Unshallowing a shallow clone changes its local memory key (the old folder is
-  orphaned).
-- A git failure such as `safe.directory` reads as "not a git repo", so no
-  local memory.
-- A new repo has no local memory until its first commit.
+- Claude Code normalises the project path to NFC before slugging; the wiki
+  slugs the path as the OS gives it, so a path with decomposed characters may
+  give another slug. `--memory DIR` is the escape.
+- Claude Code's overrides are not honoured: the `autoMemoryDirectory` setting,
+  `CLAUDE_CODE_REMOTE_MEMORY_DIR`, `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` and
+  `CLAUDE_CODE_PROJECT_DIR_NAME`. `--memory DIR` is the escape.
+- A `projects/<slug>/` directory that is missing when `serve` starts is not
+  watched; restart the server once it exists.
+- Windows slugging (`C:/` paths, the `\\?\` prefix) is covered by unit tests only;
+  CI is Linux.
+- The tail's note scores share the project's idf scale (statistics over project
+  pages plus notes) while the code list keeps its own, notes left out; the two
+  scales differ by the notes' share of the corpus, and under a `kind` filter
+  also by the docs' share: the tail's note pass runs with `kind: None` while
+  the code list honours the caller's `kind` (the hint's note pass uses
+  `KindFilter::Code`). Measured trade-off: on
+  this repo's real notes it raised code-query noise from 2 to 6 of 60, while
+  recall over all three measured corpora rose from 75 to 80 of 114.
+- A `--memory DIR` that does not exist yet, under a large parent (a home
+  directory), is watched through the whole parent; on Linux this can exhaust
+  `max_user_watches` and `serve` then fails to start. The escape is an
+  existing folder.
+- `HOME` is read before `USERPROFILE` when finding the config dir.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.

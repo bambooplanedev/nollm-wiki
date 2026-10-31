@@ -85,7 +85,11 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 /// Most memory notes `search` lists after the code hits.
 pub(crate) const MEMORY_TAIL: usize = 2;
 /// Default gate length: a query word this long naming a note lets it in.
-pub(crate) const MEMORY_GATE_LEN: usize = 6;
+/// 8 from the offline measurement (2026-10-31: 114 memory and 105 code
+/// queries on three corpora): 6 and 4 put a note under 30-97% of code
+/// queries, 8 under 3-32% at 75 of 114 notes found against 86 at 6 (on
+/// the project's idf scale: 10-20%, 80 found).
+pub(crate) const MEMORY_GATE_LEN: usize = 8;
 /// A note whose score is at least this many times the best code hit's
 /// passes the gate without a name.
 pub(crate) const MEMORY_GATE_RATIO: f64 = 2.0;
@@ -98,6 +102,7 @@ pub(crate) fn gate_len() -> usize {
         std::env::var("WIKI_MEMORY_GATE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
+            .filter(|n| *n > 0)
             .unwrap_or(MEMORY_GATE_LEN)
     })
 }
@@ -498,6 +503,11 @@ impl Wiki {
         self.items
             .iter()
             .filter_map(|(id, items)| Some((self.entries.get(id)?.path.as_str(), items.as_slice())))
+    }
+
+    /// Whether `id` is an agent memory note.
+    pub(crate) fn is_memory(&self, id: &str) -> bool {
+        self.entries.get(id).is_some_and(|e| e.memory)
     }
 
     /// A page's rendered Markdown body by id, as it was when loaded.
@@ -1277,13 +1287,13 @@ impl Wiki {
     ) -> Vec<Hit> {
         let (tokens, query_words) = Self::query_tokens(q);
         let dates = query_dates(q);
-        let passes = |e: &Entry| {
+        let in_scope = |e: &Entry| match scope {
+            MemoryScope::With => true,
+            MemoryScope::Without => !e.memory,
+            MemoryScope::Only => e.memory,
+        };
+        let filtered = |e: &Entry| {
             !(prompt_terms.is_some() && is_vendored(&e.path))
-                && (match scope {
-                    MemoryScope::With => true,
-                    MemoryScope::Without => !e.memory,
-                    MemoryScope::Only => e.memory,
-                })
                 && kind.is_none_or(|f| {
                     (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
                 })
@@ -1293,6 +1303,7 @@ impl Wiki {
                         .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
                 })
         };
+        let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
                 return Vec::new();
@@ -1307,13 +1318,23 @@ impl Wiki {
         }
         let limit = limit.unwrap_or(10);
 
-        // Pass 1: facts per page, statistics over every filtered page.
+        // Pass 1: facts per page, statistics over every filtered page. Notes
+        // alone are scored on the project's scale (statistics over project
+        // pages plus notes), so the tail's ratio to the best code hit does
+        // not shrink as the project grows; `Without` keeps notes out of them.
+        let counted = |e: &Entry| {
+            if scope == MemoryScope::Only {
+                filtered(e)
+            } else {
+                passes(e)
+            }
+        };
         let mut n = 0usize;
         let mut total_len = 0usize;
         let mut df = vec![0usize; tokens.len() + dates.len()];
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
-            if !passes(e) {
+            if !counted(e) {
                 continue;
             }
             let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut df);
@@ -1321,7 +1342,9 @@ impl Wiki {
             // over hits alone would change with the query.
             n += 1;
             total_len += len;
-            candidates.extend(candidate);
+            if in_scope(e) {
+                candidates.extend(candidate);
+            }
         }
         if candidates.is_empty() {
             return Vec::new();

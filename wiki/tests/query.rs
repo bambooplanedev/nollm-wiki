@@ -1403,45 +1403,45 @@ fn code_hits_are_identical_with_and_without_notes() {
     );
 }
 
-/// A code page and three notes whose titles say `giraffe`: two dated with
+/// A code page and three notes whose titles say `elephant`: two dated with
 /// equal text, one undated.
-fn giraffe_fixture() -> (tempfile::TempDir, Wiki) {
+fn elephant_fixture() -> (tempfile::TempDir, Wiki) {
     code_fixture(&[
-        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        ("a.rs", "//! elephant\npub fn elephant() {}\n"),
         (
             ".agents/memory/a.md",
-            &note("Giraffe Aaa", "updated: 2026-01-01\n", "x"),
+            &note("Elephant Aaa", "updated: 2026-01-01\n", "x"),
         ),
         (
             ".agents/memory/b.md",
-            &note("Giraffe Bbb", "updated: 2026-03-01\n", "x"),
+            &note("Elephant Bbb", "updated: 2026-03-01\n", "x"),
         ),
-        (".agents/memory/c.md", &note("Giraffe Ccc", "", "x")),
+        (".agents/memory/c.md", &note("Elephant Ccc", "", "x")),
     ])
 }
 
 #[test]
 fn notes_come_after_code_as_a_tail_of_at_most_two() {
-    let (_d, w) = giraffe_fixture();
-    let hits = w.search("giraffe", None, 10);
+    let (_d, w) = elephant_fixture();
+    let hits = w.search("elephant", None, 10);
     let rows: Vec<_> = hits.iter().map(|h| (h.id.as_str(), h.memory)).collect();
     // Equal scores: the newer `updated` first, the undated note cut.
     assert_eq!(
         rows,
-        [("a", false), ("giraffe_bbb", true), ("giraffe_aaa", true)]
+        [("a", false), ("elephant_bbb", true), ("elephant_aaa", true)]
     );
 }
 
 #[test]
 fn tail_is_independent_of_kind_and_limit() {
-    let (_d, w) = giraffe_fixture();
+    let (_d, w) = elephant_fixture();
     let code = KindFilter::parse("code").unwrap();
     let ids: Vec<_> = w
-        .search("giraffe", Some(&code), 1)
+        .search("elephant", Some(&code), 1)
         .into_iter()
         .map(|h| h.id)
         .collect();
-    assert_eq!(ids, ["a", "giraffe_bbb", "giraffe_aaa"]);
+    assert_eq!(ids, ["a", "elephant_bbb", "elephant_aaa"]);
 }
 
 /// Loud code (`zebra` five times) and four notes: `rotation` only in the
@@ -1525,6 +1525,24 @@ fn tail_ratio_branch_needs_a_positive_note_score() {
 }
 
 #[test]
+fn tail_scores_use_the_project_scale() {
+    // Same page count; only the project page that also says `migration`
+    // differs, so a notes-only scale would give the note the same score.
+    let tail_score = |extra: &str| {
+        let (_d, w) = code_fixture(&[
+            ("a.rs", "pub fn other() {}\n"),
+            ("b.rs", extra),
+            (".agents/memory/m.md", &note("Migration plan", "", "x")),
+        ]);
+        let hits = w.search("migration", None, 10);
+        hits.iter().find(|h| h.memory).expect("tail note").score
+    };
+    let alone = tail_score("pub fn unrelated() {}\n");
+    let shared = tail_score("/// migration\npub fn migrate() {}\n");
+    assert!(shared < alone, "{shared} vs {alone}");
+}
+
+#[test]
 fn tail_ratio_branch_skips_a_note_the_code_outscores() {
     let (_d, w) = code_fixture(&[
         (
@@ -1567,36 +1585,36 @@ fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
 #[test]
 fn memory_tail_ignores_kind_and_the_code_part_respects_it() {
     let (_d, w) = code_fixture(&[
-        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        ("a.rs", "//! elephant\npub fn elephant() {}\n"),
         (
             ".agents/memory/note.md",
-            "---\ntitle: Giraffe note\n---\n\ngiraffe\n",
+            "---\ntitle: Elephant note\n---\n\nelephant\n",
         ),
     ]);
     let ids = |f: &str| {
         let f = KindFilter::parse(f).unwrap();
-        w.search("giraffe", Some(&f), 10)
+        w.search("elephant", Some(&f), 10)
             .into_iter()
             .map(|h| h.id)
             .collect::<Vec<_>>()
     };
-    assert_eq!(ids("code"), ["a", "giraffe_note"]);
-    assert_eq!(ids("docs"), ["giraffe_note"]);
-    assert_eq!(ids("markdown"), ["giraffe_note"]);
-    assert_eq!(ids("code:rust"), ["a", "giraffe_note"]);
+    assert_eq!(ids("code"), ["a", "elephant_note"]);
+    assert_eq!(ids("docs"), ["elephant_note"]);
+    assert_eq!(ids("markdown"), ["elephant_note"]);
+    assert_eq!(ids("code:rust"), ["a", "elephant_note"]);
 }
 
 #[test]
 fn memory_flag_shows_in_json_only_on_memory_hits() {
     let (_d, w) = code_fixture(&[
-        ("a.rs", "//! giraffe\npub fn giraffe() {}\n"),
+        ("a.rs", "//! elephant\npub fn elephant() {}\n"),
         (
             ".agents/memory/note.md",
-            "---\ntitle: Giraffe note\n---\n\ngiraffe\n",
+            "---\ntitle: Elephant note\n---\n\nelephant\n",
         ),
     ]);
     let j: serde_json::Value =
-        serde_json::from_str(&wiki::serve::search_json(w.search("giraffe", None, 10))).unwrap();
+        serde_json::from_str(&wiki::serve::search_json(w.search("elephant", None, 10))).unwrap();
     assert!(j[0].get("memory").is_none());
     assert_eq!(j[1]["memory"], true);
 }
@@ -1728,7 +1746,7 @@ fn journals() -> (tempfile::TempDir, Wiki) {
     let j = |day: &str, name: &str| {
         (
             format!(".agents/memory/journal/2026-10-{day}.md"),
-            format!("---\ntitle: Journal {name}\n---\n\nstand run notes\n"),
+            format!("---\ntitle: Notebook {name}\n---\n\nstand run notes\n"),
         )
     };
     let files = [j("05", "alpha"), j("12", "beta"), j("19", "gamma")];
@@ -1754,7 +1772,7 @@ fn a_date_in_the_query_ranks_the_note_of_that_day_first() {
         assert_eq!(first_note.updated.as_deref(), Some("2026-10-12"), "{q}");
     }
     // No date: the three journals tie, newest first.
-    let hits = w.search("journal stand", None, 10);
+    let hits = w.search("notebook stand", None, 10);
     let first_note = hits.iter().find(|h| h.memory).unwrap();
     assert_eq!(first_note.updated.as_deref(), Some("2026-10-19"));
 }
