@@ -589,7 +589,7 @@ matching:
   scores on the project's scale; only the candidates are notes. The
   environment variable `WIKI_MEMORY_GATE` sets the gate length; it exists for
   measurement and is not a user setting. `lines` prints a tail row as
-  `memory: <path> — <summary>` (the title when the summary is empty), JSON
+  `memory: <path> — <summary>` (the title when the summary is empty) and, when the hit has one, its snippet on an indented line; `page` on a note returns its text, JSON
   as a full hit; tag-only listings have no tail and mark a superseded note.
 - The searched body text is the rendered page's parsed sections minus
   generated chrome (`Metadata`, `Related`, `Imported by`, `Mentioned in`,

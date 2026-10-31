@@ -81,12 +81,13 @@ impl Wiki {
         Some(fit(&parse(self, id)?, max_tokens))
     }
 
-    /// What `page` shows: the outline, or with `full` the whole page. A full
+    /// What `page` shows: the outline, or with `full` (or for a memory note,
+    /// which always) the whole page. A full
     /// page over `max_tokens` becomes its outline when it is a code page with
     /// items, else a prefix of whole lines; either way a first or last line
     /// says so and the text fits `max_tokens`.
     pub fn page_text(&self, id: &str, full: bool, max_tokens: Option<usize>) -> Option<String> {
-        if !full {
+        if !full && !self.is_memory(id) {
             return self.outline(id, max_tokens);
         }
         let page = self.page(id)?;

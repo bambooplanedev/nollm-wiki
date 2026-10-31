@@ -481,6 +481,11 @@ impl Wiki {
             .filter_map(|(id, items)| Some((self.entries.get(id)?.path.as_str(), items.as_slice())))
     }
 
+    /// Whether `id` is an agent memory note.
+    pub(crate) fn is_memory(&self, id: &str) -> bool {
+        self.entries.get(id).is_some_and(|e| e.memory)
+    }
+
     /// A page's rendered Markdown body by id, as it was when loaded.
     pub fn page(&self, id: &str) -> Option<String> {
         self.bodies.get(id).cloned()

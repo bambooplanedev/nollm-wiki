@@ -344,7 +344,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 | Tool | Parameters | Returns |
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
-| `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page |
+| `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
@@ -395,7 +395,7 @@ Migration: `compile --memory local` is gone, and notes in the per-user folder of
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
 
 `search` lists the code and docs exactly as if no notes existed, then up to two notes, one per line,
-as `memory: <path> — <summary>`. A note is listed when a query word of eight or more characters is
+as `memory: <path> — <summary>`, each followed by its snippet on an indented line. A note is listed when a query word of eight or more characters is
 in its title, aliases or summary, or the query writes the note's `updated` day, or the note scores
 at least twice the best code hit, both scores counted on the project's scale (project pages plus
 notes). Notes pass the `code` and `docs` filters, and `wiki hint` adds
@@ -482,7 +482,7 @@ clean directory.
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
   `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
-  `memory:` lines (see [Agent memory](#agent-memory)).
+  `memory:` lines, each with its snippet line (see [Agent memory](#agent-memory)).
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
   no query, lists every such page. A query or `--tag` is required.
 - `--limit <N>` (`10` with a query) — maximum number of hits.
