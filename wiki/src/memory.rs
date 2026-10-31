@@ -32,9 +32,18 @@ pub fn display_path(p: &Path) -> String {
 }
 
 /// An external memory folder as one stable absolute path: canonical when it
-/// exists (no `..`, no symlink aliases, so it matches watch events), else merely absolute.
+/// exists (no `..`, no symlink aliases, so it matches watch events), else its
+/// canonical parent plus its name, else merely absolute.
 pub fn resolve(dir: &Path) -> std::io::Result<PathBuf> {
-    dir.canonicalize().or_else(|_| std::path::absolute(dir))
+    dir.canonicalize().or_else(|_| {
+        let abs = std::path::absolute(dir)?;
+        Ok(
+            match (abs.parent().map(Path::canonicalize), abs.file_name()) {
+                (Some(Ok(p)), Some(name)) => p.join(name),
+                _ => abs,
+            },
+        )
+    })
 }
 
 pub fn data_dir() -> Option<PathBuf> {
@@ -86,6 +95,19 @@ pub fn local_dir(root: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_a_missing_folder_through_its_canonical_parent() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().canonicalize().unwrap().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, d.path().join("link")).unwrap();
+        assert_eq!(
+            resolve(&d.path().join("link/mem")).unwrap(),
+            real.join("mem")
+        );
+    }
 
     fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
         let m: HashMap<String, String> = pairs

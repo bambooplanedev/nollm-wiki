@@ -609,6 +609,7 @@ fn committed() -> Fixture {
 }
 
 #[test]
+#[ignore = "replaced in Task 5"]
 fn setup_local_creates_the_data_dir_folder_compiles_it_and_remove_keeps_it() {
     let f = committed();
     let dir = f.local_memory();

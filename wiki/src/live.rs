@@ -95,10 +95,20 @@ impl Live {
             paths.push((barriers.as_path(), RecursiveMode::NonRecursive));
         }
         // A memory folder outside the source is its own watch; one that does
-        // not exist yet is left to the next start.
-        if let Some(mem) = live.opts.memory.as_deref().filter(|m| m.is_dir()) {
-            if !is_under(mem, &live.source) {
-                paths.push((mem, RecursiveMode::Recursive));
+        // not exist yet is watched through its parent, so creating it counts.
+        for mem in live
+            .opts
+            .memory
+            .iter()
+            .filter(|m| !is_under(m, &live.source))
+        {
+            let target = if mem.is_dir() {
+                Some(mem.as_path())
+            } else {
+                mem.parent().filter(|p| p.is_dir())
+            };
+            if let Some(t) = target {
+                paths.push((t, RecursiveMode::Recursive));
             }
         }
         let hook = Arc::clone(&live);

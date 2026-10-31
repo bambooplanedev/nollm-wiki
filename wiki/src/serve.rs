@@ -576,13 +576,15 @@ pub fn search_lines(hits: &[Hit]) -> String {
 
 /// Start the MCP server over stdio and block until the client disconnects.
 /// With `source`, the server compiles it into `dir` and keeps recompiling.
-/// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]).
+/// `tools` picks the exposed tools (default [`DEFAULT_TOOLS`]). `memory`
+/// lists the external memory folders: `["none"]` or `[]` for no folder
+/// (discovery comes with `agent_dirs`), else exactly those folders.
 pub fn run(
     dir: &Path,
     source: Option<&Path>,
     jobs: Option<usize>,
     tools: Option<&[String]>,
-    memory: Option<&str>,
+    memory: &[String],
 ) -> Result<(), WikiError> {
     let tools: Vec<&str> = match tools {
         None => DEFAULT_TOOLS.to_vec(),
@@ -602,13 +604,12 @@ pub fn run(
     };
     let state = match source {
         Some(source) => {
-            // The repo's local folder unless `none`; `DIR` replaces it.
             let memory = match memory {
-                Some("none") => None,
-                Some(d) => Some(crate::memory::resolve(Path::new(d))?),
-                None => crate::memory::local_dir(source)
-                    .map(|d| crate::memory::resolve(&d))
-                    .transpose()?,
+                [none] if none == "none" => Vec::new(),
+                dirs => dirs
+                    .iter()
+                    .map(|d| crate::memory::resolve(Path::new(d)))
+                    .collect::<Result<_, _>>()?,
             };
             let opts = CompileOptions {
                 incremental: true,

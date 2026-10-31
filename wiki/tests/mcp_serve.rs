@@ -1033,3 +1033,25 @@ fn serve_source_watches_an_external_memory_folder() {
     drop(stdin);
     let _ = child.wait();
 }
+
+#[test]
+fn external_memory_folder_created_after_start_is_watched() {
+    let project = source_project();
+    let ext = tempfile::tempdir().unwrap();
+    let mem = ext.path().join("mem");
+    let (mut child, mut stdin, stdout) =
+        spawn_server_source(project.path(), &["--memory", mem.to_str().unwrap()]);
+    initialize(&mut stdin, &stdout);
+    assert_eq!(
+        hit_ids(&search(&mut stdin, &stdout, 2, "echidnalate")),
+        [] as [String; 0]
+    );
+
+    std::fs::create_dir_all(&mem).unwrap();
+    std::fs::write(mem.join("late.md"), "# Late\n\nechidnalate\n").unwrap();
+    let ids = hit_ids(&search(&mut stdin, &stdout, 3, "echidnalate"));
+    assert!(ids.iter().any(|id| id.contains("late")), "ids: {ids:?}");
+
+    drop(stdin);
+    let _ = child.wait();
+}

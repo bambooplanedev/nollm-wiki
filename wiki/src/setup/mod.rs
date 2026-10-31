@@ -367,11 +367,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         let wiki = root.join(".wiki");
         let c = CompileOptions {
             incremental: true,
-            // Repo-scope notes are found by the compile itself; the local folder is external.
-            memory: local_memory
-                .as_ref()
-                .filter(|d| local || d.is_dir())
-                .and_then(|d| memory::resolve(d).ok()),
+            memory: vec![],
             ..CompileOptions::default()
         };
         let res = compile(root, &wiki, &c)?;

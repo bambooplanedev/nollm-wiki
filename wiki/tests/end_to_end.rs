@@ -960,7 +960,7 @@ fn external_memory_folder_compiles_with_its_absolute_path() {
     write(&external, "n.md", "# Ext Note\n\nbody\n");
 
     let opts = CompileOptions {
-        memory: Some(external.clone()),
+        memory: vec![external.clone()],
         ..Default::default()
     };
     let result = compile(&input, &output, &opts).unwrap();
@@ -982,7 +982,7 @@ fn memory_folder_given_twice_or_with_no_ignore_yields_each_note_once() {
     write(&input, "doc.md", "# Doc\n\nbody\n");
     write(&input, ".agents/memory/note.md", "# Note\n\nbody\n");
 
-    for memory in [None, Some(input.join(".agents/memory"))] {
+    for memory in [vec![], vec![input.join(".agents/memory")]] {
         let opts = CompileOptions {
             respect_ignore: false,
             memory,
@@ -1042,7 +1042,7 @@ fn external_note_colliding_with_another_never_gets_the_key_folder_in_its_title()
     write(&external, "a/n.md", "---\ntitle: Dup\n---\n\nA.\n");
     write(&external, "b/n.md", "---\ntitle: Dup\n---\n\nB.\n");
     let opts = CompileOptions {
-        memory: Some(external),
+        memory: vec![external],
         ..Default::default()
     };
     compile(&input, &output, &opts).unwrap();
@@ -1077,6 +1077,63 @@ fn memory_files_join_the_watch_set() {
     assert!(result
         .watch_set
         .relevant(&input.join(".agents/memory/new.md")));
+
+    let missing = root.join("missing");
+    let opts = CompileOptions {
+        memory: vec![missing.clone()],
+        ..Default::default()
+    };
+    let result = compile(&input, &output, &opts).unwrap();
+    assert!(result.watch_set.relevant(&missing.join("n.md")));
+}
+
+#[test]
+fn two_external_memory_folders_compile_and_a_missing_one_is_skipped() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let ext1 = dir.path().join("ext1");
+    let ext2 = dir.path().join("ext2");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&ext1, "a.md", "# Ext One\n\nbody\n");
+    write(&ext2, "b.md", "# Ext Two\n\nbody\n");
+    let opts = CompileOptions {
+        memory: vec![ext1, ext2, dir.path().join("missing")],
+        ..Default::default()
+    };
+    let result = compile(&input, &output, &opts).unwrap();
+    assert_eq!(result.pages_total, 3);
+    let entries = index_entries(&output);
+    for title in ["Ext One", "Ext Two"] {
+        let note = entries.iter().find(|e| e["title"] == title).unwrap();
+        assert_eq!(note["memory"], true, "{title}");
+    }
+}
+
+#[test]
+fn logs_folder_inside_a_memory_folder_is_skipped() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let ext = dir.path().join("ext");
+    write(&input, "doc.md", "# Doc\n\nbody\n");
+    write(&input, ".agents/memory/logs/r.md", "# Repo Log\n\nbody\n");
+    write(&ext, "n.md", "# Ext Note\n\nbody\n");
+    write(&ext, "logs/s.md", "# Ext Log\n\nbody\n");
+    let opts = CompileOptions {
+        memory: vec![ext.clone()],
+        ..Default::default()
+    };
+    compile(&input, &output, &opts).unwrap();
+    let paths: Vec<String> = index_entries(&output)
+        .iter()
+        .map(|e| e["path"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        paths.contains(&wiki::memory::display_path(&ext.join("n.md"))),
+        "{paths:?}"
+    );
+    assert!(!paths.iter().any(|p| p.contains("logs/")), "{paths:?}");
 }
 
 /// A title whose slug exceeds the file-name limit (255 bytes on common file

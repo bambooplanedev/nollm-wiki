@@ -497,93 +497,42 @@ fn cli_page_prints_the_same_text_as_page_text() {
 }
 
 #[test]
-fn compile_memory_flag_takes_a_dir_or_local() {
+fn compile_memory_flag_repeats_and_local_is_an_error() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
-    let ext = dir.path().join("ext");
-    let home = dir.path().join("home");
-    let xdg = dir.path().join("xdg");
-    let lad = dir.path().join("lad");
+    let ext1 = dir.path().join("ext1");
+    let ext2 = dir.path().join("ext2");
     fs::create_dir_all(&input).unwrap();
-    fs::create_dir_all(&ext).unwrap();
+    fs::create_dir_all(&ext1).unwrap();
+    fs::create_dir_all(&ext2).unwrap();
     fs::write(input.join("doc.md"), "# Doc\n\nbody\n").unwrap();
-    fs::write(ext.join("n.md"), "# Ext Note\n\nbody\n").unwrap();
-    let git = |args: &[&str]| {
-        let ok = std::process::Command::new("git")
-            .arg("-C")
-            .arg(&input)
-            .args([
-                "-c",
-                "user.name=t",
-                "-c",
-                "user.email=t@t",
-                "-c",
-                "commit.gpgsign=false",
-            ])
-            .args(args)
-            .status()
-            .is_ok_and(|s| s.success());
-        assert!(ok, "git {args:?}");
-    };
-    let have_git = std::process::Command::new("git")
-        .arg("--version")
-        .output()
-        .is_ok();
+    fs::write(ext1.join("a.md"), "# Ext One\n\nbody\n").unwrap();
+    fs::write(ext2.join("b.md"), "# Ext Two\n\nbody\n").unwrap();
 
-    let wiki = |out: &std::path::Path, memory: &str| {
-        Command::cargo_bin("wiki")
-            .unwrap()
-            .env("HOME", &home)
-            .env("XDG_DATA_HOME", &xdg)
-            .env("LOCALAPPDATA", &lad)
-            .args([
-                "compile",
-                input.to_str().unwrap(),
-                out.to_str().unwrap(),
-                "--memory",
-                memory,
-            ])
-            .assert()
-            .success();
-    };
-    let titles = |out: &std::path::Path| -> Vec<String> {
-        common::index_entries(out)
-            .iter()
-            .map(|e| e["title"].as_str().unwrap().to_string())
-            .collect()
-    };
-
-    let out1 = dir.path().join("out1");
-    wiki(&out1, ext.to_str().unwrap());
-    assert!(titles(&out1).contains(&"Ext Note".to_string()));
-
-    if !have_git {
-        return;
-    }
-    git(&["init", "-q"]);
-    git(&["commit", "-q", "--allow-empty", "-m", "one"]);
-    let env = |k: &str| match k {
-        "HOME" => Some(home.to_string_lossy().to_string()),
-        "XDG_DATA_HOME" => Some(xdg.to_string_lossy().to_string()),
-        "LOCALAPPDATA" => Some(lad.to_string_lossy().to_string()),
-        _ => None,
-    };
-    let key = wiki::memory::repo_key(&input).unwrap();
-    let local = wiki::memory::data_dir_for(std::env::consts::OS, &env)
+    let out = dir.path().join("out");
+    Command::cargo_bin("wiki")
         .unwrap()
-        .join("wiki/memory")
-        .join(key);
+        .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+        .args(["--memory", ext1.to_str().unwrap()])
+        .args(["--memory", ext2.to_str().unwrap()])
+        .assert()
+        .success();
+    let titles: Vec<String> = common::index_entries(&out)
+        .iter()
+        .map(|e| e["title"].as_str().unwrap().to_string())
+        .collect();
+    assert!(titles.contains(&"Ext One".to_string()), "{titles:?}");
+    assert!(titles.contains(&"Ext Two".to_string()), "{titles:?}");
 
-    // An absent local folder is no memory, not an error.
-    let out2 = dir.path().join("out2");
-    wiki(&out2, "local");
-    assert_eq!(titles(&out2), vec!["Doc".to_string()]);
-
-    fs::create_dir_all(&local).unwrap();
-    fs::write(local.join("l.md"), "# Local Note\n\nbody\n").unwrap();
-    let out3 = dir.path().join("out3");
-    wiki(&out3, "local");
-    assert!(titles(&out3).contains(&"Local Note".to_string()));
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+        .args(["--memory", "local"])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains(
+            "--memory local is no longer supported; pass the folder as --memory DIR",
+        ));
 }
 
 #[test]
@@ -637,4 +586,18 @@ fn serve_memory_requires_source() {
         .args(["serve", "--memory", "none"])
         .assert()
         .failure();
+}
+
+#[test]
+fn serve_memory_none_with_a_dir_is_an_error() {
+    let dir = tempdir().unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["serve", "--source", dir.path().to_str().unwrap()])
+        .args(["--memory", "none", "--memory", dir.path().to_str().unwrap()])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains(
+            "--memory none cannot be combined with a folder",
+        ));
 }
