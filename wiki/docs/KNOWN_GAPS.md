@@ -251,9 +251,13 @@ per question is noise-level: treat single results as anecdotes.
   scales differ by the notes' share of the corpus, and under a `kind` filter
   also by the docs' share: the tail's note pass runs with `kind: None` while
   the code list honours the caller's `kind` (the hint's note pass uses
-  `KindFilter::Code`). Measured trade-off: on
+  `KindFilter::Code`). Measured trade-off at a gate of 8: on
   this repo's real notes it raised code-query noise from 2 to 6 of 60, while
   recall over all three measured corpora rose from 75 to 80 of 114.
+- The gate length is one number for every model, 4, chosen for Claude Haiku's
+  short code-shaped queries; at 4 most code queries carry one or two tail rows
+  (about 540 bytes more per `search` answer on this repo) that a model writing
+  longer queries would not need. The code list is unchanged either way.
 - A `--memory DIR` that does not exist yet, under a large parent (a home
   directory), is watched through the whole parent; on Linux this can exhaust
   `max_user_watches` and `serve` then fails to start. The escape is an

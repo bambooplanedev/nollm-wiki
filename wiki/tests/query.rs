@@ -1413,26 +1413,32 @@ fn tail_gate_long_word_in_title_alias_or_summary() {
         tail.iter().all(|id| named.contains(&id.as_str())),
         "{tail:?}"
     );
-    // A four-character word passes only under `WIKI_MEMORY_GATE=4`, read once
-    // per process, so through the binary.
-    let lines = assert_cmd::Command::cargo_bin("wiki")
-        .unwrap()
-        .args(["search", "rota zebra", "--dir"])
-        .arg(&out)
-        .env("WIKI_MEMORY_GATE", "4")
-        .assert()
-        .success();
-    let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();
-    let tail: Vec<_> = lines
-        .lines()
-        .filter(|l| l.starts_with("memory: "))
-        .collect();
+    // A four-character word passes the default gate (4) and fails under
+    // `WIKI_MEMORY_GATE=8`, read once per process, so through the binary.
+    let rows = |gate: Option<&str>| {
+        let mut cmd = assert_cmd::Command::cargo_bin("wiki").unwrap();
+        cmd.args(["search", "rota zebra", "--dir"]).arg(&out);
+        if let Some(g) = gate {
+            cmd.env("WIKI_MEMORY_GATE", g);
+        }
+        let lines = cmd.assert().success();
+        let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();
+        let tail: Vec<_> = lines
+            .lines()
+            .filter(|l| l.starts_with("memory: "))
+            .map(str::to_owned)
+            .collect();
+        (lines, tail)
+    };
+    let (lines, tail) = rows(None);
     assert_eq!(tail.len(), 2, "{lines}");
     assert!(
         tail.iter()
             .all(|l| ["t.md", "a.md", "s.md"].iter().any(|f| l.contains(f))),
         "{lines}"
     );
+    let (lines, tail) = rows(Some("8"));
+    assert!(tail.is_empty(), "{lines}");
 }
 
 #[test]

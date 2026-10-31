@@ -189,19 +189,21 @@ fn hint_memory_line_comes_from_the_body_when_no_code_competes() {
 fn hint_gate_length_comes_from_the_env() {
     let tmp = project_with_memory();
     let prompt = "rota where are member creds loaded";
-    // `rota` (4 characters) names the note's title only under a gate of 4.
+    // `rota` (4 characters) names the note's title at the default gate (4)
+    // and not under a gate of 8.
+    let plain = hint_in(&tmp, prompt);
+    assert!(plain.contains("load_member_creds"), "{plain}");
+    assert!(memory_line(&plain).is_some(), "{plain}");
     let gated = Command::cargo_bin("wiki")
         .unwrap()
         .args(["hint", prompt, "--dir"])
         .arg(tmp.path().join(".wiki"))
-        .env("WIKI_MEMORY_GATE", "4")
+        .env("WIKI_MEMORY_GATE", "8")
         .assert()
         .success();
     let gated = String::from_utf8(gated.get_output().stdout.clone()).unwrap();
     assert!(gated.contains("load_member_creds"), "{gated}");
-    assert!(memory_line(&gated).is_some(), "{gated}");
-    let plain = hint_in(&tmp, prompt);
-    assert!(memory_line(&plain).is_none(), "{plain}");
+    assert!(memory_line(&gated).is_none(), "{gated}");
     // `0` is rejected: it behaves like the default gate.
     let zero = Command::cargo_bin("wiki")
         .unwrap()
@@ -211,7 +213,7 @@ fn hint_gate_length_comes_from_the_env() {
         .assert()
         .success();
     let zero = String::from_utf8(zero.get_output().stdout.clone()).unwrap();
-    assert!(memory_line(&zero).is_none(), "{zero}");
+    assert!(memory_line(&zero).is_some(), "{zero}");
 }
 
 #[test]
@@ -277,11 +279,11 @@ fn project_with_loud_code() -> TempDir {
     project_of(&[
         (
             "src/lib.rs",
-            "/// Cache cache cache: the cache of cached cache entries.\npub fn cache_cache() {}\n\n/// Cache keyrings keyrings lookups.\npub fn cache_keyring() {}\n",
+            "/// Cache cache cache evi: the cache of cached cache entries.\npub fn cache_cache() {}\n\n/// Cache keyrings keyrings lookups.\npub fn cache_keyring() {}\n",
         ),
         (
             ".agents/memory/n.md",
-            "---\ntitle: Eviction notes\naliases: [keyrings]\n---\n\nEntries live in the cache.\n",
+            "---\ntitle: Eviction notes\naliases: [keyrings]\n---\n\nEntries are evicted overnight.\n\nSee evi.\n",
         ),
     ])
 }
@@ -289,9 +291,13 @@ fn project_with_loud_code() -> TempDir {
 #[test]
 fn hint_memory_line_skips_a_short_word_the_code_outscores() {
     let tmp = project_with_loud_code();
-    let out = hint_in(&tmp, "cache");
+    // `evi` (3 characters) is in the note's body only, under the gate, and
+    // the code outscores the note; `evic` (4) names its title and passes.
+    let out = hint_in(&tmp, "cache evi");
     assert!(out.contains("cache_cache"), "{out}");
     assert!(memory_line(&out).is_none(), "{out}");
+    let out = hint_in(&tmp, "cache evic");
+    assert!(memory_line(&out).is_some(), "{out}");
 }
 
 #[test]
@@ -309,10 +315,6 @@ fn hint_memory_line_keeps_a_long_word_the_code_outscores() {
     let out = hint_in(&tmp, "cache keyrings");
     assert!(out.contains("cache_keyring"), "{out}");
     assert!(memory_line(&out).is_some(), "{out}");
-    // `lookups` (7 characters) names the note too, but is under the gate and
-    // the code outscores it; `keyrings` (8) passes.
-    let out = hint_in(&tmp, "cache lookups");
-    assert!(memory_line(&out).is_none(), "{out}");
 }
 
 #[test]

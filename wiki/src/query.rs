@@ -85,11 +85,13 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 /// Most memory notes `search` lists after the code hits.
 pub(crate) const MEMORY_TAIL: usize = 2;
 /// Default gate length: a query word this long naming a note lets it in.
-/// 8 from the offline measurement (2026-10-31: 114 memory and 105 code
-/// queries on three corpora): 6 and 4 put a note under 30-97% of code
-/// queries, 8 under 3-32% at 75 of 114 notes found against 86 at 6 (on
-/// the project's idf scale: 10-20%, 80 found).
-pub(crate) const MEMORY_GATE_LEN: usize = 8;
+/// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
+/// tasks): Haiku searches with short code-shaped words, so at 8 the note
+/// never appeared in 14 of 60 runs and 42 were right against 51 with the
+/// old boost; at 4, 49 of 60 (parity) with the code list still untouched.
+/// Offline, 4 puts a note under most code queries (about +540 bytes per
+/// answer on this repo); 8 under 3-32% but found 75 of 114 notes to 103.
+pub(crate) const MEMORY_GATE_LEN: usize = 4;
 /// A note whose score is at least this many times the best code hit's
 /// passes the gate without a name.
 pub(crate) const MEMORY_GATE_RATIO: f64 = 2.0;
