@@ -56,7 +56,9 @@ pub fn claude_memory_dir(root: &Path, env: &dyn Fn(&str) -> Option<String>) -> O
         root,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )
-    .map(PathBuf::from)
+    // git < 2.31 has no `--path-format`; its answer may be relative to `root`.
+    .or_else(|| git(root, &["rev-parse", "--git-common-dir"]))
+    .map(|c| root.join(c))
     .filter(|c| c.file_name().is_some_and(|n| n == ".git"))
     .and_then(|c| c.parent().map(Path::to_path_buf))
     .unwrap_or_else(|| root.to_path_buf());
