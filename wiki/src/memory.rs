@@ -120,11 +120,6 @@ pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-/// Whether `root` is inside a git repo.
-pub fn is_git_repo(root: &Path) -> bool {
-    git(root, &["rev-parse", "--git-common-dir"]).is_some()
-}
-
 // removal path only; delete one release after 0.6
 
 /// The per-user data dir for `os` (a `std::env::consts::OS` value), reading variables through `env`.
