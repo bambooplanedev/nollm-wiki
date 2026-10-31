@@ -494,17 +494,18 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             for (dir, current, shipped, why) in [
                 (
                     SKILL_DIR,
-                    skill_text,
+                    Some(skill_text),
                     &old_skills,
                     "the server instructions carry its steps",
                 ),
                 (
                     MEMORY_SKILL_DIR,
-                    old_memory_skills[0],
+                    old_memory_skills.first().copied(),
                     &old_memory_skills,
                     "Claude Code keeps its own memory, which the wiki now reads",
                 ),
             ] {
+                let Some(current) = current else { continue };
                 let old = Path::new(".claude").join(dir).join("SKILL.md");
                 let old_file = old.to_string_lossy();
                 if std::fs::read_to_string(root.join(&old))

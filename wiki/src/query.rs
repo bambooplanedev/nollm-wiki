@@ -102,6 +102,7 @@ pub(crate) fn gate_len() -> usize {
         std::env::var("WIKI_MEMORY_GATE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
+            .filter(|n| *n > 0)
             .unwrap_or(MEMORY_GATE_LEN)
     })
 }

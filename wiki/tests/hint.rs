@@ -145,7 +145,7 @@ fn project_with_memory() -> TempDir {
         ),
         (
             ".agents/memory/vault.md",
-            "---\ntitle: Vault rotation\naliases: [keyrings]\n---\n\nCredentials rotate overnight.\n\nBody mentions member and zebra and loaded things.\n",
+            "---\ntitle: Vault rotation\naliases: [keyrings, lookups]\n---\n\nCredentials rotate overnight.\n\nBody mentions member and zebra and loaded things.\n",
         ),
     ])
 }
@@ -202,6 +202,16 @@ fn hint_gate_length_comes_from_the_env() {
     assert!(memory_line(&gated).is_some(), "{gated}");
     let plain = hint_in(&tmp, prompt);
     assert!(memory_line(&plain).is_none(), "{plain}");
+    // `0` is rejected: it behaves like the default gate.
+    let zero = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["hint", prompt, "--dir"])
+        .arg(tmp.path().join(".wiki"))
+        .env("WIKI_MEMORY_GATE", "0")
+        .assert()
+        .success();
+    let zero = String::from_utf8(zero.get_output().stdout.clone()).unwrap();
+    assert!(memory_line(&zero).is_none(), "{zero}");
 }
 
 #[test]
@@ -299,6 +309,10 @@ fn hint_memory_line_keeps_a_long_word_the_code_outscores() {
     let out = hint_in(&tmp, "cache keyrings");
     assert!(out.contains("cache_keyring"), "{out}");
     assert!(memory_line(&out).is_some(), "{out}");
+    // `lookups` (7 characters) names the note too, but is under the gate and
+    // the code outscores it; `keyrings` (8) passes.
+    let out = hint_in(&tmp, "cache lookups");
+    assert!(memory_line(&out).is_none(), "{out}");
 }
 
 #[test]

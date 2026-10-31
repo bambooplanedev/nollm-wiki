@@ -339,7 +339,9 @@ that does not, such as Claude Desktop, give the project's absolute path.
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off the discovery of the agents'
   memory folders and a `DIR` replaces it (`none` with a `DIR` is a usage error); a `DIR` that does
-  not exist at start is not watched. `.agents/memory` is always compiled.
+  not exist at start is picked up when it appears if its parent exists (the parent is watched
+  recursively; a missing parent needs a restart). On Linux the parent watch costs one inotify watch
+  per directory under it, so pass an existing folder when the parent is large. `.agents/memory` is always compiled.
 
 | Tool | Parameters | Returns |
 |---|---|---|
@@ -580,8 +582,8 @@ exits 0 when the wiki is missing or nothing matches, so a hook can run it on eve
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
-When the prompt names a memory note in its title, an alias or its summary, one
-`memory: <path> — <summary>` line follows the code lines. It needs a prompt word of eight or more
+One `memory: <path> — <summary>` line follows the code lines when the prompt matches a memory note
+in its title, an alias or its summary and any of three holds. It needs a prompt word of eight or more
 characters in that match, or a date in the prompt that is the note's `updated` day, or the note
 scoring at least twice the best code page.
 
