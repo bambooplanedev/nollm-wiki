@@ -419,6 +419,9 @@ pub(crate) struct PassStats {
     n: usize,
     df: Vec<usize>,
     total_len: usize,
+    /// For a prompt: the summed idf of the words that count, what a page
+    /// hit once by each of them at weight 1 would score.
+    available: f64,
 }
 
 type StemMemo = std::sync::RwLock<HashMap<String, String>>;
@@ -1337,14 +1340,15 @@ impl Wiki {
     /// rarest words that occur at all count, since most of a prompt's words
     /// say how to work, not what to find. `hint` scores its note with the
     /// same call as its code, so the gate's ratio compares like with like.
+    /// Also returns `PassStats::available` for the prompt.
     pub(crate) fn search_prompt(
         &self,
         q: &str,
         limit: usize,
         terms: usize,
         scope: MemoryScope,
-    ) -> Vec<Hit> {
-        self.search_terms(
+    ) -> (Vec<Hit>, f64) {
+        let (hits, stats) = self.search_terms(
             q,
             Some(&KindFilter::Code),
             None,
@@ -1352,8 +1356,8 @@ impl Wiki {
             scope,
             Some(terms),
             None,
-        )
-        .0
+        );
+        (hits, stats.available)
     }
 
     /// Hits for `q` and the pass-1 statistics they were scored with. With
@@ -1447,6 +1451,7 @@ impl Wiki {
             n,
             ref df,
             total_len,
+            ..
         } = stats;
 
         // Pass 2: score. `n > 0` here because a candidate was counted.
@@ -1465,6 +1470,7 @@ impl Wiki {
             for &i in seen.iter().skip(terms) {
                 idf[i] = 0.0;
             }
+            stats.available = seen.iter().take(terms).map(|&i| idf[i]).sum();
         }
         let mut ranked: Vec<(Hit, f64)> = candidates
             .into_iter()

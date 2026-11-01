@@ -20,6 +20,14 @@ const HINT_TERMS: usize = 24;
 const HINT_SHORT_WORDS: usize = 64;
 /// A page is kept when its score is at least this share of the best page's.
 const HINT_MIN_REL: f64 = 0.5;
+/// No code lines when the best page scores below this share of what the
+/// prompt's counted words could give (`PassStats::available`): its words are
+/// scattered over the project, nothing names the task. Measured 2026-11-01:
+/// every bench task prompt that hinted its answer and every code question of
+/// this repo scores 0.59 or more (80 of 80 kept); 162 of 251 subagent briefs
+/// whose hint named no file the agent then opened score below (silent, about
+/// 460 bytes each), and 26 of 75 briefs whose hint did name one stay.
+const HINT_MIN_SHARE: f64 = 0.5;
 /// Fewest prompt tokens of two or more characters a hint needs: a reply
 /// such as `yes`, `ok`, `так` or `1-2` is not a task, and on the bench each
 /// found a test fixture or a note.
@@ -32,7 +40,8 @@ const HEADER: &str = "Code locations from the project wiki (path:start-end  name
 
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
 /// `text` (`path  title` for a page with no such line, such as a script
-/// whose matching code sits outside any function), then one `memory: path — summary` line for the best memory note
+/// whose matching code sits outside any function; none when the best page
+/// scores below `HINT_MIN_SHARE` of the prompt's available score), then one `memory: path — summary` line for the best memory note
 /// that passes the hint's gate: `search`'s tail gate (`Wiki::passes_gate`)
 /// with two differences for a prompt: a name match counts only when the
 /// prompt has at most `HINT_SHORT_WORDS` distinct words, the ratio branch
@@ -43,12 +52,16 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     if is_harness_prompt(text) || Wiki::prompt_tokens(text).len() < HINT_MIN_TOKENS {
         return String::new();
     }
-    let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
+    let (hits, available) = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
+    let named = best >= HINT_MIN_SHARE * available;
     let mut seen = HashSet::new();
     let mut out = String::new();
     let mut left = HINT_LINES;
-    for h in hits.iter().filter(|h| h.score >= HINT_MIN_REL * best) {
+    for h in hits
+        .iter()
+        .filter(|h| named && h.score >= HINT_MIN_REL * best)
+    {
         let mut lines = page_lines(&h.symbols).peekable();
         if lines.peek().is_none() && left > 0 {
             push_line(&mut out, &format!("{}  {}", h.path, h.title));
@@ -71,6 +84,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
     let note = wiki
         .search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Only)
+        .0
         .into_iter()
         .find(|h| {
             h.superseded_by.is_none()
