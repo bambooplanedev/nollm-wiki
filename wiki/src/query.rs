@@ -305,18 +305,6 @@ impl Hit {
     }
 }
 
-/// Whether a page sits under a folder of other people's code.
-fn is_vendored(path: &str) -> bool {
-    const FOLDERS: [&str; 5] = [
-        "third_party",
-        "third-party",
-        "vendor",
-        "vendored",
-        "node_modules",
-    ];
-    path.split('/').any(|part| FOLDERS.contains(&part))
-}
-
 /// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
 /// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
 /// marker counts only when whitespace or the line end follows it, so
@@ -1396,15 +1384,13 @@ impl Wiki {
             MemoryScope::Only => e.memory,
         };
         let filtered = |e: &Entry| {
-            !(prompt_terms.is_some() && is_vendored(&e.path))
-                && kind.is_none_or(|f| {
-                    (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
-                })
-                && tag.is_none_or(|t| {
-                    e.tags
-                        .iter()
-                        .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
-                })
+            kind.is_none_or(|f| {
+                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
+            }) && tag.is_none_or(|t| {
+                e.tags
+                    .iter()
+                    .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+            })
         };
         let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {

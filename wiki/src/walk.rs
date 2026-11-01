@@ -10,6 +10,21 @@ pub struct SourceFile {
     pub bytes: Vec<u8>,
 }
 
+/// Folders the compile never walks: the superpowers workflow's process
+/// artefacts (specs, plans, ledgers, run logs; memory notes carry what they
+/// concluded) and vendored code. On one bench project they were 2,358 of
+/// 3,298 pages and 77% of the wiki's bytes (2,261 run logs, plans and specs
+/// under `docs/superpowers/`, 97 CLI11 pages under `third_party/`).
+/// `--no-ignore` walks them too.
+pub const SKIPPED_DIRS: [&str; 6] = [
+    "superpowers",
+    "third_party",
+    "third-party",
+    "vendor",
+    "vendored",
+    "node_modules",
+];
+
 /// What a walk reached: the kept files, and every directory it yielded (root
 /// included, sorted). Ignored subtrees are pruned, so they appear in neither.
 pub struct Walked {
@@ -26,7 +41,8 @@ pub struct Walked {
 /// rules are honored even when `root` is not inside an actual `.git`
 /// repository (e.g. a plain tempdir in tests). When `respect_ignore` is
 /// false, no filtering is applied and all files are returned, including
-/// hidden and normally-ignored ones.
+/// hidden and normally-ignored ones. [`SKIPPED_DIRS`] are pruned with the
+/// ignore rules (the root itself is never pruned by name).
 /// Results are sorted by `rel_path` for determinism, and files are read as
 /// raw bytes. Entries that error out (permission issues, broken symlinks,
 /// unreadable files) are skipped rather than aborting the walk.
@@ -44,6 +60,16 @@ pub fn walk(root: &Path, respect_ignore: bool, keep: &dyn Fn(&str) -> bool) -> W
                 .git_exclude(respect_ignore)
                 .ignore(respect_ignore)
                 .parents(respect_ignore);
+            if respect_ignore {
+                b.filter_entry(|e| {
+                    e.depth() == 0
+                        || !e.file_type().is_some_and(|t| t.is_dir())
+                        || !e
+                            .file_name()
+                            .to_str()
+                            .is_some_and(|n| SKIPPED_DIRS.contains(&n))
+                });
+            }
         },
         keep,
     )
