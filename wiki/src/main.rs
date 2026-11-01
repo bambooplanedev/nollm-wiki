@@ -35,8 +35,6 @@ enum Command {
         no_ignore: bool,
         #[arg(long)]
         emit_json: bool,
-        #[arg(long)]
-        watch: bool,
         /// Project name written to index.json, llms.txt and AGENTS.md
         /// (default: the input directory's basename).
         #[arg(long)]
@@ -210,7 +208,6 @@ fn main() -> Result<()> {
             incremental,
             no_ignore,
             emit_json,
-            watch,
             project,
             memory: memory_arg,
         } => {
@@ -238,32 +235,27 @@ fn main() -> Result<()> {
                 project,
                 memory,
             };
-            if watch {
-                wiki::watch::watch(&input, &output, &opts).context("watch failed")?;
-            } else {
-                let r = compile(&input, &output, &opts).context("compile failed")?;
-                println!(
-                    "Compiled {} pages ({} written) -> {}",
-                    r.pages_total,
-                    r.pages_written,
-                    output.display()
-                );
-                println!(
-                    "Lint: {} broken links, {} orphans, {} large",
-                    r.lint.broken_links.len(),
-                    r.lint.orphans.len(),
-                    r.lint.large.len()
-                );
-                if !no_ignore {
-                    let mut compiled = opts.memory.clone();
-                    compiled.push(input.join(wiki::memory::REPO_DIR));
-                    compiled.push(output.clone());
-                    let skipped = wiki::walk::skipped(&input, &compiled);
-                    if !skipped.is_empty() {
-                        let rules: Vec<_> =
-                            skipped.iter().map(|(r, n)| format!("{r} {n}")).collect();
-                        println!("Skipped: {}", rules.join(", "));
-                    }
+            let r = compile(&input, &output, &opts).context("compile failed")?;
+            println!(
+                "Compiled {} pages ({} written) -> {}",
+                r.pages_total,
+                r.pages_written,
+                output.display()
+            );
+            println!(
+                "Lint: {} broken links, {} orphans, {} large",
+                r.lint.broken_links.len(),
+                r.lint.orphans.len(),
+                r.lint.large.len()
+            );
+            if !no_ignore {
+                let mut compiled = opts.memory.clone();
+                compiled.push(input.join(wiki::memory::REPO_DIR));
+                compiled.push(output.clone());
+                let skipped = wiki::walk::skipped(&input, &compiled);
+                if !skipped.is_empty() {
+                    let rules: Vec<_> = skipped.iter().map(|(r, n)| format!("{r} {n}")).collect();
+                    println!("Skipped: {}", rules.join(", "));
                 }
             }
         }

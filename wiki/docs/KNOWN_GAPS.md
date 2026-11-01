@@ -233,14 +233,11 @@ per question is noise-level: treat single results as anecdotes.
   README, Obsidian and Quartz. Inferred from the page format, not tested in
   Obsidian.
 
-## `serve --source` and `--watch`
+## `serve --source`
 
 - Files written only through `mmap` are not seen as changed.
-- `compile --watch` ignores an inotify queue overflow instead of rescanning.
 - Barrier files left by a crashed server stay in `.wiki/.serve/`.
-- A running `compile --watch` does not notice its binary was replaced and
-  keeps recompiling with the old compiler; `serve` does notice. A compile
-  already running when `serve`'s binary is replaced still finishes.
+- A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
 - `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
@@ -267,7 +264,6 @@ per question is noise-level: treat single results as anecdotes.
 
 - A plain `wiki compile . .wiki` drops the agents' notes until the server
   recompiles, so `wiki hint` loses the memory line meanwhile.
-- `compile --watch` does not watch an external `--memory` folder.
 - `--no-ignore` walks `.wiki/`, whose pages can hold memory text.
 - `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
 - Claude Code normalises the project path to NFC before slugging; the wiki

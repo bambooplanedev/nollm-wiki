@@ -1,4 +1,4 @@
-//! The `wiki` binary's subcommands end to end through `assert_cmd`: compile, search, neighbors, lint, generate, and `--watch`.
+//! The `wiki` binary's subcommands end to end through `assert_cmd`: compile, search, neighbors, lint, and generate.
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt;
@@ -368,76 +368,6 @@ fn search_cli_tag_lists_and_filters() {
     search(&["--tag", "#"])
         .failure()
         .stderr(contains("empty tag"));
-}
-
-/// Kills the watcher when the test ends — including on a failed assertion,
-/// so a stray `wiki compile --watch` never outlives its tempdir.
-struct KillOnDrop(std::process::Child);
-impl Drop for KillOnDrop {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn wait_for(path: &std::path::Path, what: &str) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while !path.exists() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out after 10s waiting for {what}: {}",
-            path.display()
-        );
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
-}
-
-#[test]
-fn watch_recompiles_on_change() {
-    use std::io::BufRead;
-    let dir = tempdir().unwrap();
-    let input = dir.path().join("raw");
-    let output = dir.path().join("out");
-    fs::create_dir_all(&input).unwrap();
-    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha stands alone.\n").unwrap();
-
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_wiki"))
-        .args([
-            "compile",
-            input.to_str().unwrap(),
-            output.to_str().unwrap(),
-            "--watch",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let mut stderr = std::io::BufReader::new(child.stderr.take().unwrap());
-    let _guard = KillOnDrop(child);
-
-    // The watcher is registered only after the initial compile and before
-    // `watching …` is printed (watch.rs); a change written before that line
-    // would be missed, so wait for it rather than for index.json alone.
-    let mut line = String::new();
-    loop {
-        line.clear();
-        let n = stderr.read_line(&mut line).unwrap();
-        assert!(n > 0, "watcher exited before printing `watching`");
-        if line.starts_with("watching ") {
-            break;
-        }
-    }
-    assert!(
-        output.join("index.json").exists(),
-        "initial compile did not write index.json"
-    );
-    assert!(!output.join("gamma.md").exists());
-
-    fs::write(input.join("gamma.txt"), "# Gamma\n\nGamma arrived later.\n").unwrap();
-    wait_for(
-        &output.join("gamma.md"),
-        "the watcher to recompile the new gamma.txt into gamma.md",
-    );
 }
 
 #[test]

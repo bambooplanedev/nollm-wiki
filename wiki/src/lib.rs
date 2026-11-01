@@ -155,8 +155,7 @@ fn compile_inner(
     // 1. Walk + parallel extract (ordered — collecting into a Vec preserves
     // the sorted-by-rel_path order that `walk` produced). Files under
     // `output` are excluded so a nested output dir never feeds its own
-    // generated pages back in as sources (which would also self-trigger a
-    // `--watch` recompile loop).
+    // generated pages back in as sources.
     let registry = Registry::with_defaults();
     let walked = walk::walk(input, opts.respect_ignore, &|p| registry.handles(p));
 
