@@ -469,7 +469,11 @@ recompile.
 
 Without `--no-ignore`, a folder named `superpowers` (at any depth) and vendored code (`third_party`,
 `third-party`, `vendor`, `vendored`, `node_modules`) are not walked: memory notes carry what those
-process artefacts concluded, and other people's code crowds out the project's own.
+process artefacts concluded, and other people's code crowds out the project's own. After a run,
+`compile` prints how many files it left out, for example `Skipped: superpowers 2280, third_party 97,
+ignored 16800`: one count per folder name, and `ignored` for the `.gitignore`/`.ignore`/hidden rules.
+A file counts once, for its outermost skipped folder; `.git`, `<OUTPUT>` and the memory folders are not
+counted, and `--watch` and `--no-ignore` print no such line.
 - `--emit-json` — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
   `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project

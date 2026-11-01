@@ -1,7 +1,8 @@
 //! Source tree walk: gitignore-aware, sorted, deterministic file discovery for the compiler.
 
 use crate::model::normalize_path;
-use ignore::WalkBuilder;
+use ignore::{DirEntry, WalkBuilder};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 pub struct SourceFile {
@@ -51,28 +52,72 @@ pub struct Walked {
 /// reading. It is consulted *before* the file is opened, which is the whole
 /// point: see the note at the read site below.
 pub fn walk(root: &Path, respect_ignore: bool, keep: &dyn Fn(&str) -> bool) -> Walked {
-    walk_with(
-        root,
-        |b| {
-            b.hidden(respect_ignore)
-                .git_ignore(respect_ignore)
-                .git_global(respect_ignore)
-                .git_exclude(respect_ignore)
-                .ignore(respect_ignore)
-                .parents(respect_ignore);
-            if respect_ignore {
-                b.filter_entry(|e| {
-                    e.depth() == 0
-                        || !e.file_type().is_some_and(|t| t.is_dir())
-                        || !e
-                            .file_name()
-                            .to_str()
-                            .is_some_and(|n| SKIPPED_DIRS.contains(&n))
-                });
-            }
-        },
-        keep,
-    )
+    walk_with(root, |b| project_rules(b, respect_ignore), keep)
+}
+
+fn project_rules(b: &mut WalkBuilder, respect_ignore: bool) {
+    b.hidden(respect_ignore)
+        .git_ignore(respect_ignore)
+        .git_global(respect_ignore)
+        .git_exclude(respect_ignore)
+        .ignore(respect_ignore)
+        .parents(respect_ignore);
+    if respect_ignore {
+        b.filter_entry(|e| {
+            e.depth() == 0
+                || !e.file_type().is_some_and(|t| t.is_dir())
+                || !e
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|n| SKIPPED_DIRS.contains(&n))
+        });
+    }
+}
+
+/// How many files [`walk`] leaves out of `root`: `(name, files)` per
+/// [`SKIPPED_DIRS`] name, then `("ignored", files)` for every other rule, zero
+/// counts dropped. A file counts once, for its outermost pruned path, so
+/// `target/vendor/x` is ignored and a gitignored `vendor/` is `vendor`. A file
+/// `keep` refuses was reached, so it is no skip. `.git` and the `compiled`
+/// folders (the output, the memory folders) are left out of the count. Lists
+/// directories and opens no source file; a second walk, so the CLI's alone.
+pub fn skipped(root: &Path, compiled: &[PathBuf]) -> Vec<(&'static str, usize)> {
+    let mut reached = WalkBuilder::new(root);
+    project_rules(&mut reached, true);
+    reached.require_git(false);
+    let reached: HashSet<PathBuf> = reached.build().flatten().map(DirEntry::into_path).collect();
+
+    let compiled = compiled.to_vec();
+    let mut everything = WalkBuilder::new(root);
+    everything.standard_filters(false).filter_entry(move |e| {
+        e.file_name().to_str() != Some(".git")
+            && !(e.file_type().is_some_and(|t| t.is_dir())
+                && compiled.iter().any(|d| crate::is_under(e.path(), d)))
+    });
+
+    let mut counts = [0; SKIPPED_DIRS.len() + 1];
+    for entry in everything.build().flatten() {
+        let path = entry.path();
+        if !entry.file_type().is_some_and(|t| t.is_file()) || reached.contains(path) {
+            continue;
+        }
+        let outermost = path
+            .ancestors()
+            .take_while(|a| *a != root)
+            .filter(|a| !reached.contains(*a))
+            .last();
+        let rule = outermost
+            .filter(|top| *top != path)
+            .and_then(|top| top.file_name()?.to_str())
+            .and_then(|n| SKIPPED_DIRS.iter().position(|s| *s == n));
+        counts[rule.unwrap_or(SKIPPED_DIRS.len())] += 1;
+    }
+    SKIPPED_DIRS
+        .into_iter()
+        .chain(["ignored"])
+        .zip(counts)
+        .filter(|(_, n)| *n > 0)
+        .collect()
 }
 
 fn walk_with(
@@ -261,6 +306,52 @@ mod tests {
         let rels: Vec<_> = w.files.iter().map(|f| f.rel_path.clone()).collect();
         assert_eq!(rels, vec!["a.md", "sub/b.md"]);
         assert_eq!(w.dirs, vec![root.to_path_buf(), root.join("sub")]);
+    }
+
+    /// `.git` (a directory, or a file in a linked worktree) is never counted.
+    fn tree_with_every_skip(root: &Path) {
+        for (path, body) in [
+            (".gitignore", "build/\nsecret.txt\n"),
+            ("keep.txt", "k"),
+            ("clip.mov", "a file `keep` refuses is reached, not skipped"),
+            ("secret.txt", "s"),
+            ("build/a.o", "b"),
+            ("build/vendor/b.o", "outermost is the ignored build/"),
+            (".hidden/c.txt", "c"),
+            ("docs/superpowers/plan.md", "p"),
+            ("docs/superpowers/spec.md", "p"),
+            ("docs/superpowers/vendor/d.md", "outermost is superpowers"),
+            ("node_modules/x/e.js", "n"),
+            (".git/HEAD", "h"),
+            ("sub/.git", "gitdir: elsewhere"),
+            (".wiki/page.md", "the output, not a skipped source"),
+            (".agents/memory/note.md", "compiled from the memory walk"),
+        ] {
+            let p = root.join(path);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, body).unwrap();
+        }
+    }
+
+    #[test]
+    fn skipped_counts_each_file_once_for_its_outermost_rule() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        tree_with_every_skip(root);
+
+        let own = [root.join(".wiki"), root.join(".agents/memory")];
+        assert_eq!(
+            skipped(root, &own),
+            vec![("superpowers", 3), ("node_modules", 1), ("ignored", 5)],
+            "ignored is .gitignore, secret.txt, build/ (2) and .hidden/"
+        );
+    }
+
+    #[test]
+    fn skipped_is_empty_when_nothing_is_skipped() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        assert_eq!(skipped(dir.path(), &[]), []);
     }
 
     #[cfg(unix)]

@@ -239,6 +239,17 @@ fn main() -> Result<()> {
                     r.lint.orphans.len(),
                     r.lint.large.len()
                 );
+                if !no_ignore {
+                    let mut compiled = opts.memory.clone();
+                    compiled.push(input.join(wiki::memory::REPO_DIR));
+                    compiled.push(output.clone());
+                    let skipped = wiki::walk::skipped(&input, &compiled);
+                    if !skipped.is_empty() {
+                        let rules: Vec<_> =
+                            skipped.iter().map(|(r, n)| format!("{r} {n}")).collect();
+                        println!("Skipped: {}", rules.join(", "));
+                    }
+                }
             }
         }
         Command::Neighbors {

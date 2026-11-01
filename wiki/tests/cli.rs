@@ -635,3 +635,32 @@ fn cli_page_on_a_memory_note_prints_its_text_but_a_doc_prints_headings() {
         "{doc}"
     );
 }
+
+#[test]
+fn compile_reports_what_it_skipped_after_the_lint_line() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = input.join(".wiki");
+    fs::create_dir_all(input.join("vendor/x")).unwrap();
+    fs::write(input.join("a.txt"), "# A\n").unwrap();
+    fs::write(input.join("vendor/x/b.txt"), "# B\n").unwrap();
+    fs::write(input.join("vendor/c.txt"), "# C\n").unwrap();
+    fs::write(input.join(".hidden.txt"), "# H\n").unwrap();
+
+    let run = |extra: &[&str]| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .args(["compile", input.to_str().unwrap(), output.to_str().unwrap()])
+            .args(extra)
+            .assert()
+            .success()
+    };
+    // Twice: the second run has an output folder that must stay uncounted.
+    run(&[]);
+    let out = run(&[]).get_output().stdout.clone();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(out.lines().nth(2), Some("Skipped: vendor 2, ignored 1"));
+    assert_eq!(out.lines().count(), 3, "{out}");
+
+    run(&["--no-ignore"]).stdout(contains("Skipped").not());
+}
