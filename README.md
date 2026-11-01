@@ -485,16 +485,13 @@ process artefacts concluded, and other people's code crowds out the project's ow
 `compile` prints how many files it left out, for example `Skipped: superpowers 2280, third_party 97,
 ignored 16800`: one count per folder name, and `ignored` for the `.gitignore`/`.ignore`/hidden rules.
 A file counts once, for its outermost skipped folder; `.git`, `<OUTPUT>` and the memory folders are not
-counted, and `--watch` and `--no-ignore` print no such line.
+counted, and `--no-ignore` prints no such line.
 - `--emit-json` — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
   `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project
   differently.
 - `--memory <DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is always compiled; `--memory local` is an error.
-- `--watch` — compile once, then keep watching `<INPUT>` and recompile on change. Events are
-  debounced for 150 ms, events under `<OUTPUT>` are ignored, and each run reports
-  `recompiled: N pages (M written)` on stderr.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an earlier version, or sources
 renamed since), `compile` warns on stderr and leaves them in place: delete them or recompile into a
@@ -809,7 +806,7 @@ prompts showed a note before, 5 after), short questions unchanged.
   called on a value of unknown type lists every same-named method the caller's files see.
 - **Three formats.** Text, Markdown and code; no PDF, OCR or audio.
 - **The MCP server is query-only**, over stdio; it recompiles on file edits, not on request.
-- **`--watch` covers `compile` only**, and the graph export is JSON only.
+- **The graph export is JSON only.**
 
 Measured shortfalls and agent behaviour: [wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md).
 Internals, determinism rules and how to add a language: [wiki/docs/ARCHITECTURE.md](wiki/docs/ARCHITECTURE.md).

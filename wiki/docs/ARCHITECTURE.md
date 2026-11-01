@@ -181,8 +181,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/setup/edit.rs` | Owned edits: JSON entries, files, marked text blocks and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/setup/navigation.md` | The navigation steps `setup` writes into `AGENTS.md` for Codex. |
-| `src/watch.rs` | `watch()`/`recompile_once()` — filesystem-watch-triggered recompilation, ignoring reads (`Access` events: inotify reports every open, the compile's own walk included), events under `output`, and paths the compile's ignore rules skip (`WatchSet`), debounced 150 ms; prints `watching … (Ctrl-C to stop)` and `recompiled: N pages (M written)` on stderr. Also supplies the watch setup (with an event hook) and `WatchSet` that `live.rs` reuses. |
-| `src/main.rs` | CLI entry point (`clap`): `compile` (with `--watch` to loop via `watch::watch`), `neighbors`, `page` (`--full`, `--max-tokens`), `search` (`--kind`, `--format lines|json`), `lint`, `serve`, `hint`, `setup`, `generate`. |
+| `src/watch.rs` | What `live.rs` watches with: `start()` — the watch setup, with an event hook; `is_change()` — rejects reads (`Access` events: inotify reports every open, the compile's own walk included); `WatchSet` — judges a path by the compile's ignore rules; `DEBOUNCE` — 150 ms. |
+| `src/main.rs` | CLI entry point (`clap`): `compile`, `neighbors`, `page` (`--full`, `--max-tokens`), `search` (`--kind`, `--format lines|json`), `lint`, `serve`, `hint`, `setup`, `generate`. |
 
 **The `extract_*.rs` names are two words on purpose, not tidiness.** Page
 titles are derived from file stems and are inputs to both the graph and
