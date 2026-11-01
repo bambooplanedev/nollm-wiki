@@ -84,7 +84,7 @@ From a [release](https://github.com/bambooplanedev/llm-wiki-nollm/releases): dow
 for your platform (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`) and
 put the `wiki` binary in a directory on your `PATH`, since agents start it as plain `wiki`:
 
-    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.5.0/wiki-v0.5.0-aarch64-apple-darwin.tar.gz | tar -xz
+    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.0/wiki-v0.6.0-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
 From source:
@@ -753,6 +753,25 @@ ranked a look-alike first.
 
 Large files, same C++ repo, without and with the wiki: runs that read a 500-plus-line file whole
 went from 14/25 to 0/25 for both models, lines read from 386 to 70 (qwen) and 551 to 184 (deepseek).
+
+Agent memory, 2026-11-01. Notes from the agents' own folders (Claude Code's project memory,
+`.agents/memory`) are listed by `search` after the code, which stays byte-identical to a run without
+notes, and by the hook line. Same rig, two fixture repos with 15 synthetic notes each whose answer
+is a token in one note; 30 memory tasks × 2 runs and 8 code tasks × 3 runs per arm:
+
+| model | memory tasks right: no notes / notes after the code / 0.5.0 ranking (notes mixed in) | code tasks right |
+|---|---|---|
+| qwen3.8-27b + deepseek-v4.1-flash | 0/120 / 114/120 / 117/120 | 48/48 on every arm |
+| claude-haiku-5-5 | 0/60 / 49/60 / 51/60 | 24/24 on every arm |
+
+The 0.5.0 ranking put a note first in 51 of 60 code queries; the tail changes no code line. Haiku
+needs the four-letter name gate: at eight letters its short, code-shaped queries never surfaced
+the note in 14 of 60 runs (42/60 right). What the gate costs on code work (Haiku, 12 code tasks
+with no note about them, served with 42 notes about other projects, 36 runs): a foreign note under
+27 runs, none opened, 36/36 right, 74 lines read against 83 without notes, about 340 bytes more per
+search answer. The hook line changes no answer on Haiku (49/60 with or without it) and saves a
+search per task; on long task prompts it names a note only up to 64 distinct words (53 of 58 long
+prompts showed a note before, 5 after), short questions unchanged.
 
 ## Limitations
 
