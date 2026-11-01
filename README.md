@@ -51,7 +51,8 @@ wiki/src/lib.rs
 
 ## Features
 
-- **Symbol search.** `search` ranks pages by names, words, docs and imports, and under each code
+- **Symbol search.** `search` ranks pages by names, words, docs and imports, a query word that is a
+  file name or path suffix (`strategy_config.h`, `manager/mod.rs`) lifts that file, and under each code
   page lists its matching functions and types as `path:start-end  name  signature — doc`.
 - **Outlines.** `page` prints one line per symbol of a file with its line range, so an agent reads
   forty lines instead of four thousand.

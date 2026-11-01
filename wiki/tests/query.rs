@@ -1878,3 +1878,21 @@ fn tail_keeps_the_newest_of_many_equal_notes() {
         .collect();
     assert_eq!(ups, ["2026-10-12", "2026-10-11"]);
 }
+
+#[test]
+fn a_memory_note_earns_nothing_for_its_file_name() {
+    let (_d, w) = code_fixture(&[
+        ("a.rs", "pub fn plain() {}\n"),
+        (
+            ".agents/memory/elephant.md",
+            &note("Elephant herd", "", "x"),
+        ),
+    ]);
+    let score = |q: &str| {
+        w.search(q, None, 10)
+            .iter()
+            .find(|h| h.memory)
+            .map(|h| h.score)
+    };
+    assert_eq!(score("elephant"), score("elephant elephant.md"));
+}

@@ -70,6 +70,12 @@ per question is noise-level: treat single results as anecdotes.
 
 ## Search
 
+- **A named file is a weight, not a guarantee.** A query word that is a file
+  name or a path suffix adds `W_FILE`, so a rare identifier on another page can
+  still lead (the named file was first in 778 of 866 generated queries, top 5 in
+  all), and a name on many pages (`mod.rs`) weighs little. `src/a.rs:120` and an
+  absolute path do not count, nor does a file name with no extension. A hint
+  ignores the rule: a prompt naming a file does not find it for that reason.
 - **Vocabulary is literal.** No synonyms: "credentials" does not find
   `creds`. Cyrillic query words are stemmed by a fixed ending list, on the
   query side only, so a stem can also hit an unrelated word that shares it.

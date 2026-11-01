@@ -407,6 +407,8 @@ struct Candidate<'a> {
     /// Per query token, in query order: (summed field weights, body
     /// occurrences).
     per_token: Vec<(f64, usize)>,
+    /// The tokens that name this page's file.
+    file_tokens: Vec<usize>,
     /// Whitespace-word count of the searchable content.
     len: usize,
     snippet: Option<String>,
@@ -419,6 +421,8 @@ pub(crate) struct PassStats {
     n: usize,
     df: Vec<usize>,
     total_len: usize,
+    /// Per token, the pages whose file it names (`Wiki::names_file`).
+    named: Vec<usize>,
     /// For a prompt: the summed idf of the words that count, what a page
     /// hit once by each of them at weight 1 would score.
     available: f64,
@@ -583,6 +587,15 @@ impl Wiki {
     // query finds its page although symbol words of other pages share the
     // title's words (`summary_suffix` against the page `Summary`).
     const W_TITLE: f64 = 3.0;
+    // Added for a token that is the page's file name or a path suffix of it
+    // (`names_file`), times `idf` of the N pages it names and over `sqrt(N)`: a
+    // name on many pages (`mod.rs`) must not crowd out the answer to the query's
+    // other words, and `df` would sink a header many files include. Measured
+    // 2026-11-01 on 3 local projects, 866 queries naming a unique file: first
+    // in 778 (19 before), top 5 in all (126 before), the other answer's top 10
+    // unchanged. 120 naming a shared name: that answer's top 5 106 of 108 (base
+    // 108); a sort key cut it to 26, plain `df` idf at 12.0 to 81.
+    const W_FILE: f64 = Self::W_NAME + Self::W_TITLE;
     const W_ALIAS: f64 = 2.0;
     // Page fields from code items (`symbol_fields`), private and method
     // items included, test and module items never. A whole item name
@@ -781,6 +794,16 @@ impl Wiki {
         field
             .map(|f| Self::field_words(&f.to_lowercase()))
             .unwrap_or_default()
+    }
+
+    /// Whether query token `t` is the file name of `path` (with its extension,
+    /// any case) or a suffix of the path that starts at a folder. Field words
+    /// cannot say this: they split `strategy_config.h` into parts, `h` is in no
+    /// title, and the token then hits only the pages that include the file.
+    fn names_file(path: &str, t: &str) -> bool {
+        let path = path.to_lowercase();
+        t.rsplit('/').next().is_some_and(|name| name.contains('.'))
+            && (path == t || path.strip_suffix(t).is_some_and(|r| r.ends_with('/')))
     }
 
     /// Whether query token `t` hits a field given its `field_words`: every
@@ -1092,6 +1115,9 @@ impl Wiki {
     /// for `avglen`) and, when at least one token hits any field, the
     /// per-token facts scored in pass 2. Bumps `df[i]` for every token `i`
     /// that hits. `bodies` is the automaton over `tokens`, in their order.
+    /// With `named`, a token naming this page's file is a hit that bumps
+    /// `named[i]` and goes to `Candidate::file_tokens`.
+    #[allow(clippy::too_many_arguments)]
     fn candidate<'a>(
         &self,
         e: &'a Entry,
@@ -1100,6 +1126,7 @@ impl Wiki {
         dates: &[QueryDate],
         df: &mut [usize],
         bodies: &AhoCorasick,
+        mut named: Option<&mut [usize]>,
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
         let title_field = Field::new(&title);
@@ -1135,6 +1162,7 @@ impl Wiki {
 
         let (body_tf, body_first) = Self::body_counts(bodies, &content_lower, tokens.len());
         let mut per_token = Vec::with_capacity(tokens.len());
+        let mut file_tokens = Vec::new();
         let mut matched = false;
         let mut any_body = false;
         for (i, t) in tokens.iter().enumerate() {
@@ -1192,7 +1220,12 @@ impl Wiki {
             // ("on" in "one", "long"); `tf'` saturates, so that is harmless.
             let tf = body_tf[i];
             any_body |= tf > 0;
-            if weight > 0.0 || tf > 0 {
+            let names_file = !e.memory && Self::names_file(&e.path, t);
+            if let Some(named) = named.as_deref_mut().filter(|_| names_file) {
+                named[i] += 1;
+                file_tokens.push(i);
+            }
+            if weight > 0.0 || tf > 0 || file_tokens.last() == Some(&i) {
                 matched = true;
                 df[i] += 1;
             }
@@ -1218,6 +1251,7 @@ impl Wiki {
         let candidate = Candidate {
             entry: e,
             per_token,
+            file_tokens,
             len,
             snippet,
         };
@@ -1251,6 +1285,10 @@ impl Wiki {
     /// `W_SYMBOL_DOC`),
     /// and each returned code page carries its best items as `symbols`
     /// (`expand`), with the same `idf`.
+    ///
+    /// A query word that is a page's file name or a path suffix of it
+    /// (`names_file`) adds `W_FILE` on that page, see the constant; never on a
+    /// memory note, and not in `search_prompt`.
     pub fn search(&self, q: &str, kind: Option<&KindFilter>, limit: usize) -> Vec<Hit> {
         self.search_tagged(q, kind, None, Some(limit))
     }
@@ -1423,6 +1461,7 @@ impl Wiki {
         };
         let mut stats = prior.cloned().unwrap_or_else(|| PassStats {
             df: vec![0; tokens.len() + dates.len()],
+            named: vec![0; tokens.len()],
             ..PassStats::default()
         });
         // One automaton finds every token in a body in one pass: per token
@@ -1434,8 +1473,18 @@ impl Wiki {
             if !counted(e) {
                 continue;
             }
-            let (len, candidate) =
-                self.candidate(e, &tokens, &query_words, &dates, &mut stats.df, &bodies);
+            // Not for a prompt: it names files in passing, and a hint has five
+            // pages. Measured 2026-11-01 at `W_FILE`: of 143 prompts naming six
+            // files the answer stayed in 52, against 119 without the rule.
+            let (len, candidate) = self.candidate(
+                e,
+                &tokens,
+                &query_words,
+                &dates,
+                &mut stats.df,
+                &bodies,
+                prompt_terms.is_none().then_some(&mut stats.named[..]),
+            );
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             stats.n += 1;
@@ -1450,6 +1499,7 @@ impl Wiki {
         let PassStats {
             n,
             ref df,
+            ref named,
             total_len,
             ..
         } = stats;
@@ -1460,10 +1510,8 @@ impl Wiki {
         // `avglen == 0` needs every filtered page's body to be missing on
         // disk; guard once here rather than divide by zero per page.
         let avglen = if avglen > 0.0 { avglen } else { 1.0 };
-        let mut idf: Vec<f64> = df
-            .iter()
-            .map(|&d| (1.0 + (n_f - d as f64 + 0.5) / (d as f64 + 0.5)).ln())
-            .collect();
+        let idf_of = |d: usize| (1.0 + (n_f - d as f64 + 0.5) / (d as f64 + 0.5)).ln();
+        let mut idf: Vec<f64> = df.iter().map(|&d| idf_of(d)).collect();
         if let Some(terms) = prompt_terms {
             let mut seen: Vec<usize> = (0..tokens.len()).filter(|&i| df[i] > 0).collect();
             seen.sort_by_key(|&i| df[i]);
@@ -1487,7 +1535,14 @@ impl Wiki {
                         idf_t * (weight + Self::W_BODY * tf_norm)
                     })
                     .sum();
-                let hit = Hit::from_entry(c.entry, base, c.snippet);
+                // As rare as the pages it names: `df` also counts every page
+                // that includes the file, and that must not sink a header.
+                let file: f64 = c
+                    .file_tokens
+                    .iter()
+                    .map(|&i| idf_of(named[i]) / (named[i] as f64).sqrt())
+                    .sum();
+                let hit = Hit::from_entry(c.entry, base + Self::W_FILE * file, c.snippet);
                 (hit, c.entry.pagerank)
             })
             .collect();

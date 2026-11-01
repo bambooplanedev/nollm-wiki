@@ -260,3 +260,86 @@ fn author_heading_differing_only_in_case_from_chrome_stays_searchable() {
         "heading-only hit has no snippet"
     );
 }
+
+/// A `strategy_config.h` that `position_manager.h` and `criteria.h` include:
+/// the pages that are titled by the query's other words, or say its file
+/// name in their imports, must not outrank the file the query names.
+const NAMED_FILE: &[(&str, &str)] = &[
+    (
+        "src/strategy/strategy_config.h",
+        "struct slot_planner_params { int slot; };\n",
+    ),
+    (
+        "src/risk/criteria.h",
+        "#include \"strategy/strategy_config.h\"\n// The position criteria.\nstruct Criteria { int position; };\n",
+    ),
+    (
+        "src/risk/position_manager.h",
+        "#include \"strategy/strategy_config.h\"\n// Tracks the position.\nstruct PositionManager { int position; };\n",
+    ),
+    ("src/risk/limits.h", "struct Limits { int max; };\n"),
+    ("src/risk/orders.h", "struct Orders { int open; };\n"),
+];
+
+fn ids(hits: &[wiki::query::Hit]) -> Vec<&str> {
+    hits.iter().map(|h| h.path.as_str()).collect()
+}
+
+#[test]
+fn a_file_named_in_the_query_ranks_first() {
+    // Fillers: over five pages every word is common and no idf means much.
+    let fillers: Vec<_> = (0..30)
+        .map(|i| (format!("src/f{i}.h"), format!("int filler_{i};\n")))
+        .collect();
+    let mut files = NAMED_FILE.to_vec();
+    files.extend(fillers.iter().map(|(n, b)| (n.as_str(), b.as_str())));
+    let (_dir, w) = common::compiled_wiki(&files);
+    for q in [
+        "strategy_config.h",
+        "strategy_config.h include slot_planner_params criteria position",
+        "Strategy_Config.H slot_planner_params criteria position",
+        "src/strategy/strategy_config.h slot_planner_params criteria position",
+        "strategy/strategy_config.h, slot_planner_params criteria position",
+    ] {
+        let hits = w.search(q, None, 10);
+        assert_eq!(
+            hits[0].path,
+            "src/strategy/strategy_config.h",
+            "{q}: {:?}",
+            ids(&hits)
+        );
+    }
+}
+
+#[test]
+fn a_path_suffix_stops_at_a_folder_and_a_word_needs_its_extension() {
+    let (_dir, w) = common::compiled_wiki(NAMED_FILE);
+    let hits = w.search("gy/strategy_config.h criteria position", None, 10);
+    assert_ne!(hits[0].path, "src/strategy/strategy_config.h");
+    // The same word with and without its extension: only the first counts.
+    let with = w.search("limits orders.h", None, 1);
+    assert_eq!(with[0].path, "src/risk/orders.h");
+    let without = w.search("limits orders", None, 2);
+    assert!(without[0].score < with[0].score);
+}
+
+#[test]
+fn a_basename_on_many_pages_matches_them_all_and_a_suffix_only_one() {
+    let (_dir, w) = common::compiled_wiki(&[
+        ("src/manager/mod.rs", "pub fn alpha() {}\n"),
+        ("src/router/mod.rs", "pub fn beta() {}\n"),
+        (
+            "src/alpha.rs",
+            "// alpha mod.rs alpha alpha\npub fn gamma() {}\n",
+        ),
+        ("src/other.rs", "pub fn delta() {}\n"),
+    ]);
+    let hits = w.search("mod.rs beta", None, 10);
+    assert_eq!(
+        ids(&hits)[..2],
+        ["src/router/mod.rs", "src/manager/mod.rs"],
+        "both named, the rest of the score orders them"
+    );
+    let hits = w.search("manager/mod.rs beta", None, 10);
+    assert_eq!(ids(&hits)[0], "src/manager/mod.rs");
+}

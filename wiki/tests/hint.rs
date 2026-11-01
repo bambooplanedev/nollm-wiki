@@ -496,3 +496,21 @@ fn hint_memory_line_takes_the_newer_of_two_equal_notes() {
     let out = hint_in(&tmp, "zebra please");
     assert!(memory_line(&out).unwrap().contains("b.md"), "{out}");
 }
+
+#[test]
+fn hint_keeps_its_answer_when_the_prompt_names_many_files() {
+    let tmp = project_of(&[
+        ("a.rs", "pub fn first_thing() {}\n"),
+        ("b.rs", "pub fn second_thing() {}\n"),
+        ("c.rs", "pub fn third_thing() {}\n"),
+        ("d.rs", "pub fn fourth_thing() {}\n"),
+        ("e.rs", "pub fn fifth_thing() {}\n"),
+        ("f.rs", "pub fn sixth_thing() {}\n"),
+        ("target.rs", "pub fn parse_order_book() {}\n"),
+    ]);
+    let out = hint_in(
+        &tmp,
+        "a.rs b.rs c.rs d.rs e.rs f.rs all call parse_order_book",
+    );
+    assert!(out.contains("target.rs:1-1"), "{out}");
+}
