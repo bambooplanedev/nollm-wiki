@@ -722,6 +722,16 @@ impl Wiki {
         out
     }
 
+    /// The tokens of a prompt that `search_prompt` scores: `tokenize` less
+    /// the one-character ones. `в`, `і` and `y` alone found the one file
+    /// holding them (a Cyrillic comment, a single-letter variable) and, as
+    /// the rarest words of a Ukrainian prompt, steered every hint there.
+    pub(crate) fn prompt_tokens(text: &str) -> Vec<String> {
+        let mut tokens = Self::tokenize(text);
+        tokens.retain(|t| t.chars().count() > 1);
+        tokens
+    }
+
     /// `tokenize`, with the query's word set as typed, each token split
     /// like a name: (tokens, words). Word forms meet in `field_tier`, not
     /// here: a token stays as typed so an exact hit keeps its full weight.
@@ -1372,7 +1382,13 @@ impl Wiki {
         prompt_terms: Option<usize>,
         prior: Option<&PassStats>,
     ) -> (Vec<Hit>, PassStats) {
-        let (tokens, query_words) = Self::query_tokens(q);
+        let tokens = if prompt_terms.is_some() {
+            Self::prompt_tokens(q)
+        } else {
+            Self::tokenize(q)
+        };
+        let query_words: BTreeSet<String> =
+            tokens.iter().flat_map(|t| Self::field_words(t)).collect();
         let dates = query_dates(q);
         let in_scope = |e: &Entry| match scope {
             MemoryScope::With => true,
