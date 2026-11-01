@@ -93,6 +93,9 @@ wiki/src/lib.rs
     curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.1/wiki-v0.6.1-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
+Релізи після v0.6.1 також містять `SHA256SUMS`. Коли архів і цей файл лежать в одній теці, виконайте
+`sha256sum -c --ignore-missing SHA256SUMS` (на macOS `shasum -a 256 -c --ignore-missing SHA256SUMS`).
+
 З коду:
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
@@ -342,7 +345,8 @@ args = ["serve", "--source", "."]
     wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
-- `--dir <out>` (`<project>/.wiki` з `--source`, інакше `out`) — скомпільована вікі, яку віддавати.
+- `--dir <out>` (`<project>/.wiki` з `--source`, інакше `.wiki`, якщо така тека існує, інакше
+  `out`) — скомпільована вікі, яку віддавати.
 - `--tools <list>` (`search,page,neighbors,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (можна повторювати) — з `--source`: `none` вимикає пошук тек памʼяті
@@ -469,7 +473,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 `--jobs N` задає кількість потоків для `compile` (за замовчуванням як у Rayon, зазвичай за числом
 ядер); результат від цього не залежить. Команди-запити читають `--dir <out>` (за замовчуванням
-`out`) і ніколи не перекомпільовують.
+`.wiki`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
 
 #### compile
 
@@ -481,7 +485,11 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 Без `--no-ignore` тека з назвою `superpowers` (на будь-якій глибині) і сторонній код (`third_party`,
 `third-party`, `vendor`, `vendored`, `node_modules`) не обходяться: висновки цих артефактів процесу
-несуть нотатки памʼяті, а чужий код витісняє код самого проєкту.
+несуть нотатки памʼяті, а чужий код витісняє код самого проєкту. Після запуску `compile` друкує,
+скільки файлів пропущено, наприклад `Skipped: superpowers 2280, third_party 97, ignored 16800`: по
+одному числу на назву теки та `ignored` для правил `.gitignore`/`.ignore`/прихованих файлів. Файл
+рахується один раз, за найзовнішньою пропущеною текою; `.git`, `<OUTPUT>` і теки памʼяті не
+рахуються, а з `--watch` і `--no-ignore` такого рядка немає.
 - `--emit-json` — ще й записати `graph.json` (граф вузлів і ребер).
 - `--project <NAME>` (за замовчуванням імʼя вхідної теки) — назва проєкту в `index.json`,
   `llms.txt` і `AGENTS.md`. Без нього `compile .` і `compile "$PWD"` назвуть проєкт по-різному.
@@ -497,7 +505,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir out] [QUERY]
+    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
@@ -518,7 +526,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 #### page
 
-    wiki page [--full] [--max-tokens N] [--dir out] <ID>
+    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` — ідентифікатор сторінки або будь-що, що однозначно називає одну сторінку: її назва (у
 будь-якому регістрі), slug назви, шлях до джерела чи унікальний кінець шляху (`query.rs`) або
@@ -557,7 +565,7 @@ Index:
 
 #### callers
 
-    wiki callers [--depth N] [--max-tokens N] [--dir out] <ID> <SYMBOL>
+    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 Функції, що викликають функцію `<SYMBOL>` (`name` або `Owner::name`) на сторінці `<ID>`, по рядку
 `start-end  kind  Owner::name` на кожну, згруповані за файлами; рядок закінчується на
@@ -566,7 +574,7 @@ Index:
 
 #### neighbors
 
-    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir out] <ID>
+    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 Пакет контексту для агента в межах бюджету: обхід у ширину від `<ID>` на `--depth` кроків (1).
 `--max-tokens` — жорстка межа оціненого розміру пакета (знаки/4), `--max-nodes` обмежує кількість
@@ -581,7 +589,7 @@ Index:
 
 #### lint
 
-    wiki lint [--dir out]
+    wiki lint [--dir DIR]
 
 Друкує кількість битих посилань, сторінок-сиріт і завеликих сторінок (понад 4000 токенів: таку
 сторінку пакет `neighbors` за замовчуванням урізав би до опису; сторінки коду не перевіряються), а потім по
@@ -828,7 +836,7 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 
 `wiki` — ще й бібліотека; CLI — тонка обгортка над тим самим API, див.
 [wiki/README.md](wiki/README.md). Пуш тегу `v*` збирає бінарники для Linux і macOS і прикріплює їх
-до GitHub Release.
+до GitHub Release разом із `SHA256SUMS`.
 
 ### Самохостинг
 

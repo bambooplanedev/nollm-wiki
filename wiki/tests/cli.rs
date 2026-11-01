@@ -635,3 +635,99 @@ fn cli_page_on_a_memory_note_prints_its_text_but_a_doc_prints_headings() {
         "{doc}"
     );
 }
+
+#[test]
+fn compile_reports_what_it_skipped_after_the_lint_line() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = input.join(".wiki");
+    fs::create_dir_all(input.join("vendor/x")).unwrap();
+    fs::write(input.join("a.txt"), "# A\n").unwrap();
+    fs::write(input.join("vendor/x/b.txt"), "# B\n").unwrap();
+    fs::write(input.join("vendor/c.txt"), "# C\n").unwrap();
+    fs::write(input.join(".hidden.txt"), "# H\n").unwrap();
+
+    let run = |extra: &[&str]| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .args(["compile", input.to_str().unwrap(), output.to_str().unwrap()])
+            .args(extra)
+            .assert()
+            .success()
+    };
+    // Twice: the second run has an output folder that must stay uncounted.
+    run(&[]);
+    let out = run(&[]).get_output().stdout.clone();
+    let out = String::from_utf8(out).unwrap();
+    assert_eq!(out.lines().nth(2), Some("Skipped: vendor 2, ignored 1"));
+    assert_eq!(out.lines().count(), 3, "{out}");
+
+    run(&["--no-ignore"]).stdout(contains("Skipped").not());
+}
+
+/// A query command run from `cwd` with no `--dir`.
+fn search_from(cwd: &std::path::Path) -> assert_cmd::assert::Assert {
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(cwd)
+        .args(["search", "alpha"])
+        .assert()
+}
+
+#[test]
+fn read_commands_default_to_dot_wiki_then_out() {
+    let dir = tempdir().unwrap();
+    let cwd = dir.path();
+    fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();
+    search_from(cwd).failure().stderr(contains("load wiki"));
+
+    let compile = |output: &str| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .current_dir(cwd)
+            .args(["compile", ".", output])
+            .assert()
+            .success();
+    };
+    compile("out");
+    search_from(cwd).success().stdout(contains("alpha"));
+
+    // `.wiki` wins over `out`: empty it would fail the load, not fall through.
+    fs::create_dir(cwd.join(".wiki")).unwrap();
+    search_from(cwd).failure().stderr(contains("load wiki"));
+    compile(".wiki");
+    search_from(cwd).success().stdout(contains("alpha"));
+
+    // An explicit `--dir` wins over both.
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(cwd)
+        .args(["search", "alpha", "--dir", "nowhere"])
+        .assert()
+        .failure()
+        .stderr(contains("load wiki"));
+
+    // `serve` with neither `--dir` nor `--source` takes the same default.
+    fs::remove_dir_all(cwd.join("out")).unwrap();
+    let serve = |cwd: &std::path::Path| {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .current_dir(cwd)
+            .arg("serve")
+            .write_stdin("")
+            .assert()
+            .failure()
+    };
+    // The wiki loaded, then stdin closed before the handshake.
+    serve(cwd).stderr(contains("connection closed"));
+    serve(tempdir().unwrap().path()).stderr(contains("compile"));
+
+    for cmd in ["search", "page", "neighbors", "callers", "lint", "serve"] {
+        Command::cargo_bin("wiki")
+            .unwrap()
+            .args([cmd, "--help"])
+            .assert()
+            .success()
+            .stdout(contains("`.wiki` if that directory exists, else `out`"));
+    }
+}
