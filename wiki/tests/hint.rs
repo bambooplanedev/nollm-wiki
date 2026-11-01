@@ -81,6 +81,35 @@ fn hint_ignores_docs_and_caps_lines() {
 }
 
 #[test]
+fn hint_is_silent_on_a_harness_turn() {
+    let tmp = project();
+    let text = format!("<task-notification>\n<task-id>a1</task-id>\n<summary>{TASK}</summary>");
+    assert_eq!(hint_in(&tmp, &text), "");
+}
+
+#[test]
+fn hint_is_silent_on_a_one_word_reply() {
+    let tmp = project();
+    assert_eq!(hint_in(&tmp, "creds"), "");
+    assert_eq!(hint_in(&tmp, "y creds"), "");
+    assert!(hint_in(&tmp, "member creds").contains("load_member_creds"));
+}
+
+#[test]
+fn hint_drops_one_letter_words() {
+    let tmp = project_of(&[
+        (
+            "src/lib.rs",
+            "/// Load a member's locker credentials for each site.\npub fn load_member_creds() {}\n",
+        ),
+        ("src/q.rs", "/// q alone.\npub fn q() {}\n"),
+    ]);
+    let out = hint_in(&tmp, &format!("q {TASK}"));
+    assert!(out.contains("load_member_creds"), "{out}");
+    assert!(!out.contains("src/q.rs"), "{out}");
+}
+
+#[test]
 fn hint_is_silent_without_a_wiki() {
     let tmp = project();
     assert_eq!(hint(&tmp.path().join("missing"), TASK), "");
@@ -180,7 +209,7 @@ fn hint_adds_one_memory_line_after_the_code_lines() {
 fn hint_memory_line_comes_from_the_body_when_no_code_competes() {
     let tmp = project_with_memory();
     // Only the body says zebra and no code does: the ratio branch lets it in.
-    let out = hint_in(&tmp, "zebra");
+    let out = hint_in(&tmp, "zebra please");
     assert!(memory_line(&out).is_some(), "{out}");
     assert_eq!(out.lines().count(), 2, "{out}");
 }
@@ -305,7 +334,7 @@ fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
     let tmp = project_with_memory();
     // `vault` (5 characters) names the note's title; no code page mentions
     // it, so the note's own score passes the ratio branch.
-    let out = hint_in(&tmp, "vault");
+    let out = hint_in(&tmp, "vault please");
     assert!(memory_line(&out).is_some(), "{out}");
 }
 
@@ -404,7 +433,7 @@ fn hint_names_a_page_with_no_matching_symbol() {
         "scripts/run.sh",
         "#!/bin/sh\n# Launch the engine.\nexec engine --sky-secret \"$KEY\"\n",
     )]);
-    let out = hint_in(&tmp, "sky-secret");
+    let out = hint_in(&tmp, "sky-secret flag");
     assert!(
         out.lines().any(|l| l.starts_with("scripts/run.sh ")),
         "{out}"
@@ -458,6 +487,6 @@ fn hint_memory_line_takes_the_newer_of_two_equal_notes() {
             "---\ntitle: Bbb\nupdated: 2026-03-01\n---\n\nzebra rule.\n",
         ),
     ]);
-    let out = hint_in(&tmp, "zebra");
+    let out = hint_in(&tmp, "zebra please");
     assert!(memory_line(&out).unwrap().contains("b.md"), "{out}");
 }

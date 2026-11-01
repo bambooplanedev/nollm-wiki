@@ -1569,6 +1569,7 @@ dependencies = [
 name = "wiki"
 version = "0.6.0"
 dependencies = [
+ "aho-corasick",
  "anyhow",
  "assert_cmd",
  "blake3",

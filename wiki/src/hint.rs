@@ -1,6 +1,6 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
-use crate::model::one_line;
+use crate::model::{clip, LINE_CHARS};
 use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki, MEMORY_GATE_RATIO};
 use std::collections::HashSet;
 
@@ -20,8 +20,10 @@ const HINT_TERMS: usize = 24;
 const HINT_SHORT_WORDS: usize = 64;
 /// A page is kept when its score is at least this share of the best page's.
 const HINT_MIN_REL: f64 = 0.5;
-/// Longest line, in characters, before it is cut with `…`.
-const HINT_LINE_CHARS: usize = 160;
+/// Fewest prompt tokens of two or more characters a hint needs: a reply
+/// such as `yes`, `ok`, `так` or `1-2` is not a task, and on the bench each
+/// found a test fixture or a note.
+const HINT_MIN_TOKENS: usize = 2;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
 const HINT_PAGE_LINES: usize = 2;
@@ -38,6 +40,9 @@ const HEADER: &str = "Code locations from the project wiki (path:start-end  name
 /// the same `HINT_TERMS` words as the code. Empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
+    if is_harness_prompt(text) || Wiki::prompt_tokens(text).len() < HINT_MIN_TOKENS {
+        return String::new();
+    }
     let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let mut seen = HashSet::new();
@@ -87,15 +92,19 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     }
 }
 
-/// Append `line` whitespace-collapsed and cut to `HINT_LINE_CHARS`.
+/// Whether the harness wrote `text`, not the person: Claude Code hands a
+/// `UserPromptSubmit` hook its own turns too (`<task-notification>`, a
+/// subagent's hand-back, `<command-name>`, `<bash-stdout>`), each opening
+/// with a tag. A hint on them is noise, and the hand-backs run to a
+/// thousand words.
+fn is_harness_prompt(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic())
+}
+
+/// Append `line` whitespace-collapsed and cut to `LINE_CHARS`.
 fn push_line(out: &mut String, line: &str) {
-    let line = one_line(line);
-    if line.chars().count() > HINT_LINE_CHARS {
-        out.extend(line.chars().take(HINT_LINE_CHARS - 1));
-        out.push('…');
-    } else {
-        out.push_str(&line);
-    }
+    out.push_str(&clip(line, LINE_CHARS));
     out.push('\n');
 }
 
@@ -124,7 +133,7 @@ pub fn prompt_from_hook_json(json: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{page_lines, prompt_from_hook_json};
+    use super::{is_harness_prompt, page_lines, prompt_from_hook_json};
     use crate::query::SymbolLine;
 
     fn line(name: &str, start: usize, end: usize, test: bool) -> SymbolLine {
@@ -159,6 +168,16 @@ mod tests {
         // A container whose only inner line is a test item stays.
         let page = [line("mod", 1, 900, false), line("t", 800, 810, true)];
         assert_eq!(names(&page), ["mod"]);
+    }
+
+    #[test]
+    fn harness_prompts_open_with_a_tag() {
+        assert!(is_harness_prompt(
+            "<task-notification>\n<task-id>a1</task-id>"
+        ));
+        assert!(is_harness_prompt("  <bash-stdout>ok</bash-stdout>"));
+        assert!(!is_harness_prompt("fix the < comparison in parse_order"));
+        assert!(!is_harness_prompt("<3 this parser"));
     }
 
     #[test]

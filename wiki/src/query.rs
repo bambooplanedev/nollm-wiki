@@ -7,6 +7,7 @@
 
 use crate::calls::{callers_index, Caller};
 use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
+use aho_corasick::AhoCorasick;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -721,6 +722,16 @@ impl Wiki {
         out
     }
 
+    /// The tokens of a prompt that `search_prompt` scores: `tokenize` less
+    /// the one-character ones. `в`, `і` and `y` alone found the one file
+    /// holding them (a Cyrillic comment, a single-letter variable) and, as
+    /// the rarest words of a Ukrainian prompt, steered every hint there.
+    pub(crate) fn prompt_tokens(text: &str) -> Vec<String> {
+        let mut tokens = Self::tokenize(text);
+        tokens.retain(|t| t.chars().count() > 1);
+        tokens
+    }
+
     /// `tokenize`, with the query's word set as typed, each token split
     /// like a name: (tokens, words). Word forms meet in `field_tier`, not
     /// here: a token stays as typed so an exact hit keeps its full weight.
@@ -1003,18 +1014,42 @@ impl Wiki {
 
     const SNIPPET_CONTEXT_CHARS: usize = 60;
 
+    /// Per pattern of `bodies` (a token): its non-overlapping occurrences in
+    /// `text`, what `str::match_indices` counts, and the byte offset of the
+    /// first, what `str::find` gives; one pass over `text` for all of them.
+    /// Overlapping matches arrive in order of their end, so for one pattern
+    /// in order of their start, and the greedy skip reproduces
+    /// `match_indices`.
+    fn body_counts(bodies: &AhoCorasick, text: &str, n: usize) -> (Vec<usize>, Vec<Option<usize>>) {
+        let mut tf = vec![0; n];
+        let mut first = vec![None; n];
+        let mut next = vec![0; n];
+        for m in bodies.find_overlapping_iter(text) {
+            let i = m.pattern().as_usize();
+            if m.start() >= next[i] {
+                tf[i] += 1;
+                next[i] = m.end();
+                if first[i].is_none() {
+                    first[i] = Some(m.start());
+                }
+            }
+        }
+        (tf, first)
+    }
+
     /// Excerpt around the earliest occurrence of any query token in the
-    /// content: 60 chars of context each side, whitespace runs collapsed,
+    /// content (`first`: per token, its offset in the lowercased content, or
+    /// none): 60 chars of context each side, whitespace runs collapsed,
     /// `…` on truncated edges. Match offsets come from the lowercased text;
     /// on the rare non-ASCII page where lowercasing changes byte lengths the
     /// window may sit slightly off, but boundary snapping guarantees it
     /// never panics and stays deterministic.
-    fn snippet(content: &str, content_lower: &str, tokens: &[String]) -> Option<String> {
+    fn snippet(content: &str, tokens: &[String], first: &[Option<usize>]) -> Option<String> {
         // Earliest occurrence of any token; ties at the same index go to the
         // longer token.
         let mut best: Option<(usize, usize)> = None;
-        for t in tokens {
-            if let Some(i) = content_lower.find(t.as_str()) {
+        for (t, i) in tokens.iter().zip(first) {
+            if let Some(i) = *i {
                 best = match best {
                     Some((bi, bl)) if bi < i || (bi == i && bl >= t.len()) => Some((bi, bl)),
                     _ => Some((i, t.len())),
@@ -1065,7 +1100,7 @@ impl Wiki {
     /// Pass 1 of `search` for one page: its searchable word count (always,
     /// for `avglen`) and, when at least one token hits any field, the
     /// per-token facts scored in pass 2. Bumps `df[i]` for every token `i`
-    /// that hits.
+    /// that hits. `bodies` is the automaton over `tokens`, in their order.
     fn candidate<'a>(
         &self,
         e: &'a Entry,
@@ -1073,6 +1108,7 @@ impl Wiki {
         query_words: &BTreeSet<String>,
         dates: &[QueryDate],
         df: &mut [usize],
+        bodies: &AhoCorasick,
     ) -> (usize, Option<Candidate<'a>>) {
         let title = e.title.to_lowercase();
         let title_field = Field::new(&title);
@@ -1106,6 +1142,7 @@ impl Wiki {
         let content_lower = content.to_lowercase();
         let len = content.split_whitespace().count();
 
+        let (body_tf, body_first) = Self::body_counts(bodies, &content_lower, tokens.len());
         let mut per_token = Vec::with_capacity(tokens.len());
         let mut matched = false;
         let mut any_body = false;
@@ -1159,10 +1196,10 @@ impl Wiki {
                     .as_ref()
                     .map_or(0.0, |w| Self::field_tier(w, t));
             weight += Self::W_HEADING * Self::best_tier(&heading_fields, t);
-            // match_indices is non-overlapping — the spec'd counting rule.
-            // `tf` may exceed `len` for short tokens ("on" in "one",
-            // "long"); `tf'` saturates, so that is harmless.
-            let tf = content_lower.match_indices(t).count();
+            // Non-overlapping occurrences, as `match_indices` counts — the
+            // spec'd counting rule. `tf` may exceed `len` for short tokens
+            // ("on" in "one", "long"); `tf'` saturates, so that is harmless.
+            let tf = body_tf[i];
             any_body |= tf > 0;
             if weight > 0.0 || tf > 0 {
                 matched = true;
@@ -1183,7 +1220,7 @@ impl Wiki {
             return (len, None);
         }
         let snippet = if any_body {
-            Self::snippet(&content, &content_lower, tokens)
+            Self::snippet(&content, tokens, &body_first)
         } else {
             None
         };
@@ -1345,7 +1382,13 @@ impl Wiki {
         prompt_terms: Option<usize>,
         prior: Option<&PassStats>,
     ) -> (Vec<Hit>, PassStats) {
-        let (tokens, query_words) = Self::query_tokens(q);
+        let tokens = if prompt_terms.is_some() {
+            Self::prompt_tokens(q)
+        } else {
+            Self::tokenize(q)
+        };
+        let query_words: BTreeSet<String> =
+            tokens.iter().flat_map(|t| Self::field_words(t)).collect();
         let dates = query_dates(q);
         let in_scope = |e: &Entry| match scope {
             MemoryScope::With => true,
@@ -1392,12 +1435,17 @@ impl Wiki {
             df: vec![0; tokens.len() + dates.len()],
             ..PassStats::default()
         });
+        // One automaton finds every token in a body in one pass: per token
+        // `match_indices` took 5 ms per prompt word on a 3,300-page wiki
+        // (a 1,246-word hand-back: 4.5 s), and search itself 360 ms.
+        let bodies = AhoCorasick::new(&tokens).expect("a query's tokens fit an automaton");
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
             if !counted(e) {
                 continue;
             }
-            let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut stats.df);
+            let (len, candidate) =
+                self.candidate(e, &tokens, &query_words, &dates, &mut stats.df, &bodies);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
             stats.n += 1;
@@ -1609,6 +1657,20 @@ impl Wiki {
         {
             return Ok(e.id.clone());
         }
+        // The same file name elsewhere first: `src/x/venue_caps.rs` for a
+        // missing `src/venue_caps.rs`, not every page with `venue` in its
+        // title (on the bench, five plans).
+        let name = norm.rsplit('/').next().unwrap_or(norm);
+        let same_name: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| e.path.rsplit('/').next() == Some(name))
+            .map(|e| e.id.clone())
+            .take(5)
+            .collect();
+        if !same_name.is_empty() {
+            return Err(same_name);
+        }
         let words = |s: &str| -> BTreeSet<String> {
             s.split(|c: char| !c.is_alphanumeric())
                 .filter(|w| !w.is_empty())
@@ -1810,7 +1872,7 @@ const _: () = assert!(
 
 #[cfg(test)]
 mod tests {
-    use super::{query_dates, QueryDate, Wiki};
+    use super::{query_dates, AhoCorasick, QueryDate, Wiki};
     use crate::model::{CodeItem, CodeItemKind};
     use std::collections::BTreeSet;
 
@@ -1878,6 +1940,21 @@ mod tests {
             Wiki::with_query_stem(&format!("quokka{i}"), |_| ());
         }
         assert!(super::QUERY_STEMS.read().unwrap().len() <= super::QUERY_STEMS_MAX);
+    }
+
+    #[test]
+    fn body_counts_match_match_indices_and_find() {
+        let tokens: Vec<String> = ["aa", "a", "ab", "zz", "aab"]
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        let text = "aaab aab a aaaa";
+        let ac = AhoCorasick::new(&tokens).unwrap();
+        let (tf, first) = Wiki::body_counts(&ac, text, tokens.len());
+        for (i, t) in tokens.iter().enumerate() {
+            assert_eq!(tf[i], text.match_indices(t.as_str()).count(), "{t}");
+            assert_eq!(first[i], text.find(t.as_str()), "{t}");
+        }
     }
 
     #[test]
