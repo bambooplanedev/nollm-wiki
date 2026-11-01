@@ -1657,6 +1657,20 @@ impl Wiki {
         {
             return Ok(e.id.clone());
         }
+        // The same file name elsewhere first: `src/x/venue_caps.rs` for a
+        // missing `src/venue_caps.rs`, not every page with `venue` in its
+        // title (on the bench, five plans).
+        let name = norm.rsplit('/').next().unwrap_or(norm);
+        let same_name: Vec<String> = self
+            .entries
+            .values()
+            .filter(|e| e.path.rsplit('/').next() == Some(name))
+            .map(|e| e.id.clone())
+            .take(5)
+            .collect();
+        if !same_name.is_empty() {
+            return Err(same_name);
+        }
         let words = |s: &str| -> BTreeSet<String> {
             s.split(|c: char| !c.is_alphanumeric())
                 .filter(|w| !w.is_empty())

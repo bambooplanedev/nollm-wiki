@@ -889,6 +889,19 @@ fn unique_path_suffix_resolves() {
 }
 
 #[test]
+fn unknown_path_suggests_pages_of_the_same_file_name() {
+    let (_d, w) = resolve_fixture();
+    let (a, _) = id_title(&w, "a/mod.rs");
+    let (b, _) = id_title(&w, "b/mod.rs");
+    let (m, _) = id_title(&w, "src/manager.cpp");
+    let err = w.resolve_id("src/x/mod.rs").unwrap_err();
+    assert!(
+        err.contains(&a) && err.contains(&b) && !err.contains(&m),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn ambiguous_path_suffix_lists_candidates() {
     let (_d, w) = resolve_fixture();
     let (a, _) = id_title(&w, "a/mod.rs");
