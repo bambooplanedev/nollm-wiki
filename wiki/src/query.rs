@@ -8,7 +8,7 @@
 use crate::calls::{callers_index, Caller};
 use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
 use serde::Deserialize;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 #[derive(Deserialize)]
@@ -304,10 +304,6 @@ impl Hit {
     }
 }
 
-/// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
-/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
-/// marker counts only when whitespace or the line end follows it, so
-/// `#include`, `#[derive]`, `*ptr` and `*note*` stay intact.
 /// Whether a page sits under a folder of other people's code.
 fn is_vendored(path: &str) -> bool {
     const FOLDERS: [&str; 5] = [
@@ -320,6 +316,10 @@ fn is_vendored(path: &str) -> bool {
     path.split('/').any(|part| FOLDERS.contains(&part))
 }
 
+/// A line without its leading comment marker (`//!`, `///`, `//`, `/**`,
+/// `/*`, `*/`, `*`, `#` and `##` headings), so a snippet reads as prose. A
+/// marker counts only when whitespace or the line end follows it, so
+/// `#include`, `#[derive]`, `*ptr` and `*note*` stay intact.
 fn strip_comment_marker(line: &str) -> &str {
     let l = line.trim_start();
     let marker_end = |r: &str| r.is_empty() || r.starts_with(char::is_whitespace);
@@ -348,8 +348,6 @@ pub struct SymbolLine {
     pub test: bool,
 }
 
-/// The search fields a page earns from its items (`Wiki::symbol_fields`),
-/// built once in `Wiki::load`.
 /// A searchable field: its words (`Wiki::field_words`) and their stems,
 /// computed once per field so the stem tier compares strings, not stemmer
 /// output, per query token.
@@ -371,6 +369,8 @@ impl Field {
     }
 }
 
+/// The search fields a page earns from its items (`Wiki::symbol_fields`),
+/// built once in `Wiki::load`.
 #[derive(Default)]
 struct SymbolFields {
     /// Whole item names, lowercased, each also as `owner::name`.
@@ -422,6 +422,23 @@ struct Candidate<'a> {
     len: usize,
     snippet: Option<String>,
 }
+
+/// Pass-1 statistics of `search_terms` over the pages it counts: how many,
+/// per token (then date) how many it hits, and their total word count.
+#[derive(Default, Clone)]
+pub(crate) struct PassStats {
+    n: usize,
+    df: Vec<usize>,
+    total_len: usize,
+}
+
+type StemMemo = std::sync::RwLock<HashMap<String, String>>;
+/// Stems of corpus words (`Wiki::with_stem`).
+static CORPUS_STEMS: std::sync::LazyLock<StemMemo> = std::sync::LazyLock::new(Default::default);
+/// Stems of query words (`Wiki::with_query_stem`).
+static QUERY_STEMS: std::sync::LazyLock<StemMemo> = std::sync::LazyLock::new(Default::default);
+/// Most entries `QUERY_STEMS` holds; one search's words fit many times over.
+const QUERY_STEMS_MAX: usize = 4096;
 
 /// `Default` is the empty wiki: what `serve --source` holds before its first compile.
 #[derive(Default)]
@@ -639,27 +656,40 @@ impl Wiki {
     /// otherwise) and the separators between them stay, so `mcp-сервери`
     /// gives `mcp-сервер`. Lowercase input, as the stemmers expect.
     ///
-    /// Memoised process-wide: a search stems every field word of every
-    /// page, and the same words recur across pages. The memo holds one
-    /// entry per distinct word seen, the corpus vocabulary at most. Without
-    /// it a hint on a 3,142-page wiki took 2.0 s against 0.96 s before
-    /// stemming.
+    /// Memoised process-wide in `CORPUS_STEMS`: a search stems every field
+    /// word of every page, and the same words recur across pages. Only
+    /// corpus words go there (query words go to `with_query_stem`), so it
+    /// holds the corpus vocabulary at most. Without it a hint on a
+    /// 3,142-page wiki took 2.0 s against 0.96 s before stemming.
     fn stem(token: &str) -> String {
         Self::with_stem(token, str::to_string)
     }
 
-    /// `f` applied to the memoised stem of `token`, without copying it out.
+    /// `f` applied to the memoised stem of corpus word `token`, without
+    /// copying it out.
     fn with_stem<T>(token: &str, f: impl FnOnce(&str) -> T) -> T {
-        static MEMO: std::sync::OnceLock<
-            std::sync::RwLock<std::collections::HashMap<String, String>>,
-        > = std::sync::OnceLock::new();
-        let memo = MEMO.get_or_init(Default::default);
+        Self::stem_in(&CORPUS_STEMS, usize::MAX, token, f)
+    }
+
+    /// `with_stem` for a query word: a search stems it once per page, so it
+    /// is memoised too, in `QUERY_STEMS`, which is emptied at
+    /// `QUERY_STEMS_MAX` entries so a long-lived `serve` does not keep every
+    /// word of every prompt.
+    fn with_query_stem<T>(token: &str, f: impl FnOnce(&str) -> T) -> T {
+        Self::stem_in(&QUERY_STEMS, QUERY_STEMS_MAX, token, f)
+    }
+
+    fn stem_in<T>(memo: &StemMemo, cap: usize, token: &str, f: impl FnOnce(&str) -> T) -> T {
         if let Some(hit) = memo.read().unwrap().get(token) {
             return f(hit);
         }
         let stemmed = Self::stem_uncached(token);
         let out = f(&stemmed);
-        memo.write().unwrap().insert(token.to_string(), stemmed);
+        let mut memo = memo.write().unwrap();
+        if memo.len() >= cap {
+            memo.clear();
+        }
+        memo.insert(token.to_string(), stemmed);
         out
     }
 
@@ -694,7 +724,7 @@ impl Wiki {
     /// `tokenize`, with the query's word set as typed, each token split
     /// like a name: (tokens, words). Word forms meet in `field_tier`, not
     /// here: a token stays as typed so an exact hit keeps its full weight.
-    fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
+    pub(crate) fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
         let tokens = Self::tokenize(query);
         let words = tokens.iter().flat_map(|t| Self::field_words(t)).collect();
         (tokens, words)
@@ -787,7 +817,7 @@ impl Wiki {
         let shares_stem = t
             .split(|c: char| !c.is_alphanumeric())
             .filter(|p| !p.is_empty())
-            .all(|p| Self::with_stem(p, |sp| field.stems.iter().any(|s| s == sp)));
+            .all(|p| Self::with_query_stem(p, |sp| field.stems.iter().any(|s| s == sp)));
         if shares_stem {
             Self::STEM_TIER
         } else {
@@ -806,8 +836,9 @@ impl Wiki {
     /// Whether a whole word of `words` has the stem of `t`: the stem tier of
     /// the whole-term name-word match (`levels` ↔ `level`).
     fn shares_stem<'a>(words: impl IntoIterator<Item = &'a String>, t: &str) -> bool {
-        let st = Self::stem(t);
-        words.into_iter().any(|w| Self::with_stem(w, |sw| sw == st))
+        Self::with_query_stem(t, |st| {
+            words.into_iter().any(|w| Self::with_stem(w, |sw| sw == st))
+        })
     }
 
     /// Whether any query token of `q` (as typed, as `search` reads it) hits
@@ -1113,7 +1144,7 @@ impl Wiki {
                     weight += Self::W_SYMBOL;
                 } else if f.words.contains(t) {
                     weight += Self::W_SYMBOL_WORD;
-                } else if Self::with_stem(t, |st| f.word_stems.contains(st)) {
+                } else if Self::with_query_stem(t, |st| f.word_stems.contains(st)) {
                     weight += Self::W_SYMBOL_WORD * Self::STEM_TIER;
                 }
                 let doc = Self::field_tier(&f.doc, t);
@@ -1215,9 +1246,12 @@ impl Wiki {
         if Self::query_tokens(q).0.is_empty() {
             return self.search_scoped(q, kind, tag, limit, MemoryScope::With);
         }
-        let mut hits = self.search_scoped(q, kind, tag, limit, MemoryScope::Without);
+        let (mut hits, stats) =
+            self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
         let best = hits.first().map_or(0.0, |h| h.score);
-        hits.extend(self.memory_tail(q, tag, best));
+        // The tail counts pages of every kind, so the code pass's statistics
+        // are its own only when `kind` narrowed nothing.
+        hits.extend(self.memory_tail(q, tag, best, kind.is_none().then_some(&stats)));
         hits
     }
 
@@ -1235,13 +1269,22 @@ impl Wiki {
     /// The memory notes `search` lists after its code hits: the best ten
     /// notes for `q` (narrowed to `tag`) that pass the gate at `gate_len`,
     /// by score, the later `updated` first on a tie (dated before undated),
-    /// at most `MEMORY_TAIL`. Empty when `q` has no word.
-    pub(crate) fn memory_tail(&self, q: &str, tag: Option<&str>, best_code: f64) -> Vec<Hit> {
+    /// at most `MEMORY_TAIL`. Empty when `q` has no word. `project`: the
+    /// statistics of a `Without` pass for `q` and `tag` with no kind, which
+    /// spares counting the project pages again.
+    pub(crate) fn memory_tail(
+        &self,
+        q: &str,
+        tag: Option<&str>,
+        best_code: f64,
+        project: Option<&PassStats>,
+    ) -> Vec<Hit> {
         if !q.chars().any(char::is_alphanumeric) {
             return Vec::new();
         }
         let n = gate_len();
-        self.search_scoped(q, None, tag, Some(10), MemoryScope::Only)
+        self.search_terms(q, None, tag, Some(10), MemoryScope::Only, None, project)
+            .0
             .into_iter()
             .filter(|h| self.passes_gate(h, q, best_code, n))
             .take(MEMORY_TAIL)
@@ -1261,23 +1304,37 @@ impl Wiki {
         limit: Option<usize>,
         scope: MemoryScope,
     ) -> Vec<Hit> {
-        self.search_terms(q, kind, tag, limit, scope, None)
+        self.search_terms(q, kind, tag, limit, scope, None, None).0
     }
 
-    /// Code pages for a prompt rather than a query: vendored pages are out,
-    /// and only its `terms` rarest words that occur at all count, since most
-    /// of a prompt's words say how to work, not what to find.
-    pub(crate) fn search_prompt(&self, q: &str, limit: usize, terms: usize) -> Vec<Hit> {
+    /// Code pages (or, with `MemoryScope::Only`, memory notes) for a prompt
+    /// rather than a query: vendored pages are out, and only its `terms`
+    /// rarest words that occur at all count, since most of a prompt's words
+    /// say how to work, not what to find. `hint` scores its note with the
+    /// same call as its code, so the gate's ratio compares like with like.
+    pub(crate) fn search_prompt(
+        &self,
+        q: &str,
+        limit: usize,
+        terms: usize,
+        scope: MemoryScope,
+    ) -> Vec<Hit> {
         self.search_terms(
             q,
             Some(&KindFilter::Code),
             None,
             Some(limit),
-            MemoryScope::Without,
+            scope,
             Some(terms),
+            None,
         )
+        .0
     }
 
+    /// Hits for `q` and the pass-1 statistics they were scored with. With
+    /// `prior` (the project pages' statistics of a `Without` pass for the
+    /// same `q`, `tag` and no kind), an `Only` pass counts just the notes.
+    #[allow(clippy::too_many_arguments)]
     fn search_terms(
         &self,
         q: &str,
@@ -1286,7 +1343,8 @@ impl Wiki {
         limit: Option<usize>,
         scope: MemoryScope,
         prompt_terms: Option<usize>,
-    ) -> Vec<Hit> {
+        prior: Option<&PassStats>,
+    ) -> (Vec<Hit>, PassStats) {
         let (tokens, query_words) = Self::query_tokens(q);
         let dates = query_dates(q);
         let in_scope = |e: &Entry| match scope {
@@ -1308,15 +1366,13 @@ impl Wiki {
         let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
-                return Vec::new();
+                return (Vec::new(), PassStats::default());
             };
             let mut listed: Vec<&Entry> = self.entries.values().filter(|e| passes(e)).collect();
             listed.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.id.cmp(&b.id)));
             listed.truncate(limit.unwrap_or(usize::MAX));
-            return listed
-                .into_iter()
-                .map(|e| Hit::from_entry(e, 0.0, None))
-                .collect();
+            let listed = listed.into_iter().map(|e| Hit::from_entry(e, 0.0, None));
+            return (listed.collect(), PassStats::default());
         }
         let limit = limit.unwrap_or(10);
 
@@ -1324,33 +1380,40 @@ impl Wiki {
         // alone are scored on the project's scale (statistics over project
         // pages plus notes), so the tail's ratio to the best code hit does
         // not shrink as the project grows; `Without` keeps notes out of them.
+        // With `prior` the project pages are already counted.
         let counted = |e: &Entry| {
-            if scope == MemoryScope::Only {
+            if scope == MemoryScope::Only && prior.is_none() {
                 filtered(e)
             } else {
                 passes(e)
             }
         };
-        let mut n = 0usize;
-        let mut total_len = 0usize;
-        let mut df = vec![0usize; tokens.len() + dates.len()];
+        let mut stats = prior.cloned().unwrap_or_else(|| PassStats {
+            df: vec![0; tokens.len() + dates.len()],
+            ..PassStats::default()
+        });
         let mut candidates: Vec<Candidate> = Vec::new();
         for e in self.entries.values() {
             if !counted(e) {
                 continue;
             }
-            let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut df);
+            let (len, candidate) = self.candidate(e, &tokens, &query_words, &dates, &mut stats.df);
             // Statistics count every filtered page, hits or not — `avglen`
             // over hits alone would change with the query.
-            n += 1;
-            total_len += len;
+            stats.n += 1;
+            stats.total_len += len;
             if in_scope(e) {
                 candidates.extend(candidate);
             }
         }
         if candidates.is_empty() {
-            return Vec::new();
+            return (Vec::new(), stats);
         }
+        let PassStats {
+            n,
+            ref df,
+            total_len,
+        } = stats;
 
         // Pass 2: score. `n > 0` here because a candidate was counted.
         let n_f = n as f64;
@@ -1408,7 +1471,7 @@ impl Wiki {
         ranked.truncate(limit);
         let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
         self.expand(&mut hits, &tokens, &query_words, &idf[..tokens.len()]);
-        hits
+        (hits, stats)
     }
 
     /// Gives each code hit its symbol lines (`page_symbols`), keeping only
@@ -1793,6 +1856,28 @@ mod tests {
         // Every part must connect; a shared prefix alone is still not a hit.
         assert_eq!(Wiki::field_tier(&w("rewrite"), "write"), 0.0);
         assert_eq!(Wiki::field_tier(&w("soak"), "brew_provisioning"), 0.0);
+    }
+
+    #[test]
+    fn query_words_stay_out_of_the_corpus_stem_memo() {
+        let field = super::Field::new("provision");
+        assert_eq!(
+            Wiki::field_tier(&field, "quokkaprovisioning"),
+            0.0,
+            "no hit"
+        );
+        assert!(super::CORPUS_STEMS
+            .read()
+            .unwrap()
+            .contains_key("provision"));
+        assert!(!super::CORPUS_STEMS
+            .read()
+            .unwrap()
+            .contains_key("quokkaprovisioning"));
+        for i in 0..=super::QUERY_STEMS_MAX {
+            Wiki::with_query_stem(&format!("quokka{i}"), |_| ());
+        }
+        assert!(super::QUERY_STEMS.read().unwrap().len() <= super::QUERY_STEMS_MAX);
     }
 
     #[test]

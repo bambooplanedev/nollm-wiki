@@ -17,7 +17,8 @@ pub struct WatchSet {
     root: PathBuf,
     files: HashSet<PathBuf>,
     dirs: HashSet<PathBuf>,
-    /// Memory folders, which need not exist yet: anything under one counts.
+    /// Memory folders, which need not exist yet: anything under one counts,
+    /// except its `logs/`, which the compile skips.
     memory: Vec<PathBuf>,
     registry: Registry,
 }
@@ -50,6 +51,13 @@ impl WatchSet {
     /// produces? Known paths always; new ones only inside a visited directory,
     /// and only if a handled file, an ignore file, or a visible directory.
     pub fn relevant(&self, path: &Path) -> bool {
+        if self
+            .memory
+            .iter()
+            .any(|m| crate::is_under(path, &m.join("logs")))
+        {
+            return false;
+        }
         if self.files.contains(path) || self.dirs.contains(path) {
             return true;
         }
@@ -289,6 +297,8 @@ mod tests {
         assert!(w.relevant(&r.join(".agents/memory")));
         assert!(w.relevant(&r.join(".agents/memory/new.md")));
         assert!(w.relevant(&r.join(".agents/memory/sub/deep.md")));
+        assert!(!w.relevant(&r.join(".agents/memory/logs/2026-10-31.md")));
+        assert!(w.relevant(&r.join(".agents/memory/sub/logs/n.md")));
         assert!(!w.relevant(&r.join(".agents/other.md")));
         assert!(!w.relevant(&r.join(".cache")));
     }

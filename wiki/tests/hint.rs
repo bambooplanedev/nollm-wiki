@@ -303,10 +303,28 @@ fn hint_memory_line_skips_a_short_word_the_code_outscores() {
 #[test]
 fn hint_memory_line_keeps_a_short_word_when_no_code_competes() {
     let tmp = project_with_memory();
-    // `vault` (5 characters) is under the gate length, but no code page
-    // mentions it, so the note's own score passes the ratio branch.
+    // `vault` (5 characters) names the note's title; no code page mentions
+    // it, so the note's own score passes the ratio branch.
     let out = hint_in(&tmp, "vault");
     assert!(memory_line(&out).is_some(), "{out}");
+}
+
+#[test]
+fn hint_name_match_counts_only_in_a_short_prompt() {
+    let tmp = project_with_memory();
+    // 67 distinct words: instructions, and `rotation` among them names the
+    // note, while the code page wins the rest of the question, so the ratio
+    // branch stays shut too. The question alone is short and keeps its note.
+    let filler = (0..60)
+        .map(|i| format!("step{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let long = format!("{filler} check rotation where member creds are loaded");
+    let out = hint_in(&tmp, &long);
+    assert!(out.contains("load_member_creds"), "{out}");
+    assert!(memory_line(&out).is_none(), "{out}");
+    let short = "check rotation where member creds are loaded";
+    assert!(memory_line(&hint_in(&tmp, short)).is_some(), "{short}");
 }
 
 #[test]
