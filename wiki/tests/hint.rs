@@ -397,34 +397,56 @@ fn hint_skips_vendored_code() {
     assert!(!out.contains("vendor/"), "{out}");
 }
 
-#[test]
-fn hint_of_a_long_prompt_counts_only_its_rare_words() {
-    // Three pages hold 30 common prompt words; 24 rarer words have a page each.
-    let common: Vec<String> = (0..30).map(|i| format!("common{i:02}")).collect();
-    let rare: Vec<String> = (0..24).map(|i| format!("rare{i:02}")).collect();
-    let body = common
-        .iter()
-        .map(|w| format!("fn {w}() {{}}"))
-        .collect::<Vec<_>>()
-        .join(
-            "
-",
-        );
+/// Three `src/process{i}.rs` pages holding `common` words, plus `rare`
+/// files of `fn` names, compiled.
+fn common_and_rare(common: &[String], rare: &[(String, Vec<String>)]) -> TempDir {
+    let fns = |ws: &[String]| {
+        ws.iter()
+            .map(|w| format!("fn {w}() {{}}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
     let mut files: Vec<(String, String)> = (0..3)
-        .map(|i| (format!("src/process{i}.rs"), body.clone()))
+        .map(|i| (format!("src/process{i}.rs"), fns(common)))
         .collect();
-    files.extend(
-        rare.iter()
-            .map(|w| (format!("src/{w}.rs"), format!("fn {w}() {{}}\n"))),
-    );
+    files.extend(rare.iter().map(|(f, ws)| (f.clone(), fns(ws))));
     let refs: Vec<(&str, &str)> = files
         .iter()
         .map(|(n, b)| (n.as_str(), b.as_str()))
         .collect();
-    let tmp = project_of(&refs);
+    project_of(&refs)
+}
+
+fn words(stem: &str, n: usize) -> Vec<String> {
+    (0..n).map(|i| format!("{stem}{i:02}")).collect()
+}
+
+#[test]
+fn hint_of_a_long_prompt_counts_only_its_rare_words() {
+    // Three pages hold 100 common prompt words, one page the 24 rare ones:
+    // on every word the process pages would win.
+    let (common, rare) = (words("common", 100), words("rare", 24));
+    let tmp = common_and_rare(&common, &[("src/rare.rs".into(), rare.clone())]);
     let out = hint_in(&tmp, &format!("{} {}", common.join(" "), rare.join(" ")));
-    assert!(out.contains("src/rare"), "{out}");
+    assert!(out.contains("src/rare.rs"), "{out}");
     assert!(!out.contains("src/process"), "{out}");
+}
+
+#[test]
+fn hint_is_silent_when_no_page_holds_the_prompts_words() {
+    // Each of 24 rare words has a page of its own: the best page matches one
+    // of them, a small share of what the prompt's words could score.
+    let (common, rare) = (words("common", 30), words("rare", 24));
+    let pages: Vec<(String, Vec<String>)> = rare
+        .iter()
+        .map(|w| (format!("src/{w}.rs"), vec![w.clone()]))
+        .collect();
+    let tmp = common_and_rare(&common, &pages);
+    let out = hint_in(&tmp, &format!("{} {}", common.join(" "), rare.join(" ")));
+    assert_eq!(out, "");
+    // A prompt that names one of those functions still gets its line.
+    let out = hint_in(&tmp, "where is rare07 defined");
+    assert!(out.contains("src/rare07.rs:1-1"), "{out}");
 }
 
 #[test]

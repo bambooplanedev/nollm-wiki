@@ -84,6 +84,16 @@ per question is noise-level: treat single results as anecdotes.
   "Where does it refuse to start" lands on the file, not on `decide`.
 - **`wiki hint` shows at most 2 lines per page**, so a third relevant
   symbol in one file is not shown.
+- **`wiki hint` is silent only on text whose words scatter.** Below half
+  the prompt's available score it prints no code lines (2026-11-01: 80 of
+  80 bench task prompts and code questions kept; 162 of 251 bench subagent
+  briefs whose hint named no file the agent opened silenced, 26 of 75 that
+  named one kept). Short chat with no task ("This is a no-op check. Just
+  reply ack", a reviewer's severity/priority boilerplate) still gets lines:
+  on 81 such texts over five wikis the best page scores a median 1.25 of
+  the available score, above the code questions' lowest (0.59), and no
+  measured statistic told them apart. Long task prompts lose lines too: 12
+  of 35 that showed the page their task names went silent.
 
 ## Call chains (`neighbors` with `symbol`, `callers`)
 

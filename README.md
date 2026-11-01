@@ -582,7 +582,9 @@ line gets `path  title`. Only the text's 24 rarest words rank the pages, and ven
 (`third_party`, `vendor`, `node_modules`) are left out; one-character words never count. Prints
 nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a tag (a turn
 the harness wrote, such as `<task-notification>`) or it has fewer than two words of two or more
-characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt.
+characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt. It prints no code
+lines when the best page scores below half of what the text's counted words could give one page
+(its words are spread over the project, as in a long brief or a list of instructions).
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
