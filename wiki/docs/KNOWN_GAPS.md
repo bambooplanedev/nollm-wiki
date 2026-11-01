@@ -232,6 +232,11 @@ per question is noise-level: treat single results as anecdotes.
 - Files written only through `mmap` are not seen as changed.
 - `compile --watch` ignores an inotify queue overflow instead of rescanning.
 - Barrier files left by a crashed server stay in `.wiki/.serve/`.
+- A running `compile --watch` does not notice its binary was replaced and
+  keeps recompiling with the old compiler; `serve` does notice. A compile
+  already running when `serve`'s binary is replaced still finishes.
+- `serve` sees a binary replaced only at a tool call or before a recompile,
+  and `touch` on the binary counts as a replacement.
 - `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
   not the live snapshot.
 - A generated file ignored at file level still triggers a recompile when
