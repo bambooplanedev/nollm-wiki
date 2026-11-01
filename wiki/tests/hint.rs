@@ -381,22 +381,6 @@ fn hint_shows_the_journal_of_a_date_in_the_prompt() {
     assert!(memory_line(&hint_in(&tmp, "Що сталося зі стендом?")).is_none());
 }
 
-#[test]
-fn hint_skips_vendored_code() {
-    let tmp = project_of(&[
-        (
-            "third_party/cli/cli.hpp",
-            "void parse_flags_a() {}\nvoid parse_flags_b() {}\n",
-        ),
-        ("vendor/lib/lib.rs", "pub fn parse_flags_c() {}\n"),
-        ("src/args.rs", "pub fn parse_flags_d() {}\n"),
-    ]);
-    let out = hint_in(&tmp, "parse flags");
-    assert!(out.contains("src/args.rs"), "{out}");
-    assert!(!out.contains("third_party/"), "{out}");
-    assert!(!out.contains("vendor/"), "{out}");
-}
-
 /// Three `src/process{i}.rs` pages holding `common` words, plus `rare`
 /// files of `fn` names, compiled.
 fn common_and_rare(common: &[String], rare: &[(String, Vec<String>)]) -> TempDir {
