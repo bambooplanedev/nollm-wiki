@@ -90,7 +90,7 @@ wiki/src/lib.rs
 платформи (`aarch64-apple-darwin`, `x86_64-apple-darwin` або `x86_64-unknown-linux-gnu`) і покладіть
 бінарник `wiki` у теку, що є в `PATH`, бо агенти запускають його просто як `wiki`:
 
-    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.0/wiki-v0.6.0-aarch64-apple-darwin.tar.gz | tar -xz
+    curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.1/wiki-v0.6.1-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
 З коду:
