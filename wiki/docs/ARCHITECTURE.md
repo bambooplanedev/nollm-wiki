@@ -562,7 +562,11 @@ matching:
   the words of one item's name (`get bin stock` for `getBinStock`), every
   token the page title does not already match adds `W_SYMBOL`.
   When they all sit inside one longer item name (`order reject` in
-  `onOrderReject`), each such token adds `W_IN_ONE_NAME` 1.0 instead. Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
+  `onOrderReject`), each such token adds `W_IN_ONE_NAME` 1.0 instead. A token
+  that is the page's file name with its extension or a path suffix of it,
+  from a folder boundary, in any case (`names_file`), adds `W_FILE` 6.0 times the
+  idf of the N pages it names (not its `df`, which counts every includer), over
+  `sqrt(N)`; not on a memory note and not for a prompt (`search_prompt`). Field weights are not length-normalised, and `tf'` stays below the name weight, so a title
   hit beats any volume of body text on the same token. Because `N`,
   `df`, and `avglen` come from the filtered set, `score` is a ranking
   key, not a stable property of a page.
