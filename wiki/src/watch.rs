@@ -11,7 +11,7 @@ use std::time::Duration;
 
 /// What the last compile's walk visited. Lets a filesystem event be judged
 /// against the same ignore rules the compile applied, without re-reading them:
-/// a path under a pruned tree (`target/`, `.git/`, hidden dirs) has no visited
+/// a path under a pruned tree (`target/`, `.git/`, hidden dirs, `SKIPPED_DIRS`) has no visited
 /// parent and so never counts.
 pub struct WatchSet {
     root: PathBuf,
@@ -75,7 +75,9 @@ impl WatchSet {
         self.registry.handles(&normalize_path(&self.root, path))
             || name == ".gitignore"
             || name == ".ignore"
-            || (path.is_dir() && !name.starts_with('.'))
+            || (path.is_dir()
+                && !name.starts_with('.')
+                && !crate::walk::SKIPPED_DIRS.contains(&name))
     }
 }
 
@@ -273,6 +275,15 @@ mod tests {
         let (_d, r, w) = compiled();
         std::fs::create_dir(r.join("src/sub")).unwrap();
         assert!(w.relevant(&r.join("src/sub")));
+    }
+
+    #[test]
+    fn skipped_folder_events_are_not_relevant() {
+        let (_d, r, w) = compiled();
+        std::fs::create_dir_all(r.join("docs/superpowers/plans")).unwrap();
+        assert!(!w.relevant(&r.join("docs/superpowers")));
+        assert!(!w.relevant(&r.join("docs/superpowers/plans")));
+        assert!(!w.relevant(&r.join("docs/superpowers/plans/p.md")));
     }
 
     #[test]

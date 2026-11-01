@@ -1178,3 +1178,38 @@ fn badge_h1_page_resolves_by_its_clean_title() {
         "node_version_manager"
     );
 }
+
+#[test]
+fn process_folders_and_vendored_code_are_skipped_unless_no_ignore() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    let skipped = [
+        "docs/superpowers/plans/p.md",
+        "docs/superpowers/ledgers/runs/1.txt",
+        "third_party/x/lib.cpp",
+        "vendor/y.js",
+        "node_modules/z/index.js",
+    ];
+    write(&input, "src/a.rs", "pub fn a() {}\n");
+    write(&input, ".superpowers/specs/s.md", "# Spec\n\nbody\n");
+    for p in skipped {
+        write(&input, p, "x\n");
+    }
+    let paths = |respect_ignore| {
+        let opts = CompileOptions {
+            respect_ignore,
+            ..Default::default()
+        };
+        compile(&input, &output, &opts).unwrap();
+        index_entries(&output)
+            .iter()
+            .map(|e| e["path"].as_str().unwrap().to_string())
+            .collect::<BTreeSet<_>>()
+    };
+    assert_eq!(paths(true), BTreeSet::from(["src/a.rs".to_string()]));
+    let all = paths(false);
+    for p in skipped.iter().chain(&[".superpowers/specs/s.md"]) {
+        assert!(all.contains(*p), "{p} missing: {all:?}");
+    }
+}

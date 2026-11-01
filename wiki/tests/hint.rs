@@ -382,22 +382,6 @@ fn hint_shows_the_journal_of_a_date_in_the_prompt() {
 }
 
 #[test]
-fn hint_skips_vendored_code() {
-    let tmp = project_of(&[
-        (
-            "third_party/cli/cli.hpp",
-            "void parse_flags_a() {}\nvoid parse_flags_b() {}\n",
-        ),
-        ("vendor/lib/lib.rs", "pub fn parse_flags_c() {}\n"),
-        ("src/args.rs", "pub fn parse_flags_d() {}\n"),
-    ]);
-    let out = hint_in(&tmp, "parse flags");
-    assert!(out.contains("src/args.rs"), "{out}");
-    assert!(!out.contains("third_party/"), "{out}");
-    assert!(!out.contains("vendor/"), "{out}");
-}
-
-#[test]
 fn hint_of_a_long_prompt_counts_only_its_rare_words() {
     // Three pages hold 30 common prompt words; 24 rarer words have a page each.
     let common: Vec<String> = (0..30).map(|i| format!("common{i:02}")).collect();

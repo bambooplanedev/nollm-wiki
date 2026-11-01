@@ -464,7 +464,12 @@ recompile.
     wiki compile [OPTIONS] <INPUT> <OUTPUT>
 
 - `--incremental` — reuse `.wiki/cache.json` render fingerprints and skip unchanged pages.
-- `--no-ignore` — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`.
+- `--no-ignore` — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`,
+  and walk the process folders and vendored code too.
+
+Without `--no-ignore`, a folder named `superpowers` (at any depth) and vendored code (`third_party`,
+`third-party`, `vendor`, `vendored`, `node_modules`) are not walked: memory notes carry what those
+process artefacts concluded, and other people's code crowds out the project's own.
 - `--emit-json` — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
   `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project
@@ -578,8 +583,8 @@ counted. Exits 1 when any link is broken, so `lint` can gate a build.
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
 `path:start-end  name  signature` lines from the best-matching code pages, at most 2 per page,
 without docs, tests or a line whose range holds another of the page's lines; a page with no such
-line gets `path  title`. Only the text's 24 rarest words rank the pages, and vendored folders
-(`third_party`, `vendor`, `node_modules`) are left out; one-character words never count. Prints
+line gets `path  title`. Only the text's 24 rarest words rank the pages (vendored code is not compiled, see
+`compile`); one-character words never count. Prints
 nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a tag (a turn
 the harness wrote, such as `<task-notification>`) or it has fewer than two words of two or more
 characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt.

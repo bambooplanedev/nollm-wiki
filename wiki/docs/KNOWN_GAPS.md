@@ -78,8 +78,12 @@ per question is noise-level: treat single results as anecdotes.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
-- **Vendored code ranks like project code.** `third_party/` hits (e.g.
-  `TooManyInputsFlag` for the word "too") take result and hint slots.
+- **Process folders and vendored code are skipped by name.** A `superpowers`
+  folder and `third_party`/`vendor`/`node_modules`-style folders are not
+  compiled (on one bench project 2,358 of 3,298 pages, 71%, and 77% of the
+  wiki's bytes). A project's own code in a folder of such a name is left out
+  too, unless compiled with `--no-ignore`; with it, vendored hits (e.g.
+  `TooManyInputsFlag` for the word "too") take result and hint slots again.
 - **A decision split across a function and an enum's docs is not found.**
   "Where does it refuse to start" lands on the file, not on `decide`.
 - **`wiki hint` shows at most 2 lines per page**, so a third relevant
