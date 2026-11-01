@@ -49,14 +49,21 @@ fn spawn_env(
     extra: &[&str],
     env: &[(&str, &std::path::Path)],
 ) -> (Child, ChildStdin, Receiver<String>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_wiki"))
+    let mut server = Command::new(env!("CARGO_BIN_EXE_wiki"));
+    server
         .args(["serve", flag])
         .arg(path)
         .args(extra)
         .envs(env.iter().copied())
+        .stderr(Stdio::null());
+    attach(server)
+}
+
+/// Start `server` with piped stdin and stdout; see [`spawn_server`].
+fn attach(mut server: Command) -> (Child, ChildStdin, Receiver<String>) {
+    let mut child = server
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
         .spawn()
         .unwrap();
     let stdin = child.stdin.take().unwrap();
@@ -1100,6 +1107,165 @@ fn agent_folder_created_after_start_is_picked_up() {
     std::fs::write(slot.join("memory/n.md"), "# N\n\nquokkanote\n").unwrap();
     let ids = hit_ids(&search(&mut stdin, &stdout, 4, "quokkanote"));
     assert_ne!(ids, [] as [String; 0]);
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+/// The notice a server whose binary is gone adds to every answer.
+const RESTART: &str = "restart the agent session or reconnect the MCP server";
+
+/// Two installed copies of the wiki binary, `a` and `b`, in one directory.
+fn installed_copies() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    let (a, b) = (a.join("wiki"), b.join("wiki"));
+    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &a).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &b).unwrap();
+    (dir, a, b)
+}
+
+/// Spawn `serve <flag> <path>` from `program`, with stderr in the file `log`.
+fn spawn_from(
+    program: &std::path::Path,
+    flag: &str,
+    path: &std::path::Path,
+    log: &std::path::Path,
+) -> (Child, ChildStdin, Receiver<String>) {
+    let mut server = Command::new(program);
+    server
+        .args(["serve", flag])
+        .arg(path)
+        .stderr(std::fs::File::create(log).unwrap());
+    attach(server)
+}
+
+/// Put another file at `bin` the way `install` does, by rename.
+fn replace_binary(bin: &std::path::Path) {
+    let new = bin.with_extension("new");
+    std::fs::write(&new, "a newer build\n").unwrap();
+    std::fs::rename(&new, bin).unwrap();
+}
+
+fn notices(log: &std::path::Path) -> usize {
+    let text = std::fs::read_to_string(log).unwrap();
+    text.lines().filter(|l| l.contains("out of date")).count()
+}
+
+#[test]
+fn a_replaced_binary_stops_recompiling_and_says_so() {
+    let project = source_project();
+    let wiki_dir = project.path().join(".wiki");
+    let (bins, bin, _) = installed_copies();
+    let log = bins.path().join("stderr");
+    let (mut child, mut stdin, stdout) = spawn_from(&bin, "--source", project.path(), &log);
+    initialize(&mut stdin, &stdout);
+    let resp = search(&mut stdin, &stdout, 2, "oldword");
+    assert_ne!(hit_ids(&resp), [] as [String; 0]);
+    assert_eq!(stale_block(&resp), None);
+    let index = std::fs::read(wiki_dir.join("index.json")).unwrap();
+
+    replace_binary(&bin);
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    // JSON output: `hit_ids` parses the first block, the notice is its own.
+    let resp = search(&mut stdin, &stdout, 3, "zebrafish");
+    assert_eq!(hit_ids(&resp), [] as [String; 0], "{resp}");
+    assert!(
+        stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
+        "{resp}"
+    );
+
+    // A compile that still ran would be done after a few debounces.
+    std::thread::sleep(wiki::watch::DEBOUNCE * 4);
+    assert_eq!(std::fs::read(wiki_dir.join("index.json")).unwrap(), index);
+    let resp = search(&mut stdin, &stdout, 4, "oldword");
+    assert_ne!(hit_ids(&resp), [] as [String; 0], "keeps answering: {resp}");
+    assert!(
+        stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
+        "{resp}"
+    );
+    assert_eq!(
+        std::fs::read_dir(wiki_dir.join(".serve")).unwrap().count(),
+        0
+    );
+
+    // The new version's own compile is picked up.
+    let opts = wiki::CompileOptions {
+        incremental: true,
+        ..Default::default()
+    };
+    wiki::compile(project.path(), &wiki_dir, &opts).unwrap();
+    let resp = search(&mut stdin, &stdout, 5, "zebrafish");
+    assert_ne!(hit_ids(&resp), [] as [String; 0], "{resp}");
+    assert!(
+        stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
+        "{resp}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+    assert_eq!(notices(&log), 1);
+}
+
+#[test]
+fn a_removed_binary_is_reported_without_source_too() {
+    let (_tmp, out) = compile_fixture();
+    let (bins, bin, _) = installed_copies();
+    let log = bins.path().join("stderr");
+    let (mut child, mut stdin, stdout) = spawn_from(&bin, "--dir", &out, &log);
+    initialize(&mut stdin, &stdout);
+    let resp = search(&mut stdin, &stdout, 2, "gradient");
+    assert_eq!(stale_block(&resp), None);
+
+    std::fs::remove_file(&bin).unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "gradient");
+    assert!(hit_ids(&resp).iter().any(|id| id == "gradient_descent"));
+    assert!(
+        stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
+        "{resp}"
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+    assert_eq!(notices(&log), 1);
+}
+
+/// Started as a bare `wiki` found on `PATH` through a symlink to a build
+/// output, as on the bench: `/proc/self/exe` names the old build, which stays.
+#[cfg(unix)]
+#[test]
+fn a_retargeted_symlink_counts_as_replaced() {
+    let project = source_project();
+    let (bins, a, b) = installed_copies();
+    let path = bins.path().join("bin");
+    std::fs::create_dir_all(&path).unwrap();
+    let link = path.join("wiki");
+    std::os::unix::fs::symlink(&a, &link).unwrap();
+    let mut server = Command::new("wiki");
+    server
+        .args(["serve", "--source"])
+        .arg(project.path())
+        .env("PATH", &path)
+        .stderr(Stdio::null());
+    let (mut child, mut stdin, stdout) = attach(server);
+    initialize(&mut stdin, &stdout);
+    let resp = search(&mut stdin, &stdout, 2, "oldword");
+    assert_eq!(stale_block(&resp), None);
+
+    let next = path.join("wiki.new");
+    std::os::unix::fs::symlink(&b, &next).unwrap();
+    std::fs::rename(&next, &link).unwrap();
+    let resp = search(&mut stdin, &stdout, 3, "oldword");
+    assert!(
+        stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
+        "{resp}"
+    );
 
     drop(stdin);
     let _ = child.wait();

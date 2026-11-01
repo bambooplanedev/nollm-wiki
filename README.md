@@ -375,6 +375,13 @@ the server only reads the wiki: it checks `index.json`'s fingerprint before each
 reloads after a recompile; a failed reload keeps the previous snapshot and is retried on the next
 request.
 
+**Replaced binary.** A server that sees its `wiki` executable replaced or removed (a new install, a
+rebuild, a retargeted symlink) stops compiling and writing to `<dir>` for the rest of its life, so
+an old compiler cannot overwrite a newer wiki. It stays up and keeps answering from `<dir>`,
+reloading it as above. It says so once on stderr, and every result gains a line
+`wiki may be stale: the wiki server is out of date, ...`: restart the agent session or reconnect the
+MCP server.
+
 ### Agent memory
 
 Agents keep notes as Markdown files. The wiki compiles the folders they write to, and `search` and

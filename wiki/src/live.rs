@@ -7,14 +7,18 @@
 //! then — and then waits for the compiled generation to reach the event
 //! generation it saw. Both waits share one 5 s bound, of which a call spends
 //! at most 1 s on the start-up compile before answering from the old wiki.
+//!
+//! Once [`EXE`] sees the binary replaced, compiles stop for good: an old
+//! compiler must not overwrite what the new version wrote.
 
 use crate::query::Wiki;
 use crate::watch::{self, WatchSet};
 use crate::{compile, is_under, CompileOptions, WikiError};
 use notify::RecursiveMode;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant, SystemTime};
 
 /// How long a tool call waits for a fresh snapshot before answering from the
 /// one it has.
@@ -30,6 +34,93 @@ const RUNNING: &str = "recompile still running";
 /// Barrier files go in this subdirectory of `--dir`: it stays writable when
 /// the `--dir` root is not, and no `.md` name there is a page the prune knows.
 const BARRIER_DIR: &str = ".serve";
+
+/// What tells a file from its replacement. A stat, cheap enough for every
+/// tool call.
+#[derive(PartialEq)]
+struct FileId {
+    /// 0 where there are no inodes.
+    inode: u64,
+    mtime: SystemTime,
+    len: u64,
+}
+
+fn file_id(path: &Path) -> std::io::Result<FileId> {
+    let meta = std::fs::metadata(path)?;
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+    #[cfg(not(unix))]
+    let inode = 0;
+    Ok(FileId {
+        inode,
+        mtime: meta.modified()?,
+        len: meta.len(),
+    })
+}
+
+/// The executable this process started from, kept to see it replaced.
+pub(crate) struct Exe {
+    files: Vec<(PathBuf, FileId)>,
+    replaced: AtomicBool,
+}
+
+/// This process's executable; `serve` forces it at start.
+pub(crate) static EXE: LazyLock<Exe> = LazyLock::new(|| match std::env::current_exe() {
+    Ok(exe) => Exe::of(std::iter::once(exe).chain(invoked_path())),
+    Err(_) => Exe::of([]),
+});
+
+impl Exe {
+    /// Track `paths`, the first being the running binary. A later one counts
+    /// only if it is that same file, so an `argv[0]` naming something else
+    /// never reads as a replacement. Nothing readable means no check.
+    fn of(paths: impl IntoIterator<Item = PathBuf>) -> Exe {
+        let mut files: Vec<(PathBuf, FileId)> = Vec::new();
+        for path in paths {
+            if let Ok(id) = file_id(&path) {
+                if files.first().is_none_or(|(_, first)| *first == id) {
+                    files.push((path, id));
+                }
+            }
+        }
+        Exe {
+            files,
+            replaced: AtomicBool::new(false),
+        }
+    }
+
+    /// Has a tracked path changed or gone? Once true, always true; the first
+    /// time it says so on stderr.
+    pub(crate) fn replaced(&self) -> bool {
+        if self.replaced.load(Ordering::Relaxed) {
+            return true;
+        }
+        let same = |(path, id): &(PathBuf, FileId)| file_id(path).is_ok_and(|now| now == *id);
+        if self.files.iter().all(same) {
+            return false;
+        }
+        if !self.replaced.swap(true, Ordering::Relaxed) {
+            eprintln!("wiki serve: {OUTDATED}");
+        }
+        true
+    }
+}
+
+/// Why a replaced binary's answers may be stale, and what to do about it.
+pub(crate) const OUTDATED: &str = "the wiki server is out of date, its binary was replaced or \
+removed; restart the agent session or reconnect the MCP server";
+
+/// The path this process was started as, which unlike `current_exe` on Linux
+/// keeps a symlink: `argv[0]`, looked up on `PATH` when it is a bare name.
+fn invoked_path() -> Option<PathBuf> {
+    let arg0 = PathBuf::from(std::env::args_os().next()?);
+    if arg0.components().count() > 1 {
+        return std::path::absolute(arg0).ok();
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(&arg0))
+        .find(|p| p.is_file())
+}
 
 struct State {
     /// Bumped by every relevant watch event.
@@ -140,6 +231,11 @@ impl Live {
         &self.dir
     }
 
+    /// The snapshot compiled last, without waiting for anything.
+    pub fn wiki(&self) -> Arc<Wiki> {
+        Arc::clone(&self.lock().wiki)
+    }
+
     /// The snapshot holding every edit made before this call, and why it may
     /// not (the last compile failed, or the wait ran out). Blocks up to 5 s,
     /// or 1 s while the start-up compile runs.
@@ -217,9 +313,15 @@ impl Live {
     }
 
     /// Compile once and publish the result: a new snapshot on success, the
-    /// error as the stale reason on failure (the old snapshot stays).
+    /// error as the stale reason on failure (the old snapshot stays). With
+    /// the binary replaced it only marks the edits as handled.
     fn compile_step(&self) -> Result<(), WikiError> {
         let target = self.lock().event_gen;
+        if EXE.replaced() {
+            self.lock().compiled_gen = target;
+            self.changed.notify_all();
+            return Ok(());
+        }
         let result = unpanicked(|| {
             compile(&self.source, &self.dir, &self.opts)
                 .and_then(|r| Ok((Wiki::load(&self.dir)?, r.watch_set)))
@@ -347,6 +449,86 @@ mod tests {
         std::fs::write(slot.join("memory/n.md"), "# N\n\nnote\n").unwrap();
         let _ = live.fresh();
         assert!(gens(&live).1 > before.1);
+    }
+
+    /// `<dir>/wiki` with `body`, and an `Exe` tracking it.
+    fn tracked(dir: &Path, body: &str) -> (PathBuf, Exe) {
+        let bin = dir.join("wiki");
+        std::fs::write(&bin, body).unwrap();
+        let exe = Exe::of([bin.clone()]);
+        (bin, exe)
+    }
+
+    #[test]
+    fn an_untouched_binary_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_bin, exe) = tracked(dir.path(), "one");
+        assert!(!exe.replaced());
+        assert!(!exe.replaced());
+    }
+
+    #[test]
+    fn a_rename_over_the_binary_stays_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, exe) = tracked(dir.path(), "one");
+        let saved = dir.path().join("saved");
+        std::fs::copy(&bin, &saved).unwrap();
+        let new = dir.path().join("new");
+        std::fs::write(&new, "one").unwrap();
+        std::fs::rename(&new, &bin).unwrap();
+        assert!(exe.replaced());
+        std::fs::rename(&saved, &bin).unwrap();
+        assert!(exe.replaced());
+    }
+
+    #[test]
+    fn a_rebuild_in_place_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, exe) = tracked(dir.path(), "one");
+        std::fs::write(&bin, "a longer one").unwrap();
+        assert!(exe.replaced());
+    }
+
+    #[test]
+    fn a_removed_binary_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, exe) = tracked(dir.path(), "one");
+        std::fs::remove_file(&bin).unwrap();
+        assert!(exe.replaced());
+    }
+
+    #[test]
+    fn no_readable_executable_means_no_check() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!Exe::of([dir.path().join("gone")]).replaced());
+        assert!(!Exe::of([]).replaced());
+    }
+
+    #[test]
+    fn a_path_that_is_another_file_is_not_tracked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, _) = tracked(dir.path(), "one");
+        let other = dir.path().join("other");
+        std::fs::write(&other, "something else").unwrap();
+        let exe = Exe::of([bin, other.clone()]);
+        std::fs::remove_file(&other).unwrap();
+        assert!(!exe.replaced());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_retargeted_symlink_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let (bin, _) = tracked(dir.path(), "one");
+        let other = dir.path().join("other");
+        std::fs::write(&other, "one").unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&bin, &link).unwrap();
+        let exe = Exe::of([bin, link.clone()]);
+        assert!(!exe.replaced());
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink(&other, &link).unwrap();
+        assert!(exe.replaced());
     }
 
     #[test]

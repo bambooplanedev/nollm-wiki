@@ -3,7 +3,7 @@
 //! resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
-use crate::live::Live;
+use crate::live::{Live, EXE, OUTDATED};
 use crate::model::{clip, one_line, KindFilter, LINE_CHARS};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
@@ -23,7 +23,7 @@ use rmcp::{
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::SystemTime;
 
 pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
@@ -76,7 +76,8 @@ fn fingerprint(dir: &Path) -> std::io::Result<Fingerprint> {
 
 struct Loaded {
     wiki: Arc<Wiki>,
-    fingerprint: Fingerprint,
+    /// `None` until the first reload from disk.
+    fingerprint: Option<Fingerprint>,
 }
 
 /// How the served snapshot keeps up with the source.
@@ -85,8 +86,9 @@ enum Freshness {
     /// reload (mid-compile write, malformed index, deleted file) keeps
     /// serving the previous snapshot and is retried on the next access.
     Fingerprint(Mutex<Loaded>),
-    /// `serve --source` compiles itself (see [`Live`]).
-    Live(Arc<Live>),
+    /// `serve --source` compiles itself (see [`Live`]). Once its binary is
+    /// replaced it stops, and the second field takes over as `Fingerprint`.
+    Live(Arc<Live>, OnceLock<Mutex<Loaded>>),
 }
 
 /// A handle to the compiled wiki a server answers from.
@@ -103,7 +105,7 @@ impl WikiState {
             dir: dir.to_path_buf(),
             freshness: Freshness::Fingerprint(Mutex::new(Loaded {
                 wiki: Arc::new(wiki),
-                fingerprint: fp,
+                fingerprint: Some(fp),
             })),
         })
     }
@@ -111,7 +113,7 @@ impl WikiState {
     pub fn live(live: Arc<Live>) -> WikiState {
         WikiState {
             dir: live.dir().to_path_buf(),
-            freshness: Freshness::Live(live),
+            freshness: Freshness::Live(live, OnceLock::new()),
         }
     }
 
@@ -122,9 +124,19 @@ impl WikiState {
     /// The wiki to answer from, and why it may be stale. A live wait runs off
     /// the MCP runtime thread, so pings and cancels keep working meanwhile.
     pub async fn snapshot(&self) -> (Arc<Wiki>, Option<String>) {
+        let outdated = EXE.replaced().then(|| OUTDATED.to_string());
         match &self.freshness {
-            Freshness::Fingerprint(inner) => (self.reload(inner), None),
-            Freshness::Live(live) => {
+            Freshness::Fingerprint(inner) => (self.reload(inner), outdated),
+            Freshness::Live(live, frozen) if outdated.is_some() => {
+                let frozen = frozen.get_or_init(|| {
+                    Mutex::new(Loaded {
+                        wiki: live.wiki(),
+                        fingerprint: None,
+                    })
+                });
+                (self.reload(frozen), outdated)
+            }
+            Freshness::Live(live, _) => {
                 let live = Arc::clone(live);
                 tokio::task::spawn_blocking(move || live.fresh())
                     .await
@@ -138,11 +150,11 @@ impl WikiState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Ok(current) = fingerprint(&self.dir) {
-            if current != guard.fingerprint {
+            if Some(current) != guard.fingerprint {
                 if let Ok(wiki) = Wiki::load(&self.dir) {
                     *guard = Loaded {
                         wiki: Arc::new(wiki),
-                        fingerprint: current,
+                        fingerprint: Some(current),
                     };
                 }
                 // Reload failure: keep old snapshot, retry next call.
@@ -590,6 +602,7 @@ pub fn run(
     tools: Option<&[String]>,
     memory: &[String],
 ) -> Result<(), WikiError> {
+    LazyLock::force(&EXE);
     let tools: Vec<&str> = match tools {
         None => DEFAULT_TOOLS.to_vec(),
         Some(names) => {
@@ -756,6 +769,29 @@ mod tests {
         std::fs::write(out.join("index.json"), "{ not json").unwrap();
 
         // Old snapshot still serves.
+        assert_eq!(pages(&state), 3);
+    }
+
+    /// What a newer version may write: an old server must load or refuse it,
+    /// never fall over.
+    #[test]
+    fn snapshot_survives_the_index_of_another_version() {
+        let (_tmp, out) = fixture(3);
+        let state = WikiState::load(&out).unwrap();
+        let index = std::fs::read_to_string(out.join("index.json")).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&index).unwrap();
+
+        // An added field and a garbled items.json: read as far as understood.
+        value["entries"][0]["added_later"] = true.into();
+        value["added_later"] = 1.into();
+        std::fs::write(out.join("index.json"), value.to_string()).unwrap();
+        std::fs::write(out.join("items.json"), r#"{"p":[{"kind":"new"}]}"#).unwrap();
+        assert_eq!(pages(&state), 3);
+
+        // A dropped or retyped field: the old snapshot stays.
+        value["entries"][0]["pagerank"] = "high".into();
+        value["entries"][1].as_object_mut().unwrap().remove("title");
+        std::fs::write(out.join("index.json"), value.to_string()).unwrap();
         assert_eq!(pages(&state), 3);
     }
 }
