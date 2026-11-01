@@ -1,7 +1,7 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
-use crate::model::{one_line, KindFilter};
-use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki};
+use crate::model::one_line;
+use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki, MEMORY_GATE_RATIO};
 use std::collections::HashSet;
 
 /// Most symbol lines a hint prints.
@@ -11,6 +11,13 @@ const HINT_PAGES: usize = 5;
 /// Rarest prompt words that rank the pages (the bench keyed prompts have up
 /// to 30 and rank the same at 24; at 16 they lose two answers).
 const HINT_TERMS: usize = 24;
+/// A prompt with more distinct words than this is instructions, not a
+/// question: a memory note named by one of its words is noise, so the name
+/// branch of the memory gate is off for it. Measured 2026-11-01: questions
+/// and bench task prompts have 2-48 distinct words, long task prompts 116
+/// or more; at the shared gate the long ones showed a note 44 times in 48,
+/// about 1 in 50 relevant.
+const HINT_SHORT_WORDS: usize = 64;
 /// A page is kept when its score is at least this share of the best page's.
 const HINT_MIN_REL: f64 = 0.5;
 /// Longest line, in characters, before it is cut with `…`.
@@ -24,11 +31,14 @@ const HEADER: &str = "Code locations from the project wiki (path:start-end  name
 /// Header plus up to `HINT_LINES` `path:start-end  name  signature` lines for
 /// `text` (`path  title` for a page with no such line, such as a script
 /// whose matching code sits outside any function), then one `memory: path — summary` line for the best memory note
-/// that passes `Wiki::passes_gate`, the gate `search` uses for its tail;
-/// empty when neither exists.
+/// that passes the hint's gate: `search`'s tail gate (`Wiki::passes_gate`)
+/// with two differences for a prompt: a name match counts only when the
+/// prompt has at most `HINT_SHORT_WORDS` distinct words, the ratio branch
+/// of a longer prompt needs a code hit to beat, and the note is scored on
+/// the same `HINT_TERMS` words as the code. Empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
-    let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS);
+    let hits = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let mut seen = HashSet::new();
     let mut out = String::new();
@@ -53,16 +63,16 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
             left -= 1;
         }
     }
+    let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
     let note = wiki
-        .search_scoped(
-            text,
-            Some(&KindFilter::Code),
-            None,
-            Some(HINT_PAGES),
-            MemoryScope::Only,
-        )
+        .search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Only)
         .into_iter()
-        .find(|h| wiki.passes_gate(h, text, best, gate_len()));
+        .find(|h| {
+            h.superseded_by.is_none()
+                && ((short && wiki.names_page(&h.id, text, gate_len()))
+                    || wiki.dated_on(&h.id, text)
+                    || ((short || best > 0.0) && h.score >= MEMORY_GATE_RATIO * best))
+        });
     if let Some(h) = note {
         let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
         push_line(

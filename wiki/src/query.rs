@@ -724,7 +724,7 @@ impl Wiki {
     /// `tokenize`, with the query's word set as typed, each token split
     /// like a name: (tokens, words). Word forms meet in `field_tier`, not
     /// here: a token stays as typed so an exact hit keeps its full weight.
-    fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
+    pub(crate) fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
         let tokens = Self::tokenize(query);
         let words = tokens.iter().flat_map(|t| Self::field_words(t)).collect();
         (tokens, words)
@@ -1307,16 +1307,24 @@ impl Wiki {
         self.search_terms(q, kind, tag, limit, scope, None, None).0
     }
 
-    /// Code pages for a prompt rather than a query: vendored pages are out,
-    /// and only its `terms` rarest words that occur at all count, since most
-    /// of a prompt's words say how to work, not what to find.
-    pub(crate) fn search_prompt(&self, q: &str, limit: usize, terms: usize) -> Vec<Hit> {
+    /// Code pages (or, with `MemoryScope::Only`, memory notes) for a prompt
+    /// rather than a query: vendored pages are out, and only its `terms`
+    /// rarest words that occur at all count, since most of a prompt's words
+    /// say how to work, not what to find. `hint` scores its note with the
+    /// same call as its code, so the gate's ratio compares like with like.
+    pub(crate) fn search_prompt(
+        &self,
+        q: &str,
+        limit: usize,
+        terms: usize,
+        scope: MemoryScope,
+    ) -> Vec<Hit> {
         self.search_terms(
             q,
             Some(&KindFilter::Code),
             None,
             Some(limit),
-            MemoryScope::Without,
+            scope,
             Some(terms),
             None,
         )

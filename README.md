@@ -585,8 +585,10 @@ then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
 One `memory: <path> — <summary>` line follows the code lines when the prompt matches a memory note
 in its title, an alias or its summary and any of three holds. It needs a prompt word of four or more
-characters in that match, or a date in the prompt that is the note's `updated` day, or the note
-scoring at least twice the best code page.
+characters in that match, which counts only in a prompt of at most 64 distinct words (a longer prompt
+is instructions, and one of its words naming some note is noise), or a date in the prompt that is the
+note's `updated` day, or the note scoring at least twice the best code page, both scored on the
+prompt's 24 rarest words; past 64 words that needs a code page to beat.
 
 #### generate
 

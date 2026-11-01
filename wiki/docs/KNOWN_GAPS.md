@@ -258,6 +258,12 @@ per question is noise-level: treat single results as anecdotes.
   short code-shaped queries; at 4 most code queries carry one or two tail rows
   (about 540 bytes more per `search` answer on this repo) that a model writing
   longer queries would not need. The code list is unchanged either way.
+  `wiki hint` turns the name branch off past 64 distinct words: a long prompt
+  nearly always carries a four-letter word naming some note (a note under 44
+  of 48 long prompts, about 1 in 50 relevant). The number is a measured gap
+  (questions and bench prompts up to 48 words, long task prompts from 116),
+  not a property of prompts in general; a question longer than that shows a
+  note only when it outscores the code twice over.
 - A `--memory DIR` that does not exist yet, under a large parent (a home
   directory), is watched through the whole parent; on Linux this can exhaust
   `max_user_watches` and `serve` then fails to start. The escape is an

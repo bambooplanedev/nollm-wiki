@@ -580,7 +580,11 @@ matching:
   `MEMORY_TAIL` (2) live notes from `MemoryScope::Only`, best score first
   (newer `updated` first on a tie), after the hits and outside `limit`,
   whatever `kind`; with `tag` set a note must carry it. A note enters the tail
-  through `passes_gate`, which `wiki hint` shares: it is not superseded, and
+  through `passes_gate`, which `wiki hint` applies with two changes for a
+  prompt (the name branch only up to `HINT_SHORT_WORDS` distinct words, the
+  ratio branch of a longer prompt only against a code hit, and its note
+  scored by `search_prompt` on the same `HINT_TERMS` words as its code): it
+  is not superseded, and
   a query word of `gate_len()` (4) or more characters is in its title, aliases
   or summary (`names_page`), or the query writes its `updated` day
   (`dated_on`), or its score is at least `MEMORY_GATE_RATIO` (2) times the
