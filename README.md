@@ -334,7 +334,8 @@ that does not, such as Claude Desktop, give the project's absolute path.
     wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — also compile this project and keep the wiki in step with it.
-- `--dir <out>` (`<project>/.wiki` with `--source`, else `out`) — the compiled wiki to serve.
+- `--dir <out>` (`<project>/.wiki` with `--source`, else `.wiki` if that directory exists, else
+  `out`) — the compiled wiki to serve.
 - `--tools <list>` (`search,page,neighbors,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off the discovery of the agents'
@@ -456,8 +457,8 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 | `generate` | a synthetic corpus for demos and bug reports |
 
 `--jobs N` sets the worker threads of `compile` (Rayon's default, usually the number of CPUs); the
-output is the same for any value. The query commands read `--dir <out>` (`out` by default) and never
-recompile.
+output is the same for any value. The query commands read `--dir <out>` (by default `.wiki` if that directory exists, else `out`)
+and never recompile.
 
 #### compile
 
@@ -490,7 +491,7 @@ clean directory.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir out] [QUERY]
+    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
   `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
@@ -510,7 +511,7 @@ gets its body snippet on a four-space-indented line instead. A summary, snippet 
 
 #### page
 
-    wiki page [--full] [--max-tokens N] [--dir out] <ID>
+    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
@@ -549,7 +550,7 @@ whole lines.
 
 #### callers
 
-    wiki callers [--depth N] [--max-tokens N] [--dir out] <ID> <SYMBOL>
+    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 The functions that call function `<SYMBOL>` (`name` or `Owner::name`) on page `<ID>`, one
 `start-end  kind  Owner::name` line each, grouped by file and ending `calls f at L1, L2` with the
@@ -558,7 +559,7 @@ lines that make the call; test code comes last. `--depth 2` adds the callers' ca
 
 #### neighbors
 
-    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir out] <ID>
+    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 A budgeted context pack for an agent: a breadth-first walk from `<ID>` up to `--depth` hops (1).
 `--max-tokens` is a hard ceiling on the pack's estimated size (chars/4) and `--max-nodes` caps the
@@ -573,7 +574,7 @@ as outlines when they fit, and the rest as one-line summaries.
 
 #### lint
 
-    wiki lint [--dir out]
+    wiki lint [--dir DIR]
 
 Prints the counts of broken links, orphan pages and large pages (over 4000 tokens, which a default
 `neighbors` pack would degrade to a summary; code pages are not checked), then one line per

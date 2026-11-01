@@ -342,7 +342,8 @@ args = ["serve", "--source", "."]
     wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
-- `--dir <out>` (`<project>/.wiki` з `--source`, інакше `out`) — скомпільована вікі, яку віддавати.
+- `--dir <out>` (`<project>/.wiki` з `--source`, інакше `.wiki`, якщо така тека існує, інакше
+  `out`) — скомпільована вікі, яку віддавати.
 - `--tools <list>` (`search,page,neighbors,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (можна повторювати) — з `--source`: `none` вимикає пошук тек памʼяті
@@ -469,7 +470,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 `--jobs N` задає кількість потоків для `compile` (за замовчуванням як у Rayon, зазвичай за числом
 ядер); результат від цього не залежить. Команди-запити читають `--dir <out>` (за замовчуванням
-`out`) і ніколи не перекомпільовують.
+`.wiki`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
 
 #### compile
 
@@ -501,7 +502,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir out] [QUERY]
+    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
@@ -522,7 +523,7 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 #### page
 
-    wiki page [--full] [--max-tokens N] [--dir out] <ID>
+    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` — ідентифікатор сторінки або будь-що, що однозначно називає одну сторінку: її назва (у
 будь-якому регістрі), slug назви, шлях до джерела чи унікальний кінець шляху (`query.rs`) або
@@ -561,7 +562,7 @@ Index:
 
 #### callers
 
-    wiki callers [--depth N] [--max-tokens N] [--dir out] <ID> <SYMBOL>
+    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 Функції, що викликають функцію `<SYMBOL>` (`name` або `Owner::name`) на сторінці `<ID>`, по рядку
 `start-end  kind  Owner::name` на кожну, згруповані за файлами; рядок закінчується на
@@ -570,7 +571,7 @@ Index:
 
 #### neighbors
 
-    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir out] <ID>
+    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 Пакет контексту для агента в межах бюджету: обхід у ширину від `<ID>` на `--depth` кроків (1).
 `--max-tokens` — жорстка межа оціненого розміру пакета (знаки/4), `--max-nodes` обмежує кількість
@@ -585,7 +586,7 @@ Index:
 
 #### lint
 
-    wiki lint [--dir out]
+    wiki lint [--dir DIR]
 
 Друкує кількість битих посилань, сторінок-сиріт і завеликих сторінок (понад 4000 токенів: таку
 сторінку пакет `neighbors` за замовчуванням урізав би до опису; сторінки коду не перевіряються), а потім по

@@ -9,6 +9,8 @@ use wiki::query::{PackBudget, Wiki};
 use wiki::setup::{Agent, Scope, SetupOptions};
 use wiki::{compile, CompileOptions};
 
+const DIR_HELP: &str = "Wiki to read (default: `.wiki` if that directory exists, else `out`)";
+
 #[derive(Parser)]
 #[command(
     name = "wiki",
@@ -61,8 +63,8 @@ enum Command {
         /// A function on the page: list every function it calls instead.
         #[arg(long)]
         symbol: Option<String>,
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        #[arg(long, help = DIR_HELP)]
+        dir: Option<PathBuf>,
     },
     /// List the functions that call a function on a page.
     Callers {
@@ -73,8 +75,8 @@ enum Command {
         depth: Option<usize>,
         #[arg(long)]
         max_tokens: Option<usize>,
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        #[arg(long, help = DIR_HELP)]
+        dir: Option<PathBuf>,
     },
     /// Print a page's outline, or with `--full` the whole page.
     Page {
@@ -83,8 +85,8 @@ enum Command {
         full: bool,
         #[arg(long)]
         max_tokens: Option<usize>,
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        #[arg(long, help = DIR_HELP)]
+        dir: Option<PathBuf>,
     },
     Search {
         /// Required unless `--tag` is given.
@@ -100,18 +102,19 @@ enum Command {
         /// Output format: `lines` or `json`.
         #[arg(long, value_parser = ["lines", "json"], default_value = "lines")]
         format: String,
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        #[arg(long, help = DIR_HELP)]
+        dir: Option<PathBuf>,
     },
     Lint {
-        #[arg(long, default_value = "out")]
-        dir: PathBuf,
+        #[arg(long, help = DIR_HELP)]
+        dir: Option<PathBuf>,
     },
     Serve {
         /// Compile this project, watch it, and recompile on every edit.
         #[arg(long)]
         source: Option<PathBuf>,
-        /// Wiki to serve (default: `<source>/.wiki` with `--source`, else `out`).
+        /// Wiki to serve (default: `<source>/.wiki` with `--source`, else
+        /// `.wiki` if that directory exists, else `out`).
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Tools to expose, comma-separated, from search, page, neighbors,
@@ -176,6 +179,18 @@ fn ask_scope() -> Result<Scope> {
         "2" => Ok(Scope::Local),
         _ => anyhow::bail!("choose 1 or 2"),
     }
+}
+
+/// The wiki a command reads: `--dir`, else `./.wiki` if it exists, else `out`.
+fn wiki_dir(dir: Option<PathBuf>) -> PathBuf {
+    dir.unwrap_or_else(|| {
+        let local = PathBuf::from(".wiki");
+        if local.is_dir() {
+            local
+        } else {
+            "out".into()
+        }
+    })
 }
 
 /// Exit with a clap usage error (status 2).
@@ -262,7 +277,7 @@ fn main() -> Result<()> {
             symbol,
             dir,
         } => {
-            let w = Wiki::load(&dir).context("load wiki")?;
+            let w = Wiki::load(&wiki_dir(dir)).context("load wiki")?;
             let kind = kind
                 .as_deref()
                 .map(KindFilter::parse_arg)
@@ -297,7 +312,7 @@ fn main() -> Result<()> {
             max_tokens,
             dir,
         } => {
-            let w = Wiki::load(&dir).context("load wiki")?;
+            let w = Wiki::load(&wiki_dir(dir)).context("load wiki")?;
             let rid = w
                 .resolve(&id)
                 .map_err(anyhow::Error::msg)
@@ -313,7 +328,7 @@ fn main() -> Result<()> {
             max_tokens,
             dir,
         } => {
-            let w = Wiki::load(&dir).context("load wiki")?;
+            let w = Wiki::load(&wiki_dir(dir)).context("load wiki")?;
             let rid = w
                 .resolve(&id)
                 .map_err(anyhow::Error::msg)
@@ -339,7 +354,7 @@ fn main() -> Result<()> {
                 .map(wiki::query::tag_arg)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            let w = Wiki::load(&dir).context("load wiki")?;
+            let w = Wiki::load(&wiki_dir(dir)).context("load wiki")?;
             let kind = kind
                 .as_deref()
                 .map(KindFilter::parse_arg)
@@ -359,7 +374,8 @@ fn main() -> Result<()> {
             }
         }
         Command::Lint { dir } => {
-            let pages = wiki::lint::load_compiled_pages(&dir).context("read output dir")?;
+            let pages =
+                wiki::lint::load_compiled_pages(&wiki_dir(dir)).context("read output dir")?;
             let r = wiki::lint::lint(&pages);
             println!(
                 "Linted {} pages: {} broken links, {} orphans, {} large",
@@ -398,11 +414,7 @@ fn main() -> Result<()> {
             if memory.len() > 1 && memory.iter().any(|m| m == "none") {
                 usage_error("--memory none cannot be combined with a folder");
             }
-            let dir = dir.unwrap_or_else(|| {
-                source
-                    .as_ref()
-                    .map_or_else(|| "out".into(), |s| s.join(".wiki"))
-            });
+            let dir = wiki_dir(dir.or_else(|| source.as_ref().map(|s| s.join(".wiki"))));
             wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
         }
         Command::Hint {
