@@ -87,6 +87,9 @@ put the `wiki` binary in a directory on your `PATH`, since agents start it as pl
     curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.1/wiki-v0.6.1-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
+Releases after v0.6.1 also carry `SHA256SUMS`. With the tarball and that file in one folder, run
+`sha256sum -c --ignore-missing SHA256SUMS` (on macOS `shasum -a 256 -c --ignore-missing SHA256SUMS`).
+
 From source:
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
@@ -814,7 +817,7 @@ Internals, determinism rules and how to add a language: [wiki/docs/ARCHITECTURE.
 
 `wiki` is also a library; the CLI is a thin wrapper over the same API — see
 [wiki/README.md](wiki/README.md). Pushing a `v*` tag builds the Linux and macOS binaries and attaches
-them to a GitHub Release.
+them to a GitHub Release, with their `SHA256SUMS`.
 
 ### Self-hosting
 

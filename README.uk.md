@@ -93,6 +93,9 @@ wiki/src/lib.rs
     curl -L https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.1/wiki-v0.6.1-aarch64-apple-darwin.tar.gz | tar -xz
     sudo mv wiki /usr/local/bin/
 
+Релізи після v0.6.1 також містять `SHA256SUMS`. Коли архів і цей файл лежать в одній теці, виконайте
+`sha256sum -c --ignore-missing SHA256SUMS` (на macOS `shasum -a 256 -c --ignore-missing SHA256SUMS`).
+
 З коду:
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
@@ -833,7 +836,7 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 
 `wiki` — ще й бібліотека; CLI — тонка обгортка над тим самим API, див.
 [wiki/README.md](wiki/README.md). Пуш тегу `v*` збирає бінарники для Linux і macOS і прикріплює їх
-до GitHub Release.
+до GitHub Release разом із `SHA256SUMS`.
 
 ### Самохостинг
 
