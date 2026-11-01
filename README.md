@@ -494,7 +494,8 @@ The default output is one line per page, `id  path  [date  ]title — summary`. 
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
 inclusive range; `name` is `Owner::name` for methods). Only symbols scoring at least 30% of the best
 symbol in the response are shown, and test code ranks at half score. A page without symbol lines
-gets its body snippet on a four-space-indented line instead. `--format json` prints
+gets its body snippet on a four-space-indented line instead. A summary, snippet or doc longer than
+160 characters is cut with `…`. `--format json` prints
 `[{id, title, summary, updated, score, snippet, path, symbols}]`, each symbol
 `{path, start_line, end_line, name, signature, doc}`.
 
@@ -578,8 +579,10 @@ The code locations for a task text, as a prompt hook injects them: a header line
 `path:start-end  name  signature` lines from the best-matching code pages, at most 2 per page,
 without docs, tests or a line whose range holds another of the page's lines; a page with no such
 line gets `path  title`. Only the text's 24 rarest words rank the pages, and vendored folders
-(`third_party`, `vendor`, `node_modules`) are left out. Prints nothing and
-exits 0 when the wiki is missing or nothing matches, so a hook can run it on every prompt.
+(`third_party`, `vendor`, `node_modules`) are left out; one-character words never count. Prints
+nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a tag (a turn
+the harness wrote, such as `<task-notification>`) or it has fewer than two words of two or more
+characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 

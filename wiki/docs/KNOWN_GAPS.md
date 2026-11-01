@@ -40,6 +40,15 @@ per question is noise-level: treat single results as anecdotes.
   - The agent reads every candidate file of the hint in its first turn.
     Neither a doc on each hint line nor a header that says "read the one
     that fits" stopped it from reading a same-named twin.
+- **The hook cost grew with the prompt, and few subagents use the wiki.**
+  On the bench project (3,304 pages) `wiki hint` took about 5 ms per
+  prompt word, 4.7 s on a 1,246-word subagent hand-back, because it
+  scanned every page body once per word; it now takes 0.16-0.45 s flat,
+  and harness turns and one-word replies are silent. On that project 5 of
+  28 briefed subagents called the wiki: briefs already carry a median of
+  22 file paths, instructions in CLAUDE.md, the brief or memory did not
+  change tool choice, and the hook reaches only the main session, which
+  delegates everything.
 - **Claude Code agents grep more without the navigation skill.** Over 24
   Haiku runs on the project above, tools loaded up front and no skill gave 48
   Grep/Glob calls against 20 for the skill setup with deferred tools, yet a
