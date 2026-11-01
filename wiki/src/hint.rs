@@ -1,6 +1,6 @@
 //! `wiki hint`: the code locations an agent hook injects before it reads a task.
 
-use crate::model::one_line;
+use crate::model::{clip, LINE_CHARS};
 use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki, MEMORY_GATE_RATIO};
 use std::collections::HashSet;
 
@@ -20,8 +20,6 @@ const HINT_TERMS: usize = 24;
 const HINT_SHORT_WORDS: usize = 64;
 /// A page is kept when its score is at least this share of the best page's.
 const HINT_MIN_REL: f64 = 0.5;
-/// Longest line, in characters, before it is cut with `…`.
-const HINT_LINE_CHARS: usize = 160;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
 const HINT_PAGE_LINES: usize = 2;
@@ -87,15 +85,9 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     }
 }
 
-/// Append `line` whitespace-collapsed and cut to `HINT_LINE_CHARS`.
+/// Append `line` whitespace-collapsed and cut to `LINE_CHARS`.
 fn push_line(out: &mut String, line: &str) {
-    let line = one_line(line);
-    if line.chars().count() > HINT_LINE_CHARS {
-        out.extend(line.chars().take(HINT_LINE_CHARS - 1));
-        out.push('…');
-    } else {
-        out.push_str(&line);
-    }
+    out.push_str(&clip(line, LINE_CHARS));
     out.push('\n');
 }
 

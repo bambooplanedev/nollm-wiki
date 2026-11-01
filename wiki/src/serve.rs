@@ -4,7 +4,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::Live;
-use crate::model::{one_line, KindFilter};
+use crate::model::{clip, one_line, KindFilter, LINE_CHARS};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -517,7 +517,8 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or
-/// the snippet (four-space indent) when the page has no symbols.
+/// the snippet (four-space indent) when the page has no symbols. A summary,
+/// snippet or doc is cut at `LINE_CHARS`, as a hint line is.
 /// A memory note renders as the hook's one line, `memory: path — summary`
 /// (the title when there is no summary). No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
@@ -532,7 +533,7 @@ pub fn search_lines(hits: &[Hit]) -> String {
             out.push_str(&format!(
                 "memory: {} — {}",
                 h.path,
-                one_line(said.unwrap_or(&h.title))
+                clip(said.unwrap_or(&h.title), LINE_CHARS)
             ));
             // Only a tag listing shows a superseded note.
             if let Some(by) = &h.superseded_by {
@@ -540,7 +541,7 @@ pub fn search_lines(hits: &[Hit]) -> String {
             }
             out.push('\n');
             if let Some(sn) = &h.snippet {
-                out.push_str(&format!("    {}\n", one_line(sn)));
+                out.push_str(&format!("    {}\n", clip(sn, LINE_CHARS)));
             }
             continue;
         }
@@ -550,7 +551,7 @@ pub fn search_lines(hits: &[Hit]) -> String {
         }
         out.push_str(&one_line(&h.title));
         if let Some(s) = &h.summary {
-            out.push_str(&format!(" — {}", one_line(s)));
+            out.push_str(&format!(" — {}", clip(s, LINE_CHARS)));
         }
         if let Some(by) = &h.superseded_by {
             out.push_str(&format!(" (superseded by {by})"));
@@ -566,12 +567,12 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 one_line(&s.signature)
             ));
             if let Some(d) = &s.doc {
-                out.push_str(&format!("  — {}", one_line(d)));
+                out.push_str(&format!("  — {}", clip(d, LINE_CHARS)));
             }
             out.push('\n');
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
-            out.push_str(&format!("    {}\n", one_line(sn)));
+            out.push_str(&format!("    {}\n", clip(sn, LINE_CHARS)));
         }
     }
     out
@@ -709,6 +710,12 @@ mod tests {
             search_lines(&[plain]),
             "n  /m/n.md  2026-10-23  Vault — sum\n"
         );
+        let mut long = hit(false, Some(&"word ".repeat(100)));
+        long.snippet = None;
+        let line = search_lines(&[long]);
+        let head = "n  /m/n.md  2026-10-23  Vault — ";
+        assert_eq!(line.chars().count(), head.chars().count() + 160 + 1);
+        assert!(line.ends_with("…\n"), "{line}");
     }
 
     #[test]

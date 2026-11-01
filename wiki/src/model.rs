@@ -361,6 +361,22 @@ pub(crate) fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Longest field a search or hint line carries, in characters: a run log's
+/// summary ran 7k characters on the bench and `search` printed it whole.
+pub(crate) const LINE_CHARS: usize = 160;
+
+/// `one_line(s)` cut to `chars` characters, the last one `…` when cut.
+pub(crate) fn clip(s: &str, chars: usize) -> String {
+    let line = one_line(s);
+    if line.chars().count() > chars {
+        let mut cut: String = line.chars().take(chars - 1).collect();
+        cut.push('…');
+        cut
+    } else {
+        line
+    }
+}
+
 /// Capitalize each whitespace-separated word and lowercase the rest of it.
 /// Shared by every name-deriving path — the text extractor's ALL-CAPS first
 /// line, the markdown/code filename fallbacks, and `disambiguate_ids`'

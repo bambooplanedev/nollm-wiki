@@ -26,7 +26,8 @@
 //!
 //! The `tokens` column charges the MCP tool's default search response
 //! (`search_lines` at `DEFAULT_SEARCH_LIMIT`, 5; it was 639.9 / 700.7
-//! tune / held at limit 10); `tokens_json` in the footers charges the
+//! tune / held at limit 10, and 431.6 / 439.6 before summaries, snippets
+//! and docs were cut at 160 characters); `tokens_json` in the footers charges the
 //! `format: "json"` response (`search_json`) at the same limit. Ranks are
 //! still taken at limit 10. A step that changes the default renderer or
 //! limit must swap it here and quote both numbers.
