@@ -33,7 +33,7 @@ const RUNNING: &str = "recompile still running";
 
 /// Barrier files go in this subdirectory of `--dir`: it stays writable when
 /// the `--dir` root is not, and no `.md` name there is a page the prune knows.
-const BARRIER_DIR: &str = ".serve";
+use crate::dirlock::SERVE_DIR as BARRIER_DIR;
 
 /// What tells a file from its replacement. A stat, cheap enough for every
 /// tool call.
@@ -323,8 +323,10 @@ impl Live {
             return Ok(());
         }
         let result = unpanicked(|| {
-            compile(&self.source, &self.dir, &self.opts)
-                .and_then(|r| Ok((Wiki::load(&self.dir)?, r.watch_set)))
+            crate::dirlock::exclusive(&self.dir, || {
+                compile(&self.source, &self.dir, &self.opts)
+                    .and_then(|r| Ok((Wiki::load(&self.dir)?, r.watch_set)))
+            })
         });
         let mut s = self.lock();
         let outcome = match result {

@@ -99,8 +99,9 @@ pub(crate) struct WikiState {
 
 impl WikiState {
     pub fn load(dir: &Path) -> std::io::Result<WikiState> {
-        let fp = fingerprint(dir)?;
-        let wiki = Wiki::load(dir)?;
+        let (fp, wiki) = crate::dirlock::shared(dir, || {
+            Ok::<_, std::io::Error>((fingerprint(dir)?, Wiki::load(dir)?))
+        })?;
         Ok(WikiState {
             dir: dir.to_path_buf(),
             freshness: Freshness::Fingerprint(Mutex::new(Loaded {
@@ -149,17 +150,19 @@ impl WikiState {
         let mut guard = inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Ok(current) = fingerprint(&self.dir) {
-            if Some(current) != guard.fingerprint {
-                if let Ok(wiki) = Wiki::load(&self.dir) {
-                    *guard = Loaded {
-                        wiki: Arc::new(wiki),
-                        fingerprint: Some(current),
-                    };
+        crate::dirlock::shared(&self.dir, || {
+            if let Ok(current) = fingerprint(&self.dir) {
+                if Some(current) != guard.fingerprint {
+                    if let Ok(wiki) = Wiki::load(&self.dir) {
+                        *guard = Loaded {
+                            wiki: Arc::new(wiki),
+                            fingerprint: Some(current),
+                        };
+                    }
+                    // Reload failure: keep old snapshot, retry next call.
                 }
-                // Reload failure: keep old snapshot, retry next call.
             }
-        }
+        });
         Arc::clone(&guard.wiki)
     }
 }
@@ -480,7 +483,10 @@ impl ServerHandler for WikiServer {
         // error on a file that exists is the server's problem, not the
         // client's.
         let read_file = |name: &str| {
-            std::fs::read_to_string(self.state.dir().join(name)).map_err(|e| {
+            crate::dirlock::shared(self.state.dir(), || {
+                std::fs::read_to_string(self.state.dir().join(name))
+            })
+            .map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
                     not_found()
                 } else {

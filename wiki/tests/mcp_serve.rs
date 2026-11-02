@@ -1190,10 +1190,10 @@ fn a_replaced_binary_stops_recompiling_and_says_so() {
         stale_block(&resp).is_some_and(|b| b.contains(RESTART)),
         "{resp}"
     );
-    assert_eq!(
-        std::fs::read_dir(wiki_dir.join(".serve")).unwrap().count(),
-        0
-    );
+    // No barrier files left (the lock file stays).
+    assert!(std::fs::read_dir(wiki_dir.join(".serve"))
+        .unwrap()
+        .all(|e| e.unwrap().file_name() == "compile.lock"));
 
     // The new version's own compile is picked up.
     let opts = wiki::CompileOptions {

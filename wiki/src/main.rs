@@ -240,7 +240,8 @@ fn main() -> Result<()> {
                 project,
                 memory,
             };
-            let r = compile(&input, &output, &opts).context("compile failed")?;
+            let r = wiki::dirlock::exclusive(&output, || compile(&input, &output, &opts))
+                .context("compile failed")?;
             println!(
                 "Compiled {} pages ({} written) -> {}",
                 r.pages_total,
