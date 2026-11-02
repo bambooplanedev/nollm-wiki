@@ -24,6 +24,9 @@ fn bold(line: &str) -> Option<String> {
     for marker in ["- ", "* ", "+ "] {
         s = s.strip_prefix(marker).unwrap_or(s);
     }
+    for box_ in ["[ ] ", "[x] ", "[X] "] {
+        s = s.strip_prefix(box_).unwrap_or(s);
+    }
     if let Some((n, rest)) = s.split_once(". ") {
         if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
             s = rest;
@@ -50,7 +53,7 @@ pub fn labels(md: &str) -> Vec<Label> {
                 continue;
             }
             (Some(_), _) => continue,
-            (None, Some(c)) if run >= 3 => {
+            (None, Some(c)) if run >= 3 && !(c == '`' && t[run..].contains('`')) => {
                 fence = Some((c, run));
                 continue;
             }

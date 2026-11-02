@@ -360,7 +360,7 @@ args = ["serve", "--source", "."]
 
 | Інструмент | Параметри | Повертає |
 |---|---|---|
-| `search` | `query` (порожній разом із `tag` дає список сторінок з тегом), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 із запитом; без обмеження для списку за тегом), `format?` (`lines` за замовчуванням або `json`) | Текст `lines`, описаний у [search](#search), або `[{id, title, summary, updated, score, snippet, path, symbols}]` з `json` |
+| `search` | `query` (порожній разом із `tag` дає список сторінок з тегом), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (шляхи markdown; шукає за заголовками й жирними кроками), `limit?` (5 із запитом; без обмеження для списку за тегом), `format?` (`lines` за замовчуванням або `json`) | Текст `lines`, описаний у [search](#search), або `[{id, title, summary, updated, score, snippet, path, symbols}]` з `json` |
 | `page` | `id` (ідентифікатор, назва чи шлях), `full?` (false), `max_tokens?` (4000 для структури) | Структура або вся сторінка; сторінка нотатки памʼяті — це її текст |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | Пакет контексту, або з `symbol` — функції, які викликає ця функція |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | Функції, що викликають `symbol`, з рядками кожного виклику |

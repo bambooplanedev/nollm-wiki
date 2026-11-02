@@ -134,3 +134,48 @@ fn lines_render_like_symbol_ranges() {
     );
     assert_eq!(doc_lines(&[], &[]), "no matches\n");
 }
+
+const CHECKBOX_PLAN: &str = "# P\n- [ ] **T5k. job_start + finalize step 10 (H2).**\n  - **Files:**\nbody\n- [x] **T5l. next.**\n";
+
+#[test]
+fn checkbox_steps_are_labels() {
+    let t: Vec<_> = labels(CHECKBOX_PLAN)
+        .into_iter()
+        .map(|l| (l.start, l.end, l.text))
+        .collect();
+    assert_eq!(
+        t[1..],
+        [
+            (2, 4, "T5k. job_start + finalize step 10 (H2).".into()),
+            (5, 5, "T5l. next.".into())
+        ]
+    );
+    let dir = std::env::temp_dir().join(format!("wiki-cb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("p.md"), CHECKBOX_PLAN).unwrap();
+    let (hits, _) = doc_search(&dir, &["p.md".to_string()], "T5k", None);
+    assert_eq!(hits.len(), 1);
+    assert_eq!((hits[0].start, hits[0].end), (2, 4));
+}
+
+#[test]
+fn query_matches_whole_words_only() {
+    let md = "**T5k. a**\n**T5.0 b**\n**T5g, c**\n";
+    let dir = std::env::temp_dir().join(format!("wiki-ww-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("p.md"), md).unwrap();
+    let d = ["p.md".to_string()];
+    assert_eq!(doc_search(&dir, &d, "T5", None).0, []);
+    let hits = doc_search(&dir, &d, "T5.0", None).0;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].text, "T5.0 b");
+}
+
+#[test]
+fn inline_code_at_line_start_does_not_open_a_fence() {
+    let t: Vec<_> = labels("```x``` y\n**T1. a**\n")
+        .into_iter()
+        .map(|l| l.text)
+        .collect();
+    assert_eq!(t, ["T1. a"]);
+}

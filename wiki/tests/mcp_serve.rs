@@ -1337,3 +1337,19 @@ fn mcp_search_docs_rejects_kind() {
     }
     child.kill().ok();
 }
+
+#[test]
+fn mcp_search_empty_docs_is_plain_search() {
+    let (_tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    let plain = call(&mut stdin, &stdout, 11, "search", &json!({"query": "add"}));
+    let empty = call(
+        &mut stdin,
+        &stdout,
+        12,
+        "search",
+        &json!({"query": "add", "docs": []}),
+    );
+    child.kill().ok();
+    assert!(!text_of(&plain).contains("no matches"), "{plain}");
+    assert_eq!(text_of(&empty), text_of(&plain));
+}

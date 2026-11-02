@@ -194,7 +194,7 @@ pub(crate) struct SearchParams {
     pub kind: Option<String>,
     /// Only pages with this tag (`a` also matches `a/b`); an empty query lists them.
     pub tag: Option<String>,
-    /// Maximum pages (default 5).
+    /// Maximum pages (default 5; with `docs` default 10, and an empty query lists all labels).
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
@@ -312,7 +312,7 @@ impl WikiServer {
                 ))
             }
         };
-        if let Some(docs) = &p.docs {
+        if let Some(docs) = p.docs.as_ref().filter(|d| !d.is_empty()) {
             if kind.is_some() || tag.is_some() {
                 return Err(McpError::invalid_params(
                     "`docs` cannot be combined with kind or tag",
