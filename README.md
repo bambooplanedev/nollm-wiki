@@ -154,8 +154,8 @@ its own file tool. `callers` answers "what breaks if this changes"; `neighbors` 
 surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
 `docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
 on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
-`load profile` match alike, after the exact matches. A label repeated in one doc under the same
-head (`N11: …` appended to a ledger) lists newest first. Pass the plan, spec and ledger together, since an
+`load profile` match alike, after the exact matches. When the limit cuts a label repeated in one
+doc under the same head (`N11: …` in a ledger), both its first and last entries show. Pass the plan, spec and ledger together, since an
 ID is often a label in only one of them; an empty query lists the first 200 labels (`limit` lists more, and a
 final line says how many were cut); body text is not searched, grep stays the tool for it.
 

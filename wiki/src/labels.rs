@@ -108,9 +108,9 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
 /// Labels of the markdown files `docs` (relative to `root`) whose text holds
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
-/// order, except that labels repeated in one doc under the same head (text
-/// before the first `:`, case-insensitive) come newest first at their first
-/// member's place. Matches that hold only once `-` also splits words (two or
+/// order. When the limit cuts a label repeated in one doc under the same head
+/// (text before the first `:`, case-insensitive), it keeps the group's first
+/// and last members alternately, printed in document order. Matches that hold only once `-` also splits words (two or
 /// more such query words) rank after all the others; an empty query lists the
 /// labels in document order. Returns the hits grouped by doc, one error line per unusable path, and how many
 /// matching labels the limit (or an empty query's default cap) cut.
@@ -161,8 +161,8 @@ pub fn doc_search(
                     end: l.end,
                     text: l.text,
                 };
-                // Labels sharing a head (`N11: …` repeated in a ledger) sort at
-                // their first member's place, newest first among themselves.
+                // Labels sharing a head (`N11: …` repeated in a ledger) form a
+                // group at their first member's place.
                 let k = (loose, l.level == BOLD, at > 0);
                 let head = hit
                     .text
@@ -173,12 +173,26 @@ pub fn doc_search(
                     .to_lowercase();
                 let i = ranked.len();
                 let f = *first.entry((k, doc, head)).or_insert(i);
-                ranked.push(((k, doc, f, std::cmp::Reverse(i)), doc, hit));
+                ranked.push(((k, doc, f), 0, i, doc, hit));
             }
         }
     }
     if !q.is_empty() {
-        ranked.sort_by_key(|(k, _, _)| *k);
+        // Where the limit cuts a group, keep its first and last members
+        // alternately: first, last, second, second-to-last, …
+        let mut size = std::collections::HashMap::new();
+        for (g, ..) in &ranked {
+            *size.entry(*g).or_insert(0) += 1;
+        }
+        let mut pos = std::collections::HashMap::new();
+        for (g, alt, ..) in &mut ranked {
+            let p = pos.entry(*g).or_insert(0usize);
+            *p += 1;
+            let p = *p - 1;
+            let back = size[g] - 1 - p;
+            *alt = if p <= back { 2 * p } else { 2 * back + 1 };
+        }
+        ranked.sort_by_key(|(g, alt, ..)| (*g, *alt));
     }
     let n = limit.unwrap_or(if q.is_empty() {
         DOC_LIST_LIMIT
@@ -188,8 +202,8 @@ pub fn doc_search(
     let more = ranked.len().saturating_sub(n);
     // Rank picks the survivors; output groups them by doc, rank order within.
     ranked.truncate(n);
-    ranked.sort_by_key(|(_, doc, _)| *doc);
-    let hits = ranked.into_iter().map(|(_, _, h)| h).collect();
+    ranked.sort_by_key(|((k, ..), _, i, doc, _)| (*doc, *k, *i));
+    let hits = ranked.into_iter().map(|(.., h)| h).collect();
     (hits, errors, more)
 }
 

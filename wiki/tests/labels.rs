@@ -296,16 +296,21 @@ fn empty_query_listing_is_capped_unless_limit_given() {
 }
 
 #[test]
-fn repeated_labels_come_newest_first() {
-    let d = write_tmp("newest", "## N11: a\n## Row X\n## N11: b\n## N11: c\n");
+fn a_cut_repeated_label_keeps_its_first_and_last_entries() {
+    let d = write_tmp("repeat", "## N11: a\n## Row X\n## N11: b\n## N11: c\n");
     let docs = ["p.md".to_string()];
     let t = |q: &str, limit| -> Vec<String> {
         let h = doc_search(&d, &docs, q, limit).0;
         h.into_iter().map(|h| h.text).collect()
     };
-    assert_eq!(t("N11", None), ["N11: c", "N11: b", "N11: a"]);
-    assert_eq!(t("N11", Some(2)), ["N11: c", "N11: b"]);
+    assert_eq!(t("N11", None), ["N11: a", "N11: b", "N11: c"]);
+    assert_eq!(t("N11", Some(2)), ["N11: a", "N11: c"]);
     assert_eq!(t("", None), ["N11: a", "Row X", "N11: b", "N11: c"]);
+    let six = (1..=6).fold(String::new(), |s, i| s + &format!("## N11: {i}\n"));
+    let d = write_tmp("six", &six);
+    let h = doc_search(&d, &docs, "N11", Some(4)).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["N11: 1", "N11: 2", "N11: 5", "N11: 6"]);
     let d = write_tmp("heads", "## Task 1: x\n## Task 2: y\n");
     let h = doc_search(&d, &docs, "Task", None).0;
     let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
