@@ -77,10 +77,11 @@ per question is noise-level: treat single results as anecdotes.
   absolute path do not count, nor does a file name with no extension. A hint
   ignores the rule: a prompt naming a file does not find it for that reason.
 - **Vocabulary is literal.** No synonyms: "credentials" does not find
-  `creds`. Cyrillic query words are stemmed by a fixed ending list, on the
-  query side only, so a stem can also hit an unrelated word that shares it.
-  English and other Latin-script words are not stemmed: "decision" does not
-  find `decide`. Doc text helps only when the comment uses the user's word.
+  `creds`. Query and field words are compared by their Snowball stem
+  (Ukrainian for Cyrillic, English otherwise), so a stem can also hit an
+  unrelated word that shares it, and two forms with different stems still
+  miss: "decision" does not find `decide`. Body text is matched by
+  substring, not by stem. Doc text helps only when the comment uses the user's word.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
@@ -249,7 +250,7 @@ per question is noise-level: treat single results as anecdotes.
   count against `fs.inotify.max_user_watches`.
 - Every server on one `--dir`, readers too, watches the whole `--source`
   recursively: N servers hold N copies of those watches.
-- Servers from 0.6.1 or older do not take `writer.lock` and still race.
+- Servers from 0.6.2 or older do not take `writer.lock` and still race.
   Restart old sessions after an upgrade.
 - Servers on one `--dir` are assumed to share inputs (`--source`,
   `--memory`). If they differ, the writer's inputs win.

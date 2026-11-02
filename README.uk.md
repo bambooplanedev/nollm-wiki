@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -27,9 +27,9 @@
 
 ```
 $ wiki callers calls.rs resolve_calls --dir .wiki
-callers of resolve_calls  wiki/src/calls.rs:195-262 — 1 functions in 1 files
+callers of resolve_calls  wiki/src/calls.rs:197-264 — 1 functions in 1 files
 wiki/src/lib.rs
-  137-437  fn  compile_inner  calls resolve_calls at 302
+  140-441  fn  compile_inner  calls resolve_calls at 306
   └ рядки функції             └ рядок виклику
 ```
 
@@ -82,7 +82,7 @@ wiki/src/lib.rs
 - macOS (Apple silicon чи Intel) або Linux x86_64 для релізного бінарника. Бінарник для Linux
   зібрано на `ubuntu-latest` від GitHub, тож на старішому дистрибутиві через glibc може знадобитися
   збірка з коду.
-- Або Rust 1.88 чи новіший, щоб зібрати з коду. Windows не перевірявся.
+- Або Rust 1.89 чи новіший, щоб зібрати з коду. Windows не перевірявся.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `wiki setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 
@@ -145,10 +145,10 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 $ wiki search "call edges" --dir .wiki --limit 1
 calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ шлях             └ назва — опис
-  wiki/src/calls.rs:284-308  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ шлях:рядки               └ імʼя         └ сигнатура                                        └ документація
-  wiki/src/calls.rs:341-479  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  wiki/src/calls.rs:22-31  family  fn family(e: &Entity) -> &str  — The languages whose code…
+  wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Використання
@@ -367,7 +367,7 @@ args = ["serve", "--source", "."]
 
 | Інструмент | Параметри | Повертає |
 |---|---|---|
-| `search` | `query` (порожній разом із `tag` дає список сторінок з тегом), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (шляхи markdown; шукає за заголовками й жирними кроками), `limit?` (5 із запитом; без обмеження для списку за тегом), `format?` (`lines` за замовчуванням або `json`) | Текст `lines`, описаний у [search](#search), або `[{id, title, summary, updated, score, snippet, path, symbols}]` з `json` |
+| `search` | `query` (порожній разом із `tag` дає список сторінок з тегом), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (шляхи markdown відносно `--source`, інакше робочої теки сервера; шукає за заголовками й жирними кроками, не разом із `kind` чи `tag`), `limit?` (5 із запитом, 10 з `docs`; без обмеження для списку за тегом), `format?` (`lines` за замовчуванням або `json`) | Текст `lines`, описаний у [search](#search), або `[{id, title, summary, updated, score, snippet, path, symbols}]` з `json` |
 | `page` | `id` (ідентифікатор, назва чи шлях), `full?` (false), `max_tokens?` (4000 для структури) | Структура або вся сторінка; сторінка нотатки памʼяті — це її текст |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | Пакет контексту, або з `symbol` — функції, які викликає ця функція |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | Функції, що викликають `symbol`, з рядками кожного виклику |
@@ -388,7 +388,9 @@ CLI не обмежує, а `search` повертає 5 результатів �
 кшталт `target/`, тек збірки та `.git` цього не запускають). Кожен виклик інструмента чекає до 5 с,
 поки скомпілюються правки, зроблені до нього. Якщо перекомпіляція впала або ще йде, сервер віддає
 останній вдалий знімок, а до результатів додається рядок `wiki may be stale: <reason>`. Короткочасні
-файли-барʼєри, по одному на виклик, лежать у `<dir>/.serve/`. Без `--source` сервер лише читає
+файли-барʼєри, по одному на виклик, лежать у `<dir>/.serve/`. Кілька серверів на одному `<dir>` (по
+одному на сесію агента) ділять його: компілює той, що тримає `<dir>/.serve/writer.lock`, інші
+відповідають з того, що він записав, і один з них перебирає її на себе, коли він завершується. Без `--source` сервер лише читає
 вікі: перед кожним запитом він звіряє відбиток `index.json` і перечитує вікі після перекомпіляції;
 якщо перечитати не вдалося, лишається попередній знімок, а спроба повторюється на наступному запиті.
 
@@ -519,14 +521,17 @@ hits, each on a `memory:` line, and the prompt hook adds one.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
   `docs`; до двох, що проходять поріг, йдуть після збігів рядками `memory:` з уривком (див.
   [Памʼять агента](#памʼять-агента)).
 - `--tag <tag>` — лише сторінки з цим тегом (`#` і регістр не враховуються; `a` збігається і з `a/b`). Без
-  запиту дає список усіх таких сторінок. Потрібен запит або `--tag`.
+  запиту дає список усіх таких сторінок. Потрібен запит, `--tag` або `--docs`.
+- `--docs <FILE>` (можна повторювати) — шукати за заголовками й жирними кроками цих файлів Markdown замість
+  вікі (див. [Агенти](#агенти)); шляхи відносно поточної теки, скомпільована вікі не потрібна, а
+  `--kind` і `--tag` з ним не поєднуються.
 - `--limit <N>` (`10` із запитом) — максимальна кількість результатів.
 
 За замовчуванням — по рядку на сторінку: `id  path  [date  ]title — summary`. Під сторінкою коду до
@@ -555,15 +560,15 @@ wiki/src/calls.rs  code:rust
 └ джерело          └ вид
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
-  crate::query::Wiki
+  crate::formats::code::{module_stem, source_rank}
   …
 15-20  fn  fn owner_key(owner: &str) -> &str  — The last segment of an owner, generics dropped…
-36-48  type  struct Index<'a>  — What call sites resolve against: every function by name, every…
+38-50  type  struct Index<'a>  — What call sites resolve against: every function by name, every…
 Index:
 └ методи Index
-  51-104  method  fn new(entities: &'a BTreeMap<String, Entity>) -> Self
+  53-106  method  fn new(entities: &'a BTreeMap<String, Entity>) -> Self
   …
-195-262  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills…
+197-264  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills…
 └ рядки  └ вид, сигнатура                                                                  └ документація
 ```
 

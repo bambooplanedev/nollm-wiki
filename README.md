@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.88+](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -27,9 +27,9 @@ above it; it is not output.
 
 ```
 $ wiki callers calls.rs resolve_calls --dir .wiki
-callers of resolve_calls  wiki/src/calls.rs:195-262 — 1 functions in 1 files
+callers of resolve_calls  wiki/src/calls.rs:197-264 — 1 functions in 1 files
 wiki/src/lib.rs
-  137-437  fn  compile_inner  calls resolve_calls at 302
+  140-441  fn  compile_inner  calls resolve_calls at 306
   └ the caller's lines        └ the line of the call
 ```
 
@@ -76,7 +76,7 @@ wiki/src/lib.rs
 
 - macOS (Apple silicon or Intel) or Linux x86_64 for the release binary. The Linux one is built on
   GitHub's `ubuntu-latest`, so an older distribution's glibc may need a build from source.
-- Or Rust 1.88 or later to build from source. Windows is not tested.
+- Or Rust 1.89 or later to build from source. Windows is not tested.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `wiki setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
 
@@ -139,10 +139,10 @@ On code the same search names symbols with line ranges. Against this repository:
 $ wiki search "call edges" --dir .wiki --limit 1
 calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ path             └ title — summary
-  wiki/src/calls.rs:284-308  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ path:lines               └ name         └ signature                                        └ doc
-  wiki/src/calls.rs:341-479  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  wiki/src/calls.rs:22-31  family  fn family(e: &Entity) -> &str  — The languages whose code…
+  wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Usage
@@ -359,7 +359,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths; searches heading and bold-step labels instead), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
@@ -380,7 +380,9 @@ the project and recompiles incrementally on edits (ignored paths such as `target
 `.git` never trigger it). Each tool call waits up to 5 s
 until edits made before it are compiled. If a recompile fails or is still running, the last good
 snapshot keeps serving and results gain a line `wiki may be stale: <reason>`. Short-lived barrier
-files, one per call, live in `<dir>/.serve/`. Without `--source`,
+files, one per call, live in `<dir>/.serve/`. Several servers on one `<dir>` (one per agent session) share
+it: the one holding `<dir>/.serve/writer.lock` compiles, the others answer from what it writes and
+one of them takes over when it exits. Without `--source`,
 the server only reads the wiki: it checks `index.json`'s fingerprint before each request and
 reloads after a recompile; a failed reload keeps the previous snapshot and is retried on the next
 request.
@@ -508,13 +510,16 @@ clean directory.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
   `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
   `memory:` lines, each with its snippet line (see [Agent memory](#agent-memory)).
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
-  no query, lists every such page. A query or `--tag` is required.
+  no query, lists every such page. A query, `--tag` or `--docs` is required.
+- `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead
+  of the wiki (see [Agents](#agents)); paths are relative to the current directory, no compiled wiki
+  is needed, and `--kind` and `--tag` do not apply.
 - `--limit <N>` (`10` with a query) — maximum number of hits.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
@@ -543,15 +548,15 @@ wiki/src/calls.rs  code:rust
 └ source           └ kind
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
-  crate::query::Wiki
+  crate::formats::code::{module_stem, source_rank}
   …
 15-20  fn  fn owner_key(owner: &str) -> &str  — The last segment of an owner, generics dropped…
-36-48  type  struct Index<'a>  — What call sites resolve against: every function by name, every…
+38-50  type  struct Index<'a>  — What call sites resolve against: every function by name, every…
 Index:
 └ the methods of Index
-  51-104  method  fn new(entities: &'a BTreeMap<String, Entity>) -> Self
+  53-106  method  fn new(entities: &'a BTreeMap<String, Entity>) -> Self
   …
-195-262  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills…
+197-264  fn  pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph)  — Fills…
 └ lines  └ kind, signature                                                                 └ doc
 ```
 
