@@ -60,6 +60,7 @@ wiki/src/lib.rs
   call; `neighbors --symbol` lists everything a function calls, level by level.
 - **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page`, `neighbors` and `callers` to Claude Code, pi, Cursor, Codex or any MCP client.
+  Several servers on one `.wiki` are fine: one compiles, the others serve what it wrote.
 - **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude

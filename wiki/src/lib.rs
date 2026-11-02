@@ -2,6 +2,7 @@
 
 pub mod cache;
 pub mod calls;
+pub mod dirlock;
 pub mod formats;
 pub mod generator;
 pub mod graph;

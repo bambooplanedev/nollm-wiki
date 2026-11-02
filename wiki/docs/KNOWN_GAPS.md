@@ -236,7 +236,8 @@ per question is noise-level: treat single results as anecdotes.
 ## `serve --source`
 
 - Files written only through `mmap` are not seen as changed.
-- Barrier files left by a crashed server stay in `.wiki/.serve/`.
+- Barrier files left by a crashed server stay in `.wiki/.serve/` until a
+  writer's rescan removes them, 10 s on.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
@@ -246,6 +247,26 @@ per question is noise-level: treat single results as anecdotes.
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
   count against `fs.inotify.max_user_watches`.
+- Every server on one `--dir`, readers too, watches the whole `--source`
+  recursively: N servers hold N copies of those watches.
+- Servers from 0.6.1 or older do not take `writer.lock` and still race.
+  Restart old sessions after an upgrade.
+- Servers on one `--dir` are assumed to share inputs (`--source`,
+  `--memory`). If they differ, the writer's inputs win.
+- A reader's reload waits on `compile.lock`: during a long compile its call
+  can take longer than the usual 5 s bound.
+- A reader can load the output of a later compile that failed part way,
+  under the earlier ack's empty stale reason. The window is narrow; a plain
+  `serve` without `--source` has the same exposure.
+- Plain `serve` started while a compile holds `compile.lock`, with no
+  `index.json` yet, answers from an empty wiki with no stale line until
+  `index.json` appears.
+- Orphan cleanup compares file mtimes with the local clock: on NFS, a
+  server whose clock runs more than 10 s ahead can remove live barriers or
+  acks, and that call waits out its 5 s or reports a read error.
+- If the output dir is deleted (`rm -rf`) while a server runs, the old
+  writer keeps its lock on the deleted `writer.lock`, so a newly started
+  server can become a second writer until the old one restarts.
 
 ## `wiki setup`
 

@@ -2,7 +2,7 @@
 name = "wiki"
 version = "0.6.2"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.89"
 description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license = "MIT"
 publish = false
