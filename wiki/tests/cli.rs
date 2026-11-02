@@ -682,6 +682,6 @@ fn cli_search_docs_empty_query_lists_labels() {
         .clone();
     let out = String::from_utf8(out).unwrap();
     let lines: Vec<_> = out.lines().collect();
-    assert_eq!(lines.len(), 6, "{out}");
-    assert_eq!(lines[0], "plan.md:1-18  Plan");
+    assert_eq!(lines.len(), 7, "{out}");
+    assert_eq!(lines[..2], ["plan.md", "  1-18  Plan"]);
 }

@@ -1310,7 +1310,7 @@ fn mcp_search_docs_returns_label_range() {
         &json!({"query": "T2d", "docs": ["plan.md", "gone.md"], "format": "json"}),
     );
     child.kill().ok();
-    assert_eq!(text_of(&resp), "plan.md:5-10  T2d. Remaining matrix.\n");
+    assert_eq!(text_of(&resp), "plan.md\n  5-10  T2d. Remaining matrix.\n");
     assert_eq!(resp["result"]["content"].as_array().unwrap().len(), 1);
     let v: Value = serde_json::from_str(text_of(&json)).unwrap();
     assert_eq!(

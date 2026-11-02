@@ -152,7 +152,8 @@ symbols, `page` lists a file's symbols with line ranges, and the agent reads jus
 its own file tool. `callers` answers "what breaks if this changes"; `neighbors` is for when the
 surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
 `docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
-on the command line).
+on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
+`load profile` match alike, after the exact matches.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|

@@ -104,10 +104,25 @@ fn words(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// `words` with every word also split on `-`.
+fn split_words(s: &str) -> Vec<String> {
+    words(s)
+        .iter()
+        .flat_map(|w| w.split('-'))
+        .filter(|w| !w.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+fn find(w: &[String], q: &[String]) -> Option<usize> {
+    w.windows(q.len()).position(|win| win == q)
+}
+
 /// Labels of the markdown files `docs` (relative to `root`) whose text holds
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
-/// order. Returns the hits and one error line per unusable path.
+/// order. Matches that hold only once `-` also splits words (two or more such
+/// query words) rank after all the others. Returns the hits and one error line per unusable path.
 pub fn doc_search(
     root: &Path,
     docs: &[String],
@@ -115,6 +130,7 @@ pub fn doc_search(
     limit: Option<usize>,
 ) -> (Vec<DocHit>, Vec<String>) {
     let q = words(query);
+    let qs = split_words(query);
     let mut ranked = Vec::new();
     let mut errors = Vec::new();
     for path in docs {
@@ -130,20 +146,24 @@ pub fn doc_search(
             continue;
         };
         for l in labels(&md) {
-            let w = words(&l.text);
-            let at = if q.is_empty() {
+            let exact = if q.is_empty() {
                 Some(0)
             } else {
-                w.windows(q.len()).position(|win| win == q.as_slice())
+                find(&words(&l.text), &q)
             };
-            if let Some(at) = at {
+            let found = match exact {
+                Some(at) => Some((false, at)),
+                None if qs.len() > 1 => find(&split_words(&l.text), &qs).map(|at| (true, at)),
+                None => None,
+            };
+            if let Some((loose, at)) = found {
                 let hit = DocHit {
                     path: path.clone(),
                     start: l.start,
                     end: l.end,
                     text: l.text,
                 };
-                ranked.push(((l.level == BOLD, at > 0), hit));
+                ranked.push(((loose, l.level == BOLD, at > 0), hit));
             }
         }
     }
@@ -159,13 +179,18 @@ pub fn doc_search(
     (hits, errors)
 }
 
-/// `path:start-end  text` per hit, then the error lines; `no matches` if none.
+/// Hits grouped by consecutive path: the path alone on a line, then
+/// `  start-end  text` per hit; then the error lines; `no matches` if none.
 pub fn doc_lines(hits: &[DocHit], errors: &[String]) -> String {
     let mut out = String::new();
+    let mut path = None;
     for h in hits {
+        if path != Some(&h.path) {
+            out.push_str(&format!("{}\n", h.path));
+            path = Some(&h.path);
+        }
         out.push_str(&format!(
-            "{}:{}-{}  {}\n",
-            h.path,
+            "  {}-{}  {}\n",
             h.start,
             h.end,
             clip(&h.text, LINE_CHARS)

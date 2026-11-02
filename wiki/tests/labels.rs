@@ -130,9 +130,57 @@ fn bad_paths_get_one_line_each_and_others_answer() {
 fn lines_render_like_symbol_ranges() {
     assert_eq!(
         doc_lines(&hits("T2d"), &[]),
-        "plan.md:5-10  T2d. Remaining matrix.\n"
+        "plan.md\n  5-10  T2d. Remaining matrix.\n"
     );
     assert_eq!(doc_lines(&[], &[]), "no matches\n");
+}
+#[test]
+fn lines_print_each_path_once_and_errors_last() {
+    let h = |p: &str, s| DocHit {
+        path: p.into(),
+        start: s,
+        end: s,
+        text: "x".into(),
+    };
+    let hs = [h("a.md", 1), h("a.md", 2), h("b.md", 3), h("a.md", 4)];
+    assert_eq!(
+        doc_lines(&hs, &["c.md: not found".into()]),
+        "a.md\n  1-1  x\n  2-2  x\nb.md\n  3-3  x\na.md\n  4-4  x\nc.md: not found\n"
+    );
+}
+
+fn texts_in(md: &str, q: &str) -> Vec<String> {
+    let d = std::env::temp_dir().join(format!("wiki-hy-{}-{}", std::process::id(), md.len()));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("p.md"), md).unwrap();
+    let (h, _) = doc_search(&d, &["p.md".to_string()], q, None);
+    h.into_iter().map(|h| h.text).collect()
+}
+#[test]
+fn hyphen_insensitive_fallback_both_ways() {
+    assert_eq!(
+        texts_in("## 4.7 Load profile from result.txt\n", "load-profile"),
+        ["4.7 Load profile from result.txt"]
+    );
+    assert_eq!(
+        texts_in("**Load-profile analyzer task**\n", "load profile"),
+        ["Load-profile analyzer task"]
+    );
+}
+#[test]
+fn one_word_query_never_uses_the_fallback() {
+    let md = "**T5m-a. Execution split.**\n**T5m. purge.**\n";
+    assert_eq!(texts_in(md, "T5m"), ["T5m. purge."]);
+}
+#[test]
+fn exact_matches_rank_before_hyphen_fallback() {
+    let md = "## Row TESTS-BREW-RED\n## Row TESTS-BREW\n";
+    assert_eq!(
+        texts_in(md, "TESTS-BREW"),
+        ["Row TESTS-BREW", "Row TESTS-BREW-RED"]
+    );
+    let md2 = "## Row TESTS-BREW\n## Row TESTS-BREW-RED\n";
+    assert_eq!(texts_in(md2, "TESTS-BREW")[0], "Row TESTS-BREW");
 }
 
 const CHECKBOX_PLAN: &str = "# P\n- [ ] **T5k. job_start + finalize step 10 (H2).**\n  - **Files:**\nbody\n- [x] **T5l. next.**\n";
