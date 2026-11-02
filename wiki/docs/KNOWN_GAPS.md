@@ -236,7 +236,8 @@ per question is noise-level: treat single results as anecdotes.
 ## `serve --source`
 
 - Files written only through `mmap` are not seen as changed.
-- Barrier files left by a crashed server stay in `.wiki/.serve/`.
+- Barrier files left by a crashed server stay in `.wiki/.serve/` until a
+  writer's rescan removes them, 10 s on.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
@@ -246,6 +247,8 @@ per question is noise-level: treat single results as anecdotes.
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
   count against `fs.inotify.max_user_watches`.
+- Every server on one `--dir`, readers too, watches the whole `--source`
+  recursively: N servers hold N copies of those watches.
 - Servers from 0.6.1 or older do not take `writer.lock` and still race.
   Restart old sessions after an upgrade.
 - Servers on one `--dir` are assumed to share inputs (`--source`,

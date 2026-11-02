@@ -13,10 +13,13 @@
 //! exclusively while it writes, so a load (under the shared lock) never reads
 //! half a wiki. Every other server is a reader: its barrier is for the writer,
 //! which notes the event generation it had on seeing it and, once a compile
-//! has reached that, writes `ack-<id>-<token>` holding the compile's error or
-//! nothing. The reader then reloads from disk. While it waits it keeps trying
-//! for `writer.lock`, and on getting it finishes the call as the writer. The
-//! OS drops the lock with its holder, so a dead writer leaves nothing behind.
+//! has reached that, writes `ack-<id>-<token>`: a line naming that compile,
+//! then its error or nothing. The reader reloads from disk unless it already
+//! loaded that compile. While it waits it keeps trying for `writer.lock`, and
+//! on getting it finishes the call as the writer. The OS drops the lock with
+//! its holder, so a dead writer leaves nothing behind. An idle writer rescans
+//! `.serve` every second, for a barrier whose event was lost, and removes
+//! barriers and acks older than any call waits.
 //!
 //! Once [`EXE`] sees the binary replaced, compiles stop for good: an old
 //! compiler must not overwrite what the new version wrote. It gives up
@@ -24,7 +27,6 @@
 
 use crate::dirlock::Writer;
 use crate::query::Wiki;
-use crate::serve::Fingerprint;
 use crate::watch::{self, WatchSet};
 use crate::{compile, is_under, CompileOptions, WikiError};
 use notify::RecursiveMode;
@@ -41,6 +43,9 @@ const WAIT: Duration = Duration::from_secs(5);
 /// How much of `WAIT` a call gives the start-up compile: enough for a small
 /// project, while a large one answers from the old wiki without the full wait.
 const START_WAIT: Duration = Duration::from_secs(1);
+
+/// How often an idle writer rescans `.serve` for barriers whose event was lost.
+const RESCAN: Duration = Duration::from_secs(1);
 
 /// The stale reason while a compile has yet to catch up.
 const RUNNING: &str = "recompile still running";
@@ -156,9 +161,9 @@ struct State {
     /// event for an answered barrier is not acked again.
     foreign_seen: HashMap<String, u64>,
     wiki: Arc<Wiki>,
-    /// Reader: `index.json`'s fingerprint when `wiki` was loaded; an ack
-    /// reloads only when it changed.
-    on_disk: Option<Fingerprint>,
+    /// Reader: the writer's compile `wiki` was loaded after; an ack reloads
+    /// only when it names another.
+    loaded: Option<String>,
     /// Why `wiki` may be behind the source: the last compile's error.
     stale: Option<String>,
     /// `None` until the first compile ends: then every event counts.
@@ -213,7 +218,7 @@ impl Live {
                 foreign: Vec::new(),
                 foreign_seen: HashMap::new(),
                 wiki: Arc::default(),
-                on_disk: None,
+                loaded: None,
                 stale: None,
                 watch_set: None,
             }),
@@ -222,9 +227,12 @@ impl Live {
             compiles: std::sync::atomic::AtomicUsize::new(0),
             dir,
         });
-        let writer = live.try_become_writer();
-        let missing = live.reload().is_err();
-        if !missing && !writer {
+        let writer = live.try_become_writer(true);
+        // Never wait out a compile here: with `compile.lock` busy, start
+        // empty and catch up like a reader with no wiki on disk.
+        let loaded = live.reload(false);
+        let missing = matches!(loaded, Some(Err(_)));
+        if loaded == Some(Ok(())) && !writer {
             live.lock().compiled_gen = 1;
         }
 
@@ -254,7 +262,7 @@ impl Live {
         let watcher = watch::start(&paths, move |res| hook.on_event(&res))?;
         // Barriers put before the watcher started have no event.
         if live.is_writer() {
-            live.scan_barriers(&mut live.lock());
+            live.scan_barriers(&mut live.lock(), Duration::ZERO);
         }
 
         if missing && writer {
@@ -265,14 +273,24 @@ impl Live {
             let _watcher = watcher;
             loop {
                 // A reader idles here until it takes over as the writer.
-                drop(
-                    worker
-                        .changed
-                        .wait_while(worker.lock(), |s| {
-                            s.event_gen == s.compiled_gen || !worker.is_writer()
-                        })
-                        .unwrap_or_else(PoisonError::into_inner),
-                );
+                let (mut s, idle) = worker
+                    .changed
+                    .wait_timeout_while(worker.lock(), RESCAN, |s| {
+                        s.event_gen == s.compiled_gen || !worker.is_writer()
+                    })
+                    .unwrap_or_else(PoisonError::into_inner);
+                if idle.timed_out() {
+                    // A barrier whose event was lost: older than a rescan,
+                    // its event would have come by now.
+                    if worker.is_writer() && !EXE.replaced() {
+                        worker.scan_barriers(&mut s, RESCAN);
+                        if !s.compiling {
+                            worker.ack_ready(&mut s);
+                        }
+                    }
+                    continue;
+                }
+                drop(s);
                 std::thread::sleep(watch::DEBOUNCE);
                 if worker.is_writer() {
                     // A failure is kept in `stale`; the next edit retries.
@@ -301,8 +319,9 @@ impl Live {
     }
 
     /// Take `writer.lock` if it is free. A new writer has edits to catch up
-    /// with, and acks the barriers other servers left waiting.
-    fn try_become_writer(&self) -> bool {
+    /// with, and acks the barriers other servers left waiting; `at_start`,
+    /// `start` scans for them once its watcher runs.
+    fn try_become_writer(&self, at_start: bool) -> bool {
         if EXE.replaced() {
             return false;
         }
@@ -314,32 +333,52 @@ impl Live {
             if writer.is_some() {
                 return true;
             }
-            let Some(lock) = crate::dirlock::try_writer(&self.dir) else {
+            let Some(lock) = crate::dirlock::try_writer(&self.dir, at_start) else {
                 return false;
             };
             s.event_gen += 1;
             *writer = Some(lock);
         }
-        self.scan_barriers(&mut s);
+        if !at_start {
+            self.scan_barriers(&mut s, Duration::ZERO);
+        }
         self.changed.notify_all();
         true
     }
 
-    /// Writer: note every barrier in `.serve`, for when their events were
-    /// missed (a takeover, a lost event, before the watcher started).
-    fn scan_barriers(&self, s: &mut State) {
+    /// Writer: note every barrier in `.serve` at least `min_age` old, for
+    /// when their events were missed (a takeover, a lost event, before the
+    /// watcher started). Removes barriers and acks older than any call waits.
+    fn scan_barriers(&self, s: &mut State, min_age: Duration) {
         let Ok(entries) = std::fs::read_dir(self.dir.join(BARRIER_DIR)) else {
             return;
         };
+        let now = SystemTime::now();
+        let mut found = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let age = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .unwrap_or_default();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if age > WAIT * 2
+                && ["barrier-", "ack-", "tmp-ack-"]
+                    .iter()
+                    .any(|k| name.starts_with(k))
+            {
+                let _ = std::fs::remove_file(&path);
+            } else if let Some(barrier) = self.foreign_barrier(&path).filter(|_| age >= min_age) {
+                found.push((barrier, path));
+            }
+        }
         // In token order: a later token noted first would hide an earlier one.
-        let mut found: Vec<_> = entries
-            .flatten()
-            .map(|e| e.path())
-            .filter_map(|p| Some((self.foreign_barrier(&p)?, p)))
-            .collect();
         found.sort();
-        for (_, path) in found {
-            self.note_barrier(s, &path);
+        for (barrier, path) in found {
+            Self::note_barrier(s, barrier, &path);
         }
     }
 
@@ -367,6 +406,7 @@ impl Live {
             }
         }
         let (token, barrier, wrote) = self.put_barrier(&mut s);
+        let wrote = wrote.is_ok();
         if wrote {
             s = self.wait(s, left(), |s| s.barrier_seen < token);
         }
@@ -389,14 +429,14 @@ impl Live {
     /// A new barrier file. Created under the lock, so tokens reach the
     /// watcher in token order; one file per token, so an event names exactly
     /// the barrier it closes.
-    fn put_barrier(&self, s: &mut State) -> (u64, PathBuf, bool) {
+    fn put_barrier(&self, s: &mut State) -> (u64, PathBuf, std::io::Result<()>) {
         s.barrier_sent += 1;
         let token = s.barrier_sent;
         let barrier = self
             .dir
             .join(BARRIER_DIR)
             .join(format!("barrier-{}-{token}", self.id));
-        let wrote = std::fs::write(&barrier, "").is_ok();
+        let wrote = std::fs::write(&barrier, "");
         (token, barrier, wrote)
     }
 
@@ -409,7 +449,13 @@ impl Live {
         } else {
             deadline
         };
-        let (token, barrier, _) = self.put_barrier(&mut s);
+        let (token, barrier, wrote) = self.put_barrier(&mut s);
+        if let Err(e) = wrote {
+            // No barrier, no ack: answer from disk at once.
+            drop(s);
+            let _ = self.reload(true);
+            return Some((self.wiki(), Some(e.to_string())));
+        }
         let ack = self
             .dir
             .join(BARRIER_DIR)
@@ -423,9 +469,10 @@ impl Live {
                 break true;
             }
             drop(s);
-            if self.try_become_writer() {
+            if self.try_become_writer(false) {
                 let _ = std::fs::remove_file(&barrier);
                 let _ = std::fs::remove_file(&ack);
+                self.lock().acked.retain(|&t| t != token);
                 return None;
             }
             s = self.lock();
@@ -436,16 +483,24 @@ impl Live {
         drop(s);
         let mut stale = Some(RUNNING.to_string());
         if acked {
-            stale = match std::fs::read_to_string(&ack) {
-                Ok(reason) => Some(reason).filter(|r| !r.is_empty()),
-                Err(e) => Some(e.to_string()),
+            let (compiled, reason) = match std::fs::read_to_string(&ack) {
+                Ok(text) => {
+                    let (compiled, reason) = text.split_once('\n').unwrap_or((&text, ""));
+                    (Some(compiled.to_string()), reason.to_string())
+                }
+                Err(e) => (None, e.to_string()),
             };
-            let unchanged = crate::serve::fingerprint(&self.dir)
-                .is_ok_and(|now| Some(now) == self.lock().on_disk);
-            match if unchanged { Ok(()) } else { self.reload() } {
+            stale = Some(reason).filter(|r| !r.is_empty());
+            let unchanged = compiled.is_some() && compiled == self.lock().loaded;
+            match if unchanged {
+                Ok(())
+            } else {
+                self.reload(true).unwrap_or(Ok(()))
+            } {
                 Ok(()) => {
                     let mut s = self.lock();
                     s.compiled_gen = s.compiled_gen.max(1);
+                    s.loaded = compiled;
                 }
                 Err(e) => stale = stale.or(Some(e)),
             }
@@ -458,20 +513,20 @@ impl Live {
         Some((Arc::clone(&s.wiki), stale))
     }
 
-    /// Load the wiki on disk under the shared lock, keeping its fingerprint.
-    /// On an error the old snapshot stays.
-    fn reload(&self) -> Result<(), String> {
-        let (on_disk, loaded) = crate::dirlock::shared(&self.dir, || {
-            (
-                crate::serve::fingerprint(&self.dir).ok(),
-                Wiki::load(&self.dir),
-            )
-        });
-        let wiki = loaded.map_err(|e| e.to_string())?;
-        let mut s = self.lock();
-        s.wiki = Arc::new(wiki);
-        s.on_disk = on_disk;
-        Ok(())
+    /// Load the wiki on disk under the shared lock; on an error the old
+    /// snapshot stays. Without `wait`, `None` while a compile holds the lock.
+    fn reload(&self, wait: bool) -> Option<Result<(), String>> {
+        let load = || Wiki::load(&self.dir);
+        let loaded = if wait {
+            crate::dirlock::shared(&self.dir, load)
+        } else {
+            crate::dirlock::try_shared(&self.dir, load)?
+        };
+        Some(
+            loaded
+                .map(|wiki| self.lock().wiki = Arc::new(wiki))
+                .map_err(|e| e.to_string()),
+        )
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -508,13 +563,18 @@ impl Live {
                         }
                     }
                 }
-                if ev.paths.iter().any(|p| self.foreign_barrier(p).is_some()) && self.is_writer() {
+                let foreign: Vec<_> = ev
+                    .paths
+                    .iter()
+                    .filter_map(|p| Some((self.foreign_barrier(p)?, p)))
+                    .collect();
+                if !foreign.is_empty() && self.is_writer() {
                     if EXE.replaced() {
                         // Hand the dir to a server that still compiles.
                         *self.writer.lock().unwrap_or_else(PoisonError::into_inner) = None;
                     } else {
-                        for path in &ev.paths {
-                            self.note_barrier(&mut s, path);
+                        for (barrier, path) in foreign {
+                            Self::note_barrier(&mut s, barrier, path);
                         }
                         if !s.compiling {
                             self.ack_ready(&mut s);
@@ -530,7 +590,7 @@ impl Live {
             s.event_gen += 1;
         }
         if lost && self.is_writer() && !EXE.replaced() {
-            self.scan_barriers(&mut s);
+            self.scan_barriers(&mut s, Duration::ZERO);
         }
         self.changed.notify_all();
     }
@@ -556,12 +616,9 @@ impl Live {
         (server && id != self.id).then(|| (id.to_string(), token))
     }
 
-    /// Writer: if `path` is another server's barrier not yet seen, owe it an
-    /// ack once a compile reaches the current `event_gen`.
-    fn note_barrier(&self, s: &mut State, path: &Path) {
-        let Some((id, token)) = self.foreign_barrier(path) else {
-            return;
-        };
+    /// Writer: if `path`, another server's barrier `(id, token)`, is not
+    /// yet seen, owe it an ack once a compile reaches the current `event_gen`.
+    fn note_barrier(s: &mut State, (id, token): (String, u64), path: &Path) {
         if s.foreign_seen.get(&id).is_some_and(|&t| t >= token) || !path.exists() {
             return;
         }
@@ -569,12 +626,17 @@ impl Live {
         s.foreign_seen.insert(id, token);
     }
 
-    /// Writer: ack every barrier the last compile covers. The ack holds the
-    /// stale reason, empty for none, and appears whole by a rename.
+    /// Writer: ack every barrier the last compile covers. The ack holds a
+    /// line naming that compile, then the stale reason, empty for none, and
+    /// appears whole by a rename.
     fn ack_ready(&self, s: &mut State) {
         let done = s.compiled_gen;
         let serve = self.dir.join(BARRIER_DIR);
-        let reason = s.stale.clone().unwrap_or_default();
+        let reason = format!(
+            "{} {done}\n{}",
+            self.id,
+            s.stale.as_deref().unwrap_or_default()
+        );
         s.foreign.retain(|(name, gen)| {
             if *gen > done {
                 return true;
@@ -1040,6 +1102,113 @@ mod tests {
         );
         assert_eq!(a.foreign_barrier(&serve.join("barrier-123-4")), None);
         assert_eq!(a.foreign_barrier(&serve.join("barrier-1.x.0-4")), None);
+    }
+
+    #[test]
+    fn start_does_not_wait_for_a_cli_compile() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        let out = tempfile::tempdir().unwrap();
+        compile(src.path(), out.path(), &CompileOptions::default()).unwrap();
+        std::fs::create_dir(out.path().join(BARRIER_DIR)).unwrap();
+        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+        let d = out.path().to_path_buf();
+        let cli = std::thread::spawn(move || {
+            crate::dirlock::exclusive(&d, || {
+                held.0.send(()).unwrap();
+                release.1.recv().unwrap();
+            });
+        });
+        held.1.recv().unwrap();
+        let t = Instant::now();
+        let a = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
+        let b = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+        assert!(a.is_writer() && !b.is_writer());
+        release.0.send(()).unwrap();
+        cli.join().unwrap();
+        assert!(finds(&a.fresh().0, "alpha"));
+        assert!(finds(&b.fresh().0, "alpha"));
+    }
+
+    #[test]
+    fn reader_with_no_barrier_answers_at_once() {
+        let (_src, _out, a, b) = pair();
+        let _ = a.fresh();
+        a.lock().compiling = true;
+        // A directory where the next barrier goes: writing it fails.
+        let token = b.lock().barrier_sent + 1;
+        let barrier = b
+            .dir
+            .join(BARRIER_DIR)
+            .join(format!("barrier-{}-{token}", b.id));
+        std::fs::create_dir(&barrier).unwrap();
+        let t = Instant::now();
+        let stale = b.fresh().1;
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+        assert!(stale.is_some_and(|e| e != RUNNING));
+        std::fs::remove_dir(&barrier).unwrap();
+    }
+
+    #[test]
+    fn reader_reloads_on_a_new_compile_with_the_same_index() {
+        let (_src, _out, a, b) = pair();
+        let _ = a.fresh();
+        let (one, _) = b.fresh();
+        // The writer stalls; an ack from another compile, `index.json` untouched.
+        a.lock().compiling = true;
+        let token = b.lock().barrier_sent + 1;
+        let ack = b
+            .dir
+            .join(BARRIER_DIR)
+            .join(format!("ack-{}-{token}", b.id));
+        std::fs::write(&ack, "other 99\n").unwrap();
+        let (two, stale) = b.fresh();
+        assert_eq!(stale, None);
+        assert!(!Arc::ptr_eq(&one, &two));
+    }
+
+    #[test]
+    fn writer_scan_removes_orphans() {
+        let (_src, out, a, _b) = pair();
+        let _ = a.fresh();
+        let serve = out.path().join(BARRIER_DIR);
+        let old = SystemTime::now() - WAIT * 3;
+        for name in [
+            "barrier-1.1.0-1",
+            "ack-1.1.0-1",
+            "tmp-ack-1.1.0-1",
+            "ack-2.2.0-2",
+        ] {
+            let f = std::fs::File::create(serve.join(name)).unwrap();
+            f.set_modified(old).unwrap();
+        }
+        std::fs::write(serve.join("barrier-3.3.0-1"), "").unwrap();
+        a.scan_barriers(&mut a.lock(), Duration::ZERO);
+        let mut names: Vec<String> = std::fs::read_dir(&serve)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["barrier-3.3.0-1", "compile.lock", "writer.lock"]);
+    }
+
+    #[test]
+    fn writer_acks_a_barrier_whose_event_was_lost() {
+        let (_src, out, a, _b) = pair();
+        let _ = a.fresh();
+        let serve = out.path().join(BARRIER_DIR);
+        // Its event is ignored as already seen, then forgotten: as if lost.
+        a.lock().foreign_seen.insert("1.1.0".into(), 5);
+        std::fs::write(serve.join("barrier-1.1.0-5"), "").unwrap();
+        std::thread::sleep(watch::DEBOUNCE * 2);
+        a.lock().foreign_seen.remove("1.1.0");
+        let ack = serve.join("ack-1.1.0-5");
+        let until = Instant::now() + WAIT;
+        while !ack.exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ack.exists());
     }
 
     #[test]

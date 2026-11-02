@@ -98,15 +98,22 @@ pub(crate) struct WikiState {
 }
 
 impl WikiState {
+    /// While a compile holds `compile.lock`, start empty rather than wait:
+    /// the first call loads the wiki.
     pub fn load(dir: &Path) -> std::io::Result<Arc<WikiState>> {
-        let (fp, wiki) = crate::dirlock::shared(dir, || {
+        let loaded = crate::dirlock::try_shared(dir, || {
             Ok::<_, std::io::Error>((fingerprint(dir)?, Wiki::load(dir)?))
-        })?;
+        })
+        .transpose()?;
+        let (wiki, fingerprint) = match loaded {
+            Some((fp, wiki)) => (wiki, Some(fp)),
+            None => (Wiki::default(), None),
+        };
         Ok(Arc::new(WikiState {
             dir: dir.to_path_buf(),
             freshness: Freshness::Fingerprint(Mutex::new(Loaded {
                 wiki: Arc::new(wiki),
-                fingerprint: Some(fp),
+                fingerprint,
             })),
         }))
     }
@@ -509,12 +516,7 @@ impl ServerHandler for WikiServer {
                 })
                 .await
                 .expect("read panicked")
-            }
-        };
-        let read_file = |name: &'static str| {
-            let read = read_file(name);
-            async move {
-                read.await.map_err(|e| {
+                .map_err(|e| {
                     if e.kind() == std::io::ErrorKind::NotFound {
                         not_found()
                     } else {
@@ -822,6 +824,25 @@ mod tests {
     fn load_fails_without_index_json() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(WikiState::load(tmp.path()).is_err());
+    }
+
+    #[test]
+    fn load_does_not_wait_for_a_compile() {
+        let (_tmp, out) = fixture(3);
+        std::fs::create_dir(out.join(".serve")).unwrap();
+        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+        let d = out.clone();
+        let cli = std::thread::spawn(move || {
+            crate::dirlock::exclusive(&d, || {
+                held.0.send(()).unwrap();
+                release.1.recv().unwrap();
+            });
+        });
+        held.1.recv().unwrap();
+        let state = WikiState::load(&out).unwrap();
+        release.0.send(()).unwrap();
+        cli.join().unwrap();
+        assert_eq!(pages(&state), 3);
     }
 
     #[test]

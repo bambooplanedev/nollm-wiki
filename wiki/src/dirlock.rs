@@ -36,6 +36,17 @@ pub fn shared<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     out
 }
 
+/// `shared` without waiting: `None` while a compile holds the lock.
+pub fn try_shared<T>(dir: &Path, f: impl FnOnce() -> T) -> Option<T> {
+    let lock = open(dir, "compile.lock").ok();
+    if let Some(Err(std::fs::TryLockError::WouldBlock)) = lock.as_ref().map(File::try_lock_shared) {
+        return None;
+    }
+    let out = f();
+    drop(lock);
+    Some(out)
+}
+
 /// This server is the writer.
 pub enum Writer {
     /// Holding `writer.lock` for as long as the file lives.
@@ -45,15 +56,17 @@ pub enum Writer {
     Unlocked,
 }
 
-/// `None` if another server holds the exclusive `writer.lock`.
-pub fn try_writer(dir: &Path) -> Option<Writer> {
+/// `None` if another server holds the exclusive `writer.lock`. An error is
+/// `Unlocked` only `at_start`: later, a transient one (EMFILE, NFS) must not
+/// make a reader a second writer.
+pub fn try_writer(dir: &Path, at_start: bool) -> Option<Writer> {
     let Ok(f) = open(dir, "writer.lock") else {
-        return Some(Writer::Unlocked);
+        return at_start.then_some(Writer::Unlocked);
     };
     match f.try_lock() {
         Ok(()) => Some(Writer::Locked(f)),
         Err(std::fs::TryLockError::WouldBlock) => None,
-        Err(std::fs::TryLockError::Error(_)) => Some(Writer::Unlocked),
+        Err(std::fs::TryLockError::Error(_)) => at_start.then_some(Writer::Unlocked),
     }
 }
 
@@ -119,17 +132,42 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         // A directory in its place: opening it for writing fails, even as root.
         std::fs::create_dir_all(t.path().join(SERVE_DIR).join("writer.lock")).unwrap();
-        assert!(matches!(try_writer(t.path()), Some(Writer::Unlocked)));
+        assert!(matches!(try_writer(t.path(), true), Some(Writer::Unlocked)));
+        assert!(try_writer(t.path(), false).is_none());
+    }
+
+    #[test]
+    fn try_shared_does_not_wait_for_exclusive() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().to_path_buf();
+        std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let d2 = d.clone();
+        let a = std::thread::spawn(move || {
+            exclusive(&d2, || {
+                tx.send(()).unwrap();
+                done_rx.recv().unwrap();
+            });
+        });
+        rx.recv().unwrap();
+        assert_eq!(try_shared(&d, || 1), None);
+        done_tx.send(()).unwrap();
+        a.join().unwrap();
+        assert_eq!(try_shared(&d, || 2), Some(2));
     }
 
     #[test]
     fn try_writer_is_exclusive() {
         let t = tempfile::tempdir().unwrap();
         std::fs::create_dir(t.path().join(SERVE_DIR)).unwrap();
-        let a = try_writer(t.path());
+        let a = try_writer(t.path(), true);
         assert!(matches!(a, Some(Writer::Locked(_))));
-        assert!(try_writer(t.path()).is_none());
+        assert!(try_writer(t.path(), true).is_none());
         drop(a);
-        assert!(matches!(try_writer(t.path()), Some(Writer::Locked(_))));
+        assert!(matches!(
+            try_writer(t.path(), false),
+            Some(Writer::Locked(_))
+        ));
     }
 }
