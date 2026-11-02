@@ -625,7 +625,7 @@ impl Wiki {
     /// The searchable *content* of a parsed page: every section body except
     /// the generated chrome (`CHROME_SECTIONS`). Subtractive on purpose — a
     /// doc body's own `## ` subheadings become sections of their own in
-    /// `parse_sections`, and their text must stay searchable. The heading
+    /// `split_headings`, and their text must stay searchable. The heading
     /// names themselves are scored separately (see `search`).
     ///
     /// Known residual limits (accepted by the 2026-07-14 search-quality
@@ -1146,7 +1146,7 @@ impl Wiki {
         let in_one_name = query_words.len() > 1
             && !whole_symbol
             && symbols.is_some_and(|f| f.name_sets.iter().any(|n| query_words.is_subset(n)));
-        let sections = crate::rewrite::parse_sections(self.body(&e.id));
+        let sections = crate::rewrite::split_headings(self.body(&e.id), false);
         let headings: Vec<String> = sections
             .keys()
             .filter(|k| {
