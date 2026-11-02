@@ -98,24 +98,24 @@ pub(crate) struct WikiState {
 }
 
 impl WikiState {
-    pub fn load(dir: &Path) -> std::io::Result<WikiState> {
+    pub fn load(dir: &Path) -> std::io::Result<Arc<WikiState>> {
         let (fp, wiki) = crate::dirlock::shared(dir, || {
             Ok::<_, std::io::Error>((fingerprint(dir)?, Wiki::load(dir)?))
         })?;
-        Ok(WikiState {
+        Ok(Arc::new(WikiState {
             dir: dir.to_path_buf(),
             freshness: Freshness::Fingerprint(Mutex::new(Loaded {
                 wiki: Arc::new(wiki),
                 fingerprint: Some(fp),
             })),
-        })
+        }))
     }
 
-    pub fn live(live: Arc<Live>) -> WikiState {
-        WikiState {
+    pub fn live(live: Arc<Live>) -> Arc<WikiState> {
+        Arc::new(WikiState {
             dir: live.dir().to_path_buf(),
             freshness: Freshness::Live(live, OnceLock::new()),
-        }
+        })
     }
 
     pub fn dir(&self) -> &Path {
@@ -124,18 +124,18 @@ impl WikiState {
 
     /// The wiki to answer from, and why it may be stale. A live wait runs off
     /// the MCP runtime thread, so pings and cancels keep working meanwhile.
-    pub async fn snapshot(&self) -> (Arc<Wiki>, Option<String>) {
+    pub async fn snapshot(self: &Arc<Self>) -> (Arc<Wiki>, Option<String>) {
         let outdated = EXE.replaced().then(|| OUTDATED.to_string());
         match &self.freshness {
-            Freshness::Fingerprint(inner) => (self.reload(inner), outdated),
+            Freshness::Fingerprint(_) => (self.reload_blocking().await, outdated),
             Freshness::Live(live, frozen) if outdated.is_some() => {
-                let frozen = frozen.get_or_init(|| {
+                frozen.get_or_init(|| {
                     Mutex::new(Loaded {
                         wiki: live.wiki(),
                         fingerprint: None,
                     })
                 });
-                (self.reload(frozen), outdated)
+                (self.reload_blocking().await, outdated)
             }
             Freshness::Live(live, _) => {
                 let live = Arc::clone(live);
@@ -146,7 +146,19 @@ impl WikiState {
         }
     }
 
-    fn reload(&self, inner: &Mutex<Loaded>) -> Arc<Wiki> {
+    /// `reload` takes a file lock that may wait out a compile: off the runtime thread.
+    async fn reload_blocking(self: &Arc<Self>) -> Arc<Wiki> {
+        let this = Arc::clone(self);
+        tokio::task::spawn_blocking(move || this.reload())
+            .await
+            .expect("reload panicked")
+    }
+
+    fn reload(&self) -> Arc<Wiki> {
+        let inner = match &self.freshness {
+            Freshness::Fingerprint(m) => m,
+            Freshness::Live(_, frozen) => frozen.get().expect("frozen set before reload"),
+        };
         let mut guard = inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -482,21 +494,33 @@ impl ServerHandler for WikiServer {
         // Only a missing file is "no such resource"; a permission or read
         // error on a file that exists is the server's problem, not the
         // client's.
-        let read_file = |name: &str| {
-            crate::dirlock::shared(self.state.dir(), || {
-                std::fs::read_to_string(self.state.dir().join(name))
-            })
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    not_found()
-                } else {
-                    McpError::internal_error(format!("read {name}: {e}"), None)
-                }
-            })
+        let read_file = |name: &'static str| {
+            let ws = Arc::clone(&self.state);
+            async move {
+                tokio::task::spawn_blocking(move || {
+                    crate::dirlock::shared(ws.dir(), || {
+                        std::fs::read_to_string(ws.dir().join(name))
+                    })
+                })
+                .await
+                .expect("read panicked")
+            }
+        };
+        let read_file = |name: &'static str| {
+            let read = read_file(name);
+            async move {
+                read.await.map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::NotFound {
+                        not_found()
+                    } else {
+                        McpError::internal_error(format!("read {name}: {e}"), None)
+                    }
+                })
+            }
         };
         let (text, mime_type) = match uri {
-            "wiki://index" => (read_file("index.json")?, "application/json"),
-            "wiki://llms.txt" => (read_file("llms.txt")?, "text/plain"),
+            "wiki://index" => (read_file("index.json").await?, "application/json"),
+            "wiki://llms.txt" => (read_file("llms.txt").await?, "text/plain"),
             _ => {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
                 // Served from memory, keyed by the index's own ids: an id
@@ -705,7 +729,7 @@ pub fn run(
         Some(source) => source.to_path_buf(),
         None => std::env::current_dir()?,
     };
-    let server = WikiServer::new(Arc::new(state), root, &tools);
+    let server = WikiServer::new(state, root, &tools);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
@@ -737,7 +761,7 @@ mod tests {
     }
 
     /// Page count of the snapshot `state` answers from now.
-    fn pages(state: &WikiState) -> usize {
+    fn pages(state: &Arc<WikiState>) -> usize {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();

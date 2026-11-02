@@ -8,6 +8,9 @@ pub(crate) const SERVE_DIR: &str = ".serve";
 
 fn open(dir: &Path, name: &str) -> std::io::Result<File> {
     let d = dir.join(SERVE_DIR);
+    if !dir.is_dir() {
+        return Err(std::io::ErrorKind::NotFound.into());
+    }
     create_dir_all(&d)?;
     OpenOptions::new()
         .create(true)
@@ -53,12 +56,15 @@ mod tests {
     fn shared_waits_for_exclusive() {
         let t = tempfile::tempdir().unwrap();
         let d = t.path().to_path_buf();
-        let start = Instant::now();
+        let (tx, rx) = std::sync::mpsc::channel();
         let d2 = d.clone();
         let a = std::thread::spawn(move || {
-            exclusive(&d2, || std::thread::sleep(Duration::from_millis(300)));
+            exclusive(&d2, || {
+                tx.send(Instant::now()).unwrap();
+                std::thread::sleep(Duration::from_millis(300));
+            });
         });
-        std::thread::sleep(Duration::from_millis(50));
+        let start = rx.recv().unwrap();
         let at = shared(&d, Instant::now);
         a.join().unwrap();
         assert!(at.duration_since(start) >= Duration::from_millis(250));
@@ -72,6 +78,15 @@ mod tests {
         std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
         assert_eq!(shared(t.path(), || 7), 7);
         std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn a_missing_dir_is_not_created() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path().join("typo");
+        assert_eq!(exclusive(&d, || 1), 1);
+        assert_eq!(shared(&d, || 2), 2);
+        assert!(!d.exists());
     }
 
     #[test]

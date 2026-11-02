@@ -162,7 +162,7 @@ impl Live {
         std::fs::create_dir_all(&barriers)
             .map_err(|e| WikiError::Serve(format!("--dir {}: {e}", dir.display())))?;
         let dir = dir.canonicalize()?;
-        let loaded = Wiki::load(&dir).ok();
+        let loaded = crate::dirlock::shared(&dir, || Wiki::load(&dir)).ok();
         let missing = loaded.is_none();
         let live = Arc::new(Live {
             source,
