@@ -56,14 +56,15 @@ present "$out" "More author text."
 present "$out" "Author notes inside the body."
 absent  "$out" "_(add your own notes here — preserved on recompile)_"
 
-# Hand-written notes are published; the placeholder alone is not.
-sed 's/^_(add your own notes here.*/my hand note/' "$tmp/out/b.md" > "$tmp/out/noted.md"
+# Hand-written notes are not published; the body's own Notes heading is.
+sed 's/^_(add your own notes here.*/my hand note/' "$tmp/out/guide.md" > "$tmp/out/noted.md"
 out="$(strip noted.md)"
-present "$out" "## Notes"
-present "$out" "my hand note"
+absent  "$out" "my hand note"
+[ "$(printf '%s\n' "$out" | grep -Fxc '## Notes')" -eq 1 ] && ok "one Notes heading left" || bad "trailing Notes kept"
+present "$out" "Author notes inside the body."
 
-# Idempotent.
-once="$(strip guide.md)"
+# Idempotent (on a page whose body has no Notes heading).
+once="$(strip b.md)"
 [ "$once" = "$(printf '%s\n' "$once" | awk -f "$AWK")" ] && ok "idempotent" || bad "not idempotent"
 
 if [ "$fail" -eq 0 ]; then echo "strip-chrome: ALL PASS"; else echo "strip-chrome: FAILURES"; exit 1; fi

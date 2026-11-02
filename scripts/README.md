@@ -63,7 +63,8 @@ Press Ctrl-C to stop the server.
 The `strip-chrome.awk` script removes compiler chrome before publishing:
 
 - **`## Imported by`** and **`## Mentioned in`** — the compiler's backlink sections; Quartz draws its own backlinks
-- **`## Notes`** — only when it holds the compiler's placeholder; hand-written notes are published
+- **`## Notes`** — the compiler's trailing section (the last `## Notes` to the end of the page), with the
+  placeholder or hand-written notes alike; hand notes are not published
 
 Only headings above a page's `## Body` are taken as chrome, so a markdown body that uses the same
 headings keeps them.
@@ -77,8 +78,8 @@ scripts/test-strip-chrome.sh
 ```
 
 It compiles a small source tree with the current compiler (`$WIKI_BIN` if set, else `cargo run`), runs
-the awk filter over the pages and asserts that the chrome is removed while body content and hand-written
-notes stay. CI runs it after `cargo test`.
+the awk filter over the pages and asserts that the chrome and hand-written notes are removed while body content
+stays. CI runs it after `cargo test`.
 
 ## Quartz Version
 
