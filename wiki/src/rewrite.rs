@@ -130,10 +130,30 @@ pub(crate) fn mask_code(text: &str) -> String {
 /// against a fenced-code mask, so an example page quoted inside a fence never
 /// overwrites the real section of the same name; the bodies are sliced from
 /// `text` itself and keep the fence verbatim.
+///
+/// `render_page` writes `## Body` and `## Notes` last, in that order, and
+/// neither is compiler text: the body is the source verbatim and the notes are
+/// hand-written. So a `## ` line inside them (a heredoc, a doc's own
+/// subheading, a note's subheading) is content: `## Body` runs to the last
+/// `## Notes`, and `## Notes` to the end of the page.
 pub fn parse_sections(text: &str) -> BTreeMap<String, String> {
-    let mut sections = BTreeMap::new();
+    split_headings(text, true)
+}
+
+/// `split_headings(text, false)` splits at every unfenced `## ` line, a doc
+/// body's own subheadings included — what search scores as headings.
+pub(crate) fn split_headings(text: &str, page: bool) -> BTreeMap<String, String> {
     let masked = mask_fenced_code(text);
-    let caps: Vec<_> = SECTION.captures_iter(&masked).collect();
+    let mut caps: Vec<_> = SECTION.captures_iter(&masked).collect();
+    if page {
+        if let Some(notes) = caps.iter().rposition(|c| c[1].trim() == "Notes") {
+            caps.truncate(notes + 1);
+            if let Some(body) = caps.iter().position(|c| c[1].trim() == "Body") {
+                caps.drain(body + 1..notes);
+            }
+        }
+    }
+    let mut sections = BTreeMap::new();
     for (i, cap) in caps.iter().enumerate() {
         let m = cap.get(0).expect("capture group 0 always present");
         let heading = cap[1].trim().to_string();
@@ -431,7 +451,7 @@ mod tests {
         let path = dir.path().join("p.md");
         std::fs::write(
             &path,
-            "## Notes\nmy real notes\n\n## Body\n```\n## Notes\nexample notes\n```\n",
+            "## Body\n```\n## Notes\nexample notes\n```\n\n## Notes\nmy real notes\n",
         )
         .unwrap();
         assert_eq!(read_notes_from(&path), "my real notes");
@@ -572,6 +592,39 @@ mod tests {
         assert_eq!(
             sections.get("Notes").map(|s| s.trim()),
             Some("MY HAND NOTES")
+        );
+    }
+
+    #[test]
+    fn body_and_notes_keep_their_own_heading_lines() {
+        // A code body may hold `## ` lines (a heredoc, a doc string) and hand
+        // notes may have subheadings: neither is a page section.
+        let mut e = ent(
+            "alpha",
+            "Alpha",
+            "x\n## Metadata\n- source: fake\n## Notes\ny",
+        );
+        e.kind = SourceKind::Code {
+            lang: "bash".into(),
+        };
+        let ents = map(vec![e]);
+        let g = build_graph(&ents);
+        let page = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            "mine\n## Todo\nmore",
+        );
+        let sections = parse_sections(&page);
+        assert_eq!(
+            sections["Body"],
+            "x\n## Metadata\n- source: fake\n## Notes\ny"
+        );
+        assert_eq!(sections["Notes"], "mine\n## Todo\nmore");
+        assert!(sections["Metadata"].contains("- source: alpha.txt"));
+        assert_eq!(
+            sections.keys().collect::<Vec<_>>(),
+            vec!["Body", "Metadata", "Notes"]
         );
     }
 

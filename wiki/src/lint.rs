@@ -164,6 +164,30 @@ mod tests {
     }
 
     #[test]
+    fn a_heading_line_in_a_code_body_does_not_end_the_body() {
+        // A heredoc writing markdown: its `## ` line is source text, not a
+        // section, so the rest of the body stays unscanned code.
+        let mut code = ent(
+            "alpha",
+            "Alpha",
+            "cat <<EOF\n## Usage\nsee [[ghost|Ghost]]\nEOF",
+        );
+        code.kind = SourceKind::Code {
+            lang: "bash".into(),
+        };
+        assert_eq!(lint(&render_all(vec![code])).broken_links, vec![]);
+    }
+
+    #[test]
+    fn a_markdown_body_with_its_own_headings_is_still_scanned() {
+        let doc = ent("beta", "Beta", "## Usage\nsee [[ghost|Ghost]]");
+        assert_eq!(
+            lint(&render_all(vec![doc])).broken_links,
+            vec![("beta".to_string(), "Ghost".to_string())]
+        );
+    }
+
+    #[test]
     fn broken_link_detected() {
         let mut pages = render_all(vec![ent("alpha", "Alpha", "nothing")]);
         pages
