@@ -232,6 +232,7 @@ impl Live {
         // empty and catch up like a reader with no wiki on disk.
         let loaded = live.reload(false);
         let missing = matches!(loaded, Some(Err(_)));
+        let skipped = loaded.is_none();
         if loaded == Some(Ok(())) && !writer {
             live.lock().compiled_gen = 1;
         }
@@ -271,6 +272,11 @@ impl Live {
         let worker = Arc::clone(&live);
         std::thread::spawn(move || {
             let _watcher = watcher;
+            // Load what start-up skipped, so a failing first compile still
+            // leaves the wiki on disk to serve.
+            if skipped {
+                let _ = worker.reload(true);
+            }
             loop {
                 // A reader idles here until it takes over as the writer.
                 let (mut s, idle) = worker
@@ -454,7 +460,7 @@ impl Live {
             // No barrier, no ack: answer from disk at once.
             drop(s);
             let _ = self.reload(true);
-            return Some((self.wiki(), Some(e.to_string())));
+            return Some((self.wiki(), Some(format!("barrier: {e}"))));
         }
         let ack = self
             .dir
@@ -1172,6 +1178,8 @@ mod tests {
     fn writer_scan_removes_orphans() {
         let (_src, out, a, _b) = pair();
         let _ = a.fresh();
+        // No ack from the watcher meanwhile: it would be new, and stay.
+        a.lock().compiling = true;
         let serve = out.path().join(BARRIER_DIR);
         let old = SystemTime::now() - WAIT * 3;
         for name in [

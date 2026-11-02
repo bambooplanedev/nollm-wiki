@@ -258,6 +258,12 @@ per question is noise-level: treat single results as anecdotes.
 - A reader can load the output of a later compile that failed part way,
   under the earlier ack's empty stale reason. The window is narrow; a plain
   `serve` without `--source` has the same exposure.
+- Plain `serve` started while a compile holds `compile.lock`, with no
+  `index.json` yet, answers from an empty wiki with no stale line until
+  `index.json` appears.
+- Orphan cleanup compares file mtimes with the local clock: on NFS, a
+  server whose clock runs more than 10 s ahead can remove live barriers or
+  acks, and that call waits out its 5 s or reports a read error.
 - If the output dir is deleted (`rm -rf`) while a server runs, the old
   writer keeps its lock on the deleted `writer.lock`, so a newly started
   server can become a second writer until the old one restarts.
