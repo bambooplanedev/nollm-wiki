@@ -36,14 +36,23 @@ fn bold(line: &str) -> Option<String> {
 /// level, else on the last line.
 pub fn labels(md: &str) -> Vec<Label> {
     let mut out: Vec<Label> = Vec::new();
-    let mut fence = false;
+    // The open fence as (char, length); it closes on a line of at least as many of that char.
+    let mut fence: Option<(char, usize)> = None;
     for (i, line) in md.lines().enumerate() {
-        if line.trim_start().starts_with("```") {
-            fence = !fence;
-            continue;
-        }
-        if fence {
-            continue;
+        let t = line.trim_start();
+        let c = t.chars().next().filter(|c| matches!(c, '`' | '~'));
+        let run = c.map_or(0, |c| t.chars().take_while(|&x| x == c).count());
+        match (fence, c) {
+            (Some((fc, n)), Some(c)) if c == fc && run >= n && t[run..].trim().is_empty() => {
+                fence = None;
+                continue;
+            }
+            (Some(_), _) => continue,
+            (None, Some(c)) if run >= 3 => {
+                fence = Some((c, run));
+                continue;
+            }
+            _ => {}
         }
         let found = heading(line)
             .filter(|(_, t)| !t.is_empty())
