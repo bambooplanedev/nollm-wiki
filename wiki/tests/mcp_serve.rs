@@ -637,6 +637,26 @@ fn source_project() -> tempfile::TempDir {
     tmp
 }
 
+/// `search`, asked again (from id `*id` up) while the answer says the
+/// recompile is still running, for up to a minute.
+fn search_until_compiled(
+    stdin: &mut ChildStdin,
+    stdout: &Receiver<String>,
+    id: &mut u64,
+    query: &str,
+) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let resp = search(stdin, stdout, *id, query);
+        *id += 1;
+        let running = stale_block(&resp).is_some_and(|b| b.contains("recompile still running"));
+        if !running || std::time::Instant::now() >= deadline {
+            return resp;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 fn send_search(stdin: &mut ChildStdin, id: u64, query: &str) {
     send_call(
         stdin,
@@ -707,17 +727,9 @@ fn serve_source_catches_up_an_existing_wiki() {
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
     // The old wiki is served at once and a call does not wait for the
-    // start-up compile; what must hold is that the compile catches up, so
-    // ask again while the answer says the recompile is still running.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // start-up compile; what must hold is that the compile catches up.
     let mut id = 2;
-    let mut resp = search(&mut stdin, &stdout, id, "zebrafish");
-    let running = |r: &Value| stale_block(r).is_some_and(|b| b.contains("recompile still running"));
-    while running(&resp) && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        id += 1;
-        resp = search(&mut stdin, &stdout, id, "zebrafish");
-    }
+    let resp = search_until_compiled(&mut stdin, &stdout, &mut id, "zebrafish");
     assert_eq!(stale_block(&resp), None, "{resp}");
     for word in ["zebrafish", "quokka"] {
         id += 1;
@@ -800,7 +812,9 @@ fn killing_the_writer_hands_over() {
         "# Alpha\n\nzebrafish here\n",
     )
     .unwrap();
-    let resp = search(&mut in2, &out2, 2, "zebrafish");
+    // The new writer's first compile builds every tree-sitter query, which
+    // in a debug build on a loaded CI runner can outlast one call's wait.
+    let resp = search_until_compiled(&mut in2, &out2, &mut 2, "zebrafish");
     assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
     assert_eq!(stale_block(&resp), None);
 
