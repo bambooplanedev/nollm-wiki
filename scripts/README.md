@@ -6,15 +6,15 @@ This directory contains the tooling to turn a compiled wiki directory into a loc
 
 `quartz-publish.sh` takes a compiled wiki directory (from the `wiki` compiler) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
 1. Clones Quartz (pinned to `v4.5.2`) into `.quartz-build/` (reused across runs)
-2. Runs `npm install` once (then cached)
-3. Copies wiki pages through `strip-chrome.awk` to remove compiler-owned metadata sections
+2. Runs `npm install` once (then cached; retried if it did not finish)
+3. Copies wiki pages through `strip-chrome.awk` to remove compiler chrome, leaving out agent memory notes
 4. Builds the static site or serves a live preview locally
 
 ## Prerequisites
 
-- **Node.js** ≥ 22
+- **Node.js** ≥ 22, `git` and `perl`
 - **Network access** for the one-time initial clone of the Quartz repository and `npm install`
-- A compiled wiki directory with an `index.md` file
+- A compiled wiki directory with `index.md` and `index.json`
 
 ## Usage
 
@@ -40,7 +40,7 @@ Press Ctrl-C to stop the server.
 
 ### Options
 
-- `<compiled-wiki-dir>` (required): path to the compiled wiki directory (must contain `index.md`)
+- `<compiled-wiki-dir>` (required): path to the compiled wiki directory (must contain `index.md` and `index.json`)
 - `--title "Site Title"`: set the site title in `quartz.config.ts` (defaults to the directory basename)
 - `--serve`: serve a live preview instead of a static build
 
@@ -51,31 +51,23 @@ Press Ctrl-C to stop the server.
 - Every `<id>.md` page — individual wiki pages
 
 **Excluded:**
-- `AGENTS.md` — agent definitions are not published
-- Non-markdown files: `index.json`, `graph.json`, `llms.txt`, `.wiki/`
+- `AGENTS.md` — agent navigation notes are not published
+- Agent memory notes — pages flagged `"memory": true` in `index.json`, and the compiler's link lines to
+  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `wiki serve`,
+  `wiki setup` and `wiki compile --memory DIR` make such pages, and so does a plain `wiki compile` when the
+  source has `.agents/memory/`. The page count and link degrees in `index.md` still include them.
+- Non-markdown files: `index.json`, `items.json`, `llms.txt`, `.wiki/`
 
 ## Content Transformation
 
-The `strip-chrome.awk` script removes compiler-owned metadata sections before publishing:
+The `strip-chrome.awk` script removes compiler chrome before publishing:
 
-- **`## Referenced By`** — Quartz provides native backlink functionality; this compiler-added section is redundant
-- **`## Notes`** — compiler-added placeholder; removed to keep pages clean
+- **`## Imported by`** and **`## Mentioned in`** — the compiler's backlink sections; Quartz draws its own backlinks
+- **`## Notes`** — the compiler's trailing section (the last `## Notes` to the end of the page), with the
+  placeholder or hand-written notes alike; hand notes are not published
 
-### Known Limitation
-
-An orphan page (with no incoming links) whose markdown body contains a literal `## Referenced By` heading as actual content would have that body heading stripped. This is rare and cosmetic — the orphan page's content would still be readable, but the heading would be missing.
-
-### Known Issues
-
-Two argument-parsing edges in `quartz-publish.sh`, found in review and
-left as documented follow-ups. Both fail loud (a build error or a
-visibly wrong mode), never silent corruption:
-
-- A `--title` value ending in a backslash can break the generated
-  string in `quartz.config.ts` — the title sanitizer replaces `"` with
-  `'` but leaves `\` alone.
-- `--title --serve` consumes `--serve` as the title value; there is no
-  guard against flag-shaped values following `--title`.
+Only headings above a page's `## Body` are taken as chrome, so a markdown body that uses the same
+headings keeps them.
 
 ### Testing
 
@@ -85,7 +77,9 @@ visibly wrong mode), never silent corruption:
 scripts/test-strip-chrome.sh
 ```
 
-It runs the awk filter over fixture pages and asserts that compiler-owned sections are removed while body content is preserved.
+It compiles a small source tree with the current compiler (`$WIKI_BIN` if set, else `cargo run`), runs
+the awk filter over the pages and asserts that the chrome and hand-written notes are removed while body content
+stays. CI runs it after `cargo test`.
 
 ## Quartz Version
 
@@ -115,5 +109,5 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 Search-quality measurement now lives in `wiki/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI
-(`.github/workflows/rust.yml`: fmt, clippy, build, test). See the
+(`.github/workflows/rust.yml`: fmt, clippy, test, the strip-chrome test, docs). See the
 Testing section of [`wiki/docs/ARCHITECTURE.md`](../wiki/docs/ARCHITECTURE.md).

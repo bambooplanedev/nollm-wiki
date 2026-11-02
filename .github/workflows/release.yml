@@ -28,6 +28,12 @@ jobs:
         working-directory: wiki
     steps:
       - uses: actions/checkout@v7
+      - name: Check the tag matches Cargo.toml
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
+          [ "v$version" = "$TAG" ] || { echo "tag $TAG does not match v$version in wiki/Cargo.toml"; exit 1; }
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: wiki
