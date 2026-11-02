@@ -61,12 +61,12 @@ pub const DEFAULT_TOOLS: [&str; 4] = ["search", "page", "neighbors", "callers"];
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.
 #[derive(PartialEq, Clone, Copy, Debug)]
-struct Fingerprint {
+pub(crate) struct Fingerprint {
     mtime: SystemTime,
     len: u64,
 }
 
-fn fingerprint(dir: &Path) -> std::io::Result<Fingerprint> {
+pub(crate) fn fingerprint(dir: &Path) -> std::io::Result<Fingerprint> {
     let meta = std::fs::metadata(dir.join("index.json"))?;
     Ok(Fingerprint {
         mtime: meta.modified()?,
