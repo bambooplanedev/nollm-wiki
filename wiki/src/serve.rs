@@ -201,6 +201,8 @@ pub(crate) struct SearchParams {
     /// Markdown files to search instead of the code: the plan, spec or ledger
     /// you were handed. Returns each path on its own line, then `  start-end  label` for
     /// matching headings and bold step labels (`-` and spaces match alike); an empty query lists them all.
+    /// Pass the plan, spec and ledger together: an ID is often a label in only one of
+    /// them. Only labels are searched, not body text; use grep for text.
     pub docs: Option<Vec<String>>,
 }
 
@@ -284,7 +286,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines."
+        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
     )]
     async fn search(
         &self,

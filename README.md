@@ -153,7 +153,8 @@ its own file tool. `callers` answers "what breaks if this changes"; `neighbors` 
 surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
 `docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
 on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
-`load profile` match alike, after the exact matches.
+`load profile` match alike, after the exact matches. Pass the plan, spec and ledger together, since an
+ID is often a label in only one of them; body text is not searched, grep stays the tool for it.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
