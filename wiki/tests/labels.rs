@@ -294,3 +294,20 @@ fn empty_query_listing_is_capped_unless_limit_given() {
     assert!(doc_lines(&h, &[], 1).ends_with("… 1 more label; pass limit to list them\n"));
     assert_eq!(doc_search(&d, &docs, "L1", None).2, 0);
 }
+
+#[test]
+fn repeated_labels_come_newest_first() {
+    let d = write_tmp("newest", "## N11: a\n## Row X\n## N11: b\n## N11: c\n");
+    let docs = ["p.md".to_string()];
+    let t = |q: &str, limit| -> Vec<String> {
+        let h = doc_search(&d, &docs, q, limit).0;
+        h.into_iter().map(|h| h.text).collect()
+    };
+    assert_eq!(t("N11", None), ["N11: c", "N11: b", "N11: a"]);
+    assert_eq!(t("N11", Some(2)), ["N11: c", "N11: b"]);
+    assert_eq!(t("", None), ["N11: a", "Row X", "N11: b", "N11: c"]);
+    let d = write_tmp("heads", "## Task 1: x\n## Task 2: y\n");
+    let h = doc_search(&d, &docs, "Task", None).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["Task 1: x", "Task 2: y"]);
+}

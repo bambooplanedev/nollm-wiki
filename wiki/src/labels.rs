@@ -108,8 +108,11 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
 /// Labels of the markdown files `docs` (relative to `root`) whose text holds
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
-/// order. Matches that hold only once `-` also splits words (two or more such
-/// query words) rank after all the others. Returns the hits grouped by doc, one error line per unusable path, and how many
+/// order, except that labels repeated in one doc under the same head (text
+/// before the first `:`, case-insensitive) come newest first at their first
+/// member's place. Matches that hold only once `-` also splits words (two or
+/// more such query words) rank after all the others; an empty query lists the
+/// labels in document order. Returns the hits grouped by doc, one error line per unusable path, and how many
 /// matching labels the limit (or an empty query's default cap) cut.
 pub fn doc_search(
     root: &Path,
@@ -122,6 +125,7 @@ pub fn doc_search(
     let mut ranked = Vec::new();
     let mut errors = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut first = std::collections::HashMap::new();
     for (doc, path) in docs.iter().enumerate() {
         // The same file under another spelling is read once, at its first place.
         let file = root.join(path);
@@ -157,7 +161,19 @@ pub fn doc_search(
                     end: l.end,
                     text: l.text,
                 };
-                ranked.push(((loose, l.level == BOLD, at > 0), doc, hit));
+                // Labels sharing a head (`N11: …` repeated in a ledger) sort at
+                // their first member's place, newest first among themselves.
+                let k = (loose, l.level == BOLD, at > 0);
+                let head = hit
+                    .text
+                    .split(':')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase();
+                let i = ranked.len();
+                let f = *first.entry((k, doc, head)).or_insert(i);
+                ranked.push(((k, doc, f, std::cmp::Reverse(i)), doc, hit));
             }
         }
     }
