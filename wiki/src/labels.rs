@@ -2,6 +2,7 @@
 
 use crate::model::{clip, LINE_CHARS};
 use crate::outline::heading;
+use crate::rewrite::mask_fenced_code;
 use std::path::Path;
 
 /// Level given to a bold label, below every heading level.
@@ -24,13 +25,13 @@ fn bold(line: &str) -> Option<String> {
     for marker in ["- ", "* ", "+ "] {
         s = s.strip_prefix(marker).unwrap_or(s);
     }
+    // An ordered-list marker: digits then `. ` or `) `.
+    let digits = s.bytes().take_while(u8::is_ascii_digit).count();
+    if digits > 0 && (s[digits..].starts_with(". ") || s[digits..].starts_with(") ")) {
+        s = &s[digits + 2..];
+    }
     for box_ in ["[ ] ", "[x] ", "[X] "] {
         s = s.strip_prefix(box_).unwrap_or(s);
-    }
-    if let Some((n, rest)) = s.split_once(". ") {
-        if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) {
-            s = rest;
-        }
     }
     let text = s.strip_prefix("**")?.split_once("**")?.0.trim();
     (!text.is_empty() && !text.ends_with(':')).then(|| text.to_string())
@@ -41,24 +42,7 @@ fn bold(line: &str) -> Option<String> {
 /// level, else on the last line.
 pub fn labels(md: &str) -> Vec<Label> {
     let mut out: Vec<Label> = Vec::new();
-    // The open fence as (char, length); it closes on a line of at least as many of that char.
-    let mut fence: Option<(char, usize)> = None;
-    for (i, line) in md.lines().enumerate() {
-        let t = line.trim_start();
-        let c = t.chars().next().filter(|c| matches!(c, '`' | '~'));
-        let run = c.map_or(0, |c| t.chars().take_while(|&x| x == c).count());
-        match (fence, c) {
-            (Some((fc, n)), Some(c)) if c == fc && run >= n && t[run..].trim().is_empty() => {
-                fence = None;
-                continue;
-            }
-            (Some(_), _) => continue,
-            (None, Some(c)) if run >= 3 && !(c == '`' && t[run..].contains('`')) => {
-                fence = Some((c, run));
-                continue;
-            }
-            _ => {}
-        }
+    for (i, line) in mask_fenced_code(md).lines().enumerate() {
         let found = heading(line)
             .filter(|(_, t)| !t.is_empty())
             .map(|(l, t)| (l as u8, t))
@@ -85,6 +69,9 @@ pub fn labels(md: &str) -> Vec<Label> {
 
 /// Hits returned for a query with words when no `limit` is given.
 pub const DOC_LIMIT: usize = 10;
+
+/// Labels listed for an empty query when no `limit` is given.
+pub const DOC_LIST_LIMIT: usize = 200;
 
 /// A label found in one of the searched documents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,18 +109,25 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
 /// order. Matches that hold only once `-` also splits words (two or more such
-/// query words) rank after all the others. Returns the hits and one error line per unusable path.
+/// query words) rank after all the others. Returns the hits grouped by doc, one error line per unusable path, and how many
+/// labels an empty query's default cap cut.
 pub fn doc_search(
     root: &Path,
     docs: &[String],
     query: &str,
     limit: Option<usize>,
-) -> (Vec<DocHit>, Vec<String>) {
+) -> (Vec<DocHit>, Vec<String>, usize) {
     let q = words(query);
     let qs = split_words(query);
     let mut ranked = Vec::new();
     let mut errors = Vec::new();
-    for path in docs {
+    let mut seen = std::collections::HashSet::new();
+    for (doc, path) in docs.iter().enumerate() {
+        // The same file under another spelling is read once, at its first place.
+        let file = root.join(path);
+        if !seen.insert(file.canonicalize().unwrap_or(file)) {
+            continue;
+        }
         if !Path::new(path)
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("md"))
@@ -163,25 +157,29 @@ pub fn doc_search(
                     end: l.end,
                     text: l.text,
                 };
-                ranked.push(((loose, l.level == BOLD, at > 0), hit));
+                ranked.push(((loose, l.level == BOLD, at > 0), doc, hit));
             }
         }
     }
     if !q.is_empty() {
-        ranked.sort_by_key(|(k, _)| *k);
+        ranked.sort_by_key(|(k, _, _)| *k);
     }
-    let n = if q.is_empty() {
-        limit.unwrap_or(usize::MAX)
+    let n = limit.unwrap_or(if q.is_empty() {
+        DOC_LIST_LIMIT
     } else {
-        limit.unwrap_or(DOC_LIMIT)
-    };
-    let hits = ranked.into_iter().map(|(_, h)| h).take(n).collect();
-    (hits, errors)
+        DOC_LIMIT
+    });
+    let more = ranked.len().saturating_sub(n);
+    // Rank picks the survivors; output groups them by doc, rank order within.
+    ranked.truncate(n);
+    ranked.sort_by_key(|(_, doc, _)| *doc);
+    let hits = ranked.into_iter().map(|(_, _, h)| h).collect();
+    (hits, errors, more)
 }
 
 /// Hits grouped by consecutive path: the path alone on a line, then
 /// `  start-end  text` per hit; then the error lines; `no matches` if none.
-pub fn doc_lines(hits: &[DocHit], errors: &[String]) -> String {
+pub fn doc_lines(hits: &[DocHit], errors: &[String], more: usize) -> String {
     let mut out = String::new();
     let mut path = None;
     for h in hits {
@@ -195,6 +193,9 @@ pub fn doc_lines(hits: &[DocHit], errors: &[String]) -> String {
             h.end,
             clip(&h.text, LINE_CHARS)
         ));
+    }
+    if more > 0 {
+        out.push_str(&format!("… {more} more labels; pass limit to list them\n"));
     }
     for e in errors {
         out.push_str(e);

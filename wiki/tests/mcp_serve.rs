@@ -1321,6 +1321,36 @@ fn mcp_search_docs_returns_label_range() {
 }
 
 #[test]
+fn mcp_search_docs_dedupes_and_reports_cut_labels() {
+    let (tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    let big: String = (0..250).fold(String::new(), |s, i| s + &format!("**L{i}. x**\n"));
+    std::fs::write(tmp.path().join("big.md"), big).unwrap();
+    let dup = call(
+        &mut stdin,
+        &stdout,
+        9,
+        "search",
+        &json!({"query": "T2d", "docs": ["plan.md", "plan.md"], "format": "json"}),
+    );
+    let cut = call(
+        &mut stdin,
+        &stdout,
+        10,
+        "search",
+        &json!({"query": "", "docs": ["big.md"], "format": "json"}),
+    );
+    child.kill().ok();
+    let v: Value = serde_json::from_str(text_of(&dup)).unwrap();
+    assert_eq!(v["hits"].as_array().unwrap().len(), 1);
+    assert!(v.get("more").is_none());
+    let v: Value = serde_json::from_str(text_of(&cut)).unwrap();
+    assert_eq!(
+        (v["hits"].as_array().unwrap().len(), v["more"].as_u64()),
+        (200, Some(50))
+    );
+}
+
+#[test]
 fn mcp_search_docs_rejects_kind() {
     let (_tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
     for (id, extra) in [(9, json!({"kind": "code"})), (10, json!({"tag": "mem"}))] {

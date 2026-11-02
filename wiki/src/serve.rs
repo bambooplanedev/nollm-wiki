@@ -194,13 +194,13 @@ pub(crate) struct SearchParams {
     pub kind: Option<String>,
     /// Only pages with this tag (`a` also matches `a/b`); an empty query lists them.
     pub tag: Option<String>,
-    /// Maximum pages (default 5; with `docs` default 10, and an empty query lists all labels).
+    /// Maximum pages (default 5; with `docs` default 10, and an empty query lists the first 200 labels).
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
     /// Markdown files to search instead of the code: the plan, spec or ledger
     /// you were handed. Returns each path on its own line, then `  start-end  label` for
-    /// matching headings and bold step labels (`-` and spaces match alike); an empty query lists them all.
+    /// matching headings and bold step labels (`-` and spaces match alike); an empty query lists the first 200 (pass `limit` for more).
     /// Pass the plan, spec and ledger together: an ID is often a label in only one of
     /// them. Only labels are searched, not body text; use grep for text.
     pub docs: Option<Vec<String>>,
@@ -321,11 +321,12 @@ impl WikiServer {
                     None,
                 ));
             }
-            let (hits, errors) = crate::labels::doc_search(&self.root, docs, &p.query, p.limit);
+            let (hits, errors, more) =
+                crate::labels::doc_search(&self.root, docs, &p.query, p.limit);
             let text = if json {
-                doc_json(&hits, &errors)
+                doc_json(&hits, &errors, more)
             } else {
-                crate::labels::doc_lines(&hits, &errors)
+                crate::labels::doc_lines(&hits, &errors, more)
             };
             return Ok(text_result(Ok(text)));
         }
@@ -508,8 +509,8 @@ impl ServerHandler for WikiServer {
     }
 }
 
-/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`.
-pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String]) -> String {
+/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when an empty query's default cap cut n labels.
+pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) -> String {
     let hits: Vec<_> = hits
         .iter()
         .map(|h| {
@@ -521,7 +522,11 @@ pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String]) -> String {
             })
         })
         .collect();
-    serde_json::json!({"hits": hits, "errors": errors}).to_string()
+    let mut out = serde_json::json!({"hits": hits, "errors": errors});
+    if more > 0 {
+        out["more"] = more.into();
+    }
+    out.to_string()
 }
 
 /// Render search hits as the JSON array `search` returns with

@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use wiki::labels::{doc_lines, doc_search, labels, DocHit};
+use wiki::labels::{doc_lines, doc_search, labels, DocHit, DOC_LIST_LIMIT};
 
 const PLAN: &str = "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n";
 
@@ -112,12 +112,12 @@ fn first_word_match_ranks_before_later_word() {
 #[test]
 fn empty_query_lists_every_label_unbounded() {
     assert_eq!(hits("").len(), 6 + 2);
-    let (h, _) = doc_search(dir(), &["plan.md".into()], "", Some(2));
+    let (h, _, _) = doc_search(dir(), &["plan.md".into()], "", Some(2));
     assert_eq!(h.len(), 2);
 }
 #[test]
 fn bad_paths_get_one_line_each_and_others_answer() {
-    let (h, e) = doc_search(
+    let (h, e, _) = doc_search(
         dir(),
         &["nope.md".into(), "x.txt".into(), "plan.md".into()],
         "T2d",
@@ -129,10 +129,10 @@ fn bad_paths_get_one_line_each_and_others_answer() {
 #[test]
 fn lines_render_like_symbol_ranges() {
     assert_eq!(
-        doc_lines(&hits("T2d"), &[]),
+        doc_lines(&hits("T2d"), &[], 0),
         "plan.md\n  5-10  T2d. Remaining matrix.\n"
     );
-    assert_eq!(doc_lines(&[], &[]), "no matches\n");
+    assert_eq!(doc_lines(&[], &[], 0), "no matches\n");
 }
 #[test]
 fn lines_print_each_path_once_and_errors_last() {
@@ -142,10 +142,10 @@ fn lines_print_each_path_once_and_errors_last() {
         end: s,
         text: "x".into(),
     };
-    let hs = [h("a.md", 1), h("a.md", 2), h("b.md", 3), h("a.md", 4)];
+    let hs = [h("a.md", 1), h("a.md", 2), h("a.md", 4), h("b.md", 3)];
     assert_eq!(
-        doc_lines(&hs, &["c.md: not found".into()]),
-        "a.md\n  1-1  x\n  2-2  x\nb.md\n  3-3  x\na.md\n  4-4  x\nc.md: not found\n"
+        doc_lines(&hs, &["c.md: not found".into()], 0),
+        "a.md\n  1-1  x\n  2-2  x\n  4-4  x\nb.md\n  3-3  x\nc.md: not found\n"
     );
 }
 
@@ -153,7 +153,7 @@ fn texts_in(md: &str, q: &str) -> Vec<String> {
     let d = std::env::temp_dir().join(format!("wiki-hy-{}-{}", std::process::id(), md.len()));
     std::fs::create_dir_all(&d).unwrap();
     std::fs::write(d.join("p.md"), md).unwrap();
-    let (h, _) = doc_search(&d, &["p.md".to_string()], q, None);
+    let (h, _, _) = doc_search(&d, &["p.md".to_string()], q, None);
     h.into_iter().map(|h| h.text).collect()
 }
 #[test]
@@ -201,7 +201,7 @@ fn checkbox_steps_are_labels() {
     let dir = std::env::temp_dir().join(format!("wiki-cb-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("p.md"), CHECKBOX_PLAN).unwrap();
-    let (hits, _) = doc_search(&dir, &["p.md".to_string()], "T5k", None);
+    let (hits, _, _) = doc_search(&dir, &["p.md".to_string()], "T5k", None);
     assert_eq!(hits.len(), 1);
     assert_eq!((hits[0].start, hits[0].end), (2, 4));
 }
@@ -226,4 +226,70 @@ fn inline_code_at_line_start_does_not_open_a_fence() {
         .map(|l| l.text)
         .collect();
     assert_eq!(t, ["T1. a"]);
+}
+
+fn write_tmp(name: &str, md: &str) -> PathBuf {
+    let d = std::env::temp_dir().join(format!("wiki-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("p.md"), md).unwrap();
+    std::fs::write(d.join("q.md"), "## Task A\n").unwrap();
+    d
+}
+
+#[test]
+fn hits_are_grouped_by_doc_after_global_ranking() {
+    // p.md: bold match ranks after q.md heading match, but output groups by doc.
+    let d = write_tmp("group", "**Task B**\n## Task C\n");
+    let docs = ["p.md".to_string(), "q.md".to_string()];
+    let (h, _, _) = doc_search(&d, &docs, "task", None);
+    let t: Vec<_> = h
+        .iter()
+        .map(|h| (h.path.as_str(), h.text.as_str()))
+        .collect();
+    assert_eq!(
+        t,
+        [("p.md", "Task C"), ("p.md", "Task B"), ("q.md", "Task A")]
+    );
+    assert_eq!(
+        doc_lines(&h, &[], 0),
+        "p.md\n  2-2  Task C\n  1-1  Task B\nq.md\n  1-1  Task A\n"
+    );
+    // the limit keeps the globally best hits, then groups them
+    let (h, _, _) = doc_search(&d, &docs, "task", Some(2));
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["Task C", "Task A"]);
+}
+
+#[test]
+fn duplicate_docs_are_read_once() {
+    let d = write_tmp("dup", "**T2d. x**\n");
+    let abs = d.join("p.md").to_string_lossy().into_owned();
+    for docs in [
+        vec!["p.md".to_string(), "p.md".to_string()],
+        vec!["p.md".to_string(), abs],
+    ] {
+        assert_eq!(doc_search(&d, &docs, "T2d", None).0.len(), 1);
+    }
+}
+
+#[test]
+fn ordered_list_forms_are_labels() {
+    let md = "1) **A. one**\n1. [ ] **B. two**\n2) [x] **C. three**\n";
+    let t: Vec<_> = labels(md).into_iter().map(|l| l.text).collect();
+    assert_eq!(t, ["A. one", "B. two", "C. three"]);
+}
+
+#[test]
+fn empty_query_listing_is_capped_unless_limit_given() {
+    let md: String = (0..250).fold(String::new(), |s, i| s + &format!("**L{i}. x**\n"));
+    let d = write_tmp("cap", &md);
+    let docs = ["p.md".to_string()];
+    let (h, _, more) = doc_search(&d, &docs, "", None);
+    assert_eq!((h.len(), more), (DOC_LIST_LIMIT, 50));
+    let out = doc_lines(&h, &["z.md: not found".into()], more);
+    assert!(out.ends_with("… 50 more labels; pass limit to list them\nz.md: not found\n"));
+    let (h, _, more) = doc_search(&d, &docs, "", Some(300));
+    assert_eq!((h.len(), more), (250, 0));
+    assert!(!doc_lines(&h, &[], 0).contains("more labels"));
+    assert_eq!(doc_search(&d, &docs, "L1", None).2, 0);
 }
