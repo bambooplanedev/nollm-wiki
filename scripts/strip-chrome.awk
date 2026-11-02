@@ -1,21 +1,25 @@
-# Remove the compiler-owned "## Referenced By" and "## Notes" sections from a
-# rendered wiki page. Uses the compiler's fixed section order so a markdown
-# *source* body that contains those headings as content is not corrupted:
-#   - Notes: the compiler's is always the LAST "## Notes" → strip it to EOF.
-#   - Referenced By: the compiler's is the FIRST "## Referenced By" (it precedes
-#     the body; earlier sections are bullet/field content with no "## " lines) →
-#     strip from it through the line before the next "## " heading.
+# Remove compiler chrome from a rendered wiki page before publishing:
+#   - the backlink sections "## Imported by" and "## Mentioned in" (Quartz
+#     draws its own backlinks);
+#   - the trailing "## Notes" section when it holds only the compiler's
+#     placeholder (hand-written notes are kept).
+# The compiler writes its list sections before the body, so only "## "
+# headings above the first "## Body" (or "## Notes", for a page with no body)
+# are taken as chrome; the same headings inside a markdown body are kept.
+BEGIN { placeholder = "_(add your own notes here — preserved on recompile)_" }
 { line[NR] = $0 }
-$0 == "## Notes" { last_notes = NR }
+!head && ($0 == "## Body" || $0 == "## Notes") { head = NR }
+$0 == "## Notes" { notes = NR }
 END {
+    if (!head) head = NR + 1
+    drop_notes = notes
+    for (i = notes + 1; notes && i <= NR; i++)
+        if (line[i] != "" && line[i] != placeholder) drop_notes = 0
     for (i = 1; i <= NR; i++) {
-        if (!rb_start && line[i] == "## Referenced By") { rb_start = i; continue }
-        if (rb_start && !rb_end && line[i] ~ /^## /)     { rb_end = i; break }
-    }
-    if (rb_start && !rb_end) rb_end = NR + 1   # RefBy runs to EOF (no later heading)
-    for (i = 1; i <= NR; i++) {
-        if (last_notes && i >= last_notes) break               # drop Notes .. EOF
-        if (rb_start && i >= rb_start && i < rb_end) continue   # drop RefBy block
-        print line[i]
+        if (drop_notes && i >= notes) break
+        if (i < head && line[i] ~ /^## /)
+            skip = (line[i] == "## Imported by" || line[i] == "## Mentioned in")
+        if (i >= head) skip = 0
+        if (!skip) print line[i]
     }
 }

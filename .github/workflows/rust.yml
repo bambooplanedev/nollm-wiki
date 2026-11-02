@@ -29,6 +29,8 @@ jobs:
       run: cargo clippy --all-targets -- -D warnings
     - name: Run tests
       run: cargo test --verbose
+    - name: Test strip-chrome.awk
+      run: bash ../scripts/test-strip-chrome.sh
     - name: Docs
       run: cargo doc --no-deps
       env:
