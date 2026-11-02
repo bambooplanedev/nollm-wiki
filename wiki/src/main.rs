@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use wiki::generator::generate_corpus;
 use wiki::model::KindFilter;
 use wiki::query::{PackBudget, Wiki};
@@ -87,8 +87,13 @@ enum Command {
         dir: Option<PathBuf>,
     },
     Search {
-        /// Required unless `--tag` is given.
+        /// Required unless `--tag` or `--docs` is given.
         query: Option<String>,
+        /// Markdown files (plan, spec, ledger) to search for step labels
+        /// instead of the wiki; repeatable. Paths are relative to the
+        /// current directory; no compiled wiki is needed.
+        #[arg(long, conflicts_with_all = ["tag", "kind", "dir"])]
+        docs: Vec<String>,
         /// Only pages carrying this tag; `a` also matches `a/b`. Alone, lists every such page.
         #[arg(long)]
         tag: Option<String>,
@@ -332,14 +337,29 @@ fn main() -> Result<()> {
         }
         Command::Search {
             query,
+            docs,
             tag,
             kind,
             limit,
             format,
             dir,
         } => {
+            if !docs.is_empty() {
+                let (hits, errors, more) = wiki::labels::doc_search(
+                    Path::new("."),
+                    &docs,
+                    query.as_deref().unwrap_or(""),
+                    limit,
+                );
+                if format == "json" {
+                    println!("{}", wiki::serve::doc_json(&hits, &errors, more));
+                } else {
+                    print!("{}", wiki::labels::doc_lines(&hits, &errors, more));
+                }
+                return Ok(());
+            }
             if query.is_none() && tag.is_none() {
-                anyhow::bail!("search needs a query or --tag");
+                anyhow::bail!("search needs a query, --tag or --docs");
             }
             let tag = tag
                 .as_deref()

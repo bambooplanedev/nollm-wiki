@@ -1270,3 +1270,116 @@ fn a_retargeted_symlink_counts_as_replaced() {
     drop(stdin);
     let _ = child.wait();
 }
+
+const PLAN: &str = "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n";
+
+/// A server whose working directory is a temp dir holding `plan.md`, with
+/// the wiki compiled into `<tmp>/out`.
+fn spawn_in_plan_dir() -> (tempfile::TempDir, Child, ChildStdin, Receiver<String>) {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("lib.rs"), "pub fn add() {}\n").unwrap();
+    let out = tmp.path().join("out");
+    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    std::fs::write(tmp.path().join("plan.md"), PLAN).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_wiki"));
+    server
+        .args(["serve", "--dir"])
+        .arg(&out)
+        .current_dir(tmp.path())
+        .stderr(Stdio::null());
+    let (child, mut stdin, stdout) = attach(server);
+    initialize(&mut stdin, &stdout);
+    (tmp, child, stdin, stdout)
+}
+
+#[test]
+fn mcp_search_docs_returns_label_range() {
+    let (_tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        9,
+        "search",
+        &json!({"query": "T2d", "docs": ["plan.md"]}),
+    );
+    let json = call(
+        &mut stdin,
+        &stdout,
+        10,
+        "search",
+        &json!({"query": "T2d", "docs": ["plan.md", "gone.md"], "format": "json"}),
+    );
+    child.kill().ok();
+    assert_eq!(text_of(&resp), "plan.md\n  5-10  T2d. Remaining matrix.\n");
+    assert_eq!(resp["result"]["content"].as_array().unwrap().len(), 1);
+    let v: Value = serde_json::from_str(text_of(&json)).unwrap();
+    assert_eq!(
+        v,
+        json!({"hits": [{"path": "plan.md", "start_line": 5, "end_line": 10,
+            "label": "T2d. Remaining matrix."}], "errors": ["gone.md: not found"]})
+    );
+}
+
+#[test]
+fn mcp_search_docs_dedupes_and_reports_cut_labels() {
+    let (tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    let big: String = (0..250).fold(String::new(), |s, i| s + &format!("**L{i}. x**\n"));
+    std::fs::write(tmp.path().join("big.md"), big).unwrap();
+    let dup = call(
+        &mut stdin,
+        &stdout,
+        9,
+        "search",
+        &json!({"query": "T2d", "docs": ["plan.md", "plan.md"], "format": "json"}),
+    );
+    let cut = call(
+        &mut stdin,
+        &stdout,
+        10,
+        "search",
+        &json!({"query": "", "docs": ["big.md"], "format": "json"}),
+    );
+    child.kill().ok();
+    let v: Value = serde_json::from_str(text_of(&dup)).unwrap();
+    assert_eq!(v["hits"].as_array().unwrap().len(), 1);
+    assert!(v.get("more").is_none());
+    let v: Value = serde_json::from_str(text_of(&cut)).unwrap();
+    assert_eq!(
+        (v["hits"].as_array().unwrap().len(), v["more"].as_u64()),
+        (200, Some(50))
+    );
+}
+
+#[test]
+fn mcp_search_docs_rejects_kind() {
+    let (_tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    for (id, extra) in [(9, json!({"kind": "code"})), (10, json!({"tag": "mem"}))] {
+        let mut args = json!({"query": "x", "docs": ["plan.md"]});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let resp = call(&mut stdin, &stdout, id, "search", &args);
+        assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
+        assert_eq!(
+            resp["error"]["message"],
+            "`docs` cannot be combined with kind or tag"
+        );
+    }
+    child.kill().ok();
+}
+
+#[test]
+fn mcp_search_empty_docs_is_plain_search() {
+    let (_tmp, mut child, mut stdin, stdout) = spawn_in_plan_dir();
+    let plain = call(&mut stdin, &stdout, 11, "search", &json!({"query": "add"}));
+    let empty = call(
+        &mut stdin,
+        &stdout,
+        12,
+        "search",
+        &json!({"query": "add", "docs": []}),
+    );
+    child.kill().ok();
+    assert!(!text_of(&plain).contains("no matches"), "{plain}");
+    assert_eq!(text_of(&empty), text_of(&plain));
+}

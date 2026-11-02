@@ -150,7 +150,12 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 The workflow an agent follows is search → page → read lines: `search` finds the page and its
 symbols, `page` lists a file's symbols with line ranges, and the agent reads just those lines with
 its own file tool. `callers` answers "what breaks if this changes"; `neighbors` is for when the
-surrounding pages matter.
+surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
+`docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
+on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
+`load profile` match alike, after the exact matches. Pass the plan, spec and ledger together, since an
+ID is often a label in only one of them; an empty query lists the first 200 labels (`limit` lists more, and a
+final line says how many were cut); body text is not searched, grep stays the tool for it.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
@@ -350,7 +355,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths; searches heading and bold-step labels instead), `limit?` (5 with a query; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |

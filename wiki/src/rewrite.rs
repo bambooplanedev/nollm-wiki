@@ -25,7 +25,10 @@ fn fence_delim(trimmed: &str) -> Option<(char, usize)> {
         return None;
     }
     let n = trimmed.chars().take_while(|x| *x == c).count();
-    (n >= 3).then_some((c, n))
+    // CommonMark: a backtick fence's info string holds no backtick, so
+    // "```x``` y" is inline code, not an opener.
+    let inline = c == '`' && trimmed[n..].contains('`');
+    (n >= 3 && !inline).then_some((c, n))
 }
 
 /// Overwrite every byte of `line` except its newline with an ASCII space.
@@ -432,6 +435,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_notes_from(&path), "my real notes");
+    }
+
+    #[test]
+    fn inline_code_at_line_start_does_not_open_a_fence() {
+        assert_eq!(mask_fenced_code("```x``` y\n## H\n"), "```x``` y\n## H\n");
     }
 
     #[test]
