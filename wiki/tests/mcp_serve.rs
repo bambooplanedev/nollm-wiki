@@ -754,6 +754,61 @@ fn serve_source_sees_edit_without_sleep() {
 }
 
 #[test]
+fn two_servers_on_one_dir_answer_fresh() {
+    let project = source_project();
+    let (mut c1, mut in1, out1) = spawn_server_source(project.path(), &[]);
+    initialize(&mut in1, &out1);
+    // The first server's first answer means it holds the writer lock.
+    search(&mut in1, &out1, 2, "oldword");
+    let (mut c2, mut in2, out2) = spawn_server_source(project.path(), &[]);
+    initialize(&mut in2, &out2);
+
+    for n in 0..10u64 {
+        let word = format!("word{n}");
+        std::fs::write(
+            project.path().join("notes/alpha.md"),
+            format!("# Alpha\n\n{word} here\n"),
+        )
+        .unwrap();
+        for (stdin, stdout, id) in [(&mut in1, &out1, 10 + n), (&mut in2, &out2, 10 + n)] {
+            let resp = search(stdin, stdout, id, &word);
+            assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+            assert_eq!(stale_block(&resp), None, "{word}");
+        }
+    }
+
+    drop(in1);
+    drop(in2);
+    let _ = c1.wait();
+    let _ = c2.wait();
+}
+
+#[test]
+fn killing_the_writer_hands_over() {
+    let project = source_project();
+    let (mut c1, mut in1, out1) = spawn_server_source(project.path(), &[]);
+    initialize(&mut in1, &out1);
+    // The first server's first answer means it holds the writer lock.
+    search(&mut in1, &out1, 2, "oldword");
+    let (mut c2, mut in2, out2) = spawn_server_source(project.path(), &[]);
+    initialize(&mut in2, &out2);
+
+    c1.kill().unwrap();
+    let _ = c1.wait();
+    std::fs::write(
+        project.path().join("notes/alpha.md"),
+        "# Alpha\n\nzebrafish here\n",
+    )
+    .unwrap();
+    let resp = search(&mut in2, &out2, 2, "zebrafish");
+    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(stale_block(&resp), None);
+
+    drop(in2);
+    let _ = c2.wait();
+}
+
+#[test]
 fn serve_source_sees_file_in_new_subdir() {
     let project = source_project();
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);

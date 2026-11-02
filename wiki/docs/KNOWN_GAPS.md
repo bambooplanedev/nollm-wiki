@@ -246,6 +246,15 @@ per question is noise-level: treat single results as anecdotes.
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
   count against `fs.inotify.max_user_watches`.
+- Servers from 0.6.1 or older do not take `writer.lock` and still race.
+  Restart old sessions after an upgrade.
+- Servers on one `--dir` are assumed to share inputs (`--source`,
+  `--memory`). If they differ, the writer's inputs win.
+- A reader's reload waits on `compile.lock`: during a long compile its call
+  can take longer than the usual 5 s bound.
+- A reader can load the output of a later compile that failed part way,
+  under the earlier ack's empty stale reason. The window is narrow; a plain
+  `serve` without `--source` has the same exposure.
 
 ## `wiki setup`
 
