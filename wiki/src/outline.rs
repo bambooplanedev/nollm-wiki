@@ -261,7 +261,7 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
 
 /// An ATX heading line as `(level, text)`: one to six `#`, then a space or
 /// the line end.
-fn heading(line: &str) -> Option<(usize, String)> {
+pub(crate) fn heading(line: &str) -> Option<(usize, String)> {
     let text = line.trim_start_matches('#');
     let level = line.len() - text.len();
     let spaced = text.is_empty() || text.starts_with([' ', '\t']);
