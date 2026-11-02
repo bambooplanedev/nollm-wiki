@@ -45,6 +45,8 @@ present "$out" "def beta():"
 present "$(strip a.md)" "- [[b|B]]"
 
 # The same headings inside a markdown body are author text.
+[ "$(grep -Fxc '## Mentioned in' "$tmp/out/guide.md")" -eq 2 ] \
+    || { echo "fixture: guide.md lacks its compiler Mentioned in section; update this test"; exit 1; }
 out="$(strip guide.md)"
 absent  "$out" "- [[other|Other]]"
 present "$out" "## Mentioned in"

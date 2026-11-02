@@ -39,16 +39,14 @@ WIKI_DIR="$(cd "$WIKI_DIR" && pwd)"
 [ -n "$TITLE" ] || TITLE="$(basename "$WIKI_DIR")"
 
 # Memory notes (agent memory compiled in by `serve`, `setup` or `--memory`)
-# are private: their pages, and every link line to them, stay out.
+# are private: their pages, and the link lines the compiler writes to them
+# (`- [[id|...]]` list items, `- [Title](id.md) — ` index entries), stay out.
 MEMORY_PAGES="$(node -e '
     const idx = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     if (!Array.isArray(idx.entries)) process.exit(1);
     for (const e of idx.entries) if (e.memory) console.log(e.page);
 ' "$WIKI_DIR/index.json")" || { echo "error: cannot read $WIKI_DIR/index.json" >&2; exit 1; }
-MEMORY_LINKS="$(mktemp)"; trap 'rm -f "$MEMORY_LINKS"' EXIT
-for page in $MEMORY_PAGES; do
-    printf '[[%s|\n](%s)\n' "${page%.md}" "$page" >> "$MEMORY_LINKS"
-done
+MEMORY_IDS="$(printf '%s\n' "$MEMORY_PAGES" | sed 's/\.md$//' | tr '\n' ' ')"
 [ -z "$MEMORY_PAGES" ] || echo "Skipping $(echo "$MEMORY_PAGES" | wc -l | tr -d ' ') memory note page(s)"
 
 # 1. Quartz install (once; reused on later runs). npm writes
@@ -74,12 +72,17 @@ for f in "$WIKI_DIR"/*.md; do
     base="$(basename "$f")"
     [ "$base" = "AGENTS.md" ] && continue
     printf '%s\n' "$MEMORY_PAGES" | grep -Fxq -- "$base" && continue
-    awk -f "$STRIP_AWK" "$f" | { grep -vFf "$MEMORY_LINKS" || true; } > "$CONTENT/$base"
+    awk -f "$STRIP_AWK" "$f" | awk -v ids="$MEMORY_IDS" '
+        BEGIN { n = split(ids, id, " ") }
+        {
+            for (i = 1; i <= n; i++)
+                if (index($0, "- [[" id[i] "|") == 1 \
+                    || (index($0, "- [") == 1 && index($0, "](" id[i] ".md) — "))) next
+            print
+        }' > "$CONTENT/$base"
 done
 shopt -u nullglob
-SYNCED="$(find "$CONTENT" -name '*.md' | wc -l | tr -d ' ')"
-[ "$SYNCED" -gt 0 ] || { echo "error: no pages synced from $WIKI_DIR" >&2; exit 1; }
-echo "Synced $SYNCED pages into content/"
+echo "Synced $(find "$CONTENT" -name '*.md' | wc -l | tr -d ' ') pages into content/"
 
 # 4. Build (or serve).
 cd "$BUILD_DIR"

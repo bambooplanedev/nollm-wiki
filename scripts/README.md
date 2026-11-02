@@ -52,8 +52,10 @@ Press Ctrl-C to stop the server.
 
 **Excluded:**
 - `AGENTS.md` — agent navigation notes are not published
-- Agent memory notes — pages flagged `"memory": true` in `index.json` (a wiki compiled by `wiki serve`,
-  `wiki setup` or `wiki compile --memory DIR` holds them), and every link line to them
+- Agent memory notes — pages flagged `"memory": true` in `index.json`, and the compiler's link lines to
+  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `wiki serve`,
+  `wiki setup` and `wiki compile --memory DIR` make such pages, and so does a plain `wiki compile` when the
+  source has `.agents/memory/`. The page count and link degrees in `index.md` still include them.
 - Non-markdown files: `index.json`, `items.json`, `llms.txt`, `.wiki/`
 
 ## Content Transformation
