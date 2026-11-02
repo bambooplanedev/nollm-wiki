@@ -1,6 +1,8 @@
 //! Markdown labels: ATX headings and bold step lines with their line ranges.
 
-use wiki::labels::labels;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use wiki::labels::{doc_lines, doc_search, labels, DocHit};
 
 const PLAN: &str = "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n";
 
@@ -56,4 +58,79 @@ fn tilde_and_long_fences_hide_fake_labels() {
         .map(|l| (l.start, l.end, l.text))
         .collect();
     assert_eq!(t, [(1, 11, "A".into()), (11, 11, "real".into())]);
+}
+
+const LEDGER: &str =
+    "## Row NULL-FLUSH\nx\n**NULL-FLUSH/c0.** y\n- **Ledger:** append_row NULL-FLUSH\n";
+
+fn dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| {
+        let d = std::env::temp_dir().join(format!("wiki-labels-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("plan.md"), PLAN).unwrap();
+        std::fs::write(d.join("ledger.md"), LEDGER).unwrap();
+        d
+    })
+}
+fn hits(q: &str) -> Vec<DocHit> {
+    doc_search(dir(), &["plan.md".into(), "ledger.md".into()], q, None).0
+}
+fn texts(q: &str) -> Vec<String> {
+    hits(q).into_iter().map(|h| h.text).collect()
+}
+
+#[test]
+fn id_matches_whole_word_only() {
+    assert_eq!(texts("T2d"), ["T2d. Remaining matrix."]);
+    assert_eq!(texts("T2").len(), 0);
+}
+#[test]
+fn id_inside_a_label_matches_after_first_word_hits() {
+    assert_eq!(texts("T5"), ["T2e (QA-H T5): next."]);
+}
+#[test]
+fn title_words_consecutive_case_insensitive() {
+    assert_eq!(texts("remaining MATRIX"), ["T2d. Remaining matrix."]);
+    assert_eq!(texts("matrix remaining").len(), 0);
+}
+#[test]
+fn heading_ranks_before_bold_and_fields_never_match() {
+    assert_eq!(
+        hits("NULL-FLUSH")
+            .iter()
+            .map(|h| (h.path.as_str(), h.start, h.end))
+            .collect::<Vec<_>>(),
+        [("ledger.md", 1, 4), ("ledger.md", 3, 4)]
+    );
+}
+#[test]
+fn first_word_match_ranks_before_later_word() {
+    assert_eq!(texts("task"), ["Task 2", "Task 3"]);
+    assert_eq!(texts("remaining")[0], "T2d. Remaining matrix.");
+}
+#[test]
+fn empty_query_lists_every_label_unbounded() {
+    assert_eq!(hits("").len(), 6 + 2);
+    let (h, _) = doc_search(dir(), &["plan.md".into()], "", Some(2));
+    assert_eq!(h.len(), 2);
+}
+#[test]
+fn bad_paths_get_one_line_each_and_others_answer() {
+    let (h, e) = doc_search(
+        dir(),
+        &["nope.md".into(), "x.txt".into(), "plan.md".into()],
+        "T2d",
+        None,
+    );
+    assert_eq!(h.len(), 1);
+    assert_eq!(e, ["nope.md: not found", "x.txt: not a markdown file"]);
+}
+#[test]
+fn lines_render_like_symbol_ranges() {
+    assert_eq!(
+        doc_lines(&hits("T2d"), &[]),
+        "plan.md:5-10  T2d. Remaining matrix.\n"
+    );
+    assert_eq!(doc_lines(&[], &[]), "no matches\n");
 }

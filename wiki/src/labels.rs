@@ -1,6 +1,8 @@
 //! Markdown labels: ATX headings and bold step lines, each with the line range it covers.
 
+use crate::model::{clip, LINE_CHARS};
 use crate::outline::heading;
+use std::path::Path;
 
 /// Level given to a bold label, below every heading level.
 const BOLD: u8 = 7;
@@ -74,6 +76,104 @@ pub fn labels(md: &str) -> Vec<Label> {
             .iter()
             .find(|n| n.level <= level)
             .map_or(last, |n| n.start - 1);
+    }
+    out
+}
+
+/// Hits returned for a query with words when no `limit` is given.
+pub const DOC_LIMIT: usize = 10;
+
+/// A label found in one of the searched documents.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocHit {
+    pub path: String,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+/// Lowercased words: split on anything but alphanumerics, `-`, `_`, `.`;
+/// trailing `.` and `-` trimmed.
+fn words(s: &str) -> Vec<String> {
+    s.split(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')))
+        .map(|w| w.trim_end_matches(['.', '-']).to_lowercase())
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// Labels of the markdown files `docs` (relative to `root`) whose text holds
+/// the query's words consecutively. Headings rank before bold labels, a match
+/// at the first word before a later one, then `docs` order, then document
+/// order. Returns the hits and one error line per unusable path.
+pub fn doc_search(
+    root: &Path,
+    docs: &[String],
+    query: &str,
+    limit: Option<usize>,
+) -> (Vec<DocHit>, Vec<String>) {
+    let q = words(query);
+    let mut ranked = Vec::new();
+    let mut errors = Vec::new();
+    for path in docs {
+        if !Path::new(path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        {
+            errors.push(format!("{path}: not a markdown file"));
+            continue;
+        }
+        let Ok(md) = std::fs::read_to_string(root.join(path)) else {
+            errors.push(format!("{path}: not found"));
+            continue;
+        };
+        for l in labels(&md) {
+            let w = words(&l.text);
+            let at = if q.is_empty() {
+                Some(0)
+            } else {
+                w.windows(q.len()).position(|win| win == q.as_slice())
+            };
+            if let Some(at) = at {
+                let hit = DocHit {
+                    path: path.clone(),
+                    start: l.start,
+                    end: l.end,
+                    text: l.text,
+                };
+                ranked.push(((l.level == BOLD, at > 0), hit));
+            }
+        }
+    }
+    if !q.is_empty() {
+        ranked.sort_by_key(|(k, _)| *k);
+    }
+    let n = if q.is_empty() {
+        limit.unwrap_or(usize::MAX)
+    } else {
+        limit.unwrap_or(DOC_LIMIT)
+    };
+    let hits = ranked.into_iter().map(|(_, h)| h).take(n).collect();
+    (hits, errors)
+}
+
+/// `path:start-end  text` per hit, then the error lines; `no matches` if none.
+pub fn doc_lines(hits: &[DocHit], errors: &[String]) -> String {
+    let mut out = String::new();
+    for h in hits {
+        out.push_str(&format!(
+            "{}:{}-{}  {}\n",
+            h.path,
+            h.start,
+            h.end,
+            clip(&h.text, LINE_CHARS)
+        ));
+    }
+    for e in errors {
+        out.push_str(e);
+        out.push('\n');
+    }
+    if out.is_empty() {
+        out.push_str("no matches\n");
     }
     out
 }
