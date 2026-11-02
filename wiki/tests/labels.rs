@@ -294,3 +294,52 @@ fn empty_query_listing_is_capped_unless_limit_given() {
     assert!(doc_lines(&h, &[], 1).ends_with("… 1 more label; pass limit to list them\n"));
     assert_eq!(doc_search(&d, &docs, "L1", None).2, 0);
 }
+
+#[test]
+fn a_cut_repeated_label_keeps_its_first_and_last_entries() {
+    let d = write_tmp("repeat", "## N11: a\n## Row X\n## N11: b\n## N11: c\n");
+    let docs = ["p.md".to_string()];
+    let t = |q: &str, limit| -> Vec<String> {
+        let h = doc_search(&d, &docs, q, limit).0;
+        h.into_iter().map(|h| h.text).collect()
+    };
+    assert_eq!(t("N11", None), ["N11: a", "N11: b", "N11: c"]);
+    assert_eq!(t("N11", Some(2)), ["N11: a", "N11: c"]);
+    assert_eq!(t("", None), ["N11: a", "Row X", "N11: b", "N11: c"]);
+    let six = (1..=6).fold(String::new(), |s, i| s + &format!("## N11: {i}\n"));
+    let d = write_tmp("six", &six);
+    let h = doc_search(&d, &docs, "N11", Some(4)).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["N11: 1", "N11: 2", "N11: 5", "N11: 6"]);
+    let d = write_tmp("heads", "## Task 1: x\n## Task 2: y\n");
+    let h = doc_search(&d, &docs, "Task", None).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["Task 1: x", "Task 2: y"]);
+    for (md, q) in [
+        (
+            "## https://a.com\n## https://b.org\n## https://c.net\n",
+            "https",
+        ),
+        ("## `T5:a` x\n## `T5:b` y\n## `T5:c` z\n", "T5"),
+    ] {
+        let d = write_tmp("ownhead", md);
+        let h = doc_search(&d, &docs, q, Some(2)).0;
+        assert_eq!((h[0].start, h[1].start), (1, 2), "{md}");
+    }
+}
+#[test]
+fn a_cut_group_keeps_only_its_own_slots() {
+    let d = write_tmp("slots", "## N11: a\n## N11 row\n## N11: b\n## N11: c\n");
+    let docs = ["p.md".to_string()];
+    let h = doc_search(&d, &docs, "N11", Some(3)).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["N11: a", "N11 row", "N11: c"]);
+}
+#[test]
+fn empty_query_keeps_document_order_across_levels() {
+    let d = write_tmp("mixed", "**A1. bold**\n## H heading\n");
+    let docs = ["p.md".to_string()];
+    let h = doc_search(&d, &docs, "", None).0;
+    let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
+    assert_eq!(t, ["A1. bold", "H heading"]);
+}

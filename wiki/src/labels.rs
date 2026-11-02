@@ -3,6 +3,7 @@
 use crate::model::{clip, LINE_CHARS};
 use crate::outline::heading;
 use crate::rewrite::mask_fenced_code;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Level given to a bold label, below every heading level.
@@ -109,8 +110,11 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
 /// order. Matches that hold only once `-` also splits words (two or more such
-/// query words) rank after all the others. Returns the hits grouped by doc, one error line per unusable path, and how many
-/// matching labels the limit (or an empty query's default cap) cut.
+/// query words) rank after all the others. When the limit cuts some of the
+/// labels one doc repeats under a head (text before the first `: `), the
+/// slots they had go to the first and last of them alternately. Returns the hits grouped by doc,
+/// one error line per unusable path, and how many matching labels the limit
+/// (or an empty query's default cap) cut.
 pub fn doc_search(
     root: &Path,
     docs: &[String],
@@ -171,10 +175,48 @@ pub fn doc_search(
     });
     let more = ranked.len().saturating_sub(n);
     // Rank picks the survivors; output groups them by doc, rank order within.
-    ranked.truncate(n);
+    // A group the limit cuts (`N11: …` repeated in a ledger) keeps its slots,
+    // filled first, last, second, second-to-last, …
+    let mut keep: Vec<bool> = (0..ranked.len()).map(|p| p < n).collect();
+    if !q.is_empty() && more > 0 {
+        let mut groups: HashMap<_, Vec<usize>> = HashMap::new();
+        for (p, (k, doc, h)) in ranked.iter().enumerate() {
+            groups.entry((*k, *doc, head(&h.text))).or_default().push(p);
+        }
+        for m in groups.values() {
+            let s = m.iter().filter(|&&p| p < n).count();
+            for &p in m {
+                keep[p] = false;
+            }
+            for j in 0..s {
+                keep[m[if j % 2 == 0 {
+                    j / 2
+                } else {
+                    m.len() - 1 - j / 2
+                }]] = true;
+            }
+        }
+    }
+    let mut ranked: Vec<_> = ranked
+        .into_iter()
+        .zip(keep)
+        .filter(|(_, k)| *k)
+        .map(|(r, _)| r)
+        .collect();
     ranked.sort_by_key(|(_, doc, _)| *doc);
     let hits = ranked.into_iter().map(|(_, _, h)| h).collect();
     (hits, errors, more)
+}
+
+/// What repeated labels share: the text before the first `: ` (or a trailing
+/// `:`), trimmed and lowercased; the whole text when there is none or it is
+/// empty, so `https://a.com` or `` `T5:a` x `` stay their own heads.
+fn head(text: &str) -> String {
+    let h = text
+        .find(": ")
+        .map_or(text.strip_suffix(':').unwrap_or(text), |c| &text[..c])
+        .trim();
+    if h.is_empty() { text } else { h }.to_lowercase()
 }
 
 /// Hits grouped by consecutive path: the path alone on a line, then
