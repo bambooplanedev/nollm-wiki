@@ -290,6 +290,7 @@ fn empty_query_listing_is_capped_unless_limit_given() {
     assert!(out.ends_with("… 50 more labels; pass limit to list them\nz.md: not found\n"));
     let (h, _, more) = doc_search(&d, &docs, "", Some(300));
     assert_eq!((h.len(), more), (250, 0));
-    assert!(!doc_lines(&h, &[], 0).contains("more labels"));
+    assert!(!doc_lines(&h, &[], 0).contains("more label"));
+    assert!(doc_lines(&h, &[], 1).ends_with("… 1 more label; pass limit to list them\n"));
     assert_eq!(doc_search(&d, &docs, "L1", None).2, 0);
 }

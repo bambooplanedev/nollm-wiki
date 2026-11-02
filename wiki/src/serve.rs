@@ -509,7 +509,7 @@ impl ServerHandler for WikiServer {
     }
 }
 
-/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when an empty query's default cap cut n labels.
+/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when the limit (or an empty query's default cap) cut n labels.
 pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) -> String {
     let hits: Vec<_> = hits
         .iter()

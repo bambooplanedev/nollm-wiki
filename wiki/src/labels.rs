@@ -110,7 +110,7 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
 /// at the first word before a later one, then `docs` order, then document
 /// order. Matches that hold only once `-` also splits words (two or more such
 /// query words) rank after all the others. Returns the hits grouped by doc, one error line per unusable path, and how many
-/// labels an empty query's default cap cut.
+/// matching labels the limit (or an empty query's default cap) cut.
 pub fn doc_search(
     root: &Path,
     docs: &[String],
@@ -195,7 +195,8 @@ pub fn doc_lines(hits: &[DocHit], errors: &[String], more: usize) -> String {
         ));
     }
     if more > 0 {
-        out.push_str(&format!("… {more} more labels; pass limit to list them\n"));
+        let noun = if more == 1 { "label" } else { "labels" };
+        out.push_str(&format!("… {more} more {noun}; pass limit to list them\n"));
     }
     for e in errors {
         out.push_str(e);
