@@ -435,8 +435,13 @@ impl WikiServer {
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
         let (_, stale) = self.state.snapshot().await;
-        let pages = load_compiled_pages(self.state.dir())
-            .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
+        let ws = Arc::clone(&self.state);
+        let pages = tokio::task::spawn_blocking(move || {
+            crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()))
+        })
+        .await
+        .expect("lint read panicked")
+        .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
         let r = lint(&pages);
         let report = serde_json::json!({
             "total_pages": r.total_pages,

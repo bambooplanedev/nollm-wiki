@@ -1,26 +1,23 @@
 //! Advisory file locks under `<dir>/.serve/`: a load never reads a wiki that a
 //! compile is half way through writing.
 
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 pub(crate) const SERVE_DIR: &str = ".serve";
 
+/// `<dir>/.serve/<name>`, created if `.serve` exists; `.serve` itself is
+/// never created here, so a dir no server ever used gets none.
 fn open(dir: &Path, name: &str) -> std::io::Result<File> {
-    let d = dir.join(SERVE_DIR);
-    if !dir.is_dir() {
-        return Err(std::io::ErrorKind::NotFound.into());
-    }
-    create_dir_all(&d)?;
     OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(d.join(name))
+        .open(dir.join(SERVE_DIR).join(name))
 }
 
-/// Run `f` holding the exclusive `compile.lock`. Without a lock file (odd
-/// filesystem) it runs `f` unlocked.
+/// Run `f` holding the exclusive `compile.lock`. Without a lock file (no
+/// `.serve`, an odd filesystem) it runs `f` unlocked.
 pub fn exclusive<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     let lock = open(dir, "compile.lock").ok().filter(|l| l.lock().is_ok());
     let out = f();
@@ -29,7 +26,7 @@ pub fn exclusive<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
 }
 
 /// Run `f` holding the shared `compile.lock`; unlocked if it cannot be opened
-/// (a read-only `dir`).
+/// (no `.serve`, a read-only `dir`).
 pub fn shared<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     let lock = open(dir, "compile.lock")
         .ok()
@@ -39,12 +36,25 @@ pub fn shared<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
     out
 }
 
-/// The file holding the exclusive `writer.lock`, or `None` if another holder
-/// has it. The lock lasts as long as the returned file.
-pub fn try_writer(dir: &Path) -> Option<File> {
-    let f = open(dir, "writer.lock").ok()?;
-    f.try_lock().ok()?;
-    Some(f)
+/// This server is the writer.
+pub enum Writer {
+    /// Holding `writer.lock` for as long as the file lives.
+    Locked(File),
+    /// `writer.lock` could not be opened or locked at all (permissions, NFS):
+    /// a lone server must still compile.
+    Unlocked,
+}
+
+/// `None` if another server holds the exclusive `writer.lock`.
+pub fn try_writer(dir: &Path) -> Option<Writer> {
+    let Ok(f) = open(dir, "writer.lock") else {
+        return Some(Writer::Unlocked);
+    };
+    match f.try_lock() {
+        Ok(()) => Some(Writer::Locked(f)),
+        Err(std::fs::TryLockError::WouldBlock) => None,
+        Err(std::fs::TryLockError::Error(_)) => Some(Writer::Unlocked),
+    }
 }
 
 #[cfg(test)]
@@ -56,6 +66,7 @@ mod tests {
     fn shared_waits_for_exclusive() {
         let t = tempfile::tempdir().unwrap();
         let d = t.path().to_path_buf();
+        std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
         let d2 = d.clone();
         let a = std::thread::spawn(move || {
@@ -72,12 +83,18 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn shared_runs_without_lock_dir_when_readonly() {
+    fn shared_runs_without_lock_file_when_readonly() {
         use std::os::unix::fs::PermissionsExt;
         let t = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
-        assert_eq!(shared(t.path(), || 7), 7);
-        std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let serve = t.path().join(SERVE_DIR);
+        std::fs::create_dir(&serve).unwrap();
+        std::fs::set_permissions(&serve, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root writes anyway: nothing to test.
+        if std::fs::write(serve.join("probe"), "").is_err() {
+            assert_eq!(shared(t.path(), || 7), 7);
+            assert!(!serve.join("compile.lock").exists());
+        }
+        std::fs::set_permissions(&serve, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]
@@ -90,12 +107,29 @@ mod tests {
     }
 
     #[test]
+    fn exclusive_without_serve_dir_creates_nothing() {
+        let t = tempfile::tempdir().unwrap();
+        assert_eq!(exclusive(t.path(), || 3), 3);
+        assert_eq!(shared(t.path(), || 4), 4);
+        assert_eq!(std::fs::read_dir(t.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn try_writer_without_a_lock_file_is_an_unlocked_writer() {
+        let t = tempfile::tempdir().unwrap();
+        // A directory in its place: opening it for writing fails, even as root.
+        std::fs::create_dir_all(t.path().join(SERVE_DIR).join("writer.lock")).unwrap();
+        assert!(matches!(try_writer(t.path()), Some(Writer::Unlocked)));
+    }
+
+    #[test]
     fn try_writer_is_exclusive() {
         let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir(t.path().join(SERVE_DIR)).unwrap();
         let a = try_writer(t.path());
-        assert!(a.is_some());
+        assert!(matches!(a, Some(Writer::Locked(_))));
         assert!(try_writer(t.path()).is_none());
         drop(a);
-        assert!(try_writer(t.path()).is_some());
+        assert!(matches!(try_writer(t.path()), Some(Writer::Locked(_))));
     }
 }

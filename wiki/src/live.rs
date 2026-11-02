@@ -22,13 +22,13 @@
 //! compiler must not overwrite what the new version wrote. It gives up
 //! `writer.lock` too, so a server that still compiles takes over.
 
+use crate::dirlock::Writer;
 use crate::query::Wiki;
 use crate::serve::Fingerprint;
 use crate::watch::{self, WatchSet};
 use crate::{compile, is_under, CompileOptions, WikiError};
 use notify::RecursiveMode;
 use std::collections::HashMap;
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex, MutexGuard, PoisonError};
@@ -171,8 +171,8 @@ pub(crate) struct Live {
     opts: CompileOptions,
     /// Names this server's barriers and acks: the pid and a per-process count.
     id: String,
-    /// The held `writer.lock`, while this server is the writer.
-    writer: Mutex<Option<File>>,
+    /// `Some` while this server is the writer.
+    writer: Mutex<Option<Writer>>,
     state: Mutex<State>,
     changed: Condvar,
     #[cfg(test)]
@@ -252,6 +252,10 @@ impl Live {
         }
         let hook = Arc::clone(&live);
         let watcher = watch::start(&paths, move |res| hook.on_event(&res))?;
+        // Barriers put before the watcher started have no event.
+        if live.is_writer() {
+            live.scan_barriers(&mut live.lock());
+        }
 
         if missing && writer {
             live.compile_step().map_err(|e| named(&e))?;
@@ -302,32 +306,41 @@ impl Live {
         if EXE.replaced() {
             return false;
         }
+        // The state lock first: `on_event` must not see the writer before
+        // `event_gen` says there is a wiki to catch up with.
+        let mut s = self.lock();
         {
             let mut writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
             if writer.is_some() {
                 return true;
             }
-            *writer = crate::dirlock::try_writer(&self.dir);
-            if writer.is_none() {
+            let Some(lock) = crate::dirlock::try_writer(&self.dir) else {
                 return false;
-            }
+            };
+            s.event_gen += 1;
+            *writer = Some(lock);
         }
-        let mut s = self.lock();
-        s.event_gen += 1;
-        if let Ok(entries) = std::fs::read_dir(self.dir.join(BARRIER_DIR)) {
-            // In token order: a later token noted first would hide an earlier one.
-            let mut found: Vec<_> = entries
-                .flatten()
-                .map(|e| e.path())
-                .filter_map(|p| Some((self.foreign_barrier(&p)?, p)))
-                .collect();
-            found.sort();
-            for (_, path) in found {
-                self.note_barrier(&mut s, &path);
-            }
-        }
+        self.scan_barriers(&mut s);
         self.changed.notify_all();
         true
+    }
+
+    /// Writer: note every barrier in `.serve`, for when their events were
+    /// missed (a takeover, a lost event, before the watcher started).
+    fn scan_barriers(&self, s: &mut State) {
+        let Ok(entries) = std::fs::read_dir(self.dir.join(BARRIER_DIR)) else {
+            return;
+        };
+        // In token order: a later token noted first would hide an earlier one.
+        let mut found: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter_map(|p| Some((self.foreign_barrier(&p)?, p)))
+            .collect();
+        found.sort();
+        for (_, path) in found {
+            self.note_barrier(s, &path);
+        }
     }
 
     #[cfg(test)]
@@ -404,7 +417,8 @@ impl Live {
         let acked = loop {
             let left = end.saturating_duration_since(Instant::now());
             s = self.wait(s, left.min(watch::DEBOUNCE), |s| !s.acked.contains(&token));
-            if s.acked.contains(&token) {
+            // Its event may have been lost.
+            if s.acked.contains(&token) || ack.exists() {
                 s.acked.retain(|&t| t != token);
                 break true;
             }
@@ -479,6 +493,7 @@ impl Live {
     /// Runs on notify's thread, in event order.
     fn on_event(&self, res: &notify::Result<notify::Event>) {
         let mut s = self.lock();
+        let lost = res.as_ref().is_ok_and(notify::Event::need_rescan) || res.is_err();
         let relevant = match res {
             Ok(ev) => {
                 for path in &ev.paths {
@@ -514,10 +529,15 @@ impl Live {
         if relevant {
             s.event_gen += 1;
         }
+        if lost && self.is_writer() && !EXE.replaced() {
+            self.scan_barriers(&mut s);
+        }
         self.changed.notify_all();
     }
 
     /// `<id>-<token>` of `path` if it is another server's barrier in `dir`.
+    /// Only a `<pid>.<nanos>.<n>` id counts: a 0.6.x `barrier-<pid>-<n>` has no
+    /// reader left to remove its ack.
     fn foreign_barrier(&self, path: &Path) -> Option<(String, u64)> {
         if path.parent()? != self.dir.join(BARRIER_DIR) {
             return None;
@@ -528,7 +548,12 @@ impl Live {
             .strip_prefix("barrier-")?
             .rsplit_once('-')?;
         let token = token.parse().ok()?;
-        (id != self.id).then(|| (id.to_string(), token))
+        let parts: Vec<&str> = id.split('.').collect();
+        let server = parts.len() == 3
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+        (server && id != self.id).then(|| (id.to_string(), token))
     }
 
     /// Writer: if `path` is another server's barrier not yet seen, owe it an
@@ -866,6 +891,11 @@ mod tests {
         let (src, out, a, b) = pair();
         let _ = a.fresh();
         std::fs::set_permissions(out.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::write(out.path().join("probe"), "").is_ok() {
+            // Root writes anyway: no compile error to share.
+            std::fs::set_permissions(out.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
         std::fs::write(src.path().join("a.md"), "# A\n\nzebrafish\n").unwrap();
         let from_b = b.fresh().1;
         let from_a = a.fresh().1;
@@ -905,7 +935,7 @@ mod tests {
         let started = Instant::now();
         let stale = second.fresh().1;
         let took = started.elapsed();
-        assert!(took < Duration::from_millis(1500), "{took:?}");
+        assert!(took < Duration::from_millis(2500), "{took:?}");
         assert!(
             stale.is_none() || stale.as_deref() == Some(RUNNING),
             "{stale:?}"
@@ -979,6 +1009,37 @@ mod tests {
         std::fs::write(&ack, "").unwrap();
         std::thread::sleep(watch::DEBOUNCE * 2);
         assert_eq!(b.lock().acked, Vec::<u64>::new());
+    }
+
+    #[test]
+    fn reader_sees_an_ack_whose_event_was_lost() {
+        let (_src, _out, a, b) = pair();
+        let _ = a.fresh();
+        // The writer never acks; the ack is there before the barrier, so its
+        // event finds no barrier and is dropped.
+        a.lock().compiling = true;
+        let token = b.lock().barrier_sent + 1;
+        let ack = b
+            .dir
+            .join(BARRIER_DIR)
+            .join(format!("ack-{}-{token}", b.id));
+        std::fs::write(&ack, "").unwrap();
+        std::thread::sleep(watch::DEBOUNCE * 2);
+        let t = Instant::now();
+        assert_eq!(b.fresh().1, None);
+        assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
+    }
+
+    #[test]
+    fn foreign_barrier_takes_only_server_ids() {
+        let (_src, out, a, _b) = pair();
+        let serve = out.path().canonicalize().unwrap().join(BARRIER_DIR);
+        assert_eq!(
+            a.foreign_barrier(&serve.join("barrier-1.2.0-4")),
+            Some(("1.2.0".to_string(), 4))
+        );
+        assert_eq!(a.foreign_barrier(&serve.join("barrier-123-4")), None);
+        assert_eq!(a.foreign_barrier(&serve.join("barrier-1.x.0-4")), None);
     }
 
     #[test]

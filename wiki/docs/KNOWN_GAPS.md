@@ -255,6 +255,9 @@ per question is noise-level: treat single results as anecdotes.
 - A reader can load the output of a later compile that failed part way,
   under the earlier ack's empty stale reason. The window is narrow; a plain
   `serve` without `--source` has the same exposure.
+- If the output dir is deleted (`rm -rf`) while a server runs, the old
+  writer keeps its lock on the deleted `writer.lock`, so a newly started
+  server can become a second writer until the old one restarts.
 
 ## `wiki setup`
 
