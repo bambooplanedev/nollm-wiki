@@ -198,6 +198,10 @@ pub(crate) struct SearchParams {
     pub limit: Option<usize>,
     /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
+    /// Markdown files to search instead of the code: the plan, spec or ledger
+    /// you were handed. Returns `path:start-end  label` for matching headings
+    /// and bold step labels; an empty query lists them all.
+    pub docs: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, rmcp::schemars::JsonSchema)]
@@ -251,13 +255,15 @@ pub(crate) struct PageParams {
 #[derive(Clone)]
 pub(crate) struct WikiServer {
     state: Arc<WikiState>,
+    /// Where `docs` paths are resolved: the `--source` dir, else the cwd.
+    root: PathBuf,
     tool_router: ToolRouter<Self>,
 }
 
 #[tool_router]
 impl WikiServer {
     /// A server exposing only `tools` (names from [`TOOLS`]).
-    pub fn new(state: Arc<WikiState>, tools: &[&str]) -> Self {
+    pub fn new(state: Arc<WikiState>, root: PathBuf, tools: &[&str]) -> Self {
         let mut tool_router = Self::tool_router();
         for name in TOOLS.iter().filter(|t| !tools.contains(t)) {
             tool_router.remove_route(name);
@@ -269,12 +275,16 @@ impl WikiServer {
             meta.0.insert("anthropic/alwaysLoad".into(), true.into());
             route.attr.meta = Some(meta);
         }
-        Self { state, tool_router }
+        Self {
+            state,
+            root,
+            tool_router,
+        }
     }
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive."
+        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words)."
     )]
     async fn search(
         &self,
@@ -292,7 +302,6 @@ impl WikiServer {
             .map(crate::query::tag_arg)
             .transpose()
             .map_err(|m| McpError::invalid_params(m, None))?;
-        let (wiki, stale) = self.state.snapshot().await;
         let json = match p.format.as_deref() {
             None | Some("lines") => false,
             Some("json") => true,
@@ -303,6 +312,22 @@ impl WikiServer {
                 ))
             }
         };
+        if let Some(docs) = &p.docs {
+            if kind.is_some() || tag.is_some() {
+                return Err(McpError::invalid_params(
+                    "`docs` cannot be combined with kind or tag",
+                    None,
+                ));
+            }
+            let (hits, errors) = crate::labels::doc_search(&self.root, docs, &p.query, p.limit);
+            let text = if json {
+                doc_json(&hits, &errors)
+            } else {
+                crate::labels::doc_lines(&hits, &errors)
+            };
+            return Ok(text_result(Ok(text)));
+        }
+        let (wiki, stale) = self.state.snapshot().await;
         // A tag-only listing (no query words) stays unbounded by default.
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
@@ -481,6 +506,22 @@ impl ServerHandler for WikiServer {
     }
 }
 
+/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`.
+pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String]) -> String {
+    let hits: Vec<_> = hits
+        .iter()
+        .map(|h| {
+            serde_json::json!({
+                "path": h.path,
+                "start_line": h.start,
+                "end_line": h.end,
+                "label": h.text,
+            })
+        })
+        .collect();
+    serde_json::json!({"hits": hits, "errors": errors}).to_string()
+}
+
 /// Render search hits as the JSON array `search` returns with
 /// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`;
 /// `updated` is present only when the page has a date.
@@ -647,7 +688,11 @@ pub fn run(
             ))
         })?,
     };
-    let server = WikiServer::new(Arc::new(state), &tools);
+    let root = match source {
+        Some(source) => source.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
+    let server = WikiServer::new(Arc::new(state), root, &tools);
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?

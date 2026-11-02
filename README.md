@@ -150,7 +150,9 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 The workflow an agent follows is search → page → read lines: `search` finds the page and its
 symbols, `page` lists a file's symbols with line ranges, and the agent reads just those lines with
 its own file tool. `callers` answers "what breaks if this changes"; `neighbors` is for when the
-surrounding pages matter.
+surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
+`docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
+on the command line).
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|

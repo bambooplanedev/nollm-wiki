@@ -364,7 +364,7 @@ fn search_cli_tag_lists_and_filters() {
         .stdout(contains("b  ").not());
     search(&[])
         .failure()
-        .stderr(contains("search needs a query or --tag"));
+        .stderr(contains("search needs a query, --tag or --docs"));
     search(&["--tag", "#"])
         .failure()
         .stderr(contains("empty tag"));
@@ -660,4 +660,28 @@ fn read_commands_default_to_dot_wiki_then_out() {
             .success()
             .stdout(contains("`.wiki` if that directory exists, else `out`"));
     }
+}
+
+#[test]
+fn cli_search_docs_empty_query_lists_labels() {
+    let dir = tempdir().unwrap();
+    fs::write(
+        dir.path().join("plan.md"),
+        "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n",
+    )
+    .unwrap();
+    // No compiled wiki in the directory: `--docs` does not need one.
+    let out = Command::cargo_bin("wiki")
+        .unwrap()
+        .current_dir(dir.path())
+        .args(["search", "--docs", "plan.md"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let out = String::from_utf8(out).unwrap();
+    let lines: Vec<_> = out.lines().collect();
+    assert_eq!(lines.len(), 6, "{out}");
+    assert_eq!(lines[0], "plan.md:1-18  Plan");
 }
