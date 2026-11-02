@@ -1016,7 +1016,7 @@ unknown; and the names of one multi-declarator statement share its range.
   `.github/workflows/rust.yml` runs the same on every push to `main` and
   every pull request, in five steps: `cargo fmt --check`, `cargo clippy
   --all-targets -- -D warnings`, `cargo test`, `scripts/test-strip-chrome.sh`,
-  `cargo doc --no-deps`. Clippy's
+  `cargo doc --no-deps` with `RUSTDOCFLAGS=-D warnings`. Clippy's
   `pedantic` group is on through `[lints.clippy]` in `Cargo.toml`, with the
   lints that fight this codebase allowed there, each with its reason; `-D
   warnings` turns the rest into failures. Two more workflows: `audit.yml`
