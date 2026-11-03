@@ -121,22 +121,13 @@ impl Origin {
     pub fn trust(&self) -> f64 {
         match self {
             Origin::Local => 1.0,
-            _ if self.is_others() => 0.5,
-            Origin::Repo { .. } => 0.8,
-        }
-    }
-
-    /// A committed `repo` note neither the person's own nor edited: a
-    /// co-author's word, the least trusted.
-    pub fn is_others(&self) -> bool {
-        matches!(
-            self,
             Origin::Repo {
                 mine: false,
                 edited: false,
                 ..
-            }
-        )
+            } => 0.5,
+            Origin::Repo { .. } => 0.8,
+        }
     }
 }
 

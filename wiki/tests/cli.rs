@@ -274,8 +274,7 @@ fn lint_cli_exits_zero_with_only_orphans() {
         .assert()
         .code(0)
         .stdout(contains("0 broken links, 1 orphans, 0 large"))
-        .stdout(contains("  orphan: alpha\n"))
-        .stdout(contains("Memory conflicts: 0\n"));
+        .stdout(contains("  orphan: alpha\n"));
 }
 
 #[test]
@@ -304,41 +303,6 @@ fn lint_cli_reports_a_page_too_large_for_a_neighbors_pack() {
         ))
         .stdout(contains("  large: big ("))
         .stdout(contains(" tokens)\n"));
-}
-
-#[test]
-fn lint_runs_without_an_index() {
-    // Hand-written pages, no index.json: the page checks still run and
-    // there are no memory pairs to report.
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("alpha.md"), "# Alpha\n\nNo links.\n").unwrap();
-    Command::cargo_bin("wiki")
-        .unwrap()
-        .args(["lint", "--dir", dir.path().to_str().unwrap()])
-        .assert()
-        .code(0)
-        .stdout(contains("Linted 1 pages"))
-        .stdout(contains("Memory conflicts: 0\n"));
-}
-
-#[test]
-fn lint_lists_memory_conflicts() {
-    let (_d, out) = common::conflict_compiled();
-    let hits = wiki::query::Wiki::load(&out)
-        .unwrap()
-        .search("deploy key", None, 10);
-    let path = |id: &str| hits.iter().find(|h| h.id == id).unwrap().path.clone();
-    Command::cargo_bin("wiki")
-        .unwrap()
-        .args(["lint", "--dir", out.to_str().unwrap()])
-        .assert()
-        .code(0)
-        .stdout(contains(format!(
-            "Memory conflicts: 1\n  {} (repo, Mallory Example) <-> {} (local)\n",
-            path("deploy_key_rotation"),
-            path("deploy_key")
-        )))
-        .stdout(contains(common::email_of("Mallory Example")).not());
 }
 
 #[test]

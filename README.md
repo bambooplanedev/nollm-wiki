@@ -366,7 +366,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
-| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large, memory_conflicts}` |
+| `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
 The tools mirror the CLI with smaller defaults: `max_tokens` is 4000 where the CLI is unbounded, and
 `search` returns 5 hits where the CLI returns 10, because every hit line is re-read on each later
@@ -443,13 +443,6 @@ Notes are ordered by trust, the score order kept among equals: local notes first
 edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
 the hook's one memory line is the most trusted.
 
-A committed note by someone else may disagree with a more trusted one. When its title and summary,
-read as a query, name a more trusted note and share at least three words with it, the two pair.
-`wiki lint` (and the MCP `lint` tool) lists the pairs for you to settle; `search` and the hook
-only order notes by trust and show no pair. Pairs are word overlap, not meaning.
-To settle one, edit the notes: delete or update yours, or fix the committed note or write a local
-note with `supersedes:`; a superseded note is in no pair.
-
 A date in a query finds the memory notes dated that day: `12 жовтня`, `October 12`, `12.10`,
 `2026-10-12` (Ukrainian, Russian and English month names; `DD.MM` needs a two-digit day and month;
 without a year every year matches). Project pages are never matched by date.
@@ -496,7 +489,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 | `page` | a file's outline: one line per symbol with its line range |
 | `callers` | the functions that call a function |
 | `neighbors` | a budgeted context pack around a page, or with `--symbol` what a function calls |
-| `lint` | broken links, orphan pages, pages too large for a pack, memory notes that may disagree |
+| `lint` | broken links, orphan pages, pages too large for a pack |
 | `serve` | the MCP server — see [MCP server](#mcp-server) |
 | `hint` | the code lines for a task text, for prompt hooks |
 | `setup` | install the server for Claude Code, pi, Cursor and Codex — see [Agents](#agents) |
@@ -626,9 +619,7 @@ as outlines when they fit, and the rest as one-line summaries.
 Prints the counts of broken links, orphan pages and large pages (over 4000 tokens, which a default
 `neighbors` pack would degrade to a summary; code pages are not checked), then one line per
 offender. `[[links]]` in fenced blocks, inline code and the source body of a code page are not
-counted. Then `Memory conflicts: N` and one line per memory note pair that may disagree (see
-[agent memory](#agent-memory)), `  <path> (<label>) <-> <path> (<label>)`, to settle with the user; pairs never
-fail the run. Exits 1 when any link is broken, so `lint` can gate a build.
+counted. Exits 1 when any link is broken, so `lint` can gate a build.
 
 #### hint
 

@@ -3,7 +3,6 @@
 use std::fs;
 
 mod common;
-use common::{email_of, git_as, note};
 use tempfile::tempdir;
 use wiki::model::{KindFilter, SourceKind};
 use wiki::query::{tag_filter, PackBudget, Wiki};
@@ -1650,6 +1649,10 @@ fn index_json_without_memory_still_loads() {
     assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
 }
 
+fn note(title: &str, extra: &str, body: &str) -> String {
+    format!("---\ntitle: {title}\n{extra}---\n\n{body}\n")
+}
+
 fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
     common::index_entries(&d.path().join("out"))
         .iter()
@@ -1896,6 +1899,24 @@ fn a_memory_note_earns_nothing_for_its_file_name() {
     assert_eq!(score("elephant"), score("elephant elephant.md"));
 }
 
+/// A distinct email per author name.
+fn email_of(name: &str) -> String {
+    format!("{}@t", name.replace(' ', "."))
+}
+
+/// Run git in `dir` as author `name` (with `email_of(name)`), unsigned.
+fn git_as(dir: &std::path::Path, name: &str, args: &[&str]) {
+    let s = std::process::Command::new("git")
+        .args(["-c", &format!("user.name={name}")])
+        .args(["-c", &format!("user.email={}", email_of(name))])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(s.status.success(), "git {args:?}");
+}
+
 #[test]
 fn compile_stores_note_origin_in_index() {
     let d = tempdir().unwrap();
@@ -1992,8 +2013,6 @@ fn old_index_guesses_origin_from_path() {
     assert_eq!(origin("agent_note"), Origin::Local);
 }
 
-/// A temp git repo: committed `.agents/memory/<committed>` notes, then `local` agent-folder notes.
-/// Compiled into `<tmp>/out`; returns the loaded wiki.
 fn origin_fixture(
     committed: &[(&str, String)],
     local: &[(&str, String)],
@@ -2001,14 +2020,34 @@ fn origin_fixture(
     origin_fixture_by("Jane Doe", committed, local)
 }
 
-/// `common::origin_compiled`, loaded.
+/// A temp git repo: `committed` `.agents/memory/<name>` notes committed by
+/// `author` (the repo's own `user.email` is Jane Doe's), then `local`
+/// agent-folder notes. Compiled into `<tmp>/out`; returns the loaded wiki.
 fn origin_fixture_by(
     author: &str,
     committed: &[(&str, String)],
     local: &[(&str, String)],
 ) -> (tempfile::TempDir, Wiki) {
-    let (d, out) = common::origin_compiled(author, committed, local);
-    (d, Wiki::load(&out).unwrap())
+    let d = tempdir().unwrap();
+    let root = d.path();
+    common::write(root, "proj/a.rs", "pub fn a() {}\n");
+    for (n, t) in committed {
+        common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
+    }
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "t", &["config", "user.email", &email_of("Jane Doe")]);
+    git_as(root, author, &["add", "."]);
+    git_as(root, author, &["commit", "-qm", "x"]);
+    for (n, t) in local {
+        common::write(root, &format!("agent/{n}.md"), t);
+    }
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
+    let w = Wiki::load(&root.join("out")).unwrap();
+    (d, w)
 }
 
 /// A local note and a co-author's committed note on the same word; the
@@ -2043,6 +2082,17 @@ fn hint_picks_the_most_trusted_note() {
     let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
     assert!(hint.contains("memory (local):"), "{hint}");
     assert!(hint.contains("ours.md"), "{hint}");
+}
+
+#[test]
+fn search_output_never_shows_the_author_email() {
+    let (_d, w) = trust_fixture();
+    let search = || w.search("rotation", None, 10);
+    let json = wiki::serve::search_json(search());
+    assert!(json.contains("Mallory Example"), "{json}");
+    for out in [json, wiki::serve::search_lines(&search())] {
+        assert!(!out.contains(&email_of("Mallory Example")), "{out}");
+    }
 }
 
 #[test]
@@ -2081,139 +2131,4 @@ fn committed_note_still_supersedes_a_committed_one() {
         &[],
     );
     assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
-}
-
-/// `common::conflict_notes`, plus `extra` local notes, loaded.
-fn conflict_fixture(extra: &[(&str, String)]) -> (tempfile::TempDir, Wiki) {
-    let (committed, mut local) = common::conflict_notes();
-    local.extend(extra.iter().cloned());
-    origin_fixture_by("Mallory Example", &committed, &local)
-}
-
-#[test]
-fn conflict_pairs_found() {
-    let (_d, w) = conflict_fixture(&[]);
-    assert_eq!(
-        w.memory_conflicts(),
-        [("deploy_key_rotation".to_string(), "deploy_key".to_string())]
-    );
-}
-
-#[test]
-fn two_shared_words_do_not_pair() {
-    // `deploy` and `key` only: below `CONFLICT_MIN_WORDS`.
-    let (_d, w) = origin_fixture_by(
-        "Mallory Example",
-        &[(
-            "rotation",
-            note("Deploy key rotation", "", "deploy key changed to vault-b"),
-        )],
-        &[(
-            "deploy",
-            note("Deploy key", "", "deploy key lives in vault-a"),
-        )],
-    );
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-}
-
-#[test]
-fn no_pair_between_equal_trust() {
-    let (_d, w) = origin_fixture_by(
-        "Mallory Example",
-        &[
-            (
-                "a",
-                note("Deploy key rotation", "", "deploy key now lives in vault-b"),
-            ),
-            ("b", note("Deploy key", "", "deploy key lives in vault-a")),
-        ],
-        &[],
-    );
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-}
-
-#[test]
-fn no_pair_for_own_or_superseded() {
-    // Committed by the person compiling: trust 0.8, never the 0.5 side.
-    let (_d, w) = origin_fixture(
-        &[(
-            "rotation",
-            note("Deploy key rotation", "", "deploy key now lives in vault-b"),
-        )],
-        &[(
-            "deploy",
-            note("Deploy key", "", "deploy key lives in vault-a"),
-        )],
-    );
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-    // The local note is superseded by an unrelated one: out of pairs.
-    let (_d, w) =
-        conflict_fixture(&[("zebra", note("Zebra", "supersedes: Deploy key\n", "zebra"))]);
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-    // The co-author's note is superseded by their own unrelated one: out too.
-    let (_d, w) = origin_fixture_by(
-        "Mallory Example",
-        &[
-            (
-                "rotation",
-                note("Deploy key rotation", "", "deploy key now lives in vault-b"),
-            ),
-            (
-                "zebra",
-                note("Zebra", "supersedes: Deploy key rotation\n", "zebra"),
-            ),
-        ],
-        &[(
-            "deploy",
-            note("Deploy key", "", "deploy key lives in vault-a"),
-        )],
-    );
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-    // The co-author's note edited since HEAD: trust 0.8, never the 0.5 side.
-    let (d, _) = conflict_fixture(&[]);
-    let root = d.path();
-    common::write(
-        root,
-        "proj/.agents/memory/rotation.md",
-        &note(
-            "Deploy key rotation",
-            "",
-            "deploy key now lives in vault-b, again",
-        ),
-    );
-    let opts = CompileOptions {
-        memory: vec![root.join("agent")],
-        ..Default::default()
-    };
-    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
-    let w = Wiki::load(&root.join("out")).unwrap();
-    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
-}
-
-#[test]
-fn search_has_no_conflict_line() {
-    let (_d, w) = conflict_fixture(&[]);
-    let out = wiki::serve::search_lines(&w.search("deploy key", None, 10));
-    assert!(out.contains("memory (local):"), "{out}");
-    assert!(!out.contains("conflicts with"), "{out}");
-}
-
-#[test]
-fn hint_has_no_conflict_line() {
-    let (_d, w) = conflict_fixture(&[]);
-    let hint = wiki::hint::hint_lines(&w, "deploy key");
-    assert!(hint.contains("memory (local):"), "{hint}");
-    assert!(!hint.contains("conflicts with"), "{hint}");
-}
-
-#[test]
-fn search_json_has_no_conflicts() {
-    let (_d, w) = conflict_fixture(&[]);
-    let json: serde_json::Value =
-        serde_json::from_str(&wiki::serve::search_json(w.search("deploy key", None, 10))).unwrap();
-    let hits = json.as_array().unwrap();
-    assert!(hits.iter().any(|h| h["memory"] == true), "{json}");
-    for h in hits {
-        assert_eq!(h.get("conflicts"), None, "{h}");
-    }
 }

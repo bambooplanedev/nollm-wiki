@@ -323,18 +323,14 @@ per question is noise-level: treat single results as anecdotes.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - A note's author is the last committer of its file, which git lets anyone
   set: it shows who to ask, it is not authentication.
-- Memory conflict pairs are word overlap, not meaning: two notes on one topic
-  may pair without disagreeing, and a disagreement in different words may
-  not pair.
 - An index.json written before origin and "mine" were stored reads every
-  relative note path as a co-author's note until the next compile: lint may
-  list your own notes and the tail puts them last.
+  relative note path as a co-author's note until the next compile: the tail
+  puts your own notes last.
 - "You" reads `git config user.email` only; an `author.email` setting or a
   `GIT_AUTHOR_EMAIL` override is not recognised.
-- Lint lists every memory conflict pair; there is no cap.
-- Trust order and lint pairs only reach agents through the wiki: an agent
-  that greps `.agents/memory` directly still reads a co-author's note the
-  wiki ranks low, with no pair beside it.
+- Trust order only reaches agents through the wiki: an agent that greps
+  `.agents/memory` directly still reads a co-author's note the wiki ranks
+  low.
 - "You" is the commit author email matching `git config user.email`; git
   lets anyone set an author email, so it shows who to ask, not proof.
 - A commit that leaves a note's file unchanged triggers no recompile, so the
