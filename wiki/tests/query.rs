@@ -1511,7 +1511,7 @@ fn tail_gate_long_word_in_title_alias_or_summary() {
         let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();
         let tail: Vec<_> = lines
             .lines()
-            .filter(|l| l.starts_with("memory: "))
+            .filter(|l| l.starts_with("memory ("))
             .map(str::to_owned)
             .collect();
         (lines, tail)

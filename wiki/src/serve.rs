@@ -4,7 +4,7 @@
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::{Live, EXE, OUTDATED};
-use crate::model::{clip, one_line, KindFilter, LINE_CHARS};
+use crate::model::{clip, one_line, KindFilter, Origin, LINE_CHARS};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
 use crate::{CompileOptions, WikiError};
@@ -568,7 +568,9 @@ pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) 
 
 /// Render search hits as the JSON array `search` returns with
 /// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`;
-/// `updated` is present only when the page has a date.
+/// `updated` is present only when the page has a date. A memory note adds
+/// `memory: true` and `origin` (`local` or `repo`), plus `author` when known
+/// and `edited: true` when the file differs from its last commit.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()
@@ -601,6 +603,18 @@ pub fn search_json(hits: Vec<Hit>) -> String {
             }
             if h.memory {
                 hit["memory"] = true.into();
+                match h.origin {
+                    Origin::Local => hit["origin"] = "local".into(),
+                    Origin::Repo { author, edited } => {
+                        hit["origin"] = "repo".into();
+                        if let Some(a) = author {
+                            hit["author"] = a.into();
+                        }
+                        if edited {
+                            hit["edited"] = true.into();
+                        }
+                    }
+                }
             }
             if let Some(by) = h.superseded_by {
                 hit["superseded_by"] = by.into();
@@ -611,13 +625,20 @@ pub fn search_json(hits: Vec<Hit>) -> String {
     serde_json::Value::Array(hits).to_string()
 }
 
+/// `memory (local)`, `memory (repo, Jane Doe)`: how a note row opens in
+/// `search` lines and in the hook.
+#[must_use]
+pub fn memory_prefix(o: &Origin) -> String {
+    format!("memory ({})", o.label())
+}
+
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol, or
 /// the snippet (four-space indent) when the page has no symbols. A summary,
 /// snippet or doc is cut at `LINE_CHARS`, as a hint line is.
-/// A memory note renders as the hook's one line, `memory: path — summary`
-/// (the title when there is no summary). No hits render as one `no matches` line.
+/// A memory note renders as the hook's one line, `memory (origin): path — summary`
+/// (the title when there is no summary; see [`memory_prefix`]). No hits render as one `no matches` line.
 pub fn search_lines(hits: &[Hit]) -> String {
     if hits.is_empty() {
         return "no matches\n".to_string();
@@ -628,7 +649,8 @@ pub fn search_lines(hits: &[Hit]) -> String {
         if h.memory {
             let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
             out.push_str(&format!(
-                "memory: {} — {}",
+                "{}: {} — {}",
+                memory_prefix(&h.origin),
                 h.path,
                 clip(said.unwrap_or(&h.title), LINE_CHARS)
             ));
@@ -792,21 +814,49 @@ mod tests {
         };
         assert_eq!(
             search_lines(&[hit(true, Some("Rotate nightly."))]),
-            "memory: /m/n.md — Rotate nightly.\n    snip\n"
+            "memory (local): /m/n.md — Rotate nightly.\n    snip\n"
         );
         assert_eq!(
             search_lines(&[hit(true, None)]),
-            "memory: /m/n.md — Vault\n    snip\n"
+            "memory (local): /m/n.md — Vault\n    snip\n"
         );
         let mut bare = hit(true, Some("Rotate nightly."));
         bare.snippet = None;
-        assert_eq!(search_lines(&[bare]), "memory: /m/n.md — Rotate nightly.\n");
+        assert_eq!(
+            search_lines(&[bare]),
+            "memory (local): /m/n.md — Rotate nightly.\n"
+        );
         let mut long = hit(true, Some("Rotate nightly."));
         long.snippet = Some("…the port is\n4471…".into());
         assert_eq!(
             search_lines(&[long]),
-            "memory: /m/n.md — Rotate nightly.\n    …the port is 4471…\n"
+            "memory (local): /m/n.md — Rotate nightly.\n    …the port is 4471…\n"
         );
+        let repo = |memory: bool| Hit {
+            origin: crate::model::Origin::Repo {
+                author: Some("Jane Doe".into()),
+                edited: true,
+            },
+            ..hit(memory, Some("Rotate nightly."))
+        };
+        assert_eq!(
+            search_lines(&[repo(true)]),
+            "memory (repo, Jane Doe, edited): /m/n.md — Rotate nightly.\n    snip\n"
+        );
+        let json: serde_json::Value = serde_json::from_str(&search_json(vec![repo(true)])).unwrap();
+        assert_eq!(json[0]["origin"], "repo");
+        assert_eq!(json[0]["author"], "Jane Doe");
+        assert_eq!(json[0]["edited"], true);
+        assert_eq!(json[0]["memory"], true);
+        let json: serde_json::Value =
+            serde_json::from_str(&search_json(vec![hit(true, None)])).unwrap();
+        assert_eq!(json[0]["origin"], "local");
+        assert!(json[0].get("author").is_none() && json[0].get("edited").is_none());
+        let json: serde_json::Value =
+            serde_json::from_str(&search_json(vec![repo(false)])).unwrap();
+        for k in ["origin", "author", "edited", "memory"] {
+            assert!(json[0].get(k).is_none(), "{k}");
+        }
         let mut plain = hit(false, Some("sum"));
         plain.snippet = None;
         assert_eq!(

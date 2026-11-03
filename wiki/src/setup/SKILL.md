@@ -27,7 +27,7 @@ description: Find where something is or how it works in this project's code. Use
 # Memory
 
 Notes about this project live in `<memory-dir>`; `search` lists up to two of them after the code
-hits, each on a `memory:` line, and the prompt hook adds one.
+hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 - Write one note per fact or topic, named for what it says.
 - A note not written in English needs English `aliases:` in its front matter
