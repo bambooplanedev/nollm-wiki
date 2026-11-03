@@ -85,17 +85,20 @@ pub const DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// Watch each `(path, mode)` and hand every event to `on_event`, which runs on
 /// notify's own thread. The caller must keep the returned watcher alive.
+/// All paths go in one batch: on macOS each `watch` call restarts the
+/// `FSEvents` stream, and each start is a round trip to `fseventsd`, which
+/// serves every process in turn.
 pub fn start(
     paths: &[(&Path, RecursiveMode)],
     on_event: impl FnMut(notify::Result<notify::Event>) + Send + 'static,
 ) -> Result<notify::RecommendedWatcher, WikiError> {
-    let mut watcher =
-        notify::recommended_watcher(on_event).map_err(|e| WikiError::Watch(e.to_string()))?;
+    let err = |e: notify::Error| WikiError::Watch(e.to_string());
+    let mut watcher = notify::recommended_watcher(on_event).map_err(err)?;
+    let mut batch = watcher.paths_mut();
     for (path, mode) in paths {
-        watcher
-            .watch(path, *mode)
-            .map_err(|e| WikiError::Watch(e.to_string()))?;
+        batch.add(path, *mode).map_err(err)?;
     }
+    batch.commit().map_err(err)?;
     Ok(watcher)
 }
 
