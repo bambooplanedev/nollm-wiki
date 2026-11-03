@@ -321,4 +321,14 @@ per question is noise-level: treat single results as anecdotes.
   `max_user_watches` and `serve` then fails to start. The escape is an
   existing folder.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
+- A note's author is the last committer of its file, which git lets anyone
+  set: it shows who to ask, it is not authentication.
+- A commit that leaves a note's file unchanged triggers no recompile, so the
+  author on a served row lags until the next compile or change to a note.
+- Origin lookup runs `git log` over the memory folder's whole history on every
+  compile, so a very long history adds compile time.
+- The ratio branch of the gate (a note scoring twice the best code hit) can
+  be gamed by a note whose summary is stuffed with common code words; the
+  origin label on the row is the defence, nothing filters such a note.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
+- A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.

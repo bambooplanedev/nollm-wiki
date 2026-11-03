@@ -1074,7 +1074,11 @@ fn mcp_page_full_matches_resource() {
 #[test]
 fn serve_source_sees_first_repo_memory_note_and_its_removal() {
     let project = source_project();
-    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &["--memory", "none"]);
+    // An empty external folder: no user folder is discovered, and the
+    // repo's `.agents/memory` stays on (`none` would turn it off).
+    let ext = tempfile::tempdir().unwrap();
+    let (mut child, mut stdin, stdout) =
+        spawn_server_source(project.path(), &["--memory", ext.path().to_str().unwrap()]);
     initialize(&mut stdin, &stdout);
     assert_eq!(
         hit_ids(&search(&mut stdin, &stdout, 2, "wombatnote")),
@@ -1091,6 +1095,33 @@ fn serve_source_sees_first_repo_memory_note_and_its_removal() {
     let resp = search(&mut stdin, &stdout, 4, "wombatnote");
     assert_eq!(hit_ids(&resp), [] as [String; 0]);
     assert!(stale_block(&resp).is_none(), "{resp}");
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_memory_none_skips_repo_memory() {
+    let project = source_project();
+    let mem = project.path().join(".agents/memory");
+    std::fs::create_dir_all(&mem).unwrap();
+    std::fs::write(mem.join("n.md"), "# N\n\nnumbatnote\n").unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &["--memory", "none"]);
+    initialize(&mut stdin, &stdout);
+    let text = text_of(&call(
+        &mut stdin,
+        &stdout,
+        2,
+        "search",
+        &json!({"query": "numbatnote"}),
+    ))
+    .to_string();
+    assert!(!text.contains("memory ("), "{text}");
+    // A note written while serving is not picked up either.
+    std::fs::write(mem.join("m.md"), "# M\n\nnumbatnote\n").unwrap();
+    let mut id = 3;
+    let resp = search_until_compiled(&mut stdin, &stdout, &mut id, "numbatnote");
+    assert_eq!(hit_ids(&resp), [] as [String; 0]);
 
     drop(stdin);
     let _ = child.wait();

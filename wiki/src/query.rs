@@ -6,7 +6,7 @@
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::calls::{callers_index, Caller};
-use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, SourceKind};
+use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, Origin, SourceKind};
 use aho_corasick::AhoCorasick;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -29,6 +29,14 @@ pub(crate) struct Entry {
     /// From an agent memory folder; absent in `index.json` when false.
     #[serde(default)]
     pub(crate) memory: bool,
+    /// `repo` or `local` on a memory note; absent on other pages and in an
+    /// `index.json` older than the field (see `Entry::origin`).
+    #[serde(default)]
+    pub(crate) origin: Option<String>,
+    #[serde(default)]
+    pub(crate) author: Option<String>,
+    #[serde(default)]
+    pub(crate) edited: bool,
     /// The id of the note that supersedes this one; absent in `index.json` when unset.
     #[serde(default)]
     pub(crate) superseded_by: Option<String>,
@@ -46,6 +54,25 @@ pub(crate) struct Entry {
 }
 
 impl Entry {
+    /// The note's origin; an `index.json` older than the field gets it
+    /// guessed from the path: a relative (repo) path is `repo` without an
+    /// author, an absolute (agent folder) one `local`.
+    pub(crate) fn origin(&self) -> Origin {
+        let repo = match self.origin.as_deref() {
+            _ if !self.memory => false,
+            Some(o) => o == "repo",
+            None => !self.path.starts_with('/') && !Path::new(&self.path).is_absolute(),
+        };
+        if repo {
+            Origin::Repo {
+                author: self.author.clone(),
+                edited: self.edited,
+            }
+        } else {
+            Origin::Local
+        }
+    }
+
     /// Whether the page's source kind passes `f`.
     fn is_kind(&self, f: &KindFilter) -> bool {
         SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
@@ -276,6 +303,8 @@ pub struct Hit {
     pub score: f64,
     /// The page is an agent memory note (a tail row of `search`).
     pub memory: bool,
+    /// Where a memory note came from; `Local` on every other page.
+    pub origin: Origin,
     /// The id of the note that supersedes this one; it never enters the tail.
     pub superseded_by: Option<String>,
     /// Deterministic excerpt around the earliest body match (`None` for
@@ -298,6 +327,7 @@ impl Hit {
             updated: e.updated.clone(),
             score,
             memory: e.memory,
+            origin: e.origin(),
             superseded_by: e.superseded_by.clone(),
             snippet,
             symbols: Vec::new(),

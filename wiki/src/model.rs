@@ -72,6 +72,41 @@ impl KindFilter {
     }
 }
 
+/// Where a memory note came from: written on this machine, or committed to the repo.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    /// An agent folder, or a repo note git does not track (or no git at all).
+    #[default]
+    Local,
+    /// A note in the repo's `.agents/memory` that git tracks: the name of the
+    /// last commit's author (`None` when the history does not reach it), and
+    /// whether the file differs from `HEAD`.
+    Repo {
+        author: Option<String>,
+        edited: bool,
+    },
+}
+
+impl Origin {
+    /// `local`, `repo`, `repo, <author>`, `repo, edited`, `repo, <author>, edited`.
+    pub fn label(&self) -> String {
+        match self {
+            Origin::Local => "local".into(),
+            Origin::Repo { author, edited } => {
+                let mut s = String::from("repo");
+                if let Some(a) = author {
+                    s += ", ";
+                    s += a;
+                }
+                if *edited {
+                    s += ", edited";
+                }
+                s
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Entity {
     pub id: String,
@@ -83,6 +118,8 @@ pub struct Entity {
     pub updated: String,
     /// From an agent memory folder. Reaches `index.json` only, never the page.
     pub memory: bool,
+    /// Where a memory note came from; `Local` on every other page.
+    pub origin: Origin,
     /// Names of memory notes this note retires (front-matter `supersedes`).
     pub supersedes: Vec<String>,
     /// The id of the memory note that supersedes this one; set after ids are final.
@@ -540,6 +577,22 @@ pub fn normalize_path(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn origin_label_covers_every_form() {
+        let repo = |author: Option<&str>, edited| Origin::Repo {
+            author: author.map(String::from),
+            edited,
+        };
+        assert_eq!(Origin::Local.label(), "local");
+        assert_eq!(repo(None, false).label(), "repo");
+        assert_eq!(repo(Some("Jane Doe"), false).label(), "repo, Jane Doe");
+        assert_eq!(repo(None, true).label(), "repo, edited");
+        assert_eq!(
+            repo(Some("Jane Doe"), true).label(),
+            "repo, Jane Doe, edited"
+        );
+    }
 
     #[test]
     fn code_item_kind_names_match_serde() {

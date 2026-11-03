@@ -1,6 +1,8 @@
 //! Where agent memory lives: the repo's own folder, and the folders agents keep outside it.
 
 use crate::hash::{hash_str, to_hex};
+use crate::model::Origin;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -110,6 +112,68 @@ pub fn resolve(dir: &Path) -> std::io::Result<PathBuf> {
     })
 }
 
+/// The origin of each file git tracks under `dir`, keyed by its path relative
+/// to `dir` with `/`. A file missing from the map (untracked, only staged, no
+/// commit, no repo, no git) is `Origin::Local`. Three git calls per folder.
+pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
+    let names = |s: Option<String>| -> Vec<String> {
+        s.unwrap_or_default()
+            .split('\0')
+            .filter(|n| !n.is_empty())
+            .map(String::from)
+            .collect()
+    };
+    let Some(tracked) = git(
+        dir,
+        &["ls-tree", "-z", "-r", "--name-only", "HEAD", "--", "."],
+    ) else {
+        return BTreeMap::new();
+    };
+    let edited = names(git(
+        dir,
+        &["diff", "-z", "--relative", "--name-only", "HEAD", "--", "."],
+    ));
+    // `-z` output: `\0<author>\0\n<name>\0<name>\0` per commit, newest first.
+    let log = git(
+        dir,
+        &[
+            "-c",
+            "log.showSignature=false",
+            "log",
+            "-z",
+            "--relative",
+            "--format=%x00%an",
+            "--name-only",
+            "--",
+            ".",
+        ],
+    )
+    .unwrap_or_default();
+    let mut authors: BTreeMap<&str, &str> = BTreeMap::new();
+    let (mut author, mut after_gap) = (None, false);
+    for t in log.split('\0') {
+        if t.is_empty() {
+            after_gap = true;
+        } else if after_gap {
+            (author, after_gap) = (Some(t), false);
+        } else if let Some(a) = author {
+            authors
+                .entry(t.strip_prefix('\n').unwrap_or(t))
+                .or_insert(a);
+        }
+    }
+    names(Some(tracked))
+        .into_iter()
+        .map(|n| {
+            let origin = Origin::Repo {
+                author: authors.get(n.as_str()).map(|a| (*a).to_string()),
+                edited: edited.contains(&n),
+            };
+            (n, origin)
+        })
+        .collect()
+}
+
 pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .arg("-C")
@@ -169,6 +233,74 @@ pub fn local_dir(root: &Path) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    fn git_in(dir: &Path, name: &str, args: &[&str]) {
+        let s = Command::new("git")
+            .args(["-c", &format!("user.name={name}"), "-c", "user.email=t@t"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(s.status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn repo_origins_reads_committed_edited_staged_untracked() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, mem) = (d.path(), d.path().join("m"));
+        std::fs::create_dir(&mem).unwrap();
+        git_in(root, "t", &["init", "-q"]);
+        let commit = |file: &str, who: &str| {
+            std::fs::write(mem.join(file), file).unwrap();
+            git_in(root, who, &["add", "."]);
+            git_in(root, who, &["commit", "-qm", file]);
+        };
+        commit("a.md", "Олена Ш.");
+        commit("b.md", "Jane Doe");
+        std::fs::write(mem.join("b.md"), "changed").unwrap();
+        std::fs::write(mem.join("c.md"), "c").unwrap();
+        git_in(root, "t", &["add", "m/c.md"]);
+        std::fs::write(mem.join("d.md"), "d").unwrap();
+        let repo = |author: &str, edited| Origin::Repo {
+            author: Some(author.to_string()),
+            edited,
+        };
+        assert_eq!(
+            repo_origins(&mem),
+            BTreeMap::from([
+                ("a.md".to_string(), repo("Олена Ш.", false)),
+                ("b.md".to_string(), repo("Jane Doe", true)),
+            ])
+        );
+    }
+
+    #[test]
+    fn repo_origins_ignores_show_signature_config() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, mem) = (d.path(), d.path().join("m"));
+        std::fs::create_dir(&mem).unwrap();
+        git_in(root, "t", &["init", "-q"]);
+        git_in(root, "t", &["config", "log.showSignature", "true"]);
+        std::fs::write(mem.join("a.md"), "a").unwrap();
+        git_in(root, "Jane Doe", &["add", "."]);
+        git_in(root, "Jane Doe", &["commit", "-qm", "a"]);
+        assert_eq!(
+            repo_origins(&mem)["a.md"],
+            Origin::Repo {
+                author: Some("Jane Doe".to_string()),
+                edited: false
+            }
+        );
+    }
+
+    #[test]
+    fn repo_origins_without_head_is_empty() {
+        let d = tempfile::tempdir().unwrap();
+        git_in(d.path(), "t", &["init", "-q"]);
+        std::fs::write(d.path().join("x.md"), "x").unwrap();
+        assert!(repo_origins(d.path()).is_empty());
+    }
 
     #[cfg(unix)]
     #[test]

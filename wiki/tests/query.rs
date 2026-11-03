@@ -824,6 +824,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         updated: None,
         score: 1.0,
         memory: false,
+        origin: wiki::model::Origin::Local,
         superseded_by: None,
         snippet: None,
         symbols: vec![SymbolLine {
@@ -1269,6 +1270,7 @@ fn search_lines_shows_date_after_path() {
         snippet: None,
         symbols: vec![],
         memory: false,
+        origin: wiki::model::Origin::Local,
         superseded_by: None,
     };
     assert_eq!(
@@ -1509,7 +1511,7 @@ fn tail_gate_long_word_in_title_alias_or_summary() {
         let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();
         let tail: Vec<_> = lines
             .lines()
-            .filter(|l| l.starts_with("memory: "))
+            .filter(|l| l.starts_with("memory ("))
             .map(str::to_owned)
             .collect();
         (lines, tail)
@@ -1895,4 +1897,168 @@ fn a_memory_note_earns_nothing_for_its_file_name() {
             .map(|h| h.score)
     };
     assert_eq!(score("elephant"), score("elephant elephant.md"));
+}
+
+fn git_as(dir: &std::path::Path, name: &str, args: &[&str]) {
+    let s = std::process::Command::new("git")
+        .args(["-c", &format!("user.name={name}"), "-c", "user.email=t@t"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(s.status.success(), "git {args:?}");
+}
+
+#[test]
+fn compile_stores_note_origin_in_index() {
+    let d = tempdir().unwrap();
+    let root = d.path();
+    let note = |t: &str| format!("---\ntitle: {t}\n---\n\nzebra\n");
+    common::write(root, "proj/a.rs", "pub fn a() {}\n");
+    common::write(root, "proj/.agents/memory/kept.md", &note("Kept"));
+    common::write(root, "agent/mine.md", &note("Mine"));
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "Jane Doe", &["add", "."]);
+    git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
+    common::write(root, "proj/.agents/memory/fresh.md", &note("Fresh"));
+    let out = root.join("out");
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &out, &opts).unwrap();
+    let entries = common::index_entries(&out);
+    let by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap_or_else(|| panic!("no {id}"))
+            .clone()
+    };
+    let keys = |id: &str| {
+        let e = by_id(id);
+        ["origin", "author", "edited"].map(|k| e.get(k).cloned())
+    };
+    assert_eq!(
+        keys("kept"),
+        [
+            Some(serde_json::json!("repo")),
+            Some(serde_json::json!("Jane Doe")),
+            None
+        ]
+    );
+    assert_eq!(
+        keys("fresh"),
+        [Some(serde_json::json!("local")), None, None]
+    );
+    assert_eq!(keys("mine"), [Some(serde_json::json!("local")), None, None]);
+    assert_eq!(keys("a"), [None, None, None]);
+}
+
+#[test]
+fn old_index_guesses_origin_from_path() {
+    use wiki::model::Origin;
+    let d = tempdir().unwrap();
+    let (raw, agent, out) = (
+        d.path().join("raw"),
+        d.path().join("agent"),
+        d.path().join("out"),
+    );
+    common::write(
+        &raw,
+        ".agents/memory/x.md",
+        "---\ntitle: Repo note\n---\n\nzebra\n",
+    );
+    common::write(&agent, "y.md", "---\ntitle: Agent note\n---\n\nzebra\n");
+    let opts = CompileOptions {
+        memory: vec![agent],
+        ..Default::default()
+    };
+    compile(&raw, &out, &opts).unwrap();
+    let path = out.join("index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for e in index["entries"].as_array_mut().unwrap() {
+        let e = e.as_object_mut().unwrap();
+        for k in ["origin", "author", "edited"] {
+            e.remove(k);
+        }
+    }
+    fs::write(&path, index.to_string()).unwrap();
+    let hits = Wiki::load(&out).unwrap().search("zebra", None, 10);
+    let origin = |id: &str| hits.iter().find(|h| h.id == id).unwrap().origin.clone();
+    assert_eq!(
+        origin("repo_note"),
+        Origin::Repo {
+            author: None,
+            edited: false
+        }
+    );
+    assert_eq!(origin("agent_note"), Origin::Local);
+}
+
+/// A temp git repo: committed `.agents/memory/<committed>` notes, then `local` agent-folder notes.
+/// Compiled into `<tmp>/out`; returns the loaded wiki.
+fn origin_fixture(
+    committed: &[(&str, String)],
+    local: &[(&str, String)],
+) -> (tempfile::TempDir, Wiki) {
+    let d = tempdir().unwrap();
+    let root = d.path();
+    common::write(root, "proj/a.rs", "pub fn a() {}\n");
+    for (n, t) in committed {
+        common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
+    }
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "Jane Doe", &["add", "."]);
+    git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
+    for (n, t) in local {
+        common::write(root, &format!("agent/{n}.md"), t);
+    }
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
+    let w = Wiki::load(&root.join("out")).unwrap();
+    (d, w)
+}
+
+#[test]
+fn committed_note_cannot_supersede_a_local_note() {
+    let (d, w) = origin_fixture(
+        &[("x", note("New", "supersedes: Deploy key\n", "rotation"))],
+        &[("deploy", note("Deploy key", "", "rotation"))],
+    );
+    assert_eq!(superseded_by(&d)["deploy_key"], None);
+    let ids: Vec<_> = w
+        .search("rotation", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert!(ids.contains(&"deploy_key".to_string()), "{ids:?}");
+    let hint = wiki::hint::hint_lines(&w, "rotation of the Deploy key needs checking");
+    assert!(hint.contains("deploy"), "{hint}");
+}
+
+#[test]
+fn local_note_still_supersedes_a_committed_one() {
+    let (d, _w) = origin_fixture(
+        &[("old", note("Old", "", "rotation"))],
+        &[("new", note("New", "supersedes: Old\n", "rotation"))],
+    );
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
+}
+
+#[test]
+fn committed_note_still_supersedes_a_committed_one() {
+    let (d, _w) = origin_fixture(
+        &[
+            ("old", note("Old", "", "rotation")),
+            ("new", note("New", "supersedes: Old\n", "rotation")),
+        ],
+        &[],
+    );
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
 }

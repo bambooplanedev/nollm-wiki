@@ -25,7 +25,7 @@ pub mod watch;
 use crate::formats::code::{is_shell, module_stem, source_rank};
 use crate::formats::Registry;
 use crate::model::{
-    basename, slugify, title_case, title_from_slug, Entity, LintReport, SourceKind,
+    basename, slugify, title_case, title_from_slug, Entity, LintReport, Origin, SourceKind,
 };
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -45,6 +45,7 @@ pub enum WikiError {
     Setup(String),
 }
 
+#[allow(clippy::struct_excessive_bools)] // independent switches, not states
 pub struct CompileOptions {
     pub incremental: bool,
     pub respect_ignore: bool,
@@ -54,6 +55,9 @@ pub struct CompileOptions {
     /// Extra agent memory folders (absolute), compiled as flagged pages;
     /// a missing one is skipped but still watched.
     pub memory: Vec<PathBuf>,
+    /// Compile the repo's `.agents/memory`. Off, the folder is neither
+    /// compiled (as memory or as plain pages) nor watched.
+    pub repo_memory: bool,
 }
 
 impl Default for CompileOptions {
@@ -65,6 +69,7 @@ impl Default for CompileOptions {
             jobs: None,
             project: None,
             memory: Vec::new(),
+            repo_memory: true,
         }
     }
 }
@@ -165,11 +170,11 @@ fn compile_inner(
     // All are walked with every ignore rule off (they are usually
     // git-excluded on purpose); markdown and text only, never `logs/`. The
     // main walk may reach the in-tree one (`--no-ignore`), so its files are
-    // dropped there and come back only from the memory walk, flagged. One
-    // folder given twice is walked once.
+    // dropped there and come back only from the memory walk, flagged (or
+    // not at all with `repo_memory` off). One folder given twice is walked once.
     let in_tree = input.join(memory::REPO_DIR);
     let mut roots: Vec<(PathBuf, bool)> = Vec::new();
-    if in_tree.is_dir() {
+    if opts.repo_memory && in_tree.is_dir() {
         roots.push((in_tree.clone(), true));
     }
     let same = |a: &Path, b: &Path| match (a.canonicalize(), b.canonicalize()) {
@@ -191,16 +196,24 @@ fn compile_inner(
         .files
         .into_iter()
         .filter(|sf| !is_under(&sf.abs_path, output))
+        .filter(|sf| !is_under(&sf.abs_path, &in_tree))
         .filter(|sf| !roots.iter().any(|(r, _)| is_under(&sf.abs_path, r)))
         .collect();
     let mut dirs: Vec<PathBuf> = walked
         .dirs
         .into_iter()
-        .filter(|d| !is_under(d, output))
+        .filter(|d| !is_under(d, output) && !is_under(d, &in_tree))
         .collect();
     let mut memory_files = Vec::new();
     let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
+    // Origins of the repo folder's notes, by their final `source_path`.
+    let mut origins: BTreeMap<String, model::Origin> = BTreeMap::new();
     for (root, in_repo) in &roots {
+        let mut repo = if *in_repo {
+            memory::repo_origins(root)
+        } else {
+            BTreeMap::new()
+        };
         let w = walk::walk_memory(root, &|p| {
             registry.handles(p) && is_note(p) && !p.starts_with("logs/")
         });
@@ -212,7 +225,11 @@ fn compile_inner(
             .filter(|sf| !is_under(&sf.abs_path, output))
         {
             sf.rel_path = if *in_repo {
-                format!("{}/{}", memory::REPO_DIR, sf.rel_path)
+                let rel = format!("{}/{}", memory::REPO_DIR, sf.rel_path);
+                if let Some(o) = repo.remove(&sf.rel_path) {
+                    origins.insert(rel.clone(), o);
+                }
+                rel
             } else {
                 let abs = memory::display_path(&abs_root.join(&sf.rel_path));
                 virtual_paths.insert(abs.clone(), format!("memory/{}", sf.rel_path));
@@ -229,7 +246,12 @@ fn compile_inner(
             .map(|sf| sf.abs_path.clone()),
         dirs,
     )
-    .with_memory(std::iter::once(in_tree).chain(opts.memory.iter().cloned()));
+    .with_memory(
+        opts.repo_memory
+            .then_some(in_tree)
+            .into_iter()
+            .chain(opts.memory.iter().cloned()),
+    );
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
@@ -239,6 +261,7 @@ fn compile_inner(
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
         .map(|mut e| {
             e.memory = true;
+            e.origin = origins.get(&e.source_path).cloned().unwrap_or_default();
             e
         })
         .collect();
@@ -856,6 +879,9 @@ fn resolve_supersedes(entities: &mut BTreeMap<String, Entity>) {
             let target = entities.iter().find(|(tid, t)| {
                 t.memory
                     && *tid != id
+                    // A committed note never retires an uncommitted one.
+                    && !(matches!(e.origin, Origin::Repo { .. })
+                        && t.origin == Origin::Local)
                     && (**tid == slug
                         || t.name.to_lowercase() == lower
                         || t.aliases.iter().any(|a| a.to_lowercase() == lower))
