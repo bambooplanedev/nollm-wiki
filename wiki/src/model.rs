@@ -84,25 +84,49 @@ pub enum Origin {
     Repo {
         author: Option<String>,
         edited: bool,
+        /// The author's email is the compiling person's `git config user.email`.
+        mine: bool,
     },
 }
 
 impl Origin {
-    /// `local`, `repo`, `repo, <author>`, `repo, edited`, `repo, <author>, edited`.
+    /// `local`, or `repo` then `, <author>`, `, you` (the person's own
+    /// note) and `, edited` when they apply: `repo, Jane Doe, you, edited`.
     pub fn label(&self) -> String {
         match self {
             Origin::Local => "local".into(),
-            Origin::Repo { author, edited } => {
+            Origin::Repo {
+                author,
+                edited,
+                mine,
+            } => {
                 let mut s = String::from("repo");
                 if let Some(a) = author {
                     s += ", ";
                     s += a;
+                }
+                if *mine {
+                    s += ", you";
                 }
                 if *edited {
                     s += ", edited";
                 }
                 s
             }
+        }
+    }
+
+    /// How far to trust the note: `local` 1.0, the person's own or edited
+    /// `repo` note 0.8, any other `repo` note 0.5.
+    pub fn trust(&self) -> f64 {
+        match self {
+            Origin::Local => 1.0,
+            Origin::Repo {
+                mine: false,
+                edited: false,
+                ..
+            } => 0.5,
+            Origin::Repo { .. } => 0.8,
         }
     }
 }
@@ -583,6 +607,7 @@ mod tests {
         let repo = |author: Option<&str>, edited| Origin::Repo {
             author: author.map(String::from),
             edited,
+            mine: false,
         };
         assert_eq!(Origin::Local.label(), "local");
         assert_eq!(repo(None, false).label(), "repo");
@@ -592,6 +617,32 @@ mod tests {
             repo(Some("Jane Doe"), true).label(),
             "repo, Jane Doe, edited"
         );
+        let mine = |edited| Origin::Repo {
+            author: Some("Jane Doe".into()),
+            edited,
+            mine: true,
+        };
+        assert_eq!(mine(false).label(), "repo, Jane Doe, you");
+        assert_eq!(mine(true).label(), "repo, Jane Doe, you, edited");
+    }
+
+    #[test]
+    fn origin_trust_scores() {
+        let repo = |edited, mine| Origin::Repo {
+            author: Some("Jane Doe".into()),
+            edited,
+            mine,
+        };
+        assert_eq!(Origin::Local.trust(), 1.0);
+        assert_eq!(repo(false, true).trust(), 0.8);
+        assert_eq!(repo(true, false).trust(), 0.8);
+        assert_eq!(repo(false, false).trust(), 0.5);
+        let anonymous = Origin::Repo {
+            author: None,
+            edited: false,
+            mine: false,
+        };
+        assert_eq!(anonymous.trust(), 0.5);
     }
 
     #[test]

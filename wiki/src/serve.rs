@@ -33,8 +33,8 @@ pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 pub const DEFAULT_SEARCH_LIMIT: usize = 5;
 
 /// What the client shows the model at session start (Claude Code does; pi
-/// does not, so pi gets the same steps from its skill). Claude Code's skill
-/// carries only the memory rules: a navigation skill cost one turn per task.
+/// does not, so pi gets the same steps from its skill). Claude Code gets no skill:
+/// a navigation skill cost one turn per task.
 pub const INSTRUCTIONS: &str =
     "Map of this project. To find code, call `search` with the words of \
 what you are looking for and `kind: \"code\"`; each symbol line is \
@@ -368,7 +368,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Show a page with the pages linked to it, within a token budget: a module's outline with the outlines of the modules it imports or is imported by, then one-line summaries of the rest. Use it to see what a module connects to, not grep; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
+        description = "Show a page with the pages linked to it, within a token budget: a module's outline, the outlines of the modules it imports or is imported by (admitted first), and one-line summaries of the rest, the most central last. Use it to see what a module connects to, not grep; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
     )]
     async fn neighbors(
         &self,
@@ -605,13 +605,20 @@ pub fn search_json(hits: Vec<Hit>) -> String {
                 hit["memory"] = true.into();
                 match h.origin {
                     Origin::Local => hit["origin"] = "local".into(),
-                    Origin::Repo { author, edited } => {
+                    Origin::Repo {
+                        author,
+                        edited,
+                        mine,
+                    } => {
                         hit["origin"] = "repo".into();
                         if let Some(a) = author {
                             hit["author"] = a.into();
                         }
                         if edited {
                             hit["edited"] = true.into();
+                        }
+                        if mine {
+                            hit["mine"] = true.into();
                         }
                     }
                 }
@@ -839,25 +846,29 @@ mod tests {
             origin: crate::model::Origin::Repo {
                 author: Some("Jane Doe".into()),
                 edited: true,
+                mine: true,
             },
             ..hit(memory, Some("Rotate nightly."))
         };
         assert_eq!(
             search_lines(&[repo(true)]),
-            "memory (repo, Jane Doe, edited): /m/n.md — Rotate nightly.\n    snip\n"
+            "memory (repo, Jane Doe, you, edited): /m/n.md — Rotate nightly.\n    snip\n"
         );
         let json: serde_json::Value = serde_json::from_str(&search_json(vec![repo(true)])).unwrap();
         assert_eq!(json[0]["origin"], "repo");
         assert_eq!(json[0]["author"], "Jane Doe");
         assert_eq!(json[0]["edited"], true);
+        assert_eq!(json[0]["mine"], true);
         assert_eq!(json[0]["memory"], true);
         let json: serde_json::Value =
             serde_json::from_str(&search_json(vec![hit(true, None)])).unwrap();
         assert_eq!(json[0]["origin"], "local");
-        assert!(json[0].get("author").is_none() && json[0].get("edited").is_none());
+        for k in ["author", "edited", "mine"] {
+            assert!(json[0].get(k).is_none(), "{k}");
+        }
         let json: serde_json::Value =
             serde_json::from_str(&search_json(vec![repo(false)])).unwrap();
-        for k in ["origin", "author", "edited", "memory"] {
+        for k in ["origin", "author", "edited", "mine", "memory"] {
             assert!(json[0].get(k).is_none(), "{k}");
         }
         let mut plain = hit(false, Some("sum"));

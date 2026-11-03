@@ -24,8 +24,8 @@ per question is noise-level: treat single results as anecdotes.
   runs out the 300 s cap and the context. Haiku in Claude Code read the given
   range in 57 of 58 reads.
 - **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
-  questions that ask for a call path. `symbol` is named only in the skill
-  and the tool description; see the previous point.
+  questions that ask for a call path. `symbol` is named only in the skill,
+  the server instructions and the tool description; see the previous point.
 - **The hook trades tools for hints.** With the prompt hook the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search. Measured 2026-10-28 with
@@ -321,8 +321,19 @@ per question is noise-level: treat single results as anecdotes.
   `max_user_watches` and `serve` then fails to start. The escape is an
   existing folder.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
-- A note's author is the last committer of its file, which git lets anyone
-  set: it shows who to ask, it is not authentication.
+- A note's author is the author name of the last commit to its file, which git
+  lets anyone set: it shows who to ask, it is not authentication.
+- An old `index.json` misreads your own committed notes as a co-author's
+  until the next compile, so the tail puts them last: without `origin`, every
+  relative-path note counts as a co-author's committed note; with `origin` but
+  without `mine`, your own committed notes do.
+- Trust order only reaches agents through the wiki: an agent that greps
+  `.agents/memory` directly still reads a co-author's note the wiki ranks
+  low.
+- "You" is the commit author email matching `git config user.email`, which
+  alone is read (an `author.email` setting or a `GIT_AUTHOR_EMAIL` override is
+  not recognised); git lets anyone set an author email, so it shows who to
+  ask, not proof.
 - A commit that leaves a note's file unchanged triggers no recompile, so the
   author on a served row lags until the next compile or change to a note.
 - Origin lookup runs `git log` over the memory folder's whole history on every
