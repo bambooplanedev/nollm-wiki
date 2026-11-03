@@ -115,6 +115,10 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 
 /// Most memory notes `search` lists after the code hits.
 pub(crate) const MEMORY_TAIL: usize = 2;
+/// Distinct words (at gate length) a co-author's note's title and summary
+/// must share with a more trusted note for the two to pair as a possible
+/// conflict (`Wiki::memory_conflicts`).
+pub(crate) const CONFLICT_MIN_WORDS: usize = 2;
 /// Default gate length: a query word this long naming a note lets it in.
 /// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
 /// tasks): Haiku searches with short code-shaped words, so at 8 the note
@@ -310,6 +314,10 @@ pub struct Hit {
     pub origin: Origin,
     /// The id of the note that supersedes this one; it never enters the tail.
     pub superseded_by: Option<String>,
+    /// The path and origin of each note paired with this memory hit
+    /// (`Wiki::memory_conflicts`); filled on the search tail and the hook's
+    /// note, empty elsewhere.
+    pub conflicts: Vec<(String, Origin)>,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, item name, summary, or a
     /// section heading — the summary explains those).
@@ -332,6 +340,7 @@ impl Hit {
             memory: e.memory,
             origin: e.origin(),
             superseded_by: e.superseded_by.clone(),
+            conflicts: Vec::new(),
             snippet,
             symbols: Vec::new(),
         }
@@ -485,6 +494,8 @@ pub struct Wiki {
     symbol_fields: BTreeMap<String, SymbolFields>,
     /// Each function's callers by its `path:start-end` (`callers_index`).
     callers: BTreeMap<String, Vec<Caller>>,
+    /// `memory_conflicts`, computed on first use.
+    conflicts: std::sync::OnceLock<Vec<(String, String)>>,
 }
 
 impl Wiki {
@@ -533,6 +544,7 @@ impl Wiki {
             items,
             symbol_fields,
             callers,
+            conflicts: std::sync::OnceLock::new(),
         })
     }
 
@@ -906,19 +918,84 @@ impl Wiki {
     /// on this, because a Ukrainian prompt matches nearly every Ukrainian
     /// note body.
     pub(crate) fn names_page(&self, id: &str, q: &str, min_len: usize) -> bool {
-        let Some(e) = self.entries.get(id) else {
-            return false;
-        };
+        self.entries.get(id).is_some_and(|e| {
+            let names = Self::namer(e, min_len);
+            Self::query_tokens(q).0.iter().any(|t| names(t))
+        })
+    }
+
+    /// Whether a query word of at least `min_len` characters hits the
+    /// title, an alias or the summary of `e` (`names_page`'s test).
+    fn namer(e: &Entry, min_len: usize) -> impl Fn(&str) -> bool {
         let fields = std::iter::once(e.title.as_str())
             .chain(e.aliases.iter().map(String::as_str))
             .chain(e.summary.as_deref())
             .map(|f| Field::new(&f.to_lowercase()))
             .collect::<Vec<_>>();
-        Self::query_tokens(q)
-            .0
+        move |t: &str| {
+            t.chars().count() >= min_len && fields.iter().any(|w| Self::field_tier(w, t) > 0.0)
+        }
+    }
+
+    /// Memory note pairs that may disagree, as (id of a note with trust 0.5,
+    /// id of a more trusted note), sorted; computed once per loaded wiki.
+    /// X's title and summary, read as a query, must name Y (`names_page` at
+    /// `gate_len`), and at least `CONFLICT_MIN_WORDS` distinct words of it
+    /// must hit Y's title, aliases or summary. Superseded notes are out.
+    pub fn memory_conflicts(&self) -> &[(String, String)] {
+        self.conflicts.get_or_init(|| {
+            let notes: Vec<(&Entry, f64)> = self
+                .entries
+                .values()
+                .filter(|e| e.memory && e.superseded_by.is_none())
+                .map(|e| (e, e.origin().trust()))
+                .collect();
+            let n = gate_len();
+            let mut pairs = Vec::new();
+            // Trust 0.5: a committed note neither yours nor edited.
+            let shared = |e: &Entry| {
+                matches!(
+                    e.origin(),
+                    Origin::Repo {
+                        mine: false,
+                        edited: false,
+                        ..
+                    }
+                )
+            };
+            for &(x, tx) in notes.iter().filter(|(e, _)| shared(e)) {
+                let q = format!("{} {}", x.title, x.summary.as_deref().unwrap_or(""));
+                let (tokens, words) = Self::query_tokens(&q);
+                for &(y, _) in notes.iter().filter(|(y, ty)| *ty > tx && y.id != x.id) {
+                    let names = Self::namer(y, n);
+                    if tokens.iter().any(|t| names(t))
+                        && words.iter().filter(|w| names(w)).count() >= CONFLICT_MIN_WORDS
+                    {
+                        pairs.push((x.id.clone(), y.id.clone()));
+                    }
+                }
+            }
+            pairs.sort();
+            pairs
+        })
+    }
+
+    /// The path and origin of every note paired with note `id`, either side.
+    pub(crate) fn conflicts_of(&self, id: &str) -> Vec<(String, Origin)> {
+        self.memory_conflicts()
             .iter()
-            .filter(|t| t.chars().count() >= min_len)
-            .any(|t| fields.iter().any(|w| Self::field_tier(w, t) > 0.0))
+            .filter_map(|(x, y)| {
+                if x == id {
+                    Some(y)
+                } else if y == id {
+                    Some(x)
+                } else {
+                    None
+                }
+            })
+            .filter_map(|other| self.entries.get(other))
+            .map(|e| (e.path.clone(), e.origin()))
+            .collect()
     }
 
     /// Whether `q` writes a date and page `id` is a memory note dated that day.
@@ -1391,6 +1468,9 @@ impl Wiki {
             .collect();
         notes.sort_by(|a, b| b.origin.trust().total_cmp(&a.origin.trust()));
         notes.truncate(MEMORY_TAIL);
+        for h in &mut notes {
+            h.conflicts = self.conflicts_of(&h.id);
+        }
         notes
     }
 

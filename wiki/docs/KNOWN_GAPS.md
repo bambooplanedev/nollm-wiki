@@ -323,6 +323,9 @@ per question is noise-level: treat single results as anecdotes.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - A note's author is the last committer of its file, which git lets anyone
   set: it shows who to ask, it is not authentication.
+- Memory conflict pairs are word overlap, not meaning: two notes on one topic
+  may pair without disagreeing, and a disagreement in different words may
+  not pair.
 - "You" is the commit author email matching `git config user.email`; git
   lets anyone set an author email, so it shows who to ask, not proof.
 - A commit that leaves a note's file unchanged triggers no recompile, so the
