@@ -1899,9 +1899,15 @@ fn a_memory_note_earns_nothing_for_its_file_name() {
     assert_eq!(score("elephant"), score("elephant elephant.md"));
 }
 
+/// A distinct email per author name.
+fn email_of(name: &str) -> String {
+    format!("{}@t", name.replace(' ', "."))
+}
+
 fn git_as(dir: &std::path::Path, name: &str, args: &[&str]) {
     let s = std::process::Command::new("git")
-        .args(["-c", &format!("user.name={name}"), "-c", "user.email=t@t"])
+        .args(["-c", &format!("user.name={name}")])
+        .args(["-c", &format!("user.email={}", email_of(name))])
         .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
@@ -1919,7 +1925,7 @@ fn compile_stores_note_origin_in_index() {
     common::write(root, "proj/.agents/memory/kept.md", &note("Kept"));
     common::write(root, "agent/mine.md", &note("Mine"));
     git_as(root, "t", &["init", "-q"]);
-    git_as(root, "t", &["config", "user.name", "Jane Doe"]);
+    git_as(root, "t", &["config", "user.email", &email_of("Jane Doe")]);
     git_as(root, "Jane Doe", &["add", "."]);
     git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
     common::write(root, "proj/.agents/memory/fresh.md", &note("Fresh"));
@@ -2014,7 +2020,7 @@ fn origin_fixture(
 }
 
 /// `origin_fixture` with the notes committed by `author`; the repo's own
-/// `user.name` is `Jane Doe`.
+/// `user.email` is Jane Doe's.
 fn origin_fixture_by(
     author: &str,
     committed: &[(&str, String)],
@@ -2027,7 +2033,7 @@ fn origin_fixture_by(
         common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
     }
     git_as(root, "t", &["init", "-q"]);
-    git_as(root, "t", &["config", "user.name", "Jane Doe"]);
+    git_as(root, "t", &["config", "user.email", &email_of("Jane Doe")]);
     git_as(root, author, &["add", "."]);
     git_as(root, author, &["commit", "-qm", "x"]);
     for (n, t) in local {

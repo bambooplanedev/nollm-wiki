@@ -435,8 +435,8 @@ Each note row says where the note came from: `memory (local): /abs/x.md — summ
 an agent folder, a `--memory` folder or an `.agents/memory` file git does not track (or no git),
 and `memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the name of
 the file's last committer (never the email; left out when git cannot tell), `, you` when that
-name is your `git config user.name` (`memory (repo, Jane Doe, you): …`; no git or no name: nobody
-is you) and `, edited` when the work tree differs from that commit. JSON hits carry
+commit's author email is your `git config user.email`, ignoring case (`memory (repo, Jane Doe, you): …`;
+no git or no email: nobody is you; the email is only compared, never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
 `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and
 `"edited": true` when edited. The origin is read at compile time; serve and the hook never call git.
 Notes are ordered by trust, the score order kept among equals: local notes first, then your own or

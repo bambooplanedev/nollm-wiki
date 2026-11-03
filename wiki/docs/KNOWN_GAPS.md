@@ -323,6 +323,8 @@ per question is noise-level: treat single results as anecdotes.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - A note's author is the last committer of its file, which git lets anyone
   set: it shows who to ask, it is not authentication.
+- "You" is the commit author email matching `git config user.email`; git
+  lets anyone set an author email, so it shows who to ask, not proof.
 - A commit that leaves a note's file unchanged triggers no recompile, so the
   author on a served row lags until the next compile or change to a note.
 - Origin lookup runs `git log` over the memory folder's whole history on every

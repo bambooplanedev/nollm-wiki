@@ -84,7 +84,7 @@ pub enum Origin {
     Repo {
         author: Option<String>,
         edited: bool,
-        /// The author is the person compiling (`git config user.name`).
+        /// The author's email is the compiling person's `git config user.email`.
         mine: bool,
     },
 }

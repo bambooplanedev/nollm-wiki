@@ -115,7 +115,8 @@ pub fn resolve(dir: &Path) -> std::io::Result<PathBuf> {
 /// The origin of each file git tracks under `dir`, keyed by its path relative
 /// to `dir` with `/`. A file missing from the map (untracked, only staged, no
 /// commit, no repo, no git) is `Origin::Local`. A note is `mine` when its
-/// author is `git config user.name` (none: no note is). Four git calls per folder.
+/// author's email is `git config user.email`, ignoring case (none: no note
+/// is); the email is only compared, never kept. Four git calls per folder.
 pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
     let names = |s: Option<String>| -> Vec<String> {
         s.unwrap_or_default()
@@ -134,7 +135,8 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
         dir,
         &["diff", "-z", "--relative", "--name-only", "HEAD", "--", "."],
     ));
-    // `-z` output: `\0<author>\0\n<name>\0<name>\0` per commit, newest first.
+    // `-z` output: `\0<email>\t<author>\0\n<name>\0<name>\0` per commit,
+    // newest first; an email holds no tab.
     let log = git(
         dir,
         &[
@@ -143,21 +145,26 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
             "log",
             "-z",
             "--relative",
-            "--format=%x00%an",
+            "--format=%x00%ae%x09%an",
             "--name-only",
             "--",
             ".",
         ],
     )
     .unwrap_or_default();
-    let me = git(dir, &["config", "user.name"]).filter(|n| !n.is_empty());
-    let mut authors: BTreeMap<&str, &str> = BTreeMap::new();
+    let me = git(dir, &["config", "user.email"])
+        .filter(|e| !e.is_empty())
+        .map(|e| e.to_lowercase());
+    // Per file: its last commit's author name and whether that author is me.
+    let mut authors: BTreeMap<&str, (&str, bool)> = BTreeMap::new();
     let (mut author, mut after_gap) = (None, false);
     for t in log.split('\0') {
         if t.is_empty() {
             after_gap = true;
         } else if after_gap {
-            (author, after_gap) = (Some(t), false);
+            let (email, name) = t.split_once('\t').unwrap_or(("", t));
+            let mine = !email.is_empty() && me.as_deref() == Some(&email.to_lowercase());
+            (author, after_gap) = (Some((name, mine)), false);
         } else if let Some(a) = author {
             authors
                 .entry(t.strip_prefix('\n').unwrap_or(t))
@@ -167,11 +174,13 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
     names(Some(tracked))
         .into_iter()
         .map(|n| {
-            let author = authors.get(n.as_str()).map(|a| (*a).to_string());
+            let (author, mine) = authors
+                .get(n.as_str())
+                .map_or((None, false), |(a, m)| (Some((*a).to_string()), *m));
             let origin = Origin::Repo {
-                mine: author.is_some() && author == me,
                 author,
                 edited: edited.contains(&n),
+                mine,
             };
             (n, origin)
         })
@@ -238,9 +247,15 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
+    /// A distinct email per author name.
+    fn email_of(name: &str) -> String {
+        format!("{}@t", name.replace(' ', "."))
+    }
+
     fn git_in(dir: &Path, name: &str, args: &[&str]) {
         let s = Command::new("git")
-            .args(["-c", &format!("user.name={name}"), "-c", "user.email=t@t"])
+            .args(["-c", &format!("user.name={name}")])
+            .args(["-c", &format!("user.email={}", email_of(name))])
             .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(dir)
@@ -255,6 +270,8 @@ mod tests {
         let (root, mem) = (d.path(), d.path().join("m"));
         std::fs::create_dir(&mem).unwrap();
         git_in(root, "t", &["init", "-q"]);
+        // An email no author has, so the global `user.email` cannot leak in.
+        git_in(root, "t", &["config", "user.email", "nobody@t"]);
         let commit = |file: &str, who: &str| {
             std::fs::write(mem.join(file), file).unwrap();
             git_in(root, who, &["add", "."]);
@@ -287,6 +304,7 @@ mod tests {
         std::fs::create_dir(&mem).unwrap();
         git_in(root, "t", &["init", "-q"]);
         git_in(root, "t", &["config", "log.showSignature", "true"]);
+        git_in(root, "t", &["config", "user.email", "nobody@t"]);
         std::fs::write(mem.join("a.md"), "a").unwrap();
         git_in(root, "Jane Doe", &["add", "."]);
         git_in(root, "Jane Doe", &["commit", "-qm", "a"]);
@@ -306,13 +324,34 @@ mod tests {
         let (root, mem) = (d.path(), d.path().join("m"));
         std::fs::create_dir(&mem).unwrap();
         git_in(root, "t", &["init", "-q"]);
-        git_in(root, "t", &["config", "user.name", "Jane Doe"]);
+        git_in(root, "t", &["config", "user.email", "JANE.Doe@t"]);
         for (file, who) in [("a.md", "Jane Doe"), ("b.md", "Mallory Example")] {
             std::fs::write(mem.join(file), file).unwrap();
             git_in(root, who, &["add", "."]);
             git_in(root, who, &["commit", "-qm", file]);
         }
         let mine = |n: &str| matches!(repo_origins(&mem)[n], Origin::Repo { mine, .. } if mine);
+        assert!(mine("a.md"));
+        assert!(!mine("b.md"));
+    }
+
+    #[test]
+    fn repo_origins_tells_namesakes_apart_by_email() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, mem) = (d.path(), d.path().join("m"));
+        std::fs::create_dir(&mem).unwrap();
+        git_in(root, "t", &["init", "-q"]);
+        git_in(root, "t", &["config", "user.email", "Jane.Doe@t"]);
+        for (file, email) in [("a.md", "Jane.Doe@t"), ("b.md", "other.jane@t")] {
+            std::fs::write(mem.join(file), file).unwrap();
+            git_in(root, "Jane Doe", &["add", "."]);
+            let email = format!("user.email={email}");
+            git_in(root, "Jane Doe", &["-c", &email, "commit", "-qm", file]);
+        }
+        let origins = repo_origins(&mem);
+        let name = |n: &str| matches!(&origins[n], Origin::Repo { author: Some(a), .. } if a == "Jane Doe");
+        let mine = |n: &str| matches!(origins[n], Origin::Repo { mine, .. } if mine);
+        assert!(name("a.md") && name("b.md"));
         assert!(mine("a.md"));
         assert!(!mine("b.md"));
     }
