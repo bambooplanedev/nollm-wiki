@@ -2082,6 +2082,16 @@ fn hint_picks_the_most_trusted_note() {
     let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
     assert!(hint.contains("memory (local):"), "{hint}");
     assert!(hint.contains("ours.md"), "{hint}");
+    assert!(!hint.contains("theirs.md"), "{hint}");
+    // The committed note passes the gate on its own, so the pick above is
+    // a ranking, not a gate failure.
+    let (_d, w) = origin_fixture_by(
+        "Mallory Example",
+        &[("theirs", note("Rotation", "", "rotation rotation rotation"))],
+        &[],
+    );
+    let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
+    assert!(hint.contains("theirs.md"), "{hint}");
 }
 
 #[test]

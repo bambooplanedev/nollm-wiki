@@ -323,9 +323,10 @@ per question is noise-level: treat single results as anecdotes.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
 - A note's author is the author name of the last commit to its file, which git
   lets anyone set: it shows who to ask, it is not authentication.
-- An index.json written before origin and "mine" were stored reads every
-  relative note path as a co-author's note until the next compile: the tail
-  puts your own notes last.
+- An old `index.json` misreads your own committed notes as a co-author's
+  until the next compile, so the tail puts them last: without `origin`, every
+  relative-path note counts as a co-author's committed note; with `origin` but
+  without `mine`, your own committed notes do.
 - Trust order only reaches agents through the wiki: an agent that greps
   `.agents/memory` directly still reads a co-author's note the wiki ranks
   low.

@@ -591,8 +591,8 @@ matching:
   existed (`MemoryScope::Without`: `search_terms` drops notes before `N`,
   `df` and `avglen` are counted), then `memory_tail` appends up to
   `MEMORY_TAIL` (2) live notes from `MemoryScope::Only`, most trusted first
-  (`Origin::trust`), then best score (newer `updated` first on a tie), after the hits and outside `limit`,
-  whatever `kind`; with `tag` set a note must carry it. A note enters the tail
+  (`Origin::trust`), then best score (newer `updated` first on a tie), after
+  the hits and outside `limit`, whatever `kind`; with `tag` set a note must carry it. A note enters the tail
   through `passes_gate`, which `wiki hint` applies with two changes for a
   prompt (the name branch only up to `HINT_SHORT_WORDS` distinct words, the
   ratio branch of a longer prompt only against a code hit, and its note

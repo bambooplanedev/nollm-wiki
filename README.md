@@ -541,7 +541,7 @@ clean directory.
   no query, lists every such page. A query, `--tag` or `--docs` is required.
 - `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead
   of the wiki (see [Agents](#agents)); paths are relative to the current directory, no compiled wiki
-  is needed, and `--kind`, `--tag` and `--dir` cannot be combined with it.
+  is needed, and `--kind`, `--tag` and `--dir` cannot be combined with it (a usage error).
 - `--limit <N>` (`10` with a query) — maximum number of hits.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
