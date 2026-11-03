@@ -787,6 +787,7 @@ mod tests {
             snippet: Some("snip".into()),
             symbols: vec![],
             memory,
+            origin: crate::model::Origin::Local,
             superseded_by: None,
         };
         assert_eq!(

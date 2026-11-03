@@ -1,6 +1,6 @@
 //! Manifest and index rendering: the page index (JSON and markdown), the llms-txt and AGENTS files, the graph export, and the per-page token estimate.
 
-use crate::model::{CodeItem, Edges, Entity, Graph};
+use crate::model::{CodeItem, Edges, Entity, Graph, Origin};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,6 +18,15 @@ pub struct ManifestEntry {
     pub updated: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub memory: bool,
+    /// `repo` or `local` on a memory note; absent on every other page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<&'static str>,
+    /// The last committer's name of a `repo` note, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    /// A `repo` note that differs from `HEAD`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub edited: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<String>,
     pub degree_in: usize,
@@ -83,6 +92,11 @@ pub fn build_manifest(
             };
             let (out, inc) = (list(|x| &x.outgoing), list(|x| &x.incoming));
             let (imports_out, imports_in) = (list(|x| &x.imports), list(|x| &x.imported_by));
+            let (origin, author, edited) = match &e.origin {
+                _ if !e.memory => (None, None, false),
+                Origin::Local => (Some("local"), None, false),
+                Origin::Repo { author, edited } => (Some("repo"), author.clone(), *edited),
+            };
             ManifestEntry {
                 id: id.clone(),
                 title: e.name.clone(),
@@ -94,6 +108,9 @@ pub fn build_manifest(
                 summary: e.summary.clone(),
                 updated: Some(e.updated.clone()).filter(|u| !u.is_empty()),
                 memory: e.memory,
+                origin,
+                author,
+                edited,
                 superseded_by: e.superseded_by.clone(),
                 degree_in: inc.len(),
                 degree_out: out.len(),

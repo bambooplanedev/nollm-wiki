@@ -200,7 +200,14 @@ fn compile_inner(
         .collect();
     let mut memory_files = Vec::new();
     let mut virtual_paths: BTreeMap<String, String> = BTreeMap::new();
+    // Origins of the repo folder's notes, by their final `source_path`.
+    let mut origins: BTreeMap<String, model::Origin> = BTreeMap::new();
     for (root, in_repo) in &roots {
+        let mut repo = if *in_repo {
+            memory::repo_origins(root)
+        } else {
+            BTreeMap::new()
+        };
         let w = walk::walk_memory(root, &|p| {
             registry.handles(p) && is_note(p) && !p.starts_with("logs/")
         });
@@ -212,7 +219,11 @@ fn compile_inner(
             .filter(|sf| !is_under(&sf.abs_path, output))
         {
             sf.rel_path = if *in_repo {
-                format!("{}/{}", memory::REPO_DIR, sf.rel_path)
+                let rel = format!("{}/{}", memory::REPO_DIR, sf.rel_path);
+                if let Some(o) = repo.remove(&sf.rel_path) {
+                    origins.insert(rel.clone(), o);
+                }
+                rel
             } else {
                 let abs = memory::display_path(&abs_root.join(&sf.rel_path));
                 virtual_paths.insert(abs.clone(), format!("memory/{}", sf.rel_path));
@@ -239,6 +250,7 @@ fn compile_inner(
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
         .map(|mut e| {
             e.memory = true;
+            e.origin = origins.get(&e.source_path).cloned().unwrap_or_default();
             e
         })
         .collect();

@@ -824,6 +824,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         updated: None,
         score: 1.0,
         memory: false,
+        origin: wiki::model::Origin::Local,
         superseded_by: None,
         snippet: None,
         symbols: vec![SymbolLine {
@@ -1269,6 +1270,7 @@ fn search_lines_shows_date_after_path() {
         snippet: None,
         symbols: vec![],
         memory: false,
+        origin: wiki::model::Origin::Local,
         superseded_by: None,
     };
     assert_eq!(
@@ -1895,4 +1897,103 @@ fn a_memory_note_earns_nothing_for_its_file_name() {
             .map(|h| h.score)
     };
     assert_eq!(score("elephant"), score("elephant elephant.md"));
+}
+
+fn git_as(dir: &std::path::Path, name: &str, args: &[&str]) {
+    let s = std::process::Command::new("git")
+        .args(["-c", &format!("user.name={name}"), "-c", "user.email=t@t"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(s.status.success(), "git {args:?}");
+}
+
+#[test]
+fn compile_stores_note_origin_in_index() {
+    let d = tempdir().unwrap();
+    let root = d.path();
+    let note = |t: &str| format!("---\ntitle: {t}\n---\n\nzebra\n");
+    common::write(root, "proj/a.rs", "pub fn a() {}\n");
+    common::write(root, "proj/.agents/memory/kept.md", &note("Kept"));
+    common::write(root, "agent/mine.md", &note("Mine"));
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "Jane Doe", &["add", "."]);
+    git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
+    common::write(root, "proj/.agents/memory/fresh.md", &note("Fresh"));
+    let out = root.join("out");
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &out, &opts).unwrap();
+    let entries = common::index_entries(&out);
+    let by_id = |id: &str| {
+        entries
+            .iter()
+            .find(|e| e["id"] == id)
+            .unwrap_or_else(|| panic!("no {id}"))
+            .clone()
+    };
+    let keys = |id: &str| {
+        let e = by_id(id);
+        ["origin", "author", "edited"].map(|k| e.get(k).cloned())
+    };
+    assert_eq!(
+        keys("kept"),
+        [
+            Some(serde_json::json!("repo")),
+            Some(serde_json::json!("Jane Doe")),
+            None
+        ]
+    );
+    assert_eq!(
+        keys("fresh"),
+        [Some(serde_json::json!("local")), None, None]
+    );
+    assert_eq!(keys("mine"), [Some(serde_json::json!("local")), None, None]);
+    assert_eq!(keys("a"), [None, None, None]);
+}
+
+#[test]
+fn old_index_guesses_origin_from_path() {
+    use wiki::model::Origin;
+    let d = tempdir().unwrap();
+    let (raw, agent, out) = (
+        d.path().join("raw"),
+        d.path().join("agent"),
+        d.path().join("out"),
+    );
+    common::write(
+        &raw,
+        ".agents/memory/x.md",
+        "---\ntitle: Repo note\n---\n\nzebra\n",
+    );
+    common::write(&agent, "y.md", "---\ntitle: Agent note\n---\n\nzebra\n");
+    let opts = CompileOptions {
+        memory: vec![agent],
+        ..Default::default()
+    };
+    compile(&raw, &out, &opts).unwrap();
+    let path = out.join("index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    for e in index["entries"].as_array_mut().unwrap() {
+        let e = e.as_object_mut().unwrap();
+        for k in ["origin", "author", "edited"] {
+            e.remove(k);
+        }
+    }
+    fs::write(&path, index.to_string()).unwrap();
+    let hits = Wiki::load(&out).unwrap().search("zebra", None, 10);
+    let origin = |id: &str| hits.iter().find(|h| h.id == id).unwrap().origin.clone();
+    assert_eq!(
+        origin("repo_note"),
+        Origin::Repo {
+            author: None,
+            edited: false
+        }
+    );
+    assert_eq!(origin("agent_note"), Origin::Local);
 }
