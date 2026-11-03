@@ -104,39 +104,50 @@ pub fn entry(out: &Path, id: &str) -> serde_json::Value {
         .unwrap_or_else(|| panic!("no index entry `{id}`"))
 }
 
-/// A memory conflict pair, compiled into `<tmp>/out`: Mallory Example's
-/// committed note says the deploy key moved to vault-b, the person's (Jane
-/// Doe's) local agent note says it lives in vault-a. Mirrors
-/// `conflict_fixture` in `tests/query.rs`.
-pub fn conflict_compiled() -> (TempDir, PathBuf) {
+/// A memory note file with `title`, `extra` front matter lines and `body`.
+pub fn note(title: &str, extra: &str, body: &str) -> String {
+    format!("---\ntitle: {title}\n{extra}---\n\n{body}\n")
+}
+
+/// A distinct email per author name.
+pub fn email_of(name: &str) -> String {
+    format!("{}@t", name.replace(' ', "."))
+}
+
+/// Run git in `dir` as author `name` (with `email_of(name)`), unsigned.
+pub fn git_as(dir: &Path, name: &str, args: &[&str]) {
+    let s = std::process::Command::new("git")
+        .args(["-c", &format!("user.name={name}")])
+        .args(["-c", &format!("user.email={}", email_of(name))])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(s.status.success(), "git {args:?}");
+}
+
+/// A temp git repo: `committed` `.agents/memory/<name>` notes committed by
+/// `author` (the repo's own `user.email` is Jane Doe's), then `local`
+/// agent-folder notes. Compiled into `<tmp>/out`; returns `(tmp, out)`.
+pub fn origin_compiled(
+    author: &str,
+    committed: &[(&str, String)],
+    local: &[(&str, String)],
+) -> (TempDir, PathBuf) {
     let d = tempfile::tempdir().unwrap();
     let root = d.path();
-    let note = |t: &str, b: &str| format!("---\ntitle: {t}\n---\n\n{b}\n");
     write(root, "proj/a.rs", "pub fn a() {}\n");
-    write(
-        root,
-        "proj/.agents/memory/rotation.md",
-        &note("Deploy key rotation", "deploy key changed to vault-b"),
-    );
-    write(
-        root,
-        "agent/deploy.md",
-        &note("Deploy key", "deploy key lives in vault-a"),
-    );
-    let git = |args: &[&str]| {
-        let s = std::process::Command::new("git")
-            .args(["-c", "user.name=Mallory Example"])
-            .args(["-c", "user.email=mallory@t", "-c", "commit.gpgsign=false"])
-            .args(args)
-            .current_dir(root.join("proj"))
-            .output()
-            .unwrap();
-        assert!(s.status.success(), "git {args:?}");
-    };
-    git(&["init", "-q"]);
-    git(&["config", "user.email", "jane@t"]);
-    git(&["add", "."]);
-    git(&["commit", "-qm", "x"]);
+    for (n, t) in committed {
+        write(root, &format!("proj/.agents/memory/{n}.md"), t);
+    }
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "t", &["config", "user.email", &email_of("Jane Doe")]);
+    git_as(root, author, &["add", "."]);
+    git_as(root, author, &["commit", "-qm", "x"]);
+    for (n, t) in local {
+        write(root, &format!("agent/{n}.md"), t);
+    }
     let opts = CompileOptions {
         memory: vec![root.join("agent")],
         ..Default::default()
@@ -144,4 +155,28 @@ pub fn conflict_compiled() -> (TempDir, PathBuf) {
     let out = root.join("out");
     compile(&root.join("proj"), &out, &opts).unwrap();
     (d, out)
+}
+
+/// Memory notes as (file stem, text).
+pub type Notes = Vec<(&'static str, String)>;
+
+/// A co-author's committed note that says the deploy key moved, and the
+/// person's local note that says where it lives: `(committed, local)`.
+pub fn conflict_notes() -> (Notes, Notes) {
+    (
+        vec![(
+            "rotation",
+            note("Deploy key rotation", "", "deploy key changed to vault-b"),
+        )],
+        vec![(
+            "deploy",
+            note("Deploy key", "", "deploy key lives in vault-a"),
+        )],
+    )
+}
+
+/// `conflict_notes` committed by Mallory Example, compiled into `<tmp>/out`.
+pub fn conflict_compiled() -> (TempDir, PathBuf) {
+    let (committed, local) = conflict_notes();
+    origin_compiled("Mallory Example", &committed, &local)
 }

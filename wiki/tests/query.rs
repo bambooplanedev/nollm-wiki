@@ -3,6 +3,7 @@
 use std::fs;
 
 mod common;
+use common::{email_of, git_as, note};
 use tempfile::tempdir;
 use wiki::model::{KindFilter, SourceKind};
 use wiki::query::{tag_filter, PackBudget, Wiki};
@@ -1651,10 +1652,6 @@ fn index_json_without_memory_still_loads() {
     assert!(w.search("zebra", None, 10).iter().all(|h| !h.memory));
 }
 
-fn note(title: &str, extra: &str, body: &str) -> String {
-    format!("---\ntitle: {title}\n{extra}---\n\n{body}\n")
-}
-
 fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
     common::index_entries(&d.path().join("out"))
         .iter()
@@ -1901,23 +1898,6 @@ fn a_memory_note_earns_nothing_for_its_file_name() {
     assert_eq!(score("elephant"), score("elephant elephant.md"));
 }
 
-/// A distinct email per author name.
-fn email_of(name: &str) -> String {
-    format!("{}@t", name.replace(' ', "."))
-}
-
-fn git_as(dir: &std::path::Path, name: &str, args: &[&str]) {
-    let s = std::process::Command::new("git")
-        .args(["-c", &format!("user.name={name}")])
-        .args(["-c", &format!("user.email={}", email_of(name))])
-        .args(["-c", "commit.gpgsign=false"])
-        .args(args)
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    assert!(s.status.success(), "git {args:?}");
-}
-
 #[test]
 fn compile_stores_note_origin_in_index() {
     let d = tempdir().unwrap();
@@ -2021,33 +2001,14 @@ fn origin_fixture(
     origin_fixture_by("Jane Doe", committed, local)
 }
 
-/// `origin_fixture` with the notes committed by `author`; the repo's own
-/// `user.email` is Jane Doe's.
+/// `common::origin_compiled`, loaded.
 fn origin_fixture_by(
     author: &str,
     committed: &[(&str, String)],
     local: &[(&str, String)],
 ) -> (tempfile::TempDir, Wiki) {
-    let d = tempdir().unwrap();
-    let root = d.path();
-    common::write(root, "proj/a.rs", "pub fn a() {}\n");
-    for (n, t) in committed {
-        common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
-    }
-    git_as(root, "t", &["init", "-q"]);
-    git_as(root, "t", &["config", "user.email", &email_of("Jane Doe")]);
-    git_as(root, author, &["add", "."]);
-    git_as(root, author, &["commit", "-qm", "x"]);
-    for (n, t) in local {
-        common::write(root, &format!("agent/{n}.md"), t);
-    }
-    let opts = CompileOptions {
-        memory: vec![root.join("agent")],
-        ..Default::default()
-    };
-    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
-    let w = Wiki::load(&root.join("out")).unwrap();
-    (d, w)
+    let (d, out) = common::origin_compiled(author, committed, local);
+    (d, Wiki::load(&out).unwrap())
 }
 
 /// A local note and a co-author's committed note on the same word; the
@@ -2122,22 +2083,11 @@ fn committed_note_still_supersedes_a_committed_one() {
     assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
 }
 
-/// A co-author's note that says the deploy key moved, and the person's
-/// local note that says where it lives, plus `extra` local notes.
+/// `common::conflict_notes`, plus `extra` local notes, loaded.
 fn conflict_fixture(extra: &[(&str, String)]) -> (tempfile::TempDir, Wiki) {
-    let mut local = vec![(
-        "deploy",
-        note("Deploy key", "", "deploy key lives in vault-a"),
-    )];
+    let (committed, mut local) = common::conflict_notes();
     local.extend(extra.iter().cloned());
-    origin_fixture_by(
-        "Mallory Example",
-        &[(
-            "rotation",
-            note("Deploy key rotation", "", "deploy key changed to vault-b"),
-        )],
-        &local,
-    )
+    origin_fixture_by("Mallory Example", &committed, &local)
 }
 
 const SETTLE: &str =

@@ -422,9 +422,10 @@ fn main() -> Result<()> {
             for (id, tokens) in &r.large {
                 println!("  large: {id} ({tokens} tokens)");
             }
+            // Hand-written pages without an index still lint; no index, no pairs.
             let conflicts = Wiki::load(&dir)
-                .context("load wiki")?
-                .memory_conflict_rows();
+                .map(|w| w.memory_conflict_rows())
+                .unwrap_or_default();
             println!("Memory conflicts: {}", conflicts.len());
             for [xp, xl, yp, yl] in &conflicts {
                 println!("  {xp} ({xl}) <-> {yp} ({yl})");

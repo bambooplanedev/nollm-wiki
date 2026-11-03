@@ -307,6 +307,21 @@ fn lint_cli_reports_a_page_too_large_for_a_neighbors_pack() {
 }
 
 #[test]
+fn lint_runs_without_an_index() {
+    // Hand-written pages, no index.json: the page checks still run and
+    // there are no memory pairs to report.
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("alpha.md"), "# Alpha\n\nNo links.\n").unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["lint", "--dir", dir.path().to_str().unwrap()])
+        .assert()
+        .code(0)
+        .stdout(contains("Linted 1 pages"))
+        .stdout(contains("Memory conflicts: 0\n"));
+}
+
+#[test]
 fn lint_lists_memory_conflicts() {
     let (_d, out) = common::conflict_compiled();
     let hits = wiki::query::Wiki::load(&out)
