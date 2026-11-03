@@ -1915,6 +1915,8 @@ fn compile_stores_note_origin_in_index() {
         ..Default::default()
     };
     compile(&root.join("proj"), &out, &opts).unwrap();
+    let raw = std::fs::read_to_string(out.join("index.json")).unwrap();
+    assert!(!raw.contains(&email_of("Jane Doe")), "email in index.json");
     let entries = common::index_entries(&out);
     let by_id = |id: &str| {
         entries
@@ -2192,6 +2194,7 @@ fn no_pair_for_own_or_superseded() {
 fn search_has_no_conflict_line() {
     let (_d, w) = conflict_fixture(&[]);
     let out = wiki::serve::search_lines(&w.search("deploy key", None, 10));
+    assert!(out.contains("memory (local):"), "{out}");
     assert!(!out.contains("conflicts with"), "{out}");
 }
 
@@ -2199,6 +2202,7 @@ fn search_has_no_conflict_line() {
 fn hint_has_no_conflict_line() {
     let (_d, w) = conflict_fixture(&[]);
     let hint = wiki::hint::hint_lines(&w, "deploy key");
+    assert!(hint.contains("memory (local):"), "{hint}");
     assert!(!hint.contains("conflicts with"), "{hint}");
 }
 
@@ -2207,7 +2211,9 @@ fn search_json_has_no_conflicts() {
     let (_d, w) = conflict_fixture(&[]);
     let json: serde_json::Value =
         serde_json::from_str(&wiki::serve::search_json(w.search("deploy key", None, 10))).unwrap();
-    for h in json.as_array().unwrap() {
+    let hits = json.as_array().unwrap();
+    assert!(hits.iter().any(|h| h["memory"] == true), "{json}");
+    for h in hits {
         assert_eq!(h.get("conflicts"), None, "{h}");
     }
 }

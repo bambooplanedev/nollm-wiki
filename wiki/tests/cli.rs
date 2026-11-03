@@ -337,7 +337,8 @@ fn lint_lists_memory_conflicts() {
             "Memory conflicts: 1\n  {} (repo, Mallory Example) <-> {} (local)\n",
             path("deploy_key_rotation"),
             path("deploy_key")
-        )));
+        )))
+        .stdout(contains(common::email_of("Mallory Example")).not());
 }
 
 #[test]

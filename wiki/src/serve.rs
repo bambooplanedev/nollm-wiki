@@ -443,19 +443,21 @@ impl WikiServer {
     async fn lint(&self) -> Result<CallToolResult, McpError> {
         let (wiki, stale) = self.state.snapshot().await;
         let ws = Arc::clone(&self.state);
-        let pages = tokio::task::spawn_blocking(move || {
-            crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()))
+        let (pages, conflicts) = tokio::task::spawn_blocking(move || {
+            let pages = crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()));
+            (pages, wiki.memory_conflict_rows())
         })
         .await
-        .expect("lint read panicked")
-        .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
+        .expect("lint read panicked");
+        let pages =
+            pages.map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
         let r = lint(&pages);
         let report = serde_json::json!({
             "total_pages": r.total_pages,
             "broken_links": r.broken_links,
             "orphans": r.orphans,
             "large": r.large,
-            "memory_conflicts": wiki.memory_conflict_rows(),
+            "memory_conflicts": conflicts,
         });
         Ok(with_stale(
             text_result(Ok(report.to_string())),

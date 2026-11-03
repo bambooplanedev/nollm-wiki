@@ -117,8 +117,8 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 pub(crate) const MEMORY_TAIL: usize = 2;
 /// Distinct words (at gate length) a co-author's note's title and summary
 /// must share with a more trusted note for the two to pair as a possible
-/// conflict (`Wiki::memory_conflicts`). 3, not 2 (2026-11-03 trust runs):
-/// the planted note still pairs 10 of 10, with the fewest pairs.
+/// conflict (`Wiki::memory_conflicts`). 3 is the strictest value that still
+/// pairs all 10 planted notes (2026-11-03).
 pub(crate) const CONFLICT_MIN_WORDS: usize = 3;
 /// Default gate length: a query word this long naming a note lets it in.
 /// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
@@ -490,8 +490,6 @@ pub struct Wiki {
     symbol_fields: BTreeMap<String, SymbolFields>,
     /// Each function's callers by its `path:start-end` (`callers_index`).
     callers: BTreeMap<String, Vec<Caller>>,
-    /// `memory_conflicts`, computed on first use.
-    conflicts: std::sync::OnceLock<Vec<(String, String)>>,
 }
 
 impl Wiki {
@@ -540,7 +538,6 @@ impl Wiki {
             items,
             symbol_fields,
             callers,
-            conflicts: std::sync::OnceLock::new(),
         })
     }
 
@@ -934,34 +931,32 @@ impl Wiki {
     }
 
     /// Memory note pairs that may disagree, as (id of a note with trust 0.5,
-    /// id of a more trusted note), sorted; computed once per loaded wiki.
+    /// id of a more trusted note), sorted; for `lint` only.
     /// X's title and summary, read as a query, must name Y (`names_page` at
     /// `gate_len`), and at least `CONFLICT_MIN_WORDS` distinct words of it
     /// must hit Y's title, aliases or summary. Superseded notes are out.
-    pub fn memory_conflicts(&self) -> &[(String, String)] {
-        self.conflicts.get_or_init(|| {
-            let n = gate_len();
-            let notes: Vec<_> = self
-                .entries
-                .values()
-                .filter(|e| e.memory && e.superseded_by.is_none())
-                .map(|e| (e, e.origin().trust(), Self::namer(e, n)))
-                .collect();
-            let mut pairs = Vec::new();
-            for (x, tx, _) in notes.iter().filter(|(e, ..)| e.origin().is_others()) {
-                let q = format!("{} {}", x.title, x.summary.as_deref().unwrap_or(""));
-                let (tokens, words) = Self::query_tokens(&q);
-                for (y, _, names) in notes.iter().filter(|(y, ty, _)| ty > tx && y.id != x.id) {
-                    if tokens.iter().any(|t| names(t))
-                        && words.iter().filter(|w| names(w)).count() >= CONFLICT_MIN_WORDS
-                    {
-                        pairs.push((x.id.clone(), y.id.clone()));
-                    }
+    pub fn memory_conflicts(&self) -> Vec<(String, String)> {
+        let n = gate_len();
+        let notes: Vec<_> = self
+            .entries
+            .values()
+            .filter(|e| e.memory && e.superseded_by.is_none())
+            .map(|e| (e, e.origin().trust(), Self::namer(e, n)))
+            .collect();
+        let mut pairs = Vec::new();
+        for (x, tx, _) in notes.iter().filter(|(e, ..)| e.origin().is_others()) {
+            let q = format!("{} {}", x.title, x.summary.as_deref().unwrap_or(""));
+            let (tokens, words) = Self::query_tokens(&q);
+            for (y, _, names) in notes.iter().filter(|(_, ty, _)| ty > tx) {
+                if tokens.iter().any(|t| names(t))
+                    && words.iter().filter(|w| names(w)).count() >= CONFLICT_MIN_WORDS
+                {
+                    pairs.push((x.id.clone(), y.id.clone()));
                 }
             }
-            pairs.sort();
-            pairs
-        })
+        }
+        pairs.sort();
+        pairs
     }
 
     /// `memory_conflicts` as `[path, label, path, label]` rows, for `lint`.

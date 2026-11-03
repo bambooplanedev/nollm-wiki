@@ -326,6 +326,12 @@ per question is noise-level: treat single results as anecdotes.
 - Memory conflict pairs are word overlap, not meaning: two notes on one topic
   may pair without disagreeing, and a disagreement in different words may
   not pair.
+- An index.json written before origin and "mine" were stored reads every
+  relative note path as a co-author's note until the next compile: lint may
+  list your own notes and the tail puts them last.
+- "You" reads `git config user.email` only; an `author.email` setting or a
+  `GIT_AUTHOR_EMAIL` override is not recognised.
+- Lint lists every memory conflict pair; there is no cap.
 - Trust order and lint pairs only reach agents through the wiki: an agent
   that greps `.agents/memory` directly still reads a co-author's note the
   wiki ranks low, with no pair beside it.
