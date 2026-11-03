@@ -108,8 +108,8 @@ In the project you want agents to navigate:
 
 Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
 `.wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex: `wiki setup --agent
-cursor,codex`; other clients: see [Agents](#agents).
+and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex:
+`wiki setup --agent cursor,codex`; other clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
 
@@ -249,9 +249,9 @@ By hand, `.pi/mcp.json` in the project:
 ```
 
 and the [navigation rules](#navigation-rules) in `.agents/skills/wiki-navigation/SKILL.md`, under a
-front matter with `name: wiki-navigation` and a `description:` that says when to use it (`wiki
-setup` writes "Find where something is or how it works in this project's code. Use before grep,
-find or reading whole files, whenever the task needs a function, type, handler or module
+front matter with `name: wiki-navigation` and a `description:` that says when to use it
+(`wiki setup` writes "Find where something is or how it works in this project's code. Use before
+grep, find or reading whole files, whenever the task needs a function, type, handler or module
 location."); pi finds a skill by them.
 
 Use only the project's server: if `~/.pi/agent/mcp.json` also has a wiki server, under any name,
@@ -435,17 +435,17 @@ count project pages only.
 
 Each note row says where the note came from: `memory (local): /abs/x.md — summary` for a note in an
 agent folder, a `--memory` folder or an `.agents/memory` file git does not track (or no git), and
-`memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the
-author name of the file's last commit (never the email; left out when git cannot tell), `, you` when
-that commit's author email is your `git config user.email`, ignoring case (`memory (repo, Jane Doe,
-you): …`; no git or no email: nobody is you; the email is only compared, never stored or shown) and
-`, edited` when the work tree differs from that commit. JSON hits carry `"memory": true`, `"origin":
-"local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and `"edited": true` when
-edited. The origin is read when the wiki is compiled, by `wiki compile` and by each recompile of
-`serve --source`; answering a `search` or a hook never calls git. Notes are ordered by trust, the
-score order kept among equals: local notes first, then your own or edited committed notes, then the
-rest; `search` lists the two most trusted notes that pass, and the hook's one memory line is the
-most trusted.
+`memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the author name
+of the file's last commit (never the email; left out when git cannot tell), `, you` when that
+commit's author email is your `git config user.email`, ignoring case
+(`memory (repo, Jane Doe, you): …`; no git or no email: nobody is you; the email is only compared,
+never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
+`"memory": true`, `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your
+notes and `"edited": true` when edited. The origin is read when the wiki is compiled, by
+`wiki compile` and by each recompile of `serve --source`; answering a `search` or a hook never calls
+git. Notes are ordered by trust, the score order kept among equals: local notes first, then your own
+or edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
+the hook's one memory line is the most trusted.
 
 A committed note by someone else may disagree with a more trusted one. When its title and summary,
 read as a query, name a more trusted note and share at least three words with it, the two pair.
@@ -521,10 +521,10 @@ and never recompile.
 Without `--no-ignore`, a folder named `superpowers` (at any depth) and vendored code (`third_party`,
 `third-party`, `vendor`, `vendored`, `node_modules`) are not walked: memory notes carry what those
 process artefacts concluded, and other people's code crowds out the project's own. After a run,
-`compile` prints how many files it left out, for example `Skipped: superpowers 2280, third_party 97,
-ignored 16800`: one count per folder name, and `ignored` for the `.gitignore`/`.ignore`/hidden rules.
-A file counts once, for its outermost skipped folder; `.git`, `<OUTPUT>` and the memory folders are not
-counted, and `--no-ignore` prints no such line.
+`compile` prints how many files it left out, for example
+`Skipped: superpowers 2280, third_party 97, ignored 16800`: one count per folder name, and `ignored`
+for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermost skipped folder;
+`.git`, `<OUTPUT>` and the memory folders are not counted, and `--no-ignore` prints no such line.
 - `--emit-json` — also write `graph.json` (node/edge graph).
 - `--project <NAME>` (the input path's last component; `wiki` when it has none, as for `.`) —
   project name written to `index.json`, `llms.txt` and `AGENTS.md`. Without it, `compile .` is
@@ -721,23 +721,23 @@ A code page's body is its source; its symbols and line ranges are in `items.json
 
 ### What agents read
 
-- - **`index.json`** — `{ project, root, entries: [...] }`, where `root` is the compiled directory's
+- **`index.json`** — `{ project, root, entries: [...] }`, where `root` is the compiled directory's
   own name. Each entry has `id`, `title`, `kind`, `aliases`, `tags`, `updated` (only when the page
   has a date), `path`, `page`, `summary` (`null` when none could be derived), `degree_in`,
   `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`, `neighbors_in`, `imports_out`,
   `imports_in` (the import edges among them), `defined` (top-level definition names) and `methods`.
   A memory note's entry adds `memory: true`, `origin` (`local` or `repo`) and, when they apply,
   `author`, `mine`, `edited` and `superseded_by`.
-- - **`items.json`** — the code map, kept out of `index.json` so the catalog stays small. One object
+- **`items.json`** — the code map, kept out of `index.json` so the catalog stays small. One object
   keyed by page id; each value lists the page's items with `kind`, `name`, `owner`, `signature`,
   `start_line`/`end_line`, `doc`, `doc_text` (the whole doc on one line, when longer than `doc`;
   scored, never shown), `public`, `test` (test code), `twin` for a paired C++ declaration or
   definition, and for a function `calls` (the `path:start-end` of the functions it calls) and
   `call_lines` (for each, the lines that call it). A shell file's calls outside any function hang
   off a `top_level` item.
-- - **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under `##
-  Optional`.
-- - **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
+- **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under
+  `## Optional`.
+- **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
   each page's `## Notes` section is preserved across recompiles.
 
 ### Obsidian and Quartz
