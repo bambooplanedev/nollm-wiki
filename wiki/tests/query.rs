@@ -1654,6 +1654,10 @@ fn note(title: &str, extra: &str, body: &str) -> String {
 }
 
 fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
+    superseded_by_in(d)
+}
+
+fn superseded_by_in(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
     common::index_entries(&d.path().join("out"))
         .iter()
         .map(|e| {
@@ -1996,4 +2000,69 @@ fn old_index_guesses_origin_from_path() {
         }
     );
     assert_eq!(origin("agent_note"), Origin::Local);
+}
+
+/// A temp git repo: committed `.agents/memory/<committed>` notes, then `local` agent-folder notes.
+/// Compiled into `<tmp>/out`; returns the loaded wiki.
+fn origin_fixture(
+    committed: &[(&str, String)],
+    local: &[(&str, String)],
+) -> (tempfile::TempDir, Wiki) {
+    let d = tempdir().unwrap();
+    let root = d.path();
+    common::write(root, "proj/a.rs", "pub fn a() {}\n");
+    for (n, t) in committed {
+        common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
+    }
+    git_as(root, "t", &["init", "-q"]);
+    git_as(root, "Jane Doe", &["add", "."]);
+    git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
+    for (n, t) in local {
+        common::write(root, &format!("agent/{n}.md"), t);
+    }
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
+    let w = Wiki::load(&root.join("out")).unwrap();
+    (d, w)
+}
+
+#[test]
+fn committed_note_cannot_supersede_a_local_note() {
+    let (d, w) = origin_fixture(
+        &[("x", note("New", "supersedes: Deploy key\n", "rotation"))],
+        &[("deploy", note("Deploy key", "", "rotation"))],
+    );
+    assert_eq!(superseded_by_in(&d)["deploy_key"], None);
+    let ids: Vec<_> = w
+        .search("rotation", None, 10)
+        .into_iter()
+        .map(|h| h.id)
+        .collect();
+    assert!(ids.contains(&"deploy_key".to_string()), "{ids:?}");
+    let hint = wiki::hint::hint_lines(&w, "rotation of the Deploy key needs checking");
+    assert!(hint.contains("deploy"), "{hint}");
+}
+
+#[test]
+fn local_note_still_supersedes_a_committed_one() {
+    let (d, _w) = origin_fixture(
+        &[("old", note("Old", "", "rotation"))],
+        &[("new", note("New", "supersedes: Old\n", "rotation"))],
+    );
+    assert_eq!(superseded_by_in(&d)["old"].as_deref(), Some("new"));
+}
+
+#[test]
+fn committed_note_still_supersedes_a_committed_one() {
+    let (d, _w) = origin_fixture(
+        &[
+            ("old", note("Old", "", "rotation")),
+            ("new", note("New", "supersedes: Old\n", "rotation")),
+        ],
+        &[],
+    );
+    assert_eq!(superseded_by_in(&d)["old"].as_deref(), Some("new"));
 }

@@ -443,6 +443,7 @@ A note can retire an older one with `supersedes:` in its front matter (titles, a
 `aliases:` syntax). The older note then never appears after the code hits and `wiki hint` never shows it; a tag listing prints ` (superseded by <id>)` after
 its line (`"superseded_by"` in JSON). Only memory notes are matched,
 a name that matches nothing is ignored, and with several superseders the smallest id is shown.
+A committed note never retires an uncommitted one.
 
 Front matter on any Markdown page: `title:` is the title (else the first `# heading`, else the file
 name) and `description:` is the one-line summary that memory rows print and the gate matches on;

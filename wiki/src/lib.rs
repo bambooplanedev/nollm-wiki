@@ -25,7 +25,7 @@ pub mod watch;
 use crate::formats::code::{is_shell, module_stem, source_rank};
 use crate::formats::Registry;
 use crate::model::{
-    basename, slugify, title_case, title_from_slug, Entity, LintReport, SourceKind,
+    basename, slugify, title_case, title_from_slug, Entity, LintReport, Origin, SourceKind,
 };
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
@@ -868,6 +868,9 @@ fn resolve_supersedes(entities: &mut BTreeMap<String, Entity>) {
             let target = entities.iter().find(|(tid, t)| {
                 t.memory
                     && *tid != id
+                    // A committed note never retires an uncommitted one.
+                    && !(matches!(e.origin, Origin::Repo { .. })
+                        && t.origin == Origin::Local)
                     && (**tid == slug
                         || t.name.to_lowercase() == lower
                         || t.aliases.iter().any(|a| a.to_lowercase() == lower))

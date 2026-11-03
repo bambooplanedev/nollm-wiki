@@ -579,6 +579,22 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn origin_label_covers_every_form() {
+        let repo = |author: Option<&str>, edited| Origin::Repo {
+            author: author.map(String::from),
+            edited,
+        };
+        assert_eq!(Origin::Local.label(), "local");
+        assert_eq!(repo(None, false).label(), "repo");
+        assert_eq!(repo(Some("Jane Doe"), false).label(), "repo, Jane Doe");
+        assert_eq!(repo(None, true).label(), "repo, edited");
+        assert_eq!(
+            repo(Some("Jane Doe"), true).label(),
+            "repo, Jane Doe, edited"
+        );
+    }
+
+    #[test]
     fn code_item_kind_names_match_serde() {
         for k in [
             CodeItemKind::Fn,
