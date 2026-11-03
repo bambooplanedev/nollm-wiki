@@ -398,8 +398,8 @@ fn main() -> Result<()> {
             }
         }
         Command::Lint { dir } => {
-            let pages =
-                wiki::lint::load_compiled_pages(&wiki_dir(dir)).context("read output dir")?;
+            let dir = wiki_dir(dir);
+            let pages = wiki::lint::load_compiled_pages(&dir).context("read output dir")?;
             let r = wiki::lint::lint(&pages);
             println!(
                 "Linted {} pages: {} broken links, {} orphans, {} large",
@@ -421,6 +421,13 @@ fn main() -> Result<()> {
             }
             for (id, tokens) in &r.large {
                 println!("  large: {id} ({tokens} tokens)");
+            }
+            let conflicts = Wiki::load(&dir)
+                .context("load wiki")?
+                .memory_conflict_rows();
+            println!("Memory conflicts: {}", conflicts.len());
+            for [xp, xl, yp, yl] in &conflicts {
+                println!("  {xp} ({xl}) <-> {yp} ({yl})");
             }
             // Broken links fail the process so `lint` can gate a build (the
             // self-host script does). Orphans are advice, not a defect: a

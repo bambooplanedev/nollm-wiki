@@ -968,6 +968,21 @@ impl Wiki {
         })
     }
 
+    /// `memory_conflicts` as `[path, label, path, label]` rows, for `lint`.
+    pub fn memory_conflict_rows(&self) -> Vec<[String; 4]> {
+        let side = |id: &String| {
+            let e = &self.entries[id];
+            (e.path.clone(), e.origin().label())
+        };
+        self.memory_conflicts()
+            .iter()
+            .map(|(x, y)| {
+                let ((xp, xl), (yp, yl)) = (side(x), side(y));
+                [xp, xl, yp, yl]
+            })
+            .collect()
+    }
+
     /// The path and origin of every note paired with note `id`, either side.
     pub(crate) fn conflicts_of(&self, id: &str) -> Vec<(String, Origin)> {
         self.memory_conflicts()

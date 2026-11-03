@@ -438,10 +438,10 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
+        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]], memory_conflicts: [[path, origin, path, origin]]} (memory note pairs that may disagree; settle them with the user)."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
-        let (_, stale) = self.state.snapshot().await;
+        let (wiki, stale) = self.state.snapshot().await;
         let ws = Arc::clone(&self.state);
         let pages = tokio::task::spawn_blocking(move || {
             crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()))
@@ -455,6 +455,7 @@ impl WikiServer {
             "broken_links": r.broken_links,
             "orphans": r.orphans,
             "large": r.large,
+            "memory_conflicts": wiki.memory_conflict_rows(),
         });
         Ok(with_stale(
             text_result(Ok(report.to_string())),

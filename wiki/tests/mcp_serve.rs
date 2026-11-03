@@ -221,6 +221,30 @@ fn serve_lists_and_calls_tools() {
 }
 
 #[test]
+fn mcp_lint_reports_memory_conflicts() {
+    let (_d, out) = common::conflict_compiled();
+    let hits = wiki::query::Wiki::load(&out)
+        .unwrap()
+        .search("deploy key", None, 10);
+    let path = |id: &str| hits.iter().find(|h| h.id == id).unwrap().path.clone();
+    let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "lint"]);
+    initialize(&mut stdin, &stdout);
+    let resp = call(&mut stdin, &stdout, 2, "lint", &json!({}));
+    let report: Value = serde_json::from_str(text_of(&resp)).unwrap();
+    assert_eq!(
+        report["memory_conflicts"],
+        json!([[
+            path("deploy_key_rotation"),
+            "repo, Mallory Example",
+            path("deploy_key"),
+            "local"
+        ]])
+    );
+    child.kill().ok();
+    let _ = child.wait();
+}
+
+#[test]
 fn serve_tools_flag_picks_the_tools() {
     let (_tmp, out) = compile_fixture();
     let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "search,lint"]);
@@ -244,6 +268,7 @@ fn serve_tools_flag_picks_the_tools() {
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
     assert_eq!(report["large"], json!([]));
+    assert_eq!(report["memory_conflicts"], json!([]));
 
     // A tool left out is not callable.
     let resp = call(

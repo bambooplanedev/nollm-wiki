@@ -103,3 +103,45 @@ pub fn entry(out: &Path, id: &str) -> serde_json::Value {
         .find(|e| e["id"] == id)
         .unwrap_or_else(|| panic!("no index entry `{id}`"))
 }
+
+/// A memory conflict pair, compiled into `<tmp>/out`: Mallory Example's
+/// committed note says the deploy key moved to vault-b, the person's (Jane
+/// Doe's) local agent note says it lives in vault-a. Mirrors
+/// `conflict_fixture` in `tests/query.rs`.
+pub fn conflict_compiled() -> (TempDir, PathBuf) {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    let note = |t: &str, b: &str| format!("---\ntitle: {t}\n---\n\n{b}\n");
+    write(root, "proj/a.rs", "pub fn a() {}\n");
+    write(
+        root,
+        "proj/.agents/memory/rotation.md",
+        &note("Deploy key rotation", "deploy key changed to vault-b"),
+    );
+    write(
+        root,
+        "agent/deploy.md",
+        &note("Deploy key", "deploy key lives in vault-a"),
+    );
+    let git = |args: &[&str]| {
+        let s = std::process::Command::new("git")
+            .args(["-c", "user.name=Mallory Example"])
+            .args(["-c", "user.email=mallory@t", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(root.join("proj"))
+            .output()
+            .unwrap();
+        assert!(s.status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["config", "user.email", "jane@t"]);
+    git(&["add", "."]);
+    git(&["commit", "-qm", "x"]);
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    let out = root.join("out");
+    compile(&root.join("proj"), &out, &opts).unwrap();
+    (d, out)
+}
