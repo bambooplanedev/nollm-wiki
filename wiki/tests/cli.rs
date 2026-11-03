@@ -510,6 +510,46 @@ fn compile_memory_dir_that_does_not_exist_warns_and_continues() {
 }
 
 #[test]
+fn compile_memory_none_skips_repo_memory() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(input.join(".agents/memory")).unwrap();
+    fs::write(input.join(".agents/memory/n.md"), "# N\n\nquokkanote\n").unwrap();
+    fs::write(input.join("doc.md"), "# Doc\n\nbody\n").unwrap();
+    let out = dir.path().join("out");
+    // `--no-ignore` lets the main walk reach `.agents`: the note must not
+    // come back from there as a plain page either.
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+        .args(["--memory", "none", "--no-ignore"])
+        .assert()
+        .success()
+        .stderr(contains("no such memory folder").not());
+    let entries = common::index_entries(&out);
+    assert!(entries.iter().any(|e| e["path"] == "doc.md"), "{entries:?}");
+    assert!(
+        !entries
+            .iter()
+            .any(|e| e["memory"] == true || e["path"].as_str().unwrap_or("").contains(".agents")),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn compile_memory_none_with_folder_is_usage_error() {
+    let dir = tempdir().unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", dir.path().to_str().unwrap()])
+        .arg(dir.path().join("out"))
+        .args(["--memory", "none", "--memory", dir.path().to_str().unwrap()])
+        .assert()
+        .code(2)
+        .stderr(contains("--memory none cannot be combined with a folder"));
+}
+
+#[test]
 fn serve_memory_requires_source() {
     Command::cargo_bin("wiki")
         .unwrap()

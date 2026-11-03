@@ -351,11 +351,14 @@ that does not, such as Claude Desktop, give the project's absolute path.
   `out`) — the compiled wiki to serve.
 - `--tools <list>` (`search,page,neighbors,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
-- `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off the discovery of the agents'
-  memory folders and a `DIR` replaces it (`none` with a `DIR` is a usage error); a `DIR` that does
+- `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off all memory, the agents'
+  folders and `.agents/memory` alike, and a `DIR` replaces the discovery of the agents' folders
+  (`none` with a `DIR` is a usage error); a `DIR` that does
   not exist at start is picked up when it appears if its parent exists (the parent is watched
   recursively; a missing parent needs a restart). On Linux the parent watch costs one inotify watch
-  per directory under it, so pass an existing folder when the parent is large. `.agents/memory` is always compiled.
+  per directory under it, so pass an existing folder when the parent is large. `.agents/memory` is
+  compiled unless `--memory none` is given. Behaviour change: before this release `none` turned off only
+  the discovery and `.agents/memory` was still compiled.
 
 | Tool | Parameters | Returns |
 |---|---|---|
@@ -401,7 +404,7 @@ Agents keep notes as Markdown files. The wiki compiles the folders they write to
 
 - **`.agents/memory/`** in the project. `wiki setup` creates it in both scopes; in `--scope local`
   it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `wiki compile`
-  always includes it.
+  includes it unless `--memory none` is given.
 - **The agents' own folders.** `serve --source` and `wiki setup` look for them. Today that is Claude
   Code's `<config dir>/projects/<slug>/memory/`, where the config dir is `CLAUDE_CONFIG_DIR` or
   `~/.claude` and `<slug>` is the path of the repo's main checkout with every UTF-16 unit that is not
@@ -409,8 +412,9 @@ Agents keep notes as Markdown files. The wiki compiles the folders they write to
   outside the BMP two), cut at 200 units with a hash, as Claude Code does. A
   worktree or a subdirectory therefore shares the folder of its main checkout. A `logs/` folder
   inside it is skipped, and so is `MEMORY.md`.
-- **`--memory DIR`** (repeatable) for any other folder. On `serve`, `--memory none` turns the
-  discovery off and `--memory DIR` replaces it.
+- **`--memory DIR`** (repeatable) for any other folder. On `serve`, `--memory DIR` replaces the
+  discovery. On `compile` and `serve`, `--memory none` turns off all memory, `.agents/memory`
+  included (a behaviour change: it used to keep `.agents/memory`).
 
 A plain `wiki compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
 agents' folders, so a published site never carries private notes. So a plain `wiki compile . .wiki`
@@ -510,8 +514,9 @@ counted, and `--no-ignore` prints no such line.
 - `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
   `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project
   differently.
-- `--memory <DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
-  `<INPUT>/.agents/memory` is always compiled; `--memory local` is an error.
+- `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
+  `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
+  included (`none` with a `DIR` is a usage error); `--memory local` is an error.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an earlier version, or sources
 renamed since), `compile` warns on stderr and leaves them in place: delete them or recompile into a

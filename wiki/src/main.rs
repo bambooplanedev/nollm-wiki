@@ -40,8 +40,8 @@ enum Command {
         #[arg(long)]
         project: Option<String>,
         /// Also compile an agent memory folder as flagged memory pages
-        /// (repeatable).
-        #[arg(long, value_name = "DIR")]
+        /// (repeatable), or `none` for no memory at all, `.agents/memory` included.
+        #[arg(long, value_name = "none|DIR")]
         memory: Vec<String>,
     },
     Neighbors {
@@ -125,7 +125,8 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
         /// With `--source`, an agent memory folder to include (repeatable), or
-        /// `none` for no external folder; without it, Claude Code's memory folder of the project.
+        /// `none` for no memory at all, `.agents/memory` included; without it,
+        /// Claude Code's memory folder of the project.
         #[arg(long, value_name = "none|DIR", requires = "source")]
         memory: Vec<String>,
     },
@@ -204,6 +205,13 @@ fn usage_error(msg: &str) -> ! {
         .exit()
 }
 
+/// `--memory none` stands alone.
+fn no_memory_mix(memory: &[String]) {
+    if memory.len() > 1 && memory.iter().any(|m| m == "none") {
+        usage_error("--memory none cannot be combined with a folder");
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
@@ -221,8 +229,10 @@ fn main() -> Result<()> {
                     "--memory local is no longer supported; pass the folder as --memory DIR",
                 );
             }
+            no_memory_mix(&memory_arg);
+            let repo_memory = memory_arg != ["none"];
             let mut memory = Vec::new();
-            for arg in &memory_arg {
+            for arg in memory_arg.iter().filter(|a| *a != "none") {
                 let d =
                     wiki::memory::resolve(std::path::Path::new(arg)).context("resolve --memory")?;
                 if !d.is_dir() {
@@ -239,6 +249,7 @@ fn main() -> Result<()> {
                 jobs: cli.jobs,
                 project,
                 memory,
+                repo_memory,
             };
             let r = wiki::dirlock::exclusive(&output, || compile(&input, &output, &opts))
                 .context("compile failed")?;
@@ -424,9 +435,7 @@ fn main() -> Result<()> {
             tools,
             memory,
         } => {
-            if memory.len() > 1 && memory.iter().any(|m| m == "none") {
-                usage_error("--memory none cannot be combined with a folder");
-            }
+            no_memory_mix(&memory);
             let dir = wiki_dir(dir.or_else(|| source.as_ref().map(|s| s.join(".wiki"))));
             wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
         }
