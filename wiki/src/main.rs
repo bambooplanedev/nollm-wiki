@@ -36,7 +36,8 @@ enum Command {
         /// Rewrite only the pages whose content changed.
         #[arg(long)]
         incremental: bool,
-        /// Read files that .gitignore and .ignore would skip.
+        /// Read every file: no .gitignore/.ignore/hidden-file rules, and process and
+        /// vendored folders are not skipped.
         #[arg(long)]
         no_ignore: bool,
         /// Also write graph.json.
@@ -65,7 +66,7 @@ enum Command {
         /// Maximum pages in the pack (default no limit).
         #[arg(long)]
         max_nodes: Option<usize>,
-        /// Whole linked pages instead of outlines and one-line summaries.
+        /// Whole linked pages (outlines for code) instead of one-line summaries.
         #[arg(long)]
         full: bool,
         /// Only neighbors of this kind: code, docs, text, markdown, or code:<lang>.
@@ -164,7 +165,7 @@ enum Command {
         #[arg(long)]
         claude_hook: bool,
     },
-    /// Install the MCP server, the prompt hook and what tells each agent to use them (Claude Code, pi, Cursor, Codex) in this project.
+    /// Install the MCP server and what tells each agent to use it (Claude Code, pi, Cursor, Codex) in this project, plus the prompt hook for Claude Code and pi.
     Setup {
         /// Agents to set up (default: the ones found; Codex only when named, its config is global).
         #[arg(long, value_delimiter = ',')]

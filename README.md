@@ -108,8 +108,8 @@ In the project you want agents to navigate:
 
 Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
 `.wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex: `wiki setup --agent cursor,codex`; other
-clients: see [Agents](#agents).
+and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex: `wiki setup --agent
+cursor,codex`; other clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
 
@@ -425,25 +425,27 @@ Migration: `compile --memory local` is gone, and notes in the per-user folder of
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
 
 `search` lists the code and docs exactly as if no notes existed, then up to two notes, one per line,
-as `memory (<origin>): <path> — <summary>`, each followed, when its body matched, by its snippet on an indented line. A note is listed when a query word of four or more characters is
-in its title, aliases or summary, or the query writes the note's `updated` day, or the note scores
-at least twice the best code hit (the note is scored over project pages plus notes, the code hit
-over project pages only). Notes pass the `code` and `docs` filters, and `wiki hint` adds
-one memory line by the same rule (see [hint](#hint)). Notes never move a code page's rank:
-PageRank and the `llms.txt` median count project pages only.
+as `memory (<origin>): <path> — <summary>`, each followed, when its body matched, by its snippet on
+an indented line. A note is listed when a query word of four or more characters is in its title,
+aliases or summary, or the query writes the note's `updated` day, or the note scores at least twice
+the best code hit (the note is scored over project pages plus notes, the code hit over project pages
+only). Notes pass the `code` and `docs` filters, and `wiki hint` adds one memory line by the same
+rule (see [hint](#hint)). Notes never move a code page's rank: PageRank and the `llms.txt` median
+count project pages only.
 
-Each note row says where the note came from: `memory (local): /abs/x.md — summary` for a note in
-an agent folder, a `--memory` folder or an `.agents/memory` file git does not track (or no git),
-and `memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the name of
-the author name of the file's last commit (never the email; left out when git cannot tell), `, you` when that
-commit's author email is your `git config user.email`, ignoring case (`memory (repo, Jane Doe, you): …`;
-no git or no email: nobody is you; the email is only compared, never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
-`"memory": true`, `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and
-`"edited": true` when edited. The origin is read when the wiki is compiled, by `wiki compile` and by each recompile of
-`serve --source`; answering a `search` or a hook never calls git.
-Notes are ordered by trust, the score order kept among equals: local notes first, then your own or
-edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
-the hook's one memory line is the most trusted.
+Each note row says where the note came from: `memory (local): /abs/x.md — summary` for a note in an
+agent folder, a `--memory` folder or an `.agents/memory` file git does not track (or no git), and
+`memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the
+author name of the file's last commit (never the email; left out when git cannot tell), `, you` when
+that commit's author email is your `git config user.email`, ignoring case (`memory (repo, Jane Doe,
+you): …`; no git or no email: nobody is you; the email is only compared, never stored or shown) and
+`, edited` when the work tree differs from that commit. JSON hits carry `"memory": true`, `"origin":
+"local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and `"edited": true` when
+edited. The origin is read when the wiki is compiled, by `wiki compile` and by each recompile of
+`serve --source`; answering a `search` or a hook never calls git. Notes are ordered by trust, the
+score order kept among equals: local notes first, then your own or edited committed notes, then the
+rest; `search` lists the two most trusted notes that pass, and the hook's one memory line is the
+most trusted.
 
 A committed note by someone else may disagree with a more trusted one. When its title and summary,
 read as a query, name a more trusted note and share at least three words with it, the two pair.
@@ -551,14 +553,13 @@ clean directory.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
-inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30% of
-the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
-one, and test code ranks at half score. A page without symbol lines
-gets its body snippet on a four-space-indented line instead. A summary, snippet or doc longer than
-160 characters is cut with `…`. `--format json` prints
-`[{id, title, summary, updated, score, snippet, path, symbols}]`, each symbol
-`{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin` and,
-when they apply, `author`, `mine`, `edited` and `superseded_by`.
+inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30%
+of the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
+one, and test code ranks at half score. A page without symbol lines gets its body snippet on a
+four-space-indented line instead. A summary, snippet or doc longer than 160 characters is cut with
+`…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
+symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
+and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 #### page
 
@@ -617,9 +618,9 @@ A budgeted context pack for an agent: a breadth-first walk from `<ID>` up to `--
 node count; neighbors are admitted by centrality (PageRank), and one that does not fit the remaining
 budget is skipped while the walk goes on. The target comes first — a code target as its outline —
 and the neighbors follow ordered by centrality, highest last, so the most important context sits
-closest to the end. Without `--full`, the modules the target imports or is imported by are admitted first, as outlines
-when they fit, and the rest as one-line summaries; all of them are then printed in the centrality
-order above.
+closest to the end. Without `--full`, the modules the target imports or is imported by are admitted
+first, as outlines when they fit, and the rest as one-line summaries; all of them are then printed
+in the centrality order above.
 
 `--symbol <NAME>` prints every function that function calls instead, through all levels (or
 `--depth` of them), in the line format of `callers`.
@@ -640,15 +641,15 @@ fail the run. Exits 1 when any link is broken, so `lint` can gate a build.
     wiki hint [--dir .wiki] [--claude-hook] [TEXT]
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
-`path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the best-matching code pages, at most 2 per page,
-without docs, tests or a line whose range holds another of the page's lines; a page with no such
-line gets `path  title`. Only the text's 24 rarest words rank the pages (vendored code is not compiled, see
-`compile`); one-character words never count. Prints
-nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a tag (a turn
-the harness wrote, such as `<task-notification>`) or it has fewer than two words of two or more
-characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt. It prints no code
-lines when the best page scores below half of what the text's counted words could give one page
-(its words are spread over the project, as in a long brief or a list of instructions).
+`path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the
+best-matching code pages, at most 2 per page, without docs, tests or a line whose range holds
+another of the page's lines; a page with no such line gets `path  title`. Only the text's 24 rarest
+words rank the pages (vendored code is not compiled, see `compile`); one-character words never
+count. Prints nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a
+tag (a turn the harness wrote, such as `<task-notification>`) or it has fewer than two words of two
+or more characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt. It prints
+no code lines when the best page scores below half of what the text's counted words could give one
+page (its words are spread over the project, as in a long brief or a list of instructions).
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
 
@@ -720,23 +721,23 @@ A code page's body is its source; its symbols and line ranges are in `items.json
 
 ### What agents read
 
-- **`index.json`** — `{ project, root, entries: [...] }`, where `root` is the compiled directory's
+- - **`index.json`** — `{ project, root, entries: [...] }`, where `root` is the compiled directory's
   own name. Each entry has `id`, `title`, `kind`, `aliases`, `tags`, `updated` (only when the page
   has a date), `path`, `page`, `summary` (`null` when none could be derived), `degree_in`,
   `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`, `neighbors_in`, `imports_out`,
   `imports_in` (the import edges among them), `defined` (top-level definition names) and `methods`.
   A memory note's entry adds `memory: true`, `origin` (`local` or `repo`) and, when they apply,
   `author`, `mine`, `edited` and `superseded_by`.
-- **`items.json`** — the code map, kept out of `index.json` so the catalog stays small. One object
+- - **`items.json`** — the code map, kept out of `index.json` so the catalog stays small. One object
   keyed by page id; each value lists the page's items with `kind`, `name`, `owner`, `signature`,
-  `start_line`/`end_line`, `doc`, `doc_text` (the rest of the doc, for ranking), `public`, `test`
-  (test code), `twin` for a paired C++ declaration or definition, and
-  for a function `calls` (the `path:start-end` of the functions it calls) and `call_lines` (for
-  each, the lines that call it). A shell file's calls outside any function hang off a `top_level`
-  item.
-- **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under
-  `## Optional`.
-- **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
+  `start_line`/`end_line`, `doc`, `doc_text` (the whole doc on one line, when longer than `doc`;
+  scored, never shown), `public`, `test` (test code), `twin` for a paired C++ declaration or
+  definition, and for a function `calls` (the `path:start-end` of the functions it calls) and
+  `call_lines` (for each, the lines that call it). A shell file's calls outside any function hang
+  off a `top_level` item.
+- - **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under `##
+  Optional`.
+- - **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
   each page's `## Notes` section is preserved across recompiles.
 
 ### Obsidian and Quartz

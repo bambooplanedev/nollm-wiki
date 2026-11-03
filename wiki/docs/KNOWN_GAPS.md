@@ -329,7 +329,8 @@ per question is noise-level: treat single results as anecdotes.
 - A conflict pair needs a co-author's untouched committed note on one side and
   a more trusted note on the other: two local notes, two of your own, or two
   co-authors' notes that disagree never pair, and editing a co-author's note
-  takes it out of every pair.
+  moves it to the trusted side: it then pairs only against other co-authors'
+  untouched notes.
 - An index.json written before origin and "mine" were stored reads every
   relative note path as a co-author's note until the next compile: lint may
   list your own notes and the tail puts them last.

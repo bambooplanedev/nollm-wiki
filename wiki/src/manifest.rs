@@ -21,7 +21,7 @@ pub struct ManifestEntry {
     /// `repo` or `local` on a memory note; absent on every other page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<&'static str>,
-    /// The last committer's name of a `repo` note, when known.
+    /// The author name of the last commit to a `repo` note, when known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     /// A `repo` note that differs from `HEAD`.
