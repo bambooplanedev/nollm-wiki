@@ -827,7 +827,6 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         memory: false,
         origin: wiki::model::Origin::Local,
         superseded_by: None,
-        conflicts: vec![],
         snippet: None,
         symbols: vec![SymbolLine {
             path: "a.rs".into(),
@@ -1274,7 +1273,6 @@ fn search_lines_shows_date_after_path() {
         memory: false,
         origin: wiki::model::Origin::Local,
         superseded_by: None,
-        conflicts: vec![],
     };
     assert_eq!(
         wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
@@ -2090,9 +2088,6 @@ fn conflict_fixture(extra: &[(&str, String)]) -> (tempfile::TempDir, Wiki) {
     origin_fixture_by("Mallory Example", &committed, &local)
 }
 
-const SETTLE: &str =
-    "if this matters for what you will do, settle it with the user before relying on either";
-
 #[test]
 fn conflict_pairs_found() {
     let (_d, w) = conflict_fixture(&[]);
@@ -2103,13 +2098,30 @@ fn conflict_pairs_found() {
 }
 
 #[test]
+fn two_shared_words_do_not_pair() {
+    // `deploy` and `key` only: below `CONFLICT_MIN_WORDS`.
+    let (_d, w) = origin_fixture_by(
+        "Mallory Example",
+        &[(
+            "rotation",
+            note("Deploy key rotation", "", "deploy key changed to vault-b"),
+        )],
+        &[(
+            "deploy",
+            note("Deploy key", "", "deploy key lives in vault-a"),
+        )],
+    );
+    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
+}
+
+#[test]
 fn no_pair_between_equal_trust() {
     let (_d, w) = origin_fixture_by(
         "Mallory Example",
         &[
             (
                 "a",
-                note("Deploy key rotation", "", "deploy key changed to vault-b"),
+                note("Deploy key rotation", "", "deploy key now lives in vault-b"),
             ),
             ("b", note("Deploy key", "", "deploy key lives in vault-a")),
         ],
@@ -2124,7 +2136,7 @@ fn no_pair_for_own_or_superseded() {
     let (_d, w) = origin_fixture(
         &[(
             "rotation",
-            note("Deploy key rotation", "", "deploy key changed to vault-b"),
+            note("Deploy key rotation", "", "deploy key now lives in vault-b"),
         )],
         &[(
             "deploy",
@@ -2142,7 +2154,7 @@ fn no_pair_for_own_or_superseded() {
         &[
             (
                 "rotation",
-                note("Deploy key rotation", "", "deploy key changed to vault-b"),
+                note("Deploy key rotation", "", "deploy key now lives in vault-b"),
             ),
             (
                 "zebra",
@@ -2164,7 +2176,7 @@ fn no_pair_for_own_or_superseded() {
         &note(
             "Deploy key rotation",
             "",
-            "deploy key changed to vault-b, again",
+            "deploy key now lives in vault-b, again",
         ),
     );
     let opts = CompileOptions {
@@ -2177,71 +2189,25 @@ fn no_pair_for_own_or_superseded() {
 }
 
 #[test]
-fn search_prints_conflict_line() {
+fn search_has_no_conflict_line() {
     let (_d, w) = conflict_fixture(&[]);
-    let hits = w.search("deploy key", None, 10);
-    let path = |id: &str| hits.iter().find(|h| h.id == id).unwrap().path.clone();
-    let (local, repo) = (path("deploy_key"), path("deploy_key_rotation"));
-    let out = wiki::serve::search_lines(&hits);
-    assert!(
-        out.contains(&format!(
-            "    conflicts with {repo} (repo, Mallory Example); {SETTLE}\n"
-        )),
-        "{out}"
-    );
-    assert!(
-        out.contains(&format!("    conflicts with {local} (local); {SETTLE}\n")),
-        "{out}"
-    );
-    // A note in no pair gets no line.
-    let (_d, w) = trust_fixture();
-    let out = wiki::serve::search_lines(&w.search("rotation", None, 10));
+    let out = wiki::serve::search_lines(&w.search("deploy key", None, 10));
     assert!(!out.contains("conflicts with"), "{out}");
 }
 
 #[test]
-fn hint_prints_conflict_line() {
+fn hint_has_no_conflict_line() {
     let (_d, w) = conflict_fixture(&[]);
     let hint = wiki::hint::hint_lines(&w, "deploy key");
-    let lines: Vec<_> = hint.lines().collect();
-    let at = lines
-        .iter()
-        .position(|l| l.starts_with("memory (local):"))
-        .unwrap();
-    assert_eq!(
-        lines[at + 1],
-        format!("    conflicts with .agents/memory/rotation.md (repo, Mallory Example); {SETTLE}"),
-        "{hint}"
-    );
+    assert!(!hint.contains("conflicts with"), "{hint}");
 }
 
 #[test]
-fn search_json_lists_conflicts() {
+fn search_json_has_no_conflicts() {
     let (_d, w) = conflict_fixture(&[]);
     let json: serde_json::Value =
         serde_json::from_str(&wiki::serve::search_json(w.search("deploy key", None, 10))).unwrap();
-    let hit = |id: &str| {
-        json.as_array()
-            .unwrap()
-            .iter()
-            .find(|h| h["id"] == id)
-            .unwrap_or_else(|| panic!("no {id}: {json}"))
-            .clone()
-    };
-    assert_eq!(
-        hit("deploy_key")["conflicts"],
-        serde_json::json!([".agents/memory/rotation.md"])
-    );
-    assert_eq!(
-        hit("deploy_key_rotation")["conflicts"],
-        serde_json::json!([hit("deploy_key")["path"]])
-    );
-    for h in json
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|h| h.get("memory").is_none())
-    {
+    for h in json.as_array().unwrap() {
         assert_eq!(h.get("conflicts"), None, "{h}");
     }
 }

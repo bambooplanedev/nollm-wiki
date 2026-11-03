@@ -51,8 +51,7 @@ const MEMORY_HEADER: &str =
 /// with two differences for a prompt: a name match counts only when the
 /// prompt has at most `HINT_SHORT_WORDS` distinct words, the ratio branch
 /// of a longer prompt needs a code hit to beat, and the note is scored on
-/// the same `HINT_TERMS` words as the code; a `serve::conflict_line` follows
-/// the note for each note it is paired with. Each part has its own header;
+/// the same `HINT_TERMS` words as the code. Each part has its own header;
 /// empty when neither exists.
 #[must_use]
 pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
@@ -116,9 +115,6 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
                 said.unwrap_or(&h.title)
             ),
         );
-        for (p, o) in wiki.conflicts_of(&h.id) {
-            out.push_str(&crate::serve::conflict_line(&p, &o));
-        }
     }
     out
 }

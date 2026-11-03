@@ -117,8 +117,9 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 pub(crate) const MEMORY_TAIL: usize = 2;
 /// Distinct words (at gate length) a co-author's note's title and summary
 /// must share with a more trusted note for the two to pair as a possible
-/// conflict (`Wiki::memory_conflicts`).
-pub(crate) const CONFLICT_MIN_WORDS: usize = 2;
+/// conflict (`Wiki::memory_conflicts`). 3, not 2 (2026-11-03 trust runs):
+/// the planted note still pairs 10 of 10, with the fewest pairs.
+pub(crate) const CONFLICT_MIN_WORDS: usize = 3;
 /// Default gate length: a query word this long naming a note lets it in.
 /// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
 /// tasks): Haiku searches with short code-shaped words, so at 8 the note
@@ -314,10 +315,6 @@ pub struct Hit {
     pub origin: Origin,
     /// The id of the note that supersedes this one; it never enters the tail.
     pub superseded_by: Option<String>,
-    /// The path and origin of each note paired with this memory hit
-    /// (`Wiki::memory_conflicts`); filled on the search tail and the hook's
-    /// note, empty elsewhere.
-    pub conflicts: Vec<(String, Origin)>,
     /// Deterministic excerpt around the earliest body match (`None` for
     /// hits that matched only title, alias, item name, summary, or a
     /// section heading — the summary explains those).
@@ -340,7 +337,6 @@ impl Hit {
             memory: e.memory,
             origin: e.origin(),
             superseded_by: e.superseded_by.clone(),
-            conflicts: Vec::new(),
             snippet,
             symbols: Vec::new(),
         }
@@ -983,24 +979,6 @@ impl Wiki {
             .collect()
     }
 
-    /// The path and origin of every note paired with note `id`, either side.
-    pub(crate) fn conflicts_of(&self, id: &str) -> Vec<(String, Origin)> {
-        self.memory_conflicts()
-            .iter()
-            .filter_map(|(x, y)| {
-                if x == id {
-                    Some(y)
-                } else if y == id {
-                    Some(x)
-                } else {
-                    None
-                }
-            })
-            .filter_map(|other| self.entries.get(other))
-            .map(|e| (e.path.clone(), e.origin()))
-            .collect()
-    }
-
     /// Whether `q` writes a date and page `id` is a memory note dated that day.
     pub(crate) fn dated_on(&self, id: &str, q: &str) -> bool {
         let Some(e) = self.entries.get(id).filter(|e| e.memory) else {
@@ -1471,9 +1449,6 @@ impl Wiki {
             .collect();
         notes.sort_by(|a, b| b.origin.trust().total_cmp(&a.origin.trust()));
         notes.truncate(MEMORY_TAIL);
-        for h in &mut notes {
-            h.conflicts = self.conflicts_of(&h.id);
-        }
         notes
     }
 

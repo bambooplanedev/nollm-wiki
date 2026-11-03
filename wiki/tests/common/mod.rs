@@ -166,7 +166,7 @@ pub fn conflict_notes() -> (Notes, Notes) {
     (
         vec![(
             "rotation",
-            note("Deploy key rotation", "", "deploy key changed to vault-b"),
+            note("Deploy key rotation", "", "deploy key now lives in vault-b"),
         )],
         vec![(
             "deploy",

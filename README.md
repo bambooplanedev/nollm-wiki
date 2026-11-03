@@ -444,10 +444,9 @@ edited committed notes, then the rest; `search` lists the two most trusted notes
 the hook's one memory line is the most trusted.
 
 A committed note by someone else may disagree with a more trusted one. When its title and summary,
-read as a query, name a more trusted note and share at least two words with it, the two pair, and
-both rows (in `search` and in the hook) carry a line under them:
-`    conflicts with <other path> (<other label>); if this matters for what you will do, settle it with the user before relying on either`.
-JSON memory hits list the partners' paths in `"conflicts"`. Pairs are word overlap, not meaning.
+read as a query, name a more trusted note and share at least three words with it, the two pair.
+`wiki lint` (and the MCP `lint` tool) lists the pairs for you to settle; `search` and the hook
+only order notes by trust and show no pair. Pairs are word overlap, not meaning.
 To settle one, edit the notes: delete or update yours, or fix the committed note or write a local
 note with `supersedes:`; a superseded note is in no pair.
 

@@ -571,8 +571,7 @@ pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) 
 /// `format: "json"`: `[{id, title, summary, updated, score, snippet, path, symbols}]`;
 /// `updated` is present only when the page has a date. A memory note adds
 /// `memory: true` and `origin` (`local` or `repo`), plus `author` when known
-/// and `edited: true` when the file differs from its last commit, and
-/// `conflicts`, the paths of the notes it is paired with, when it has any.
+/// and `edited: true` when the file differs from its last commit.
 pub fn search_json(hits: Vec<Hit>) -> String {
     let hits = hits
         .into_iter()
@@ -624,10 +623,6 @@ pub fn search_json(hits: Vec<Hit>) -> String {
                         }
                     }
                 }
-                if !h.conflicts.is_empty() {
-                    let paths: Vec<_> = h.conflicts.into_iter().map(|(p, _)| p).collect();
-                    hit["conflicts"] = paths.into();
-                }
             }
             if let Some(by) = h.superseded_by {
                 hit["superseded_by"] = by.into();
@@ -643,16 +638,6 @@ pub fn search_json(hits: Vec<Hit>) -> String {
 #[must_use]
 pub fn memory_prefix(o: &Origin) -> String {
     format!("memory ({})", o.label())
-}
-
-/// The line under a note row for each note it is paired with
-/// (`Wiki::memory_conflicts`), in `search` lines and in the hook.
-#[must_use]
-pub fn conflict_line(path: &str, o: &Origin) -> String {
-    format!(
-        "    conflicts with {path} ({}); if this matters for what you will do, settle it with the user before relying on either\n",
-        o.label()
-    )
 }
 
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
@@ -684,9 +669,6 @@ pub fn search_lines(hits: &[Hit]) -> String {
             out.push('\n');
             if let Some(sn) = &h.snippet {
                 out.push_str(&format!("    {}\n", clip(sn, LINE_CHARS)));
-            }
-            for (p, o) in &h.conflicts {
-                out.push_str(&conflict_line(p, o));
             }
             continue;
         }
@@ -840,7 +822,6 @@ mod tests {
             memory,
             origin: crate::model::Origin::Local,
             superseded_by: None,
-            conflicts: vec![],
         };
         assert_eq!(
             search_lines(&[hit(true, Some("Rotate nightly."))]),
