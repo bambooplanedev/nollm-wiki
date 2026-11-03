@@ -114,7 +114,8 @@ pub fn resolve(dir: &Path) -> std::io::Result<PathBuf> {
 
 /// The origin of each file git tracks under `dir`, keyed by its path relative
 /// to `dir` with `/`. A file missing from the map (untracked, only staged, no
-/// commit, no repo, no git) is `Origin::Local`. Three git calls per folder.
+/// commit, no repo, no git) is `Origin::Local`. A note is `mine` when its
+/// author is `git config user.name` (none: no note is). Four git calls per folder.
 pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
     let names = |s: Option<String>| -> Vec<String> {
         s.unwrap_or_default()
@@ -149,6 +150,7 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
         ],
     )
     .unwrap_or_default();
+    let me = git(dir, &["config", "user.name"]).filter(|n| !n.is_empty());
     let mut authors: BTreeMap<&str, &str> = BTreeMap::new();
     let (mut author, mut after_gap) = (None, false);
     for t in log.split('\0') {
@@ -165,8 +167,10 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
     names(Some(tracked))
         .into_iter()
         .map(|n| {
+            let author = authors.get(n.as_str()).map(|a| (*a).to_string());
             let origin = Origin::Repo {
-                author: authors.get(n.as_str()).map(|a| (*a).to_string()),
+                mine: author.is_some() && author == me,
+                author,
                 edited: edited.contains(&n),
             };
             (n, origin)
@@ -265,6 +269,7 @@ mod tests {
         let repo = |author: &str, edited| Origin::Repo {
             author: Some(author.to_string()),
             edited,
+            mine: false,
         };
         assert_eq!(
             repo_origins(&mem),
@@ -289,9 +294,27 @@ mod tests {
             repo_origins(&mem)["a.md"],
             Origin::Repo {
                 author: Some("Jane Doe".to_string()),
-                edited: false
+                edited: false,
+                mine: false
             }
         );
+    }
+
+    #[test]
+    fn repo_origins_marks_own_notes() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, mem) = (d.path(), d.path().join("m"));
+        std::fs::create_dir(&mem).unwrap();
+        git_in(root, "t", &["init", "-q"]);
+        git_in(root, "t", &["config", "user.name", "Jane Doe"]);
+        for (file, who) in [("a.md", "Jane Doe"), ("b.md", "Mallory Example")] {
+            std::fs::write(mem.join(file), file).unwrap();
+            git_in(root, who, &["add", "."]);
+            git_in(root, who, &["commit", "-qm", file]);
+        }
+        let mine = |n: &str| matches!(repo_origins(&mem)[n], Origin::Repo { mine, .. } if mine);
+        assert!(mine("a.md"));
+        assert!(!mine("b.md"));
     }
 
     #[test]

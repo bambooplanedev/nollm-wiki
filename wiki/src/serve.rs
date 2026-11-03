@@ -605,13 +605,20 @@ pub fn search_json(hits: Vec<Hit>) -> String {
                 hit["memory"] = true.into();
                 match h.origin {
                     Origin::Local => hit["origin"] = "local".into(),
-                    Origin::Repo { author, edited } => {
+                    Origin::Repo {
+                        author,
+                        edited,
+                        mine,
+                    } => {
                         hit["origin"] = "repo".into();
                         if let Some(a) = author {
                             hit["author"] = a.into();
                         }
                         if edited {
                             hit["edited"] = true.into();
+                        }
+                        if mine {
+                            hit["mine"] = true.into();
                         }
                     }
                 }
@@ -839,25 +846,29 @@ mod tests {
             origin: crate::model::Origin::Repo {
                 author: Some("Jane Doe".into()),
                 edited: true,
+                mine: true,
             },
             ..hit(memory, Some("Rotate nightly."))
         };
         assert_eq!(
             search_lines(&[repo(true)]),
-            "memory (repo, Jane Doe, edited): /m/n.md — Rotate nightly.\n    snip\n"
+            "memory (repo, Jane Doe, you, edited): /m/n.md — Rotate nightly.\n    snip\n"
         );
         let json: serde_json::Value = serde_json::from_str(&search_json(vec![repo(true)])).unwrap();
         assert_eq!(json[0]["origin"], "repo");
         assert_eq!(json[0]["author"], "Jane Doe");
         assert_eq!(json[0]["edited"], true);
+        assert_eq!(json[0]["mine"], true);
         assert_eq!(json[0]["memory"], true);
         let json: serde_json::Value =
             serde_json::from_str(&search_json(vec![hit(true, None)])).unwrap();
         assert_eq!(json[0]["origin"], "local");
-        assert!(json[0].get("author").is_none() && json[0].get("edited").is_none());
+        for k in ["author", "edited", "mine"] {
+            assert!(json[0].get(k).is_none(), "{k}");
+        }
         let json: serde_json::Value =
             serde_json::from_str(&search_json(vec![repo(false)])).unwrap();
-        for k in ["origin", "author", "edited", "memory"] {
+        for k in ["origin", "author", "edited", "mine", "memory"] {
             assert!(json[0].get(k).is_none(), "{k}");
         }
         let mut plain = hit(false, Some("sum"));

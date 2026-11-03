@@ -27,6 +27,9 @@ pub struct ManifestEntry {
     /// A `repo` note that differs from `HEAD`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub edited: bool,
+    /// A `repo` note whose author is the person who compiled.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub mine: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<String>,
     pub degree_in: usize,
@@ -92,10 +95,14 @@ pub fn build_manifest(
             };
             let (out, inc) = (list(|x| &x.outgoing), list(|x| &x.incoming));
             let (imports_out, imports_in) = (list(|x| &x.imports), list(|x| &x.imported_by));
-            let (origin, author, edited) = match &e.origin {
-                _ if !e.memory => (None, None, false),
-                Origin::Local => (Some("local"), None, false),
-                Origin::Repo { author, edited } => (Some("repo"), author.clone(), *edited),
+            let (origin, author, edited, mine) = match &e.origin {
+                _ if !e.memory => (None, None, false, false),
+                Origin::Local => (Some("local"), None, false, false),
+                Origin::Repo {
+                    author,
+                    edited,
+                    mine,
+                } => (Some("repo"), author.clone(), *edited, *mine),
             };
             ManifestEntry {
                 id: id.clone(),
@@ -111,6 +118,7 @@ pub fn build_manifest(
                 origin,
                 author,
                 edited,
+                mine,
                 superseded_by: e.superseded_by.clone(),
                 degree_in: inc.len(),
                 degree_out: out.len(),

@@ -37,6 +37,8 @@ pub(crate) struct Entry {
     pub(crate) author: Option<String>,
     #[serde(default)]
     pub(crate) edited: bool,
+    #[serde(default)]
+    pub(crate) mine: bool,
     /// The id of the note that supersedes this one; absent in `index.json` when unset.
     #[serde(default)]
     pub(crate) superseded_by: Option<String>,
@@ -67,6 +69,7 @@ impl Entry {
             Origin::Repo {
                 author: self.author.clone(),
                 edited: self.edited,
+                mine: self.mine,
             }
         } else {
             Origin::Local
@@ -1362,12 +1365,13 @@ impl Wiki {
                 || (h.score > 0.0 && h.score >= MEMORY_GATE_RATIO * best_code))
     }
 
-    /// The memory notes `search` lists after its code hits: the best ten
+    /// The memory notes `search` lists after its code hits: of the best ten
     /// notes for `q` (narrowed to `tag`) that pass the gate at `gate_len`,
-    /// by score, the later `updated` first on a tie (dated before undated),
-    /// at most `MEMORY_TAIL`. Empty when `q` has no word. `project`: the
-    /// statistics of a `Without` pass for `q` and `tag` with no kind, which
-    /// spares counting the project pages again.
+    /// the most trusted (`Origin::trust`), then by score, the later
+    /// `updated` first on a tie (dated before undated), at most
+    /// `MEMORY_TAIL`. Empty when `q` has no word. `project`: the statistics
+    /// of a `Without` pass for `q` and `tag` with no kind, which spares
+    /// counting the project pages again.
     pub(crate) fn memory_tail(
         &self,
         q: &str,
@@ -1379,12 +1383,15 @@ impl Wiki {
             return Vec::new();
         }
         let n = gate_len();
-        self.search_terms(q, None, tag, Some(10), MemoryScope::Only, None, project)
+        let mut notes: Vec<Hit> = self
+            .search_terms(q, None, tag, Some(10), MemoryScope::Only, None, project)
             .0
             .into_iter()
             .filter(|h| self.passes_gate(h, q, best_code, n))
-            .take(MEMORY_TAIL)
-            .collect()
+            .collect();
+        notes.sort_by(|a, b| b.origin.trust().total_cmp(&a.origin.trust()));
+        notes.truncate(MEMORY_TAIL);
+        notes
     }
 
     /// `search_tagged` over the memory notes only, all but them, or both,

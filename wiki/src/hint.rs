@@ -45,7 +45,8 @@ const MEMORY_HEADER: &str =
 /// `text` (`path  title` for a page with no such line, such as a script
 /// whose matching code sits outside any function; none when the best page
 /// scores below `HINT_MIN_SHARE` of the prompt's available score), then
-/// `MEMORY_HEADER` and one `memory (origin): path — summary` line for the best memory note
+/// `MEMORY_HEADER` and one `memory (origin): path — summary` line for the
+/// most trusted memory note (`Origin::trust`; the best scored of equals)
 /// that passes the hint's gate: `search`'s tail gate (`Wiki::passes_gate`)
 /// with two differences for a prompt: a name match counts only when the
 /// prompt has at most `HINT_SHORT_WORDS` distinct words, the ratio branch
@@ -87,16 +88,18 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
         }
     }
     let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
+    // The most trusted passing note; `min_by` keeps the first of equals.
     let note = wiki
         .search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Only)
         .0
         .into_iter()
-        .find(|h| {
+        .filter(|h| {
             h.superseded_by.is_none()
                 && ((short && wiki.names_page(&h.id, text, gate_len()))
                     || wiki.dated_on(&h.id, text)
                     || ((short || best > 0.0) && h.score >= MEMORY_GATE_RATIO * best))
-        });
+        })
+        .min_by(|a, b| b.origin.trust().total_cmp(&a.origin.trust()));
     if !out.is_empty() {
         out.insert_str(0, HEADER);
     }

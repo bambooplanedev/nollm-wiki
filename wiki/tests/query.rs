@@ -1919,6 +1919,7 @@ fn compile_stores_note_origin_in_index() {
     common::write(root, "proj/.agents/memory/kept.md", &note("Kept"));
     common::write(root, "agent/mine.md", &note("Mine"));
     git_as(root, "t", &["init", "-q"]);
+    git_as(root, "t", &["config", "user.name", "Jane Doe"]);
     git_as(root, "Jane Doe", &["add", "."]);
     git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
     common::write(root, "proj/.agents/memory/fresh.md", &note("Fresh"));
@@ -1938,22 +1939,26 @@ fn compile_stores_note_origin_in_index() {
     };
     let keys = |id: &str| {
         let e = by_id(id);
-        ["origin", "author", "edited"].map(|k| e.get(k).cloned())
+        ["origin", "author", "edited", "mine"].map(|k| e.get(k).cloned())
     };
     assert_eq!(
         keys("kept"),
         [
             Some(serde_json::json!("repo")),
             Some(serde_json::json!("Jane Doe")),
-            None
+            None,
+            Some(serde_json::json!(true))
         ]
     );
     assert_eq!(
         keys("fresh"),
-        [Some(serde_json::json!("local")), None, None]
+        [Some(serde_json::json!("local")), None, None, None]
     );
-    assert_eq!(keys("mine"), [Some(serde_json::json!("local")), None, None]);
-    assert_eq!(keys("a"), [None, None, None]);
+    assert_eq!(
+        keys("mine"),
+        [Some(serde_json::json!("local")), None, None, None]
+    );
+    assert_eq!(keys("a"), [None, None, None, None]);
 }
 
 #[test]
@@ -1981,7 +1986,7 @@ fn old_index_guesses_origin_from_path() {
         serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     for e in index["entries"].as_array_mut().unwrap() {
         let e = e.as_object_mut().unwrap();
-        for k in ["origin", "author", "edited"] {
+        for k in ["origin", "author", "edited", "mine"] {
             e.remove(k);
         }
     }
@@ -1992,7 +1997,8 @@ fn old_index_guesses_origin_from_path() {
         origin("repo_note"),
         Origin::Repo {
             author: None,
-            edited: false
+            edited: false,
+            mine: false
         }
     );
     assert_eq!(origin("agent_note"), Origin::Local);
@@ -2004,6 +2010,16 @@ fn origin_fixture(
     committed: &[(&str, String)],
     local: &[(&str, String)],
 ) -> (tempfile::TempDir, Wiki) {
+    origin_fixture_by("Jane Doe", committed, local)
+}
+
+/// `origin_fixture` with the notes committed by `author`; the repo's own
+/// `user.name` is `Jane Doe`.
+fn origin_fixture_by(
+    author: &str,
+    committed: &[(&str, String)],
+    local: &[(&str, String)],
+) -> (tempfile::TempDir, Wiki) {
     let d = tempdir().unwrap();
     let root = d.path();
     common::write(root, "proj/a.rs", "pub fn a() {}\n");
@@ -2011,8 +2027,9 @@ fn origin_fixture(
         common::write(root, &format!("proj/.agents/memory/{n}.md"), t);
     }
     git_as(root, "t", &["init", "-q"]);
-    git_as(root, "Jane Doe", &["add", "."]);
-    git_as(root, "Jane Doe", &["commit", "-qm", "x"]);
+    git_as(root, "t", &["config", "user.name", "Jane Doe"]);
+    git_as(root, author, &["add", "."]);
+    git_as(root, author, &["commit", "-qm", "x"]);
     for (n, t) in local {
         common::write(root, &format!("agent/{n}.md"), t);
     }
@@ -2023,6 +2040,40 @@ fn origin_fixture(
     compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
     let w = Wiki::load(&root.join("out")).unwrap();
     (d, w)
+}
+
+/// A local note and a co-author's committed note on the same word; the
+/// committed one scores higher (the word is also its title).
+fn trust_fixture() -> (tempfile::TempDir, Wiki) {
+    origin_fixture_by(
+        "Mallory Example",
+        &[("theirs", note("Rotation", "", "rotation rotation rotation"))],
+        &[("ours", note("Keys", "", "rotation"))],
+    )
+}
+
+#[test]
+fn tail_orders_notes_by_trust() {
+    let (_d, w) = trust_fixture();
+    let notes: Vec<_> = w
+        .search("rotation", None, 10)
+        .into_iter()
+        .filter(|h| h.memory)
+        .collect();
+    let ids: Vec<_> = notes.iter().map(|h| h.id.as_str()).collect();
+    assert_eq!(ids, ["keys", "rotation"]);
+    assert!(
+        notes[1].score > notes[0].score,
+        "Mallory's note must score higher"
+    );
+}
+
+#[test]
+fn hint_picks_the_most_trusted_note() {
+    let (_d, w) = trust_fixture();
+    let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
+    assert!(hint.contains("memory (local):"), "{hint}");
+    assert!(hint.contains("ours.md"), "{hint}");
 }
 
 #[test]
