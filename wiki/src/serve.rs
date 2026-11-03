@@ -47,8 +47,7 @@ the functions that call it. Do not call grep, find or ls in the same turn as \
 or handled, `callers` for who calls a function, grep for every occurrence of a \
 literal string (an env var, a message, a config key). If search finds \
 nothing relevant, try other words (a name, an abbreviation) before grep. \
-Code and doc paths are relative to the project root; a note from an \
-agent's memory folder has an absolute path. Line ranges are 1-based and \
+Paths are relative to the project root; line ranges are 1-based and \
 inclusive. Pages are also resources under wiki://page/<id>.";
 
 /// Every tool the server has.
@@ -309,7 +308,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Code and doc paths are relative to the project root; a note from an agent's memory folder has an absolute path. Line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
+        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
     )]
     async fn search(
         &self,
