@@ -130,7 +130,7 @@ enum Command {
         #[arg(long, help = DIR_HELP)]
         dir: Option<PathBuf>,
     },
-    /// Report broken links, orphan pages, large pages and memory notes that may disagree; exit 1 on a broken link.
+    /// Report broken links, orphan pages and large pages; exit 1 on a broken link.
     Lint {
         #[arg(long, help = DIR_HELP)]
         dir: Option<PathBuf>,
@@ -426,8 +426,8 @@ fn main() -> Result<()> {
             }
         }
         Command::Lint { dir } => {
-            let dir = wiki_dir(dir);
-            let pages = wiki::lint::load_compiled_pages(&dir).context("read output dir")?;
+            let pages =
+                wiki::lint::load_compiled_pages(&wiki_dir(dir)).context("read output dir")?;
             let r = wiki::lint::lint(&pages);
             println!(
                 "Linted {} pages: {} broken links, {} orphans, {} large",
@@ -449,14 +449,6 @@ fn main() -> Result<()> {
             }
             for (id, tokens) in &r.large {
                 println!("  large: {id} ({tokens} tokens)");
-            }
-            // Hand-written pages without an index still lint; no index, no pairs.
-            let conflicts = Wiki::load(&dir)
-                .map(|w| w.memory_conflict_rows())
-                .unwrap_or_default();
-            println!("Memory conflicts: {}", conflicts.len());
-            for [xp, xl, yp, yl] in &conflicts {
-                println!("  {xp} ({xl}) <-> {yp} ({yl})");
             }
             // Broken links fail the process so `lint` can gate a build (the
             // self-host script does). Orphans are advice, not a defect: a

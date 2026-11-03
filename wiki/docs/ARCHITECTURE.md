@@ -144,13 +144,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
    inline code span is never reported, and a code page's `## Body` (verbatim
    source, per its `## Metadata` kind) is dropped from the scan altogether.
-   The CLI exits 1 on any broken link; orphans are advisory. Memory conflict
-   pairs are not part of `lint::lint`: `main.rs` (CLI) and `serve.rs` (MCP)
-   add them from the loaded wiki via `Wiki::memory_conflicts`, which pairs a
-   live trust-0.5 note with a more trusted live note when its title and
-   summary, read as a query, pass the note gate (`names_page` at
-   `gate_len`) and share at least `CONFLICT_MIN_WORDS` (3) words with it;
-   superseded notes are out. Pairs never fail the run.
+   The CLI exits 1 on any broken link; orphans are advisory.
 
 ## Module map
 
@@ -179,7 +173,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
-| `src/lint.rs` | `lint()` — in-memory broken-link, orphan-page and too-large-page checks over rendered pages; memory conflict pairs come from `Wiki::memory_conflicts`, added by `main.rs` and `serve.rs`. |
+| `src/lint.rs` | `lint()` — in-memory broken-link, orphan-page and too-large-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (page hits with symbol lines; one Aho-Corasick automaton over the query's tokens, built once per search, counts every token in a page body in one pass) and `neighbors()` (context-pack) queries, with `resolve_id()` mapping an id, title or path to a page (on a miss, pages of the same file name are suggested first), plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
 | `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/labels.rs` | `labels()` — a Markdown file's ATX headings and bold step lines with the line range each covers; `doc_search()`/`doc_lines()` — `search` with `docs` (CLI `--docs`): labels holding the query's words in order, read from the named files at call time, 10 hits by default (`DOC_LIMIT`), an empty query listing the first 200 (`DOC_LIST_LIMIT`); a label repeated under one head keeps its first and last entries when the limit cuts it. |

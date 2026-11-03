@@ -438,26 +438,23 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]], memory_conflicts: [[path, label, path, label]]} (label as on a memory row, e.g. `repo, Jane Doe`; memory note pairs that may disagree; settle them with the user)."
+        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
-        let (wiki, stale) = self.state.snapshot().await;
+        let (_, stale) = self.state.snapshot().await;
         let ws = Arc::clone(&self.state);
-        let (pages, conflicts) = tokio::task::spawn_blocking(move || {
-            let pages = crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()));
-            (pages, wiki.memory_conflict_rows())
+        let pages = tokio::task::spawn_blocking(move || {
+            crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()))
         })
         .await
-        .expect("lint read panicked");
-        let pages =
-            pages.map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
+        .expect("lint read panicked")
+        .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
         let r = lint(&pages);
         let report = serde_json::json!({
             "total_pages": r.total_pages,
             "broken_links": r.broken_links,
             "orphans": r.orphans,
             "large": r.large,
-            "memory_conflicts": conflicts,
         });
         Ok(with_stale(
             text_result(Ok(report.to_string())),

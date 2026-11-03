@@ -115,11 +115,6 @@ pub fn tag_arg(arg: &str) -> Result<String, String> {
 
 /// Most memory notes `search` lists after the code hits.
 pub(crate) const MEMORY_TAIL: usize = 2;
-/// Distinct words (at gate length) a co-author's note's title and summary
-/// must share with a more trusted note for the two to pair as a possible
-/// conflict (`Wiki::memory_conflicts`). 3 is the strictest value that still
-/// pairs all 10 planted notes (2026-11-03).
-pub(crate) const CONFLICT_MIN_WORDS: usize = 3;
 /// Default gate length: a query word this long naming a note lets it in.
 /// 4 from the agent runs (2026-11-01, Claude Haiku on 30 memory and 8 code
 /// tasks): Haiku searches with short code-shaped words, so at 8 the note
@@ -911,67 +906,19 @@ impl Wiki {
     /// on this, because a Ukrainian prompt matches nearly every Ukrainian
     /// note body.
     pub(crate) fn names_page(&self, id: &str, q: &str, min_len: usize) -> bool {
-        self.entries.get(id).is_some_and(|e| {
-            let names = Self::namer(e, min_len);
-            Self::query_tokens(q).0.iter().any(|t| names(t))
-        })
-    }
-
-    /// Whether a query word of at least `min_len` characters hits the
-    /// title, an alias or the summary of `e` (`names_page`'s test).
-    fn namer(e: &Entry, min_len: usize) -> impl Fn(&str) -> bool {
+        let Some(e) = self.entries.get(id) else {
+            return false;
+        };
         let fields = std::iter::once(e.title.as_str())
             .chain(e.aliases.iter().map(String::as_str))
             .chain(e.summary.as_deref())
             .map(|f| Field::new(&f.to_lowercase()))
             .collect::<Vec<_>>();
-        move |t: &str| {
-            t.chars().count() >= min_len && fields.iter().any(|w| Self::field_tier(w, t) > 0.0)
-        }
-    }
-
-    /// Memory note pairs that may disagree, as (id of a note with trust 0.5,
-    /// id of a more trusted note), sorted; for `lint` only.
-    /// X's title and summary, read as a query, must name Y (`names_page` at
-    /// `gate_len`), and at least `CONFLICT_MIN_WORDS` distinct words of it
-    /// must hit Y's title, aliases or summary. Superseded notes are out.
-    pub fn memory_conflicts(&self) -> Vec<(String, String)> {
-        let n = gate_len();
-        let notes: Vec<_> = self
-            .entries
-            .values()
-            .filter(|e| e.memory && e.superseded_by.is_none())
-            .map(|e| (e, e.origin().trust(), Self::namer(e, n)))
-            .collect();
-        let mut pairs = Vec::new();
-        for (x, tx, _) in notes.iter().filter(|(e, ..)| e.origin().is_others()) {
-            let q = format!("{} {}", x.title, x.summary.as_deref().unwrap_or(""));
-            let (tokens, words) = Self::query_tokens(&q);
-            for (y, _, names) in notes.iter().filter(|(_, ty, _)| ty > tx) {
-                if tokens.iter().any(|t| names(t))
-                    && words.iter().filter(|w| names(w)).count() >= CONFLICT_MIN_WORDS
-                {
-                    pairs.push((x.id.clone(), y.id.clone()));
-                }
-            }
-        }
-        pairs.sort();
-        pairs
-    }
-
-    /// `memory_conflicts` as `[path, label, path, label]` rows, for `lint`.
-    pub fn memory_conflict_rows(&self) -> Vec<[String; 4]> {
-        let side = |id: &String| {
-            let e = &self.entries[id];
-            (e.path.clone(), e.origin().label())
-        };
-        self.memory_conflicts()
+        Self::query_tokens(q)
+            .0
             .iter()
-            .map(|(x, y)| {
-                let ((xp, xl), (yp, yl)) = (side(x), side(y));
-                [xp, xl, yp, yl]
-            })
-            .collect()
+            .filter(|t| t.chars().count() >= min_len)
+            .any(|t| fields.iter().any(|w| Self::field_tier(w, t) > 0.0))
     }
 
     /// Whether `q` writes a date and page `id` is a memory note dated that day.
