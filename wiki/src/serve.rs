@@ -33,8 +33,8 @@ pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 pub const DEFAULT_SEARCH_LIMIT: usize = 5;
 
 /// What the client shows the model at session start (Claude Code does; pi
-/// does not, so pi gets the same steps from its skill). Claude Code's skill
-/// carries only the memory rules: a navigation skill cost one turn per task.
+/// does not, so pi gets the same steps from its skill). Claude Code gets no skill:
+/// a navigation skill cost one turn per task.
 pub const INSTRUCTIONS: &str =
     "Map of this project. To find code, call `search` with the words of \
 what you are looking for and `kind: \"code\"`; each symbol line is \
@@ -438,7 +438,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]], memory_conflicts: [[path, origin, path, origin]]} (memory note pairs that may disagree; settle them with the user)."
+        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]], memory_conflicts: [[path, label, path, label]]} (label as on a memory row, e.g. `repo, Jane Doe`; memory note pairs that may disagree; settle them with the user)."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
         let (wiki, stale) = self.state.snapshot().await;

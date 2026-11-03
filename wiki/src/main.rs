@@ -18,6 +18,7 @@ const DIR_HELP: &str = "Wiki to read (default: `.wiki` if that directory exists,
     about = "Deterministic wiki compiler for agent-navigable knowledge bases"
 )]
 struct Cli {
+    /// Worker threads for compiling (default: Rayon's, usually the CPU count).
     #[arg(long, global = true)]
     jobs: Option<usize>,
     #[command(subcommand)]
@@ -26,17 +27,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Compile a project into a wiki.
     Compile {
+        /// Project directory to read.
         input: PathBuf,
+        /// Directory the wiki is written to.
         output: PathBuf,
+        /// Rewrite only the pages whose content changed.
         #[arg(long)]
         incremental: bool,
+        /// Read files that .gitignore and .ignore would skip.
         #[arg(long)]
         no_ignore: bool,
+        /// Also write graph.json.
         #[arg(long)]
         emit_json: bool,
         /// Project name written to index.json, llms.txt and AGENTS.md
-        /// (default: the input directory's basename).
+        /// (default: the input path's last component, or `wiki` when it has
+        /// none, as for `.`).
         #[arg(long)]
         project: Option<String>,
         /// Also compile an agent memory folder as flagged memory pages
@@ -44,15 +52,20 @@ enum Command {
         #[arg(long, value_name = "none|DIR")]
         memory: Vec<String>,
     },
+    /// Print a budgeted context pack around a page, or with `--symbol` what a function calls.
     Neighbors {
+        /// Page id, title or source path.
         id: String,
         /// Link hops (default 1); with `--symbol`, calls deep (default no limit).
         #[arg(long)]
         depth: Option<usize>,
+        /// Token budget (default: none).
         #[arg(long)]
         max_tokens: Option<usize>,
+        /// Maximum pages in the pack (default no limit).
         #[arg(long)]
         max_nodes: Option<usize>,
+        /// Whole linked pages instead of outlines and one-line summaries.
         #[arg(long)]
         full: bool,
         /// Only neighbors of this kind: code, docs, text, markdown, or code:<lang>.
@@ -66,11 +79,14 @@ enum Command {
     },
     /// List the functions that call a function on a page.
     Callers {
+        /// Page id, title or source path.
         id: String,
+        /// A function on the page.
         symbol: String,
         /// Caller levels (default 1).
         #[arg(long)]
         depth: Option<usize>,
+        /// Token budget (default: none).
         #[arg(long)]
         max_tokens: Option<usize>,
         #[arg(long, help = DIR_HELP)]
@@ -78,14 +94,18 @@ enum Command {
     },
     /// Print a page's outline, or with `--full` the whole page.
     Page {
+        /// Page id, title or source path.
         id: String,
+        /// The whole page instead of the outline.
         #[arg(long)]
         full: bool,
+        /// Token budget (default: none).
         #[arg(long)]
         max_tokens: Option<usize>,
         #[arg(long, help = DIR_HELP)]
         dir: Option<PathBuf>,
     },
+    /// Find pages and symbols for a query, or step labels in `--docs` files.
     Search {
         /// Required unless `--tag` or `--docs` is given.
         query: Option<String>,
@@ -97,6 +117,7 @@ enum Command {
         /// Only pages carrying this tag; `a` also matches `a/b`. Alone, lists every such page.
         #[arg(long)]
         tag: Option<String>,
+        /// Only pages of this kind: code, docs, text, markdown, or code:<lang>.
         #[arg(long)]
         kind: Option<String>,
         /// Maximum hits (default 10 with a query; unbounded for a bare `--tag`).
@@ -108,10 +129,12 @@ enum Command {
         #[arg(long, help = DIR_HELP)]
         dir: Option<PathBuf>,
     },
+    /// Report broken links, orphan pages, large pages and memory notes that may disagree; exit 1 on a broken link.
     Lint {
         #[arg(long, help = DIR_HELP)]
         dir: Option<PathBuf>,
     },
+    /// Serve a compiled wiki to MCP clients over stdio.
     Serve {
         /// Compile this project, watch it, and recompile on every edit.
         #[arg(long)]
@@ -141,7 +164,7 @@ enum Command {
         #[arg(long)]
         claude_hook: bool,
     },
-    /// Install the MCP server and a skill so Claude Code, pi, Cursor and Codex use the wiki in this project.
+    /// Install the MCP server, the prompt hook and what tells each agent to use them (Claude Code, pi, Cursor, Codex) in this project.
     Setup {
         /// Agents to set up (default: the ones found; Codex only when named, its config is global).
         #[arg(long, value_delimiter = ',')]
@@ -156,10 +179,14 @@ enum Command {
         #[arg(long)]
         remove: bool,
     },
+    /// Write a synthetic corpus (same seed, same files).
     Generate {
+        /// Directory to write into.
         dir: PathBuf,
+        /// Number of files to write.
         #[arg(long, default_value_t = 20)]
         files: usize,
+        /// Seed for the generator.
         #[arg(long, default_value_t = 42)]
         seed: u64,
     },
