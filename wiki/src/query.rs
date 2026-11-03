@@ -944,30 +944,18 @@ impl Wiki {
     /// must hit Y's title, aliases or summary. Superseded notes are out.
     pub fn memory_conflicts(&self) -> &[(String, String)] {
         self.conflicts.get_or_init(|| {
-            let notes: Vec<(&Entry, f64)> = self
+            let n = gate_len();
+            let notes: Vec<_> = self
                 .entries
                 .values()
                 .filter(|e| e.memory && e.superseded_by.is_none())
-                .map(|e| (e, e.origin().trust()))
+                .map(|e| (e, e.origin().trust(), Self::namer(e, n)))
                 .collect();
-            let n = gate_len();
             let mut pairs = Vec::new();
-            // Trust 0.5: a committed note neither yours nor edited.
-            let shared = |e: &Entry| {
-                matches!(
-                    e.origin(),
-                    Origin::Repo {
-                        mine: false,
-                        edited: false,
-                        ..
-                    }
-                )
-            };
-            for &(x, tx) in notes.iter().filter(|(e, _)| shared(e)) {
+            for (x, tx, _) in notes.iter().filter(|(e, ..)| e.origin().is_others()) {
                 let q = format!("{} {}", x.title, x.summary.as_deref().unwrap_or(""));
                 let (tokens, words) = Self::query_tokens(&q);
-                for &(y, _) in notes.iter().filter(|(y, ty)| *ty > tx && y.id != x.id) {
-                    let names = Self::namer(y, n);
+                for (y, _, names) in notes.iter().filter(|(y, ty, _)| ty > tx && y.id != x.id) {
                     if tokens.iter().any(|t| names(t))
                         && words.iter().filter(|w| names(w)).count() >= CONFLICT_MIN_WORDS
                     {

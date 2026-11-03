@@ -2186,6 +2186,44 @@ fn no_pair_for_own_or_superseded() {
     let (_d, w) =
         conflict_fixture(&[("zebra", note("Zebra", "supersedes: Deploy key\n", "zebra"))]);
     assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
+    // The co-author's note is superseded by their own unrelated one: out too.
+    let (_d, w) = origin_fixture_by(
+        "Mallory Example",
+        &[
+            (
+                "rotation",
+                note("Deploy key rotation", "", "deploy key changed to vault-b"),
+            ),
+            (
+                "zebra",
+                note("Zebra", "supersedes: Deploy key rotation\n", "zebra"),
+            ),
+        ],
+        &[(
+            "deploy",
+            note("Deploy key", "", "deploy key lives in vault-a"),
+        )],
+    );
+    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
+    // The co-author's note edited since HEAD: trust 0.8, never the 0.5 side.
+    let (d, _) = conflict_fixture(&[]);
+    let root = d.path();
+    common::write(
+        root,
+        "proj/.agents/memory/rotation.md",
+        &note(
+            "Deploy key rotation",
+            "",
+            "deploy key changed to vault-b, again",
+        ),
+    );
+    let opts = CompileOptions {
+        memory: vec![root.join("agent")],
+        ..Default::default()
+    };
+    compile(&root.join("proj"), &root.join("out"), &opts).unwrap();
+    let w = Wiki::load(&root.join("out")).unwrap();
+    assert_eq!(w.memory_conflicts(), &[] as &[(String, String)]);
 }
 
 #[test]
