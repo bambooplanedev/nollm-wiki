@@ -24,8 +24,8 @@ per question is noise-level: treat single results as anecdotes.
   runs out the 300 s cap and the context. Haiku in Claude Code read the given
   range in 57 of 58 reads.
 - **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
-  questions that ask for a call path. `symbol` is named only in the skill
-  and the tool description; see the previous point.
+  questions that ask for a call path. `symbol` is named only in the skill,
+  the server instructions and the tool description; see the previous point.
 - **The hook trades tools for hints.** With the prompt hook the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search. Measured 2026-10-28 with
@@ -321,22 +321,26 @@ per question is noise-level: treat single results as anecdotes.
   `max_user_watches` and `serve` then fails to start. The escape is an
   existing folder.
 - `HOME` is read before `USERPROFILE` when finding the config dir.
-- A note's author is the last committer of its file, which git lets anyone
-  set: it shows who to ask, it is not authentication.
+- A note's author is the author name of the last commit to its file, which git
+  lets anyone set: it shows who to ask, it is not authentication.
 - Memory conflict pairs are word overlap, not meaning: two notes on one topic
   may pair without disagreeing, and a disagreement in different words may
   not pair.
+- A conflict pair needs a co-author's untouched committed note on one side and
+  a more trusted note on the other: two local notes, two of your own, or two
+  co-authors' notes that disagree never pair, and editing a co-author's note
+  takes it out of every pair.
 - An index.json written before origin and "mine" were stored reads every
   relative note path as a co-author's note until the next compile: lint may
   list your own notes and the tail puts them last.
-- "You" reads `git config user.email` only; an `author.email` setting or a
-  `GIT_AUTHOR_EMAIL` override is not recognised.
 - Lint lists every memory conflict pair; there is no cap.
 - Trust order and lint pairs only reach agents through the wiki: an agent
   that greps `.agents/memory` directly still reads a co-author's note the
   wiki ranks low, with no pair beside it.
-- "You" is the commit author email matching `git config user.email`; git
-  lets anyone set an author email, so it shows who to ask, not proof.
+- "You" is the commit author email matching `git config user.email`, which
+  alone is read (an `author.email` setting or a `GIT_AUTHOR_EMAIL` override is
+  not recognised); git lets anyone set an author email, so it shows who to
+  ask, not proof.
 - A commit that leaves a note's file unchanged triggers no recompile, so the
   author on a served row lags until the next compile or change to a note.
 - Origin lookup runs `git log` over the memory folder's whole history on every

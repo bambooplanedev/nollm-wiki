@@ -127,11 +127,13 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    per item, keys in this order — `kind` (`fn`, `method`, `type` for a
    struct, class, enum, trait, interface, union, exported macro or type
    alias in every language, `value` for a constant, static or module-level
-   variable, `module`), `name`, `owner` (omitted when free), `signature` (as
+   variable, `module`, `top_level` for a shell file's calls outside any
+   function), `name`, `owner` (omitted when free), `signature` (as
    the source reads it, no owner spliced in), `start_line`, `end_line`
    (1-based, inclusive, in the original file, from the first attached doc
    or attribute line), `doc` (the doc comment's first sentence, at most 120
-   chars; omitted when none), `public` (whether it is in `## Exports`), and
+   chars; omitted when none), `doc_text` (the whole doc on one line, at most
+   1000 chars; omitted when it equals `doc`), `public` (whether it is in `## Exports`), and
    `twin` (`path:start-end` of a paired C++ declaration or definition;
    omitted when none), `test` (omitted when false), `calls` (the
    `path:start-end` of each function a function calls, sorted; omitted when
@@ -160,7 +162,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`; front matter `aliases:` and `tags:` as `a, b`, `[a, b]` or a YAML block list (tags normalized: lowercase, `#` stripped); front-matter scalars are unquoted; the page date comes from `updated`/`modified`/`date`, then the same keys under a one-level `metadata:` block, then a `YYYY-MM-DD` file-name prefix. |
-| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds no language's grammar node kinds — those live behind the `Shape` hook in each language's module. |
+| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
 | `src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
 | `src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
 | `src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and the two-pages-per-component `.h`/`.cpp` pairing (`source_rank`, `module_stem`). |
@@ -168,10 +170,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
 | `src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
 | `src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
+| `src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`): functions only, listed as `name()`, doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
 | `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), `CodeItem` (with the `test` flag) and `is_test_path()`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
 | `src/calls.rs` | `resolve_calls()` — call edges between code items, matched by name and argument count after the graph is built; `Wiki::calls` — what `neighbors --symbol` prints; `Wiki::callers` — what `callers` prints. |
-| `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank; `orphan_ids()`. |
+| `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
@@ -518,8 +521,8 @@ and `items.json` (each code page's items, absent for older wikis); page
 bodies are read on demand from `<id>.md`. From the items it builds the
 per-page symbol fields below.
 
-**Id resolution** (`Wiki::resolve_id`, used by `neighbors` and `page` in the
-CLI and MCP) tries, in order, and takes the first that names exactly one page:
+**Id resolution** (`Wiki::resolve_id`, used by `neighbors`, `callers` and `page` in
+the CLI and MCP) tries, in order, and takes the first that names exactly one page:
 the exact id; the title (case-insensitive); the slug of the argument; the
 argument normalised (`\` to `/`, one leading `./` stripped) as an exact page
 path; a unique page path ending in `/<argument>` (several are an error listing
@@ -827,7 +830,7 @@ shape is common at the top of a C++ file and every other language keeps the
 stricter rule that a doc comment must open the file or there is none.
 
 **One part of that restructuring is NOT C++-only: a blank doc line no longer
-ends the paragraph, in any of the six languages.** `leading_doc` used to stop
+ends the paragraph, in every language.** `leading_doc` used to stop
 at the first line that stripped to `""`; it now skips it and keeps
 collecting, because a bare `/**`, a lone `*/` and a `//!` with nothing after
 it are all gaps *within* one doc comment, not its end. So a Rust module doc
@@ -841,7 +844,7 @@ pins that the banner-skip did *not* travel with it.
 
 **Signature normalization is language-agnostic**, unlike the visibility and
 owner machinery above: `build_signature` collapses whitespace and tidies the
-punctuation a wrapped parameter list leaves behind, for all six languages.
+punctuation a wrapped parameter list leaves behind, for every language.
 A multi-line Python `def` or Go `func` renders on one line with `( ` and `, )`
 cleaned up. This is deliberate; the pass and its limits are documented on
 `tidy_punctuation`.
@@ -929,6 +932,17 @@ unknown; and the names of one multi-declarator statement share its range.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
   - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
+  - `tests/hint.rs` — `wiki hint` end to end: code lines for a task text,
+    silence when there is nothing to say.
+  - `tests/labels.rs` — Markdown headings and bold step lines with their
+    line ranges, behind `search --docs`.
+  - `tests/page.rs` — `Wiki::outline`: a page's module map against a
+    compiled fixture.
+  - `tests/query_defined.rs` — item names in search: an older `index.json`
+    without `defined`, and the whole-term match rule.
+  - `tests/setup.rs` — `wiki setup` end to end, with stub agent binaries.
+  - `tests/shell_extraction.rs` — shell scripts through `compile()`:
+    functions, docs, the parse-error fallback, page ids.
   - `tests/python_extraction.rs` — Python extraction through `compile()`
     on a reduced stand-in for the audit corpora (dataclass, constant,
     private helper, relative imports), asserting on `## Exports`/`## Imports`.
@@ -993,8 +1007,9 @@ unknown; and the names of one multi-declarator statement share its range.
   at most 3), and mean response tokens: `tokens` charges the default
   response (`search_lines`, limit 10), `tokens_json` the `format: "json"`
   response (`search_json`). Gates, checked before the snapshot: `file_hit@3`
-  and `symbol_hit@3` floors per split (tune 35/35, held 16/17) and the
-  title-as-query count (27/28). The `neighbors` pack size is recorded
+  and `symbol_hit@3` floors per split (`file_hit@3` tune 35/35, held 17/17;
+  `symbol_hit@3` tune 34/35, held 17/17) and the
+  title-as-query count (28/28). The `neighbors` pack size is recorded
   without being asserted. A step that changes the default renderer or limit
   swaps it in the harness and quotes both token numbers.
 

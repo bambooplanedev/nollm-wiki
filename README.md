@@ -29,7 +29,7 @@ above it; it is not output.
 $ wiki callers calls.rs resolve_calls --dir .wiki
 callers of resolve_calls  wiki/src/calls.rs:197-264 — 1 functions in 1 files
 wiki/src/lib.rs
-  140-441  fn  compile_inner  calls resolve_calls at 306
+  145-464  fn  compile_inner  calls resolve_calls at 329
   └ the caller's lines        └ the line of the call
 ```
 
@@ -65,8 +65,8 @@ wiki/src/lib.rs
   Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
   Code's) become searchable pages, listed after the code hits, with dates, aliases and `supersedes:`.
-- **Languages.** Rust, Python, C++, Go, JavaScript, TypeScript, `.vue` and `.svelte` scripts,
-  Markdown and plain text.
+- **Languages.** Rust, Python, C++, Go, JavaScript, TypeScript (with JSX/TSX), `.vue` and `.svelte`
+  scripts, shell (`.sh`, `.bash`: functions only), Markdown and plain text.
 - **Deterministic.** Byte-identical output across runs, machines and thread counts; incremental
   recompiles.
 - **Opens in Obsidian.** The pages link each other with Obsidian wikilinks, so the output folder is
@@ -104,11 +104,11 @@ From source:
 In the project you want agents to navigate:
 
     cd your-project
-    wiki setup --scope local      # compiles .wiki, installs the MCP server and a skill for this checkout
+    wiki setup --scope local      # compiles .wiki, installs the MCP server, the prompt hook and (for pi) a skill
 
 Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
 `.wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `wiki setup --remove` undoes either. Cursor and Codex: `wiki setup --agent cursor,codex`; other
+and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex: `wiki setup --agent cursor,codex`; other
 clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
@@ -191,8 +191,9 @@ names them. Codex is set up only when named: its MCP config is global.
   `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
   `--scope repo` for it.
-- Either scope creates `.agents/memory/`, and removes the `wiki-memory` skill an earlier release
-  wrote.
+- Either scope creates `.agents/memory/`. When Claude Code is set up, the
+  `.claude/skills/wiki-navigation` and `.claude/skills/wiki-memory` skills an earlier release wrote
+  are removed if untouched (in local scope, only if git does not track them).
 - Either scope adds Codex's server with `codex mcp add wiki -- wiki serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
@@ -364,7 +365,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
-| `neighbors` | `id`, `depth?` (1), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
+| `neighbors` | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large, memory_conflicts}` |
 
@@ -424,21 +425,22 @@ Migration: `compile --memory local` is gone, and notes in the per-user folder of
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
 
 `search` lists the code and docs exactly as if no notes existed, then up to two notes, one per line,
-as `memory (<origin>): <path> — <summary>`, each followed by its snippet on an indented line. A note is listed when a query word of four or more characters is
+as `memory (<origin>): <path> — <summary>`, each followed, when its body matched, by its snippet on an indented line. A note is listed when a query word of four or more characters is
 in its title, aliases or summary, or the query writes the note's `updated` day, or the note scores
-at least twice the best code hit, both scores counted on the project's scale (project pages plus
-notes). Notes pass the `code` and `docs` filters, and `wiki hint` adds
+at least twice the best code hit (the note is scored over project pages plus notes, the code hit
+over project pages only). Notes pass the `code` and `docs` filters, and `wiki hint` adds
 one memory line by the same rule (see [hint](#hint)). Notes never move a code page's rank:
 PageRank and the `llms.txt` median count project pages only.
 
 Each note row says where the note came from: `memory (local): /abs/x.md — summary` for a note in
 an agent folder, a `--memory` folder or an `.agents/memory` file git does not track (or no git),
 and `memory (repo, Jane Doe): .agents/memory/x.md — summary` for a committed one, with the name of
-the file's last committer (never the email; left out when git cannot tell), `, you` when that
+the author name of the file's last commit (never the email; left out when git cannot tell), `, you` when that
 commit's author email is your `git config user.email`, ignoring case (`memory (repo, Jane Doe, you): …`;
 no git or no email: nobody is you; the email is only compared, never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
-`"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and
-`"edited": true` when edited. The origin is read at compile time; serve and the hook never call git.
+`"memory": true`, `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your notes and
+`"edited": true` when edited. The origin is read when the wiki is compiled, by `wiki compile` and by each recompile of
+`serve --source`; answering a `search` or a hook never calls git.
 Notes are ordered by trust, the score order kept among equals: local notes first, then your own or
 edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
 the hook's one memory line is the most trusted.
@@ -522,9 +524,9 @@ ignored 16800`: one count per folder name, and `ignored` for the `.gitignore`/`.
 A file counts once, for its outermost skipped folder; `.git`, `<OUTPUT>` and the memory folders are not
 counted, and `--no-ignore` prints no such line.
 - `--emit-json` — also write `graph.json` (node/edge graph).
-- `--project <NAME>` (the input directory's basename) — project name written to `index.json`,
-  `llms.txt` and `AGENTS.md`. Without it, `compile .` and `compile "$PWD"` name the project
-  differently.
+- `--project <NAME>` (the input path's last component; `wiki` when it has none, as for `.`) —
+  project name written to `index.json`, `llms.txt` and `AGENTS.md`. Without it, `compile .` is
+  named `wiki` and `compile "$PWD"` after the directory.
 - `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
@@ -544,17 +546,19 @@ clean directory.
   no query, lists every such page. A query, `--tag` or `--docs` is required.
 - `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead
   of the wiki (see [Agents](#agents)); paths are relative to the current directory, no compiled wiki
-  is needed, and `--kind` and `--tag` do not apply.
+  is needed, and `--kind`, `--tag` and `--dir` cannot be combined with it.
 - `--limit <N>` (`10` with a query) — maximum number of hits.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
-inclusive range; `name` is `Owner::name` for methods). Only symbols scoring at least 30% of the best
-symbol in the response are shown, and test code ranks at half score. A page without symbol lines
+inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30% of
+the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
+one, and test code ranks at half score. A page without symbol lines
 gets its body snippet on a four-space-indented line instead. A summary, snippet or doc longer than
 160 characters is cut with `…`. `--format json` prints
 `[{id, title, summary, updated, score, snippet, path, symbols}]`, each symbol
-`{path, start_line, end_line, name, signature, doc}`.
+`{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin` and,
+when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 #### page
 
@@ -613,8 +617,9 @@ A budgeted context pack for an agent: a breadth-first walk from `<ID>` up to `--
 node count; neighbors are admitted by centrality (PageRank), and one that does not fit the remaining
 budget is skipped while the walk goes on. The target comes first — a code target as its outline —
 and the neighbors follow ordered by centrality, highest last, so the most important context sits
-closest to the end. Without `--full`, the modules the target imports or is imported by come first,
-as outlines when they fit, and the rest as one-line summaries.
+closest to the end. Without `--full`, the modules the target imports or is imported by are admitted first, as outlines
+when they fit, and the rest as one-line summaries; all of them are then printed in the centrality
+order above.
 
 `--symbol <NAME>` prints every function that function calls instead, through all levels (or
 `--depth` of them), in the line format of `callers`.
@@ -635,7 +640,7 @@ fail the run. Exits 1 when any link is broken, so `lint` can gate a build.
     wiki hint [--dir .wiki] [--claude-hook] [TEXT]
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
-`path:start-end  name  signature` lines from the best-matching code pages, at most 2 per page,
+`path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the best-matching code pages, at most 2 per page,
 without docs, tests or a line whose range holds another of the page's lines; a page with no such
 line gets `path  title`. Only the text's 24 rarest words rank the pages (vendored code is not compiled, see
 `compile`); one-character words never count. Prints
@@ -720,11 +725,15 @@ A code page's body is its source; its symbols and line ranges are in `items.json
   has a date), `path`, `page`, `summary` (`null` when none could be derived), `degree_in`,
   `degree_out`, `pagerank`, `token_estimate`, `neighbors_out`, `neighbors_in`, `imports_out`,
   `imports_in` (the import edges among them), `defined` (top-level definition names) and `methods`.
+  A memory note's entry adds `memory: true`, `origin` (`local` or `repo`) and, when they apply,
+  `author`, `mine`, `edited` and `superseded_by`.
 - **`items.json`** — the code map, kept out of `index.json` so the catalog stays small. One object
   keyed by page id; each value lists the page's items with `kind`, `name`, `owner`, `signature`,
-  `start_line`/`end_line`, `doc`, `public`, `twin` for a paired C++ declaration or definition, and
+  `start_line`/`end_line`, `doc`, `doc_text` (the rest of the doc, for ranking), `public`, `test`
+  (test code), `twin` for a paired C++ declaration or definition, and
   for a function `calls` (the `path:start-end` of the functions it calls) and `call_lines` (for
-  each, the lines that call it).
+  each, the lines that call it). A shell file's calls outside any function hang off a `top_level`
+  item.
 - **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under
   `## Optional`.
 - **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
@@ -760,7 +769,9 @@ directory (`tests/common/mod.rs` → `common`). Two names that fold to the same 
 `Fetch v2`, two files with one stem in different directories, `orderbook.h` and `orderbook.cpp` —
 are told apart by a directory segment, then a file-name discriminator, then a free id; no source
 is ever dropped for a collision ([details](wiki/docs/ARCHITECTURE.md#disambiguation-ladder)). A name
-with no letter or digit left after folding becomes `page_<hash>`.
+with no letter or digit left after folding becomes `page_<hash>`. An id that would be `index`,
+`llms`, `agents` or `graph` becomes `<id>_page`, since those names are the wiki's own files;
+`compile` warns.
 
 ## Measured
 
