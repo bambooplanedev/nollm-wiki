@@ -331,3 +331,4 @@ per question is noise-level: treat single results as anecdotes.
   be gamed by a note whose summary is stuffed with common code words; the
   origin label on the row is the defence, nothing filters such a note.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
+- A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.

@@ -1654,10 +1654,6 @@ fn note(title: &str, extra: &str, body: &str) -> String {
 }
 
 fn superseded_by(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
-    superseded_by_in(d)
-}
-
-fn superseded_by_in(d: &tempfile::TempDir) -> std::collections::BTreeMap<String, Option<String>> {
     common::index_entries(&d.path().join("out"))
         .iter()
         .map(|e| {
@@ -2035,7 +2031,7 @@ fn committed_note_cannot_supersede_a_local_note() {
         &[("x", note("New", "supersedes: Deploy key\n", "rotation"))],
         &[("deploy", note("Deploy key", "", "rotation"))],
     );
-    assert_eq!(superseded_by_in(&d)["deploy_key"], None);
+    assert_eq!(superseded_by(&d)["deploy_key"], None);
     let ids: Vec<_> = w
         .search("rotation", None, 10)
         .into_iter()
@@ -2052,7 +2048,7 @@ fn local_note_still_supersedes_a_committed_one() {
         &[("old", note("Old", "", "rotation"))],
         &[("new", note("New", "supersedes: Old\n", "rotation"))],
     );
-    assert_eq!(superseded_by_in(&d)["old"].as_deref(), Some("new"));
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
 }
 
 #[test]
@@ -2064,5 +2060,5 @@ fn committed_note_still_supersedes_a_committed_one() {
         ],
         &[],
     );
-    assert_eq!(superseded_by_in(&d)["old"].as_deref(), Some("new"));
+    assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
 }

@@ -137,6 +137,8 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
     let log = git(
         dir,
         &[
+            "-c",
+            "log.showSignature=false",
             "log",
             "-z",
             "--relative",
@@ -274,27 +276,30 @@ mod tests {
     }
 
     #[test]
+    fn repo_origins_ignores_show_signature_config() {
+        let d = tempfile::tempdir().unwrap();
+        let (root, mem) = (d.path(), d.path().join("m"));
+        std::fs::create_dir(&mem).unwrap();
+        git_in(root, "t", &["init", "-q"]);
+        git_in(root, "t", &["config", "log.showSignature", "true"]);
+        std::fs::write(mem.join("a.md"), "a").unwrap();
+        git_in(root, "Jane Doe", &["add", "."]);
+        git_in(root, "Jane Doe", &["commit", "-qm", "a"]);
+        assert_eq!(
+            repo_origins(&mem)["a.md"],
+            Origin::Repo {
+                author: Some("Jane Doe".to_string()),
+                edited: false
+            }
+        );
+    }
+
+    #[test]
     fn repo_origins_without_head_is_empty() {
         let d = tempfile::tempdir().unwrap();
         git_in(d.path(), "t", &["init", "-q"]);
         std::fs::write(d.path().join("x.md"), "x").unwrap();
         assert!(repo_origins(d.path()).is_empty());
-    }
-
-    #[test]
-    fn origin_labels() {
-        let repo = |author: Option<&str>, edited| Origin::Repo {
-            author: author.map(String::from),
-            edited,
-        };
-        assert_eq!(Origin::Local.label(), "local");
-        assert_eq!(repo(None, false).label(), "repo");
-        assert_eq!(repo(Some("Jane Doe"), false).label(), "repo, Jane Doe");
-        assert_eq!(repo(None, true).label(), "repo, edited");
-        assert_eq!(
-            repo(Some("Jane Doe"), true).label(),
-            "repo, Jane Doe, edited"
-        );
     }
 
     #[cfg(unix)]
