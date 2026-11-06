@@ -395,6 +395,30 @@ fn cli_search_prints_the_same_lines_as_mcp() {
 }
 
 #[test]
+fn cli_page_names_a_missing_page_file() {
+    let (_d, _raw, out) = common::compiled(&[
+        ("docs/a.md", "# Alpha\n\nAlpha doc.\n"),
+        ("src/g.rs", "/// Gamma fn.\npub fn gamma() {}\n"),
+    ]);
+    fs::remove_file(out.join("alpha.md")).unwrap();
+    fs::remove_file(out.join("g.md")).unwrap();
+    let a3 = "page \"alpha\" is in the index but its file alpha.md is missing from the wiki folder — recompile the wiki";
+    let dir = out.to_str().unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", "alpha", "--full", "--dir", dir])
+        .assert()
+        .code(1)
+        .stderr(contains(a3));
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", "nope", "--dir", dir])
+        .assert()
+        .failure()
+        .stderr(contains("unknown page"));
+}
+
+#[test]
 fn cli_page_prints_the_same_text_as_page_text() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");

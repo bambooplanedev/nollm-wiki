@@ -432,7 +432,7 @@ impl WikiServer {
                 .max_tokens
                 .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
             wiki.page_text(&id, full, max_tokens)
-                .ok_or_else(|| crate::query::unknown_page(&p.id, &[]))
+                .ok_or_else(|| wiki.page_error(&id, &p.id))
         }));
         with_stale(result, stale.as_deref())
     }
@@ -533,8 +533,14 @@ impl ServerHandler for WikiServer {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
                 // Served from memory, keyed by the index's own ids: an id
                 // with a traversal sequence is simply not found.
-                let page = wiki.page(id);
-                (page.ok_or_else(not_found)?, "text/markdown")
+                let page = match wiki.page(id) {
+                    Some(page) => page,
+                    None if wiki.has_page(id) => {
+                        return Err(McpError::resource_not_found(wiki.page_error(id, id), None))
+                    }
+                    None => return Err(not_found()),
+                };
+                (page, "text/markdown")
             }
         };
         let mut contents = vec![ResourceContents::text(text, uri).with_mime_type(mime_type)];

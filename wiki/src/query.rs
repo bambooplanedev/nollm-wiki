@@ -109,6 +109,18 @@ pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
     format!("unknown page {arg:?}{closest} — use search to find ids")
 }
 
+impl Wiki {
+    /// Why `page_text`/`page` found no body for `id`: an indexed page whose
+    /// file is gone says so; anything else is an unknown page named `arg`.
+    pub fn page_error(&self, id: &str, arg: &str) -> String {
+        if self.entry(id).is_some() && self.page(id).is_none() {
+            format!("page {id:?} is in the index but its file {id}.md is missing from the wiki folder — recompile the wiki")
+        } else {
+            unknown_page(arg, &[])
+        }
+    }
+}
+
 /// Normalizes a tag argument as the index stores tags: trimmed, no leading
 /// `#` or trailing `/`, lowercase. `None` when nothing is left.
 pub fn tag_filter(arg: &str) -> Option<String> {
