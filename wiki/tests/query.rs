@@ -2276,3 +2276,22 @@ fn committed_note_still_supersedes_a_committed_one() {
     );
     assert_eq!(superseded_by(&d)["old"].as_deref(), Some("new"));
 }
+
+#[test]
+fn callers_reach_a_pointer_returning_definition() {
+    let (_d, w) = code_fixture(&[
+        (
+            "src/router.h",
+            "class Router {\npublic:\n  const Venue* pick_venue(int id);\n  int cost(int id);\n};\n",
+        ),
+        (
+            "src/router.cpp",
+            "#include \"router.h\"\nconst Venue* Router::pick_venue(int id) { return nullptr; }\nint Router::cost(int id) {\n  pick_venue(id);\n  return 0;\n}\n",
+        ),
+    ]);
+    let id = w.resolve("src/router.cpp").unwrap();
+    let out = w
+        .callers(&id, "pick_venue", Some(1), None)
+        .unwrap_or_else(|e| e);
+    assert!(out.contains("cost  calls pick_venue at 4"), "{out}");
+}

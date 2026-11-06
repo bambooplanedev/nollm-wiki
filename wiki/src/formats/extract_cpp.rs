@@ -16,17 +16,19 @@ use tree_sitter::Node;
 /// already-qualified name — and `dedup_by` would not collapse them, because
 /// their signatures differ.
 ///
-/// The six wrapper patterns are the exception, and are general on purpose. They
-/// require the `declarator:` field to be a `pointer_declarator` or a
-/// `reference_declarator`, where every other pattern requires a bare
-/// `function_declarator`, so no node can be matched by both and there is
-/// nothing to disambiguate. Spelling out the alternation there instead would
-/// need a qualified twin for each, twelve patterns for the same result, and
-/// would drop `Level* OrderBook::top()` on the floor in the meantime. The
-/// safety of `(_)` rests on `qualified_owner` reaching no owner THROUGH a
-/// wrapper — an owner resolved there would be spliced ahead of the qualifier
-/// the source already wrote. `a_pointer_returning_out_of_line_definition_renders_its_owner_once`
-/// pins that pairing.
+/// The ten wrapper patterns require the `declarator:` field to be a
+/// `pointer_declarator` or a `reference_declarator` around a
+/// `function_declarator`, one level deep. The six on `function_definition`
+/// mirror the unwrapped ones: a plain-name pair plus a qualified pair for one
+/// and two qualifier levels, so `Level* OrderBook::top()` captures `top` and
+/// `qualified_owner` (which descends the same one wrapper) supplies
+/// `OrderBook`, as for `void OrderBook::apply()`. A general `(_)` capture
+/// there would match the qualified name too and splice the owner ahead of the
+/// qualifier the source already wrote;
+/// `a_pointer_returning_out_of_line_definition_renders_its_owner_once` pins
+/// that. The four on `field_declaration`/`declaration` stay general `(_)`:
+/// no pattern there resolves an owner through a qualifier, so there is
+/// nothing to double.
 ///
 /// `function_definition` alone covers only members with a BODY, so a
 /// declaration-only header would carry nothing but `class OrderBook`;
@@ -56,7 +58,7 @@ use tree_sitter::Node;
 /// documented, not fixed.
 ///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
-///   * declarator nesting beyond ONE wrapper — the six wrapper patterns reach
+///   * declarator nesting beyond ONE wrapper — the ten wrapper patterns reach
 ///     exactly one deep, and `int** f()` is
 ///     `(pointer_declarator (pointer_declarator (function_declarator …)))`;
 ///   * qualifier nesting beyond two — `a::b::C::m` needs a third pattern;
@@ -65,15 +67,6 @@ use tree_sitter::Node;
 ///     `type_identifier` these patterns require;
 ///   * template specializations, whose head is a `template_declaration`
 ///     wrapping a `class_specifier` named by a `template_type`;
-///   * a pointer- or reference-returning OUT-OF-LINE definition
-///     (`Level* OrderBook::top() { … }`) classifies as `FreeDef`, not
-///     `Member`: `qualified_owner` resolves `None` through the wrapper (see
-///     its own doc), so `classify` sees no owner and sorts the definition
-///     away from its class in `## Exports`, where it also competes in
-///     `pick_summary_fallback` against genuine free functions. Closing this
-///     needs `qualified_owner` to descend a wrapper level AND the wrapper
-///     patterns' `(_)` capture narrowed in the same change — out of scope
-///     here;
 ///   * a conversion operator (`operator bool()`) parses as an `operator_cast`
 ///     declarator under an `abstract_function_declarator`, not an
 ///     `operator_name` under a `function_declarator`, so no pattern here
@@ -98,9 +91,23 @@ const QUERY: &str = r"
     name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
 
 (function_definition declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
+  (function_declarator
+    declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name))) @def
 (function_definition declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
+  (function_declarator
+    declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name))) @def
+(function_definition declarator: (pointer_declarator
+  (function_declarator declarator: (qualified_identifier
+    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
+(function_definition declarator: (reference_declarator
+  (function_declarator declarator: (qualified_identifier
+    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
+(function_definition declarator: (pointer_declarator
+  (function_declarator declarator: (qualified_identifier name: (qualified_identifier
+    name: [(identifier) (destructor_name) (operator_name)] @name))))) @def
+(function_definition declarator: (reference_declarator
+  (function_declarator declarator: (qualified_identifier name: (qualified_identifier
+    name: [(identifier) (destructor_name) (operator_name)] @name))))) @def
 (field_declaration declarator: (pointer_declarator
   (function_declarator declarator: (_) @name))) @def
 (field_declaration declarator: (reference_declarator
@@ -343,17 +350,33 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 /// separate exclusion here.
 ///
 /// Two stated gaps, both observed:
-///   * one declarator level only, so a pointer- or reference-returning
-///     out-of-line definition (`Level* OrderBook::top()`) resolves no owner and
-///     renders its qualifier verbatim instead — matching the query's own
-///     wrapper patterns;
+///   * one wrapper level only, and only on a `function_definition`: a
+///     pointer- or reference-returning out-of-line definition
+///     (`Level* OrderBook::top()`) resolves `OrderBook` through its one
+///     `pointer_declarator`/`reference_declarator`, matching the query's
+///     wrapper patterns, while `int** OrderBook::grid()` (two wrappers)
+///     resolves nothing and is not an item. A definition returning a pointer
+///     to a function that returns a pointer (`char *(*get_fn(void))(int)`) is
+///     no longer an item either: its wrapped `function_declarator` names a
+///     `parenthesized_declarator`, which the general `(_)` capture once
+///     extracted as the garbage name `(*get_fn(void))`;
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
 ///     arguments from an owner for exactly this reason; C++ does not yet, so
 ///     the two forms of a template method do not index alike.
 fn qualified_owner(def: Node, text: &str) -> Option<String> {
-    let declarator = def.child_by_field_name("declarator")?;
+    let mut declarator = def.child_by_field_name("declarator")?;
+    if def.kind() == "function_definition"
+        && matches!(
+            declarator.kind(),
+            "pointer_declarator" | "reference_declarator"
+        )
+    {
+        declarator = declarator
+            .named_children(&mut declarator.walk())
+            .find(|c| c.kind() == "function_declarator")?;
+    }
     let inner = declarator.child_by_field_name("declarator")?;
     if inner.kind() != "qualified_identifier" {
         return None;
@@ -432,7 +455,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// descent those members render correctly in `## Exports` yet never reach
 /// `Entity::methods`, which `Wiki::search` scores on.
 ///
-/// Exactly ONE wrapper deep, deliberately: that is the reach of the six
+/// Exactly ONE wrapper deep, deliberately: that is the reach of the ten
 /// wrapper patterns in `QUERY`, so this gate accepts precisely the members
 /// the query captures — `Level** grid()` is uncovered on both sides at once
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
@@ -698,13 +721,13 @@ mod tests {
 
     #[test]
     fn a_pointer_returning_out_of_line_definition_renders_its_owner_once() {
-        // The wrapper patterns capture a general `(_)` name, so on an
-        // out-of-line definition the capture is the whole
-        // `qualified_identifier`. That is safe only while `qualified_owner`
-        // reaches no owner through a wrapper: were it to, the owner would be
-        // spliced in AHEAD of the qualifier the source already wrote. Asserting
-        // presence alone would not catch it — a doubled entry would sit beside
-        // a correct one — so the absence is asserted too.
+        // `qualified_owner` descends one wrapper on a definition, so the
+        // `function_definition` wrapper patterns must capture only the last
+        // name segment: a general `(_)` capture would also take the whole
+        // `qualified_identifier` and splice the owner AHEAD of the qualifier
+        // the source already wrote. Asserting presence alone would not catch
+        // it — a doubled entry would sit beside a correct one — so the
+        // absence is asserted too.
         let s = syms(
             "src/ob.cpp",
             "Level* OrderBook::top() { return nullptr; }\n",

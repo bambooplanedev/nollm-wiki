@@ -234,3 +234,26 @@ fn cpp_multi_declarator_methods_get_own_signatures() {
     assert_eq!(sig_of(&items, Some("B"), "f"), "int f()");
     assert_eq!(sig_of(&items, Some("B"), "g"), "int *g()");
 }
+
+#[test]
+fn a_pointer_or_reference_returning_definition_pairs_with_its_declaration() {
+    let idx = compile_with_items(&[
+        (
+            "include/router.h",
+            "class Router {\npublic:\n  /// Picks a venue.\n  const Venue* pick_venue(int id);\n  Venue& front();\n};\n",
+        ),
+        (
+            "src/router.cpp",
+            "#include \"router.h\"\nconst Venue* Router::pick_venue(int id) { return nullptr; }\nVenue& Router::front() { return *pick_venue(0); }\n",
+        ),
+    ]);
+    let h = items_of(&idx, "include/router.h");
+    let at = |items: &[serde_json::Value], n: &str| items.iter().find(|i| i["name"] == n).cloned();
+    assert_eq!(at(&h, "pick_venue").unwrap()["twin"], "src/router.cpp:2-2");
+    assert_eq!(at(&h, "front").unwrap()["twin"], "src/router.cpp:3-3");
+    let c = items_of(&idx, "src/router.cpp");
+    let pick = at(&c, "pick_venue").expect("definition named without its qualifier");
+    assert_eq!(pick["owner"], "Router");
+    assert_eq!(pick["doc"], "Picks a venue.");
+    assert_eq!(pick["twin"], "include/router.h:3-4");
+}
