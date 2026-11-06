@@ -361,3 +361,10 @@ fn empty_query_keeps_document_order_across_levels() {
     let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
     assert_eq!(t, ["A1. bold", "H heading"]);
 }
+
+#[test]
+fn labels_skip_bare_headings_and_strip_closing_hashes() {
+    let md = "# Only\n\n#\n\n## Closing ##\n\n### Kept#\n\n## Tail ###   \n\n## ##\n\n  ## Indented\n    ## Code\n";
+    let t: Vec<_> = labels(md).into_iter().map(|l| l.text).collect();
+    assert_eq!(t, ["Only", "Closing", "Kept#", "Tail"]);
+}

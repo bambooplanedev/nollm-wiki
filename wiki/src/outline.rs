@@ -264,12 +264,26 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
 }
 
 /// An ATX heading line as `(level, text)`: one to six `#`, then a space or
-/// the line end.
+/// the line end; `None` when the text is empty. A closing `#` run is not
+/// part of the text.
 pub(crate) fn heading(line: &str) -> Option<(usize, String)> {
     let text = line.trim_start_matches('#');
     let level = line.len() - text.len();
     let spaced = text.is_empty() || text.starts_with([' ', '\t']);
-    ((1..=6).contains(&level) && spaced).then(|| (level, text.trim().to_string()))
+    if !(1..=6).contains(&level) || !spaced {
+        return None;
+    }
+    // A closing run of `#` is dropped only when a space or tab precedes it.
+    let text = text.trim();
+    let rest = text.trim_end_matches('#');
+    let text = if rest.ends_with([' ', '\t']) {
+        rest.trim_end()
+    } else if rest.is_empty() {
+        ""
+    } else {
+        text
+    };
+    (!text.is_empty()).then(|| (level, text.to_string()))
 }
 
 /// The outline text with only what `keep` keeps; ends with a newline.

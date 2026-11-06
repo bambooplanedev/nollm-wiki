@@ -369,3 +369,16 @@ fn truncating_a_huge_doc_is_the_longest_whole_line_prefix() {
     );
     assert!(token_estimate(&(longer + &m)) > 50);
 }
+
+#[test]
+fn outline_drops_bare_and_closing_hashes() {
+    let (_d, w) = common::compiled_wiki(&[(
+        "docs/h.md",
+        "# Only\n\n#\n\n## Closing ##\n\n### Kept#\n\n## Tail ###   \n\n## ##\n\n  ## Indented\n    ## Code\n",
+    )]);
+    let o = outline(&w, "only");
+    assert!(
+        o.ends_with("headings:\n  Only\n    Closing\n      Kept#\n    Tail\n"),
+        "{o}"
+    );
+}
