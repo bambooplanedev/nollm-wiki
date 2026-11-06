@@ -145,7 +145,7 @@ enum Command {
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Tools to expose, comma-separated, from search, page, neighbors,
-        /// callers, lint (default: search,page,neighbors,callers).
+        /// callers, lint (default: search,page,callers).
         #[arg(long, value_delimiter = ',')]
         tools: Option<Vec<String>>,
         /// With `--source`, an agent memory folder to include (repeatable), or

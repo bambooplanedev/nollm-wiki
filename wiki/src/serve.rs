@@ -1,6 +1,6 @@
 //! MCP server for a compiled wiki (`wiki serve`): exposes
-//! search/page/neighbors/callers (and, on request, lint) as tools and pages as
-//! resources over stdio.
+//! search/page/callers (and, on request, neighbors and lint) as tools and
+//! pages as resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::{Live, EXE, OUTDATED};
@@ -55,8 +55,10 @@ pub const TOOLS: [&str; 5] = ["search", "page", "neighbors", "callers", "lint"];
 
 /// The tools exposed without `--tools`. `lint` serves the person keeping
 /// the wiki, not an agent mid-task, and each exposed tool costs schema
-/// tokens on every request.
-pub const DEFAULT_TOOLS: [&str; 4] = ["search", "page", "neighbors", "callers"];
+/// tokens on every request. `neighbors` is left out: 16 of 11,056 rig calls
+/// and 0 of 37 on the bench, for about a quarter of the per-turn schema
+/// tokens.
+pub const DEFAULT_TOOLS: [&str; 3] = ["search", "page", "callers"];
 
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.
