@@ -44,6 +44,7 @@ const SHIPPED_SKILLS: &[&str] = &[
     include_str!("shipped/skill-5.md"),
     include_str!("shipped/skill-6.md"),
     include_str!("shipped/skill-7.md"),
+    include_str!("shipped/skill-8.md"),
 ];
 const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
 const NAV_END: &str = "<!-- /wiki:navigation -->";

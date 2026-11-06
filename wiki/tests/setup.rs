@@ -880,7 +880,7 @@ const OLD_NAVS: [&str; 2] = [
     include_str!("../src/setup/shipped/navigation-1.md"),
     include_str!("../src/setup/shipped/navigation-2.md"),
 ];
-const OLD_SKILLS: [&str; 7] = [
+const OLD_SKILLS: [&str; 8] = [
     include_str!("../src/setup/shipped/skill-1.md"),
     include_str!("../src/setup/shipped/skill-2.md"),
     include_str!("../src/setup/shipped/skill-3.md"),
@@ -888,6 +888,7 @@ const OLD_SKILLS: [&str; 7] = [
     include_str!("../src/setup/shipped/skill-5.md"),
     include_str!("../src/setup/shipped/skill-6.md"),
     include_str!("../src/setup/shipped/skill-7.md"),
+    include_str!("../src/setup/shipped/skill-8.md"),
 ];
 
 fn nav_block(nav: &str) -> String {
