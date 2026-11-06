@@ -305,13 +305,13 @@ pub struct CodeItem {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PairRole {
     /// Not a candidate: other languages; inline or in-class bodies,
-    /// `= default`, `static` or anonymous-namespace definitions.
+    /// `= delete`, `static` or anonymous-namespace definitions.
     #[default]
     Neither,
     /// A body-less declaration.
     Declaration,
-    /// An out-of-line definition: a body, no class-body ancestor, not
-    /// `static`, not inside an anonymous namespace.
+    /// An out-of-line definition: a body or `= default`, no class-body
+    /// ancestor, not `static`, not inside an anonymous namespace.
     OutOfLineDefinition,
 }
 
