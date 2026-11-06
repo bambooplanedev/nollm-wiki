@@ -876,14 +876,18 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     assert!(read(&f.root().join("AGENTS.md")).contains("<!-- wiki:navigation -->"));
 }
 
-const OLD_NAV: &str = include_str!("../src/setup/shipped/navigation-1.md");
-const OLD_SKILLS: [&str; 6] = [
+const OLD_NAVS: [&str; 2] = [
+    include_str!("../src/setup/shipped/navigation-1.md"),
+    include_str!("../src/setup/shipped/navigation-2.md"),
+];
+const OLD_SKILLS: [&str; 7] = [
     include_str!("../src/setup/shipped/skill-1.md"),
     include_str!("../src/setup/shipped/skill-2.md"),
     include_str!("../src/setup/shipped/skill-3.md"),
     include_str!("../src/setup/shipped/skill-4.md"),
     include_str!("../src/setup/shipped/skill-5.md"),
     include_str!("../src/setup/shipped/skill-6.md"),
+    include_str!("../src/setup/shipped/skill-7.md"),
 ];
 
 fn nav_block(nav: &str) -> String {
@@ -899,15 +903,23 @@ fn memory_part(skill: &str) -> Option<String> {
 
 #[test]
 fn setup_upgrades_previous_release() {
-    // Codex: the block in AGENTS.md.
-    let f = fixture(true, false);
-    codex_stub(&f);
-    let agents = f.root().join("AGENTS.md");
-    fs::write(&agents, format!("# Team rules\n\n{}", nav_block(OLD_NAV))).unwrap();
-    f.setup(&["--agent", "codex", "--scope", "repo"]).success();
-    let now = read(&agents);
-    assert_eq!(now, format!("# Team rules\n\n{}", nav_block(NAV)));
-    assert_eq!(now.matches("<!-- wiki:navigation -->").count(), 1);
+    // Codex: every earlier block in AGENTS.md.
+    for (i, old) in OLD_NAVS.iter().enumerate() {
+        let f = fixture(true, false);
+        codex_stub(&f);
+        let agents = f.root().join("AGENTS.md");
+        fs::write(&agents, format!("# Team rules\n\n{}", nav_block(old))).unwrap();
+        let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
+        let now = read(&agents);
+        assert_eq!(
+            now,
+            format!("# Team rules\n\n{}", nav_block(NAV)),
+            "navigation-{}: {}",
+            i + 1,
+            out(&a)
+        );
+        assert_eq!(now.matches("<!-- wiki:navigation -->").count(), 1);
+    }
 
     // pi, repo scope: every earlier skill, with the memory folder filled in.
     let skill_file = ".agents/skills/wiki-navigation/SKILL.md";
@@ -955,7 +967,7 @@ fn setup_keeps_hand_edited_block() {
     let f = fixture(true, false);
     codex_stub(&f);
     let agents = f.root().join("AGENTS.md");
-    let edited = nav_block(&OLD_NAV.replace("exact", "approximate"));
+    let edited = nav_block(&OLD_NAVS[0].replace("exact", "approximate"));
     fs::write(&agents, &edited).unwrap();
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert_eq!(read(&agents), edited);
@@ -976,13 +988,22 @@ fn setup_keeps_hand_edited_block() {
 
 #[test]
 fn remove_takes_out_old_block() {
-    let f = fixture(true, false);
-    codex_stub(&f);
-    let agents = f.root().join("AGENTS.md");
-    fs::write(&agents, format!("# Team rules\n\n{}", nav_block(OLD_NAV))).unwrap();
-    f.setup(&["--remove", "--agent", "codex", "--scope", "repo"])
-        .success();
-    assert_eq!(read(&agents), "# Team rules\n");
+    for (i, old) in OLD_NAVS.iter().enumerate() {
+        let f = fixture(true, false);
+        codex_stub(&f);
+        let agents = f.root().join("AGENTS.md");
+        fs::write(&agents, format!("# Team rules\n\n{}", nav_block(old))).unwrap();
+        let a = f
+            .setup(&["--remove", "--agent", "codex", "--scope", "repo"])
+            .success();
+        assert_eq!(
+            read(&agents),
+            "# Team rules\n",
+            "navigation-{}: {}",
+            i + 1,
+            out(&a)
+        );
+    }
 
     let f = fixture(true, false);
     let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
@@ -1009,6 +1030,25 @@ fn the_search_first_rules_are_in_every_copy() {
 }
 
 #[test]
+fn default_texts_name_only_default_tools() {
+    for name in wiki::serve::TOOLS {
+        if wiki::serve::DEFAULT_TOOLS.contains(&name) {
+            continue;
+        }
+        for (text_name, text) in [
+            ("INSTRUCTIONS", wiki::serve::INSTRUCTIONS),
+            ("navigation.md", NAV),
+            ("SKILL.md", SKILL),
+        ] {
+            assert!(
+                !text.contains(&format!("`{name}`")),
+                "{text_name} names `{name}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn setup_and_remove_clear_every_shipped_claude_navigation_skill() {
     for (i, old) in OLD_SKILLS.iter().enumerate() {
         for remove in [false, true] {
@@ -1028,11 +1068,13 @@ fn setup_and_remove_clear_every_shipped_claude_navigation_skill() {
 
 #[test]
 fn setup_removes_a_lone_old_agents_md_beside_claude_md() {
-    let f = fixture(true, false);
-    codex_stub(&f);
-    fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
-    fs::write(f.root().join("AGENTS.md"), nav_block(OLD_NAV)).unwrap();
-    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
-    assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
-    assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
+    for old in OLD_NAVS {
+        let f = fixture(true, false);
+        codex_stub(&f);
+        fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
+        fs::write(f.root().join("AGENTS.md"), nav_block(old)).unwrap();
+        let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+        assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
+        assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
+    }
 }

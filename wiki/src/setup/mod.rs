@@ -32,7 +32,10 @@ const CMD: &str = "wiki";
 const NAV_RULES: &str = include_str!("navigation.md");
 /// Every earlier release's `navigation.md` and `SKILL.md` (from git history), so setup can
 /// upgrade or remove what an older `wiki` wrote while a hand-edited copy stays foreign.
-const SHIPPED_NAV: &[&str] = &[include_str!("shipped/navigation-1.md")];
+const SHIPPED_NAV: &[&str] = &[
+    include_str!("shipped/navigation-1.md"),
+    include_str!("shipped/navigation-2.md"),
+];
 const SHIPPED_SKILLS: &[&str] = &[
     include_str!("shipped/skill-1.md"),
     include_str!("shipped/skill-2.md"),
@@ -40,6 +43,7 @@ const SHIPPED_SKILLS: &[&str] = &[
     include_str!("shipped/skill-4.md"),
     include_str!("shipped/skill-5.md"),
     include_str!("shipped/skill-6.md"),
+    include_str!("shipped/skill-7.md"),
 ];
 const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
 const NAV_END: &str = "<!-- /wiki:navigation -->";
