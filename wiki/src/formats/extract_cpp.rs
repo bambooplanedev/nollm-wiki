@@ -16,19 +16,26 @@ use tree_sitter::Node;
 /// already-qualified name — and `dedup_by` would not collapse them, because
 /// their signatures differ.
 ///
-/// The ten wrapper patterns require the `declarator:` field to be a
+/// The wrapper patterns require the `declarator:` field to be a
 /// `pointer_declarator` or a `reference_declarator` around a
-/// `function_declarator`, one level deep. The six on `function_definition`
-/// mirror the unwrapped ones: a plain-name pair plus a qualified pair for one
-/// and two qualifier levels, so `Level* OrderBook::top()` captures `top` and
+/// `function_declarator`, one level deep. The one on `function_definition`
+/// mirrors the unwrapped ones: a plain name, or a qualified name of one or
+/// two qualifier levels, so `Level* OrderBook::top()` captures `top` and
 /// `qualified_owner` (which descends the same one wrapper) supplies
 /// `OrderBook`, as for `void OrderBook::apply()`. A general `(_)` capture
 /// there would match the qualified name too and splice the owner ahead of the
 /// qualifier the source already wrote;
 /// `a_pointer_returning_out_of_line_definition_renders_its_owner_once` pins
-/// that. The four on `field_declaration`/`declaration` stay general `(_)`:
+/// that. The two on `field_declaration`/`declaration` stay general `(_)`:
 /// no pattern there resolves an owner through a qualifier, so there is
 /// nothing to double.
+///
+/// Each wrapper set is one pattern with alternations, not one pattern per
+/// shape: `Query::new` cost grows with the pattern count, and this query is
+/// built once per process. The plain names inside a wrapper alternation are
+/// listed flat, each with its own `@name`: a nested `[(identifier) …] @name`
+/// inside the outer alternation silently drops the `field_identifier` match
+/// of `const Stats& stats() const { … }` (tree-sitter 0.27).
 ///
 /// `function_definition` alone covers only members with a BODY, so a
 /// declaration-only header would carry nothing but `class OrderBook`;
@@ -58,10 +65,10 @@ use tree_sitter::Node;
 /// documented, not fixed.
 ///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
-///   * declarator nesting beyond ONE wrapper — the ten wrapper patterns reach
+///   * declarator nesting beyond ONE wrapper — the wrapper patterns reach
 ///     exactly one deep, and `int** f()` is
 ///     `(pointer_declarator (pointer_declarator (function_declarator …)))`;
-///   * qualifier nesting beyond two — `a::b::C::m` needs a third pattern;
+///   * qualifier nesting beyond two — `a::b::C::m` needs a third alternative;
 ///   * an out-of-line nested class (`class Outer::Inner { … }`), whose
 ///     `class_specifier` names itself with a `qualified_identifier`, not the
 ///     `type_identifier` these patterns require;
@@ -83,39 +90,25 @@ const QUERY: &str = r"
 (declaration declarator: (function_declarator
   declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
 
-(function_definition declarator: (function_declarator
-  declarator: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name))) @def
-(function_definition declarator: (function_declarator
-  declarator: (qualified_identifier name: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
+(function_definition declarator: (function_declarator declarator: [
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))])) @def
 
-(function_definition declarator: (pointer_declarator
-  (function_declarator
-    declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name))) @def
-(function_definition declarator: (reference_declarator
-  (function_declarator
-    declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name))) @def
-(function_definition declarator: (pointer_declarator
-  (function_declarator declarator: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
-(function_definition declarator: (reference_declarator
-  (function_declarator declarator: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
-(function_definition declarator: (pointer_declarator
-  (function_declarator declarator: (qualified_identifier name: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name))))) @def
-(function_definition declarator: (reference_declarator
-  (function_declarator declarator: (qualified_identifier name: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name))))) @def
-(field_declaration declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
-(field_declaration declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
-(declaration declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
-(declaration declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
+(function_definition declarator: [
+  (pointer_declarator (function_declarator declarator: [
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))
+  (reference_declarator (function_declarator declarator: [
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))]) @def
+(field_declaration declarator: [
+  (pointer_declarator (function_declarator declarator: (_) @name))
+  (reference_declarator (function_declarator declarator: (_) @name))]) @def
+(declaration declarator: [
+  (pointer_declarator (function_declarator declarator: (_) @name))
+  (reference_declarator (function_declarator declarator: (_) @name))]) @def
 
 (class_specifier   name: (type_identifier) @name) @def
 (struct_specifier  name: (type_identifier) @name) @def
