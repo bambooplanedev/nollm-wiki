@@ -26,6 +26,13 @@ pub const SKIPPED_DIRS: [&str; 6] = [
     "node_modules",
 ];
 
+/// Whether the compile prunes a directory of this name: a [`SKIPPED_DIRS`]
+/// name, or a hidden one (a leading `.`, `WalkBuilder::hidden`'s rule, which
+/// an ignore-file whitelist such as `!.github/` overrides).
+pub(crate) fn pruned_dir(name: &str) -> bool {
+    name.starts_with('.') || SKIPPED_DIRS.contains(&name)
+}
+
 /// What a walk reached: the kept files, and every directory it yielded (root
 /// included, sorted). Ignored subtrees are pruned, so they appear in neither.
 pub struct Walked {

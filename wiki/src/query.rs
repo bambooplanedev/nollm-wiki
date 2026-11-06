@@ -90,6 +90,12 @@ struct IndexFile {
     entries: Vec<Entry>,
 }
 
+/// `arg` as a path: `\` read as `/`, one leading `./` dropped.
+fn norm_path(arg: &str) -> String {
+    let norm = arg.replace('\\', "/");
+    norm.strip_prefix("./").unwrap_or(&norm).to_string()
+}
+
 /// The error for an id `resolve_id` could not place; `near` are its candidates.
 pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
     let closest = if near.is_empty() {
@@ -1682,8 +1688,51 @@ impl Wiki {
 
     /// `resolve_id` with the unknown-page error text callers show.
     pub fn resolve(&self, arg: &str) -> Result<String, String> {
-        self.resolve_id(arg)
-            .map_err(|near| unknown_page(arg, &near))
+        self.resolve_id(arg).map_err(|near| {
+            self.skipped_path(arg)
+                .unwrap_or_else(|| unknown_page(arg, &near))
+        })
+    }
+
+    /// The error for a relative path under a folder the compile prunes
+    /// (`walk::pruned_dir`, outermost first), or `None`.
+    fn skipped_path(&self, arg: &str) -> Option<String> {
+        use std::path::{Component, Path};
+        let norm = norm_path(arg);
+        let comps: Vec<&str> = Path::new(&norm)
+            .components()
+            .map(|c| match c {
+                Component::Normal(s) => s.to_str(),
+                _ => None,
+            })
+            .collect::<Option<_>>()?;
+        let dirs = &comps[..comps.len().saturating_sub(1)];
+        let at = dirs.iter().position(|d| crate::walk::pruned_dir(d))?;
+        let name = dirs[at];
+        // The compile input at or below `name`: the path names a page above
+        // the input, not a pruned folder inside it.
+        if self.root.is_empty() || dirs[at..].contains(&self.root.as_str()) {
+            return None;
+        }
+        // A page under a folder of that name: it was compiled (`--no-ignore`,
+        // or a hidden folder an ignore file whitelists).
+        let compiled = |p: &str| p.rsplit('/').skip(1).any(|d| d == name);
+        if self.entries.values().any(|e| compiled(&e.path)) {
+            return None;
+        }
+        let what = if name.starts_with('.') {
+            "hidden"
+        } else {
+            "skipped"
+        };
+        let mut text = format!(
+            "{arg:?} is under a {what} `{name}` folder, which the wiki does not compile; read it with your file tool"
+        );
+        if norm.to_lowercase().ends_with(".md") {
+            text +=
+                &format!(", or pass \"{norm}\" in search's `docs` for its headings' line ranges");
+        }
+        Some(text)
     }
 
     /// Resolves what a caller typed to a page id: an exact id, a title
@@ -1712,8 +1761,8 @@ impl Wiki {
         if self.entries.contains_key(&slug) {
             return Ok(slug);
         }
-        let norm = arg.replace('\\', "/");
-        let norm = norm.strip_prefix("./").unwrap_or(&norm);
+        let norm = norm_path(arg);
+        let norm = norm.as_str();
         if let Some(id) = by(&|e| e.path == norm) {
             return Ok(id);
         }
