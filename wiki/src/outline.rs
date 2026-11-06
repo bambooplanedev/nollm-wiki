@@ -7,7 +7,7 @@
 //! token budget shrinks it.
 
 use crate::manifest::{largest_fit, token_estimate};
-use crate::model::{one_line, CodeItem, CodeItemKind, SourceKind};
+use crate::model::{clip, one_line, CodeItem, CodeItemKind, SourceKind, ITEM_DOC_TEXT_MAX_CHARS};
 use crate::query::Wiki;
 use crate::rewrite::mask_fenced_code;
 
@@ -208,7 +208,11 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
         format!("# {} ({id})", e.title),
         format!("{}  {}", e.path, e.kind),
     ];
-    header.extend(e.summary.as_deref().map(one_line));
+    header.extend(
+        e.summary
+            .as_deref()
+            .map(|s| clip(s, ITEM_DOC_TEXT_MAX_CHARS)),
+    );
     let page = w.page(id).unwrap_or_default();
     let lines: Vec<&str> = page.lines().collect();
     // A code page's body is its source verbatim, so it can hold `## Imports`

@@ -6,7 +6,10 @@
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::calls::{callers_index, Caller};
-use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, Origin, SourceKind};
+use crate::model::{
+    clip, days_in_month, CodeItem, CodeItemKind, KindFilter, Origin, SourceKind,
+    ITEM_DOC_TEXT_MAX_CHARS,
+};
 use aho_corasick::AhoCorasick;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1923,7 +1926,7 @@ impl Wiki {
             format!(
                 "# {} ({id})\n\n{}\n\n_body (~{} tokens) {OVER_BUDGET_NOTE}; read wiki://page/{id} for the full page_\n",
                 target.title,
-                target.summary.as_deref().unwrap_or("(no summary)"),
+                summary_line(target.summary.as_deref()),
                 target.token_estimate,
             )
         };
@@ -1942,7 +1945,7 @@ impl Wiki {
                     "## {} ({})\n{}\n\n",
                     e.title,
                     nid,
-                    e.summary.as_deref().unwrap_or("(no summary)")
+                    summary_line(e.summary.as_deref())
                 )
             };
             let outline = || self.outline(&nid, None).map(|o| o + "\n");
@@ -2002,6 +2005,14 @@ const _: () = assert!(
         && Wiki::IW_NAME_WORD > Wiki::IW_DOC
         && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
 );
+
+/// A page summary for a pack block: clipped, `(no summary)` when absent.
+fn summary_line(summary: Option<&str>) -> String {
+    summary.map_or_else(
+        || "(no summary)".to_string(),
+        |s| clip(s, ITEM_DOC_TEXT_MAX_CHARS),
+    )
+}
 
 #[cfg(test)]
 mod tests {

@@ -434,10 +434,37 @@ pub(crate) fn title_from_slug(s: &str) -> String {
     title_case(&s.replace(['_', '-'], " "))
 }
 
-/// `s` with every whitespace run, newlines included, collapsed to one space.
+/// `s` with every whitespace run, newlines included, collapsed to one space,
+/// and with ANSI escape sequences, other control characters and bidi format
+/// characters dropped (a tool log's colours must not reach the terminal).
 pub(crate) fn one_line(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut clean = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => {
+                // A CSI sequence runs to its first final byte; `[` itself is
+                // in that range, so the scan starts after it.
+                if chars.as_str().starts_with('[') {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if ('@'..='~').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+            }
+            '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' => {}
+            c if c.is_control() && !c.is_whitespace() => {}
+            c => clean.push(c),
+        }
+    }
+    clean.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+/// The most chars of an item's whole doc kept in `items.json`, and of a
+/// summary printed by the page view.
+pub(crate) const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
 
 /// Longest field a search or hint line carries, in characters: a run log's
 /// summary ran 7k characters on the bench and `search` printed it whole.
@@ -618,6 +645,15 @@ pub fn normalize_path(root: &Path, path: &Path) -> String {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn one_line_drops_control_characters_and_ansi_sequences() {
+        assert_eq!(one_line("a \x1b[31mred\x1b[0m b\x07c\x00d"), "a red bcd");
+        assert_eq!(one_line("x\x1b[0;37my"), "xy");
+        assert_eq!(one_line("left\u{202E}right\u{2066}x\u{2069}"), "leftrightx");
+        assert_eq!(one_line("[0;37m é 日本 🚀\t\n  z"), "[0;37m é 日本 🚀 z");
+        assert_eq!(one_line("cr\rtail"), "cr tail");
+    }
 
     #[test]
     fn origin_label_covers_every_form() {
