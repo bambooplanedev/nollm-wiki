@@ -362,3 +362,65 @@ fn two_definitions_of_one_key_never_pair() {
     }
     assert_eq!(named(&idx, "src/wait.cc", "wait").len(), 2);
 }
+
+/// Asserts that no item of `path` has a twin.
+fn no_twins(idx: &(serde_json::Value, serde_json::Value), path: &str) {
+    for it in items_of(idx, path) {
+        assert!(it.get("twin").is_none(), "{path}: {it}");
+    }
+}
+
+#[test]
+fn a_header_function_with_a_body_never_pairs_as_the_declaration() {
+    // The bench false pair: an inline header function in a namespace and an
+    // unrelated global of the same key in another .cpp; plus an in-class body.
+    let idx = compile_with_items(&[
+        (
+            "src/utils/system_utils.h",
+            "namespace lab::utils {\n/// Handles SIGINT and SIGTERM signals.\ninline void signal_handler(int sig) { (void)sig; }\n}\nstruct Buffer {\n  int size() const { return 0; }\n};\n",
+        ),
+        (
+            "src/main_combined.cpp",
+            "void signal_handler(int sig) { (void)sig; }\nint Buffer::size() const { return 1; }\n",
+        ),
+    ]);
+    no_twins(&idx, "src/utils/system_utils.h");
+    no_twins(&idx, "src/main_combined.cpp");
+    let main = &named(&idx, "src/main_combined.cpp", "signal_handler")[0];
+    assert!(main.get("doc").is_none(), "{main}");
+}
+
+#[test]
+fn file_local_definitions_in_a_cpp_never_pair() {
+    let idx = compile_with_items(&[
+        (
+            "lib/run.h",
+            "void run(int n);\nvoid stop(int n);\nvoid tick(int n);\nclass FD {\npublic:\n  FD();\n};\n",
+        ),
+        (
+            "tools/tool.cpp",
+            "class FD {\npublic:\n  FD() {}\n};\nstatic void run(int n) {}\nnamespace {\nvoid stop(int n) {}\n}\ninline static void tick(int n) {}\n",
+        ),
+    ]);
+    no_twins(&idx, "lib/run.h");
+    no_twins(&idx, "tools/tool.cpp");
+}
+
+#[test]
+fn a_cpp_class_body_naming_another_class_never_pairs() {
+    // The critic's fx2 shape: a .cpp class `Opts` with an in-class body whose
+    // parameter names `MyOpts::`, same key as the header's `Opts::apply`.
+    let idx = compile_with_items(&[
+        (
+            "inc/opts.h",
+            "class Opts {\npublic:\n  void apply(int v);\n};\n",
+        ),
+        (
+            "app/main.cpp",
+            "class Opts {\npublic:\n  void apply(MyOpts::Mode v) { local(v); }\n};\n",
+        ),
+    ]);
+    let h = &named(&idx, "inc/opts.h", "apply")[0];
+    assert!(h.get("twin").is_none(), "{h}");
+    no_twins(&idx, "app/main.cpp");
+}

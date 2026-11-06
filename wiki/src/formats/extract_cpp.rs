@@ -4,7 +4,7 @@ use super::code::{
     default_cut, default_shape, ext_of, is_cpp, module_stem, outermost, plain_comment_text,
     source_rank, value_shape, LangSpec, Lead, Placement, Shape,
 };
-use crate::model::{CodeItem, CodeItemKind, Entity};
+use crate::model::{CodeItem, CodeItemKind, Entity, PairRole};
 use std::collections::BTreeMap;
 use tree_sitter::Node;
 
@@ -495,6 +495,31 @@ fn arity(signature: &str, name: &str) -> Option<usize> {
     })
 }
 
+/// Which side of project-wide pairing `def` may take: a body-less
+/// declaration, or a definition that is out of line (no class body around
+/// it, so `MyOpts::` in a parameter cannot pass for a qualifier), not
+/// `static` (in any specifier position) and not in an anonymous namespace.
+/// Inline and in-class bodies and `= default` are neither: they still count
+/// toward uniqueness in `pair_project`, so they block but never pair.
+pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
+    if def.kind() != "function_definition" {
+        return PairRole::Declaration;
+    }
+    let mut cursor = def.walk();
+    let is_static = def
+        .children(&mut cursor)
+        .any(|c| c.kind() == "storage_class_specifier" && &text[c.byte_range()] == "static");
+    let local = std::iter::successors(def.parent(), Node::parent).any(|a| {
+        a.kind() == "field_declaration_list"
+            || (a.kind() == "namespace_definition" && a.child_by_field_name("name").is_none())
+    });
+    if def.child_by_field_name("body").is_none() || is_static || local {
+        PairRole::Neither
+    } else {
+        PairRole::OutOfLineDefinition
+    }
+}
+
 type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
 
 /// The `(owner, name, arity)` keys that occur exactly once among `items`,
@@ -599,7 +624,9 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
 /// The project step of `pair_declarations`: appends every key
 /// `(owner, name, arity)` that occurs exactly once among the `Fn`/`Method`
 /// items of all C++ headers and exactly once among those of all
-/// implementation files. Uniqueness counts every item, paired or not, so an
+/// implementation files. Only a `Declaration` header item and an
+/// `OutOfLineDefinition` implementation item pair (`pair_role`), but
+/// uniqueness counts every item, whatever its role and paired or not, so an
 /// item the same-stem step paired blocks any other partner. There is no
 /// "already paired" set: a key unique project-wide is unique inside its file
 /// pair too, so this step can only re-find a same-stem pair, and applying a
@@ -631,10 +658,15 @@ fn pair_project(
         }
         seen
     };
+    let role = |id: &str, i: usize| entities[id].items[i].pair_role;
     let impls = unique(false);
     for (key, h) in unique(true) {
         if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
-            pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
+            if role(hid, hi) == PairRole::Declaration
+                && role(cid, *ci) == PairRole::OutOfLineDefinition
+            {
+                pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
+            }
         }
     }
 }

@@ -254,7 +254,7 @@ pub fn render_graph_json(entities: &BTreeMap<String, Entity>, graph: &Graph) -> 
 mod tests {
     use super::*;
     use crate::graph::build_graph;
-    use crate::model::CodeItemKind;
+    use crate::model::{CodeItemKind, PairRole};
 
     fn ent(id: &str, name: &str, body: &str, summary: Option<&str>) -> Entity {
         Entity {
@@ -451,6 +451,7 @@ mod tests {
                 call_lines: Vec::new(),
                 call_sites: Vec::new(),
                 arity: None,
+                pair_role: PairRole::Neither,
             },
             CodeItem {
                 kind: CodeItemKind::Method,
@@ -468,6 +469,7 @@ mod tests {
                 call_lines: Vec::new(),
                 call_sites: Vec::new(),
                 arity: None,
+                pair_role: PairRole::Neither,
             },
         ];
         // Each item's keys in declaration order, the `None` ones skipped;

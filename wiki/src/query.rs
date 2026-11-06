@@ -2006,7 +2006,7 @@ const _: () = assert!(
 #[cfg(test)]
 mod tests {
     use super::{query_dates, AhoCorasick, QueryDate, Wiki};
-    use crate::model::{CodeItem, CodeItemKind};
+    use crate::model::{CodeItem, CodeItemKind, PairRole};
     use std::collections::BTreeSet;
 
     fn set(items: &[&str]) -> BTreeSet<String> {
@@ -2177,6 +2177,7 @@ mod tests {
             call_lines: Vec::new(),
             call_sites: Vec::new(),
             arity: None,
+            pair_role: PairRole::Neither,
         }
     }
 

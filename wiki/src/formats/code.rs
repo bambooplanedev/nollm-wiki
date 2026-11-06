@@ -3,7 +3,7 @@
 use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
     basename, one_line, slugify, title_from_slug, Arity, CallSite, CallVia, CodeItem, CodeItemKind,
-    Entity, SourceKind,
+    Entity, PairRole, SourceKind,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1711,6 +1711,11 @@ fn code_item(
                 arity_of(def, spec.lang_name, kind == CodeItemKind::Method, text)
             }
             _ => None,
+        },
+        pair_role: if spec.lang_name == "cpp" {
+            super::extract_cpp::pair_role(def, text)
+        } else {
+            PairRole::Neither
         },
     };
     item.doc_text = raw_doc

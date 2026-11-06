@@ -296,6 +296,23 @@ pub struct CodeItem {
     /// extractor knows them; `resolve_calls` drops a match that cannot fit.
     #[serde(skip)]
     pub arity: Option<Arity>,
+    /// C++ only: which side of project-wide pairing this item may take.
+    #[serde(skip)]
+    pub pair_role: PairRole,
+}
+
+/// C++ only: which side of project-wide pairing an item may take.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PairRole {
+    /// Not a candidate: other languages; inline or in-class bodies,
+    /// `= default`, `static` or anonymous-namespace definitions.
+    #[default]
+    Neither,
+    /// A body-less declaration.
+    Declaration,
+    /// An out-of-line definition: a body, no class-body ancestor, not
+    /// `static`, not inside an anonymous namespace.
+    OutOfLineDefinition,
 }
 
 /// The argument counts a function accepts: `min..=max`, `max` unbounded
