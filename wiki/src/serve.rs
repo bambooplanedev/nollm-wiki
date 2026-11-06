@@ -40,8 +40,8 @@ pub const INSTRUCTIONS: &str =
 what you are looking for and `kind: \"code\"`; each symbol line is \
 `path:start-end  name  signature`. Read only those lines with your file tool: \
 the ranges are exact, do not re-derive them with grep. `page` with a path \
-lists a module's symbols with their lines; `callers` lists the functions \
-that call it. Do not call grep, find or ls in the same turn as \
+lists a module's symbols with their lines. Do not call grep, find or ls in \
+the same turn as \
 `search`: read its answer first. Use `search` for where something is defined \
 or handled, `callers` for who calls a function, grep for every occurrence of a \
 literal string (an env var, a message, a config key). If search finds \

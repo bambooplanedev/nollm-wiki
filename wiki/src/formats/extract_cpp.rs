@@ -4,7 +4,7 @@ use super::code::{
     default_cut, default_shape, ext_of, is_cpp, module_stem, outermost, plain_comment_text,
     source_rank, value_shape, LangSpec, Lead, Placement, Shape,
 };
-use crate::model::{CodeItem, CodeItemKind, Entity};
+use crate::model::{CodeItem, CodeItemKind, Entity, PairRole};
 use std::collections::BTreeMap;
 use tree_sitter::Node;
 
@@ -16,17 +16,26 @@ use tree_sitter::Node;
 /// already-qualified name — and `dedup_by` would not collapse them, because
 /// their signatures differ.
 ///
-/// The six wrapper patterns are the exception, and are general on purpose. They
-/// require the `declarator:` field to be a `pointer_declarator` or a
-/// `reference_declarator`, where every other pattern requires a bare
-/// `function_declarator`, so no node can be matched by both and there is
-/// nothing to disambiguate. Spelling out the alternation there instead would
-/// need a qualified twin for each, twelve patterns for the same result, and
-/// would drop `Level* OrderBook::top()` on the floor in the meantime. The
-/// safety of `(_)` rests on `qualified_owner` reaching no owner THROUGH a
-/// wrapper — an owner resolved there would be spliced ahead of the qualifier
-/// the source already wrote. `a_pointer_returning_out_of_line_definition_renders_its_owner_once`
-/// pins that pairing.
+/// The wrapper patterns require the `declarator:` field to be a
+/// `pointer_declarator` or a `reference_declarator` around a
+/// `function_declarator`, one level deep. The one on `function_definition`
+/// mirrors the unwrapped ones: a plain name, or a qualified name of one or
+/// two qualifier levels, so `Level* OrderBook::top()` captures `top` and
+/// `qualified_owner` (which descends the same one wrapper) supplies
+/// `OrderBook`, as for `void OrderBook::apply()`. A general `(_)` capture
+/// there would match the qualified name too and splice the owner ahead of the
+/// qualifier the source already wrote;
+/// `a_pointer_returning_out_of_line_definition_renders_its_owner_once` pins
+/// that. The two on `field_declaration`/`declaration` stay general `(_)`:
+/// no pattern there resolves an owner through a qualifier, so there is
+/// nothing to double.
+///
+/// Each wrapper set is one pattern with alternations, not one pattern per
+/// shape: `Query::new` cost grows with the pattern count, and this query is
+/// built once per process. The plain names inside a wrapper alternation are
+/// listed flat, each with its own `@name`: a nested `[(identifier) …] @name`
+/// inside the outer alternation silently drops the `field_identifier` match
+/// of `const Stats& stats() const { … }` (tree-sitter 0.27).
 ///
 /// `function_definition` alone covers only members with a BODY, so a
 /// declaration-only header would carry nothing but `class OrderBook`;
@@ -56,24 +65,15 @@ use tree_sitter::Node;
 /// documented, not fixed.
 ///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
-///   * declarator nesting beyond ONE wrapper — the six wrapper patterns reach
+///   * declarator nesting beyond ONE wrapper — the wrapper patterns reach
 ///     exactly one deep, and `int** f()` is
 ///     `(pointer_declarator (pointer_declarator (function_declarator …)))`;
-///   * qualifier nesting beyond two — `a::b::C::m` needs a third pattern;
+///   * qualifier nesting beyond two — `a::b::C::m` needs a third alternative;
 ///   * an out-of-line nested class (`class Outer::Inner { … }`), whose
 ///     `class_specifier` names itself with a `qualified_identifier`, not the
 ///     `type_identifier` these patterns require;
 ///   * template specializations, whose head is a `template_declaration`
 ///     wrapping a `class_specifier` named by a `template_type`;
-///   * a pointer- or reference-returning OUT-OF-LINE definition
-///     (`Level* OrderBook::top() { … }`) classifies as `FreeDef`, not
-///     `Member`: `qualified_owner` resolves `None` through the wrapper (see
-///     its own doc), so `classify` sees no owner and sorts the definition
-///     away from its class in `## Exports`, where it also competes in
-///     `pick_summary_fallback` against genuine free functions. Closing this
-///     needs `qualified_owner` to descend a wrapper level AND the wrapper
-///     patterns' `(_)` capture narrowed in the same change — out of scope
-///     here;
 ///   * a conversion operator (`operator bool()`) parses as an `operator_cast`
 ///     declarator under an `abstract_function_declarator`, not an
 ///     `operator_name` under a `function_declarator`, so no pattern here
@@ -90,25 +90,25 @@ const QUERY: &str = r"
 (declaration declarator: (function_declarator
   declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
 
-(function_definition declarator: (function_declarator
-  declarator: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name))) @def
-(function_definition declarator: (function_declarator
-  declarator: (qualified_identifier name: (qualified_identifier
-    name: [(identifier) (destructor_name) (operator_name)] @name)))) @def
+(function_definition declarator: (function_declarator declarator: [
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))])) @def
 
-(function_definition declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
-(function_definition declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
-(field_declaration declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
-(field_declaration declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
-(declaration declarator: (pointer_declarator
-  (function_declarator declarator: (_) @name))) @def
-(declaration declarator: (reference_declarator
-  (function_declarator declarator: (_) @name))) @def
+(function_definition declarator: [
+  (pointer_declarator (function_declarator declarator: [
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))
+  (reference_declarator (function_declarator declarator: [
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))]) @def
+(field_declaration declarator: [
+  (pointer_declarator (function_declarator declarator: (_) @name))
+  (reference_declarator (function_declarator declarator: (_) @name))]) @def
+(declaration declarator: [
+  (pointer_declarator (function_declarator declarator: (_) @name))
+  (reference_declarator (function_declarator declarator: (_) @name))]) @def
 
 (class_specifier   name: (type_identifier) @name) @def
 (struct_specifier  name: (type_identifier) @name) @def
@@ -343,17 +343,36 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 /// separate exclusion here.
 ///
 /// Two stated gaps, both observed:
-///   * one declarator level only, so a pointer- or reference-returning
-///     out-of-line definition (`Level* OrderBook::top()`) resolves no owner and
-///     renders its qualifier verbatim instead — matching the query's own
-///     wrapper patterns;
+///   * one wrapper level only, and only on a `function_definition`: a
+///     pointer- or reference-returning out-of-line definition
+///     (`Level* OrderBook::top()`) resolves `OrderBook` through its one
+///     `pointer_declarator`/`reference_declarator`, matching the query's
+///     wrapper patterns, while `int** OrderBook::grid()` (two wrappers)
+///     resolves nothing and is not an item. A definition returning a pointer
+///     to a function that returns a pointer (`char *(*get_fn(void))(int)`) is
+///     no longer an item either: its wrapped `function_declarator` names a
+///     `parenthesized_declarator`, which the general `(_)` capture once
+///     extracted as the garbage name `(*get_fn(void))`. The narrowed
+///     patterns also miss a pointer-returning definition qualified three or
+///     more levels deep (`Level* a::b::Book::top()`) and a definition named
+///     by a template-id (`void f<int>(int)`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
 ///     arguments from an owner for exactly this reason; C++ does not yet, so
 ///     the two forms of a template method do not index alike.
 fn qualified_owner(def: Node, text: &str) -> Option<String> {
-    let declarator = def.child_by_field_name("declarator")?;
+    let mut declarator = def.child_by_field_name("declarator")?;
+    if def.kind() == "function_definition"
+        && matches!(
+            declarator.kind(),
+            "pointer_declarator" | "reference_declarator"
+        )
+    {
+        declarator = declarator
+            .named_children(&mut declarator.walk())
+            .find(|c| c.kind() == "function_declarator")?;
+    }
     let inner = declarator.child_by_field_name("declarator")?;
     if inner.kind() != "qualified_identifier" {
         return None;
@@ -432,7 +451,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// descent those members render correctly in `## Exports` yet never reach
 /// `Entity::methods`, which `Wiki::search` scores on.
 ///
-/// Exactly ONE wrapper deep, deliberately: that is the reach of the six
+/// Exactly ONE wrapper deep, deliberately: that is the reach of the
 /// wrapper patterns in `QUERY`, so this gate accepts precisely the members
 /// the query captures — `Level** grid()` is uncovered on both sides at once
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
@@ -479,6 +498,34 @@ fn arity(signature: &str, name: &str) -> Option<usize> {
     })
 }
 
+/// Which side of project-wide pairing `def` may take: a body-less
+/// declaration, or a definition that is out of line (no class body around
+/// it, so `MyOpts::` in a parameter cannot pass for a qualifier), not
+/// `static` (in any specifier position) and not in an anonymous namespace.
+/// Inline and in-class bodies and `= default` are neither: they still count
+/// toward uniqueness in `pair_project`, so they block but never pair. The
+/// `body.is_none()` check is what excludes `= default`/`= delete`: such a
+/// `function_definition` has no `body`, so an out-of-line `X::X() = default;`
+/// in a `.cpp` never pairs (a lost true pair, kept on the safe side).
+pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
+    if def.kind() != "function_definition" {
+        return PairRole::Declaration;
+    }
+    let mut cursor = def.walk();
+    let is_static = def
+        .children(&mut cursor)
+        .any(|c| c.kind() == "storage_class_specifier" && &text[c.byte_range()] == "static");
+    let local = std::iter::successors(def.parent(), Node::parent).any(|a| {
+        a.kind() == "field_declaration_list"
+            || (a.kind() == "namespace_definition" && a.child_by_field_name("name").is_none())
+    });
+    if def.child_by_field_name("body").is_none() || is_static || local {
+        PairRole::Neither
+    } else {
+        PairRole::OutOfLineDefinition
+    }
+}
+
 type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
 
 /// The `(owner, name, arity)` keys that occur exactly once among `items`,
@@ -517,14 +564,15 @@ fn header_and_impl<'a>(
     }
 }
 
-/// Pairs a header's declarations with the definitions in the one `.cpp` that
-/// implements it: the doc usually sits on the declaration, so the definition
-/// inherits it, and each side's `twin` names the other's lines. Only a
-/// group with exactly one implementation file and a unique lowest-rank header
-/// pairs (a same-stem group that is not one pairs within each directory),
-/// and only keys unique on both sides: a wrong pairing is worse than none,
-/// so overloads with the same parameter count and ambiguous groups stay
-/// untouched.
+/// Pairs a header's declarations with their definitions: the doc usually
+/// sits on the declaration, so the definition inherits it, and each side's
+/// `twin` names the other's lines. Two steps. Same stem first: a group with
+/// exactly one implementation file and a unique lowest-rank header pairs (a
+/// same-stem group that is not one pairs within each directory), on keys
+/// unique within that file pair. Then the whole project (`pair_project`):
+/// keys unique among all header items and among all implementation items.
+/// A wrong pairing is worse than none, so overloads with the same parameter
+/// count and keys with two declarations or two definitions stay unpaired.
 pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, e) in entities.iter() {
@@ -562,6 +610,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
             }
         }
     }
+    pair_project(entities, &mut pairs);
     for (hid, hi, cid, ci) in pairs {
         let span = |e: &Entity, i: usize| e.items[i].span(&e.source_path);
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
@@ -574,6 +623,56 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
         if c_item.doc.is_none() {
             c_item.doc = doc;
             c_item.doc_text = doc_text;
+        }
+    }
+}
+
+/// The project step of `pair_declarations`: appends every key
+/// `(owner, name, arity)` that occurs exactly once among the `Fn`/`Method`
+/// items of all C++ headers and exactly once among those of all
+/// implementation files. Only a `Declaration` header item and an
+/// `OutOfLineDefinition` implementation item pair (`pair_role`), but
+/// uniqueness counts every item, whatever its role and paired or not, so an
+/// item the same-stem step paired blocks any other partner. There is no
+/// "already paired" set: a key unique project-wide is unique inside its file
+/// pair too, so this step can only re-find a same-stem pair, and applying a
+/// pair twice leaves `twin` and `doc` as after once (the definition's `doc`
+/// is filled only while empty).
+fn pair_project(
+    entities: &BTreeMap<String, Entity>,
+    pairs: &mut Vec<(String, usize, String, usize)>,
+) {
+    let unique = |header: bool| {
+        let mut seen: BTreeMap<Key<'_>, Option<(&str, usize)>> = BTreeMap::new();
+        for (id, e) in entities {
+            let sp = e.source_path.as_str();
+            if !is_cpp(&ext_of(sp)) || (source_rank(sp) < 2) != header {
+                continue;
+            }
+            for (i, it) in e.items.iter().enumerate() {
+                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+                    let key = (
+                        it.owner.as_deref(),
+                        it.name.as_str(),
+                        arity(&it.signature, &it.name),
+                    );
+                    seen.entry(key)
+                        .and_modify(|v| *v = None)
+                        .or_insert(Some((id.as_str(), i)));
+                }
+            }
+        }
+        seen
+    };
+    let role = |id: &str, i: usize| entities[id].items[i].pair_role;
+    let impls = unique(false);
+    for (key, h) in unique(true) {
+        if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
+            if role(hid, hi) == PairRole::Declaration
+                && role(cid, *ci) == PairRole::OutOfLineDefinition
+            {
+                pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
+            }
         }
     }
 }
@@ -697,14 +796,34 @@ mod tests {
     }
 
     #[test]
+    fn pointer_and_reference_returning_in_class_definitions_are_captured() {
+        // pinning: guards the flat `@name` plain-name alternatives inside the
+        // wrapper alternation. A nested `[(identifier) (field_identifier) …]
+        // @name` there compiles but silently drops these in-class definitions.
+        let src = "class B {\npublic:\n  const Stats& stats() const { return s_; }\n  Stats* sp() { return nullptr; }\n};\n";
+        let s = syms("src/b.h", src);
+        assert!(s.iter().any(|x| x.contains("B::stats")), "{s:?}");
+        assert!(s.iter().any(|x| x.contains("B::sp")), "{s:?}");
+        let methods: Vec<String> = CodeExtractor
+            .extract("src/b.h", src)
+            .items
+            .into_iter()
+            .filter(|i| i.kind == crate::model::CodeItemKind::Method)
+            .map(|i| i.name)
+            .collect();
+        assert!(methods.iter().any(|m| m == "stats"), "{methods:?}");
+        assert!(methods.iter().any(|m| m == "sp"), "{methods:?}");
+    }
+
+    #[test]
     fn a_pointer_returning_out_of_line_definition_renders_its_owner_once() {
-        // The wrapper patterns capture a general `(_)` name, so on an
-        // out-of-line definition the capture is the whole
-        // `qualified_identifier`. That is safe only while `qualified_owner`
-        // reaches no owner through a wrapper: were it to, the owner would be
-        // spliced in AHEAD of the qualifier the source already wrote. Asserting
-        // presence alone would not catch it — a doubled entry would sit beside
-        // a correct one — so the absence is asserted too.
+        // `qualified_owner` descends one wrapper on a definition, so the
+        // `function_definition` wrapper patterns must capture only the last
+        // name segment: a general `(_)` capture would also take the whole
+        // `qualified_identifier` and splice the owner AHEAD of the qualifier
+        // the source already wrote. Asserting presence alone would not catch
+        // it — a doubled entry would sit beside a correct one — so the
+        // absence is asserted too.
         let s = syms(
             "src/ob.cpp",
             "Level* OrderBook::top() { return nullptr; }\n",

@@ -3,7 +3,7 @@
 //! parse is parsed again from a blanked copy (`reparse`), and gets the
 //! functions still missing from a line regex (`missed_functions`).
 use super::code::{LangSpec, Lead};
-use crate::model::{CodeItem, CodeItemKind};
+use crate::model::{CodeItem, CodeItemKind, PairRole};
 use regex::bytes::Regex as BytesRegex;
 use regex::Regex;
 use std::sync::LazyLock;
@@ -94,6 +94,7 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
             call_lines: Vec::new(),
             call_sites: Vec::new(),
             arity: None,
+            pair_role: PairRole::Neither,
         });
     }
     out
@@ -118,6 +119,7 @@ pub(crate) fn top_level_item(last: usize) -> CodeItem {
         call_lines: Vec::new(),
         call_sites: Vec::new(),
         arity: None,
+        pair_role: PairRole::Neither,
     }
 }
 

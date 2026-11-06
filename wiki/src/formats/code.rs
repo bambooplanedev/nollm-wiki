@@ -3,9 +3,10 @@
 use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
     basename, one_line, slugify, title_from_slug, Arity, CallSite, CallVia, CodeItem, CodeItemKind,
-    Entity, SourceKind,
+    Entity, PairRole, SourceKind,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::LazyLock;
 use tree_sitter::{
     Language, Node, Parser, Query, QueryCursor, QueryMatch, StreamingIterator, Tree,
@@ -355,7 +356,12 @@ const CODE_EXTENSIONS: &[&str] = &[
     "hxx", "h", "sh", "bash",
 ];
 
-/// Each language's query, compiled once per process instead of once per file.
+/// Each grammar's query, compiled once per process instead of once per file,
+/// and shared by every extension on that grammar (seven for C++).
+///
+/// Keyed by the grammar, not by `lang_name`: `ts` and `tsx` are both
+/// "typescript" on two grammars, and a query only runs on the grammar it was
+/// built for. One grammar has one query string; a test pins that.
 ///
 /// Compilation is a flat ~1.3ms and does not depend on the file, so doing it
 /// per file dominated extraction for ordinary source sizes (88% of tree-sitter
@@ -367,18 +373,19 @@ const CODE_EXTENSIONS: &[&str] = &[
 /// programming error, not a runtime condition. `validate_queries` forces this
 /// before any output is written, so the panic cannot arrive mid-compile with
 /// pages already on disk.
-static QUERIES: LazyLock<BTreeMap<&'static str, Query>> = LazyLock::new(|| {
-    CODE_EXTENSIONS
-        .iter()
-        .map(|ext| {
-            let spec = lang_for_ext(ext)
-                .unwrap_or_else(|| panic!("no LangSpec registered for extension {ext:?}"));
-            let query = Query::new(&spec.language, spec.query_src).unwrap_or_else(|e| {
+static QUERIES: LazyLock<HashMap<Language, Query>> = LazyLock::new(|| {
+    let mut queries = HashMap::new();
+    for ext in CODE_EXTENSIONS {
+        let spec = lang_for_ext(ext)
+            .unwrap_or_else(|| panic!("no LangSpec registered for extension {ext:?}"));
+        if let Entry::Vacant(slot) = queries.entry(spec.language) {
+            let query = Query::new(slot.key(), spec.query_src).unwrap_or_else(|e| {
                 panic!("invalid tree-sitter query for {}: {e:?}", spec.lang_name)
             });
-            (*ext, query)
-        })
-        .collect()
+            slot.insert(query);
+        }
+    }
+    queries
 });
 
 /// Force every language query to compile.
@@ -857,7 +864,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // Compiled once per process. A malformed query must not silently strip a
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
-    let query = QUERIES.get(ext)?;
+    let query = QUERIES.get(&spec.language)?;
     let tree = if let Some(tree) = pre_parsed {
         tree
     } else {
@@ -1705,6 +1712,11 @@ fn code_item(
             }
             _ => None,
         },
+        pair_role: if spec.lang_name == "cpp" {
+            super::extract_cpp::pair_role(def, text)
+        } else {
+            PairRole::Neither
+        },
     };
     item.doc_text = raw_doc
         .as_deref()
@@ -2278,6 +2290,7 @@ pub(crate) mod testutil {
 mod tests {
     use super::testutil::{assert_has, assert_lacks};
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn ext_of_lowercases_and_source_rank_totally_orders_headers() {
@@ -2643,7 +2656,11 @@ mod tests {
         // `LangSpec` panics here too.
         validate_queries();
         for ext in CODE_EXTENSIONS {
-            assert!(QUERIES.contains_key(ext), "no compiled query for {ext}");
+            let spec = lang_for_ext(ext).unwrap();
+            assert!(
+                QUERIES.contains_key(&spec.language),
+                "no compiled query for {ext}"
+            );
         }
     }
 
@@ -2653,8 +2670,39 @@ mod tests {
         // would extract nothing while the compile still exits 0 — the silent
         // failure a per-file `Query::new` would allow.
         let claimed: BTreeSet<&str> = CodeExtractor.extensions().iter().copied().collect();
-        let compiled: BTreeSet<&str> = QUERIES.keys().copied().collect();
+        let compiled: BTreeSet<&str> = CODE_EXTENSIONS
+            .iter()
+            .copied()
+            .filter(|e| lang_for_ext(e).is_some_and(|s| QUERIES.contains_key(&s.language)))
+            .collect();
         assert_eq!(claimed, compiled);
+    }
+
+    #[test]
+    fn each_grammar_query_is_built_once() {
+        validate_queries();
+        let grammars: HashSet<Language> = CODE_EXTENSIONS
+            .iter()
+            .map(|e| lang_for_ext(e).unwrap().language)
+            .collect();
+        assert_eq!(QUERIES.len(), grammars.len());
+    }
+
+    #[test]
+    fn extensions_sharing_a_grammar_share_a_query() {
+        // Pinning: keying `QUERIES` by grammar is safe only while one grammar
+        // means one query string. Not `lang_name`: `ts` and `tsx` are both
+        // "typescript" on two grammars, and a query only runs on the grammar
+        // it was built for.
+        let specs: Vec<LangSpec> = CODE_EXTENSIONS
+            .iter()
+            .map(|e| lang_for_ext(e).unwrap())
+            .collect();
+        for a in &specs {
+            for b in specs.iter().filter(|b| b.language == a.language) {
+                assert_eq!(a.query_src, b.query_src, "query of {}", a.lang_name);
+            }
+        }
     }
 
     #[test]

@@ -172,10 +172,26 @@ per question is noise-level: treat single results as anecdotes.
   items. Go `var f = func…` is a `value`, while a JS arrow is an `fn`.
 - **C++ access is ignored:** every C++ item is `public: true`;
   `private:` sections are not read.
-- **C++ declaration ↔ definition pairing** works on same-stem files in one
-  directory. Repeated basenames across directories do not pair, and a lone
-  cross-directory `x.h`/`x.cpp` with a coincidental free-function key
-  could.
+- **C++ declaration ↔ definition pairing** crosses files and directories
+  when the key `(owner, name, arity)` is unique among all header items and
+  among all implementation items. In that project-wide step a header item
+  with a body never pairs, and neither does a `static`, anonymous-namespace,
+  class-body or `= default` definition in a `.cpp`. Two definitions of one
+  key never pair. A same-stem `x.h`/`x.cpp` pair keeps the older rule: keys
+  unique within the two files, with no guard. So an inline `f(int)` in
+  `x.h` can pair with an anonymous-namespace `f(int)` in `x.cpp`. An
+  out-of-line `X::X() = default;` never pairs project-wide, so its header
+  declaration stays unpaired. Uniqueness can still
+  mislead: namespaces are not compared (a unique-key free function in
+  another named namespace can pair with an unrelated header
+  declaration; none observed), and a definition in an unindexed file
+  (`.c`, `.mm`, `.cu`) is invisible, so a same-key `.cc` function would
+  pair instead (none observed). The owner is the last scope only
+  (`MapBaseObj::iterator::operator++` → `iterator`), so enclosing classes
+  are not compared either. Adding a file that defines a same-key function
+  unpairs a distant pair, by design. Templates: `Ring<T>::size` out of line
+  reaches its definition in walks, but the outline and `callers` asked on
+  the header are imprecise; not fixed.
 - **Shell (`.sh`, `.bash`) lists only function definitions.** A function
   passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
   of `f`, and a call in a part the grammar could not parse has no caller (unless a

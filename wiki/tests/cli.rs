@@ -742,3 +742,42 @@ fn cli_search_docs_empty_query_lists_labels() {
     assert_eq!(lines.len(), 7, "{out}");
     assert_eq!(lines[..2], ["plan.md", "  1-18  Plan"]);
 }
+
+#[test]
+fn neighbors_symbol_walks_through_a_pointer_returning_definition() {
+    // The walk from `cost` must step into the pointer-returning
+    // `Router::pick_venue` definition and on to `in_maintenance`; with no
+    // owner on that definition it stops at the header declaration.
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(
+        input.join("src/router.h"),
+        "class Router {\npublic:\n  const Venue* pick_venue(int id);\n  int cost(int id);\n  bool in_maintenance(int id);\n};\n",
+    )
+    .unwrap();
+    fs::write(
+        input.join("src/router.cpp"),
+        "const Venue* Router::pick_venue(int id) { in_maintenance(id); return nullptr; }\nint Router::cost(int id) { pick_venue(id); return 0; }\nbool Router::in_maintenance(int id) { return id == 0; }\n",
+    )
+    .unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), output.to_str().unwrap()])
+        .assert()
+        .success();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args([
+            "neighbors",
+            "src/router.cpp",
+            "--symbol",
+            "cost",
+            "--dir",
+            output.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(contains("in_maintenance"));
+}

@@ -1079,3 +1079,13 @@ fn setup_removes_a_lone_old_agents_md_beside_claude_md() {
         assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
     }
 }
+
+#[test]
+fn instructions_have_no_dangling_callers_clause() {
+    let text = wiki::serve::INSTRUCTIONS;
+    assert!(!text.contains("lists the functions that call it"), "{text}");
+    assert!(
+        text.contains("symbols with their lines. Do not call grep"),
+        "{text}"
+    );
+}
