@@ -648,6 +648,34 @@ fn cli_page_on_a_memory_note_prints_its_text_but_a_doc_prints_headings() {
 }
 
 #[test]
+fn cli_page_names_a_missing_memory_note_file() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join(".agents/memory")).unwrap();
+    fs::write(
+        input.join(".agents/memory/note.md"),
+        "---\ntitle: Note\n---\n\nThe port is zorblax4471.\n",
+    )
+    .unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    let note = common::index_entries(&output)
+        .into_iter()
+        .find(|e| e["memory"] == true)
+        .unwrap();
+    let id = note["id"].as_str().unwrap();
+    fs::remove_file(output.join(format!("{id}.md"))).unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", id, "--dir", output.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(contains(format!(
+            "page {id:?} is in the index but its file {id}.md is missing from the wiki folder — recompile the wiki"
+        )));
+}
+
+#[test]
 fn compile_reports_what_it_skipped_after_the_lint_line() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
