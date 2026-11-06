@@ -1,6 +1,6 @@
 //! MCP server for a compiled wiki (`wiki serve`): exposes
-//! search/page/neighbors/callers (and, on request, lint) as tools and pages as
-//! resources over stdio.
+//! search/page/callers (and, on request, neighbors and lint) as tools and
+//! pages as resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::{Live, EXE, OUTDATED};
@@ -40,9 +40,8 @@ pub const INSTRUCTIONS: &str =
 what you are looking for and `kind: \"code\"`; each symbol line is \
 `path:start-end  name  signature`. Read only those lines with your file tool: \
 the ranges are exact, do not re-derive them with grep. `page` with a path \
-lists a module's symbols with their lines; `neighbors` with a path and \
-`symbol` lists every function that one calls, with its lines; `callers` lists \
-the functions that call it. Do not call grep, find or ls in the same turn as \
+lists a module's symbols with their lines; `callers` lists the functions \
+that call it. Do not call grep, find or ls in the same turn as \
 `search`: read its answer first. Use `search` for where something is defined \
 or handled, `callers` for who calls a function, grep for every occurrence of a \
 literal string (an env var, a message, a config key). If search finds \
@@ -55,8 +54,10 @@ pub const TOOLS: [&str; 5] = ["search", "page", "neighbors", "callers", "lint"];
 
 /// The tools exposed without `--tools`. `lint` serves the person keeping
 /// the wiki, not an agent mid-task, and each exposed tool costs schema
-/// tokens on every request.
-pub const DEFAULT_TOOLS: [&str; 4] = ["search", "page", "neighbors", "callers"];
+/// tokens on every request. `neighbors` is left out: 16 of 11,056 rig calls
+/// and 0 of 37 on the bench, for about a quarter of the per-turn schema
+/// tokens.
+pub const DEFAULT_TOOLS: [&str; 3] = ["search", "page", "callers"];
 
 /// Identity of the compiled output, cheap to compute: `index.json`'s
 /// (mtime, len). A recompile rewrites index.json, changing at least one.

@@ -173,12 +173,8 @@ fn serve_lists_and_calls_tools() {
         .collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
-    // `lint` is left out unless `--tools` names it.
-    assert_eq!(
-        sorted,
-        ["callers", "neighbors", "page", "search"],
-        "tools: {names:?}"
-    );
+    // `neighbors` and `lint` are left out unless `--tools` names them.
+    assert_eq!(sorted, ["callers", "page", "search"], "tools: {names:?}");
     // Claude Code loads them up front instead of behind `ToolSearch`.
     for t in resp["result"]["tools"].as_array().unwrap() {
         assert_eq!(t["_meta"]["anthropic/alwaysLoad"], true, "{t}");
@@ -195,28 +191,36 @@ fn serve_lists_and_calls_tools() {
     let text = text_of(&resp);
     assert!(text.contains("gradient_descent"), "search result: {text}");
 
-    // tools/call neighbors
+    // tools/call neighbors on a default server -> invalid params
     let resp = call(
         &mut stdin,
         &stdout,
         4,
         "neighbors",
+        &json!({"id": "gradient_descent"}),
+    );
+    assert_eq!(resp["error"]["code"], -32602, "{resp}");
+
+    drop(stdin); // close stdin -> server exits
+    let _ = child.wait();
+}
+
+#[test]
+fn serve_tools_flag_brings_back_neighbors() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, stdout) =
+        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
+    initialize(&mut stdin, &stdout);
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        2,
+        "neighbors",
         &json!({"id": "gradient_descent", "max_tokens": 800}),
     );
     let text = text_of(&resp);
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
-
-    // tools/call neighbors with unknown id -> tool error result
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        5,
-        "neighbors",
-        &json!({"id": "no_such_page"}),
-    );
-    assert_eq!(resp["result"]["isError"], json!(true));
-
-    drop(stdin); // close stdin -> server exits
+    drop(stdin);
     let _ = child.wait();
 }
 
@@ -503,7 +507,8 @@ fn mcp_search_json_on_request() {
 #[test]
 fn serve_reports_bad_params_and_survives() {
     let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    let (mut child, mut stdin, stdout) =
+        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
     initialize(&mut stdin, &stdout);
 
     // (a) An unknown kind is rejected inside the handler with
@@ -593,7 +598,8 @@ fn neighbors_defaults_to_a_token_ceiling() {
     std::fs::write(raw.join("small.txt"), "# Small\n\nSmall body.\n").unwrap();
     wiki::compile(&raw, &out, &wiki::CompileOptions::default()).unwrap();
 
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    let (mut child, mut stdin, stdout) =
+        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
     initialize(&mut stdin, &stdout);
     let resp = call(&mut stdin, &stdout, 2, "neighbors", &json!({"id": "huge"}));
     let text = text_of(&resp);
@@ -969,7 +975,8 @@ fn mcp_neighbors_unknown_id_names_candidates() {
         .search("add", None, 1)
         .remove(0)
         .id;
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    let (mut child, mut stdin, stdout) =
+        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
     initialize(&mut stdin, &stdout);
     let resp = call(
         &mut stdin,

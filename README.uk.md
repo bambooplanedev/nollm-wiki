@@ -59,9 +59,11 @@ wiki/src/lib.rs
 - **Структура файлів.** `page` друкує по рядку на кожен символ файлу з його діапазоном рядків, тож
   агент читає сорок рядків замість чотирьох тисяч.
 - **Виклики в обидва боки.** `callers` показує функції, які викликають функцію, з рядками кожного
-  виклику; `neighbors --symbol` — усе, що функція викликає, рівень за рівнем.
+  виклику; `neighbors --symbol` (CLI; MCP з `--tools`) — усе, що функція
+  викликає, рівень за рівнем.
 - **MCP-сервер.** `wiki serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
-  `search`, `page`, `neighbors` і `callers` у Claude Code, pi, Cursor, Codex чи будь-який MCP-клієнт.
+  `search`, `page` і `callers` (`neighbors` і `lint` з `--tools`) у Claude Code, pi, Cursor, Codex
+  чи будь-який MCP-клієнт.
   Кілька серверів на одному `.wiki` — це нормально: один компілює, решта віддають те, що він записав.
 - **Налаштування однією командою.** `wiki setup` встановлює сервер і те, що каже агентові ним
   користуватися, для Claude Code, pi, Cursor і Codex, і хук, що додає до кожного запиту відповідні
@@ -157,8 +159,8 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 
 Агент працює так: пошук → структура → читання рядків. `search` знаходить сторінку та її символи,
 `page` показує символи файлу з діапазонами рядків, і агент читає лише ці рядки своїм інструментом
-для файлів. `callers` відповідає на «що зламається, якщо це змінити»; `neighbors` — коли важливі
-сусідні сторінки. Отримавши план, специфікацію чи журнал, агент передає їхні шляхи в параметр `docs`
+для файлів. `callers` відповідає на «що зламається, якщо це змінити». Отримавши план,
+специфікацію чи журнал, агент передає їхні шляхи в параметр `docs`
 інструмента `search` і отримує діапазон рядків кроку за його міткою (`T5k`) або словами назви
 (`wiki search T5k --docs plan.md` у командному рядку). Кожен шлях друкується один раз, далі
 `  start-end  label` на збіг; `load-profile` і `load profile` збігаються однаково, але після точних
@@ -328,9 +330,8 @@ args = ["serve", "--source", "."]
    Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are exact — do not
    re-derive them with grep.
-3. For a module's map, call `page` with the path; it lists every symbol with its lines. To follow
-   a function through the code, call `neighbors` with the path and `symbol`. To see what calls a
-   function, call `callers` with the path and `symbol` instead of grepping for its name.
+3. For a module's map, call `page` with the path; it lists every symbol with its lines. To see what
+   calls a function, call `callers` with the path and `symbol` instead of grepping for its name.
 4. Do not call grep, find or ls in the same turn as `search`. Wait for the `search` answer and
    read it first; most of the time it already holds what you need.
 5. Pick the tool by the question: where something is defined or handled, `search`; who calls a
@@ -360,7 +361,7 @@ args = ["serve", "--source", "."]
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
 - `--dir <out>` (`<project>/.wiki` з `--source`, інакше `.wiki`, якщо така тека існує, інакше
   `out`) — скомпільована вікі, яку віддавати.
-- `--tools <list>` (`search,page,neighbors,callers`) — які інструменти відкрити, через кому, з
+- `--tools <list>` (`search,page,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (можна повторювати) — з `--source`: `none` вимикає всю памʼять, і теки
   агентів, і `.agents/memory`, а `DIR` бере теки замість пошуку тек памʼяті агентів (`none` разом
@@ -375,7 +376,7 @@ args = ["serve", "--source", "."]
 |---|---|---|
 | `search` | `query` (порожній разом із `tag` дає список сторінок з тегом), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (шляхи markdown відносно `--source`, інакше робочої теки сервера; шукає за заголовками й жирними кроками, не разом із `kind` чи `tag`), `limit?` (5 із запитом, 10 з `docs`; без обмеження для списку за тегом), `format?` (`lines` за замовчуванням або `json`) | Текст `lines`, описаний у [search](#search), або `[{id, title, summary, updated, score, snippet, path, symbols}]` з `json` |
 | `page` | `id` (ідентифікатор, назва чи шлях), `full?` (false), `max_tokens?` (4000 для структури) | Структура або вся сторінка; сторінка нотатки памʼяті — це її текст |
-| `neighbors` | `id`, `depth?` (1; із `symbol` — без обмеження), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | Пакет контексту, або з `symbol` — функції, які викликає ця функція |
+| `neighbors` (з `--tools`) | `id`, `depth?` (1; із `symbol` — без обмеження), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | Пакет контексту, або з `symbol` — функції, які викликає ця функція |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | Функції, що викликають `symbol`, з рядками кожного виклику |
 | `lint` (з `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
@@ -383,7 +384,12 @@ args = ["serve", "--source", "."]
 CLI не обмежує, а `search` повертає 5 результатів замість 10, бо кожен рядок результату агент
 перечитує на кожному наступному ході. `lint` відкривається лише тоді, коли його названо в
 `--tools`: він потрібен тому, хто доглядає вікі, а кожен відкритий інструмент коштує токенів схеми
-в кожному запиті.
+в кожному запиті. `neighbors` теж вмикається лише явно: агенти майже ніколи його не викликали (16 з
+11 056 викликів у вимірюваннях, 0 з 37 на тестовій машині), а його схема займала близько чверті
+токенів інструментів на кожному ході. `--tools search,page,neighbors,callers` повертає його. Після
+оновлення запустіть `wiki setup` ще раз, щоб закомічений блок AGENTS.md чи skill перестав його
+називати; копію, яку ви редагували вручну, `wiki setup` не змінює, тож речення про `neighbors` у ній
+видаліть самі.
 
 **Ресурси:** кожна сторінка — `wiki://page/<id>` (Markdown), плюс `wiki://index` (`index.json`) і
 `wiki://llms.txt`.
