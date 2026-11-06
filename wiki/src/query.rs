@@ -6,7 +6,10 @@
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::calls::{callers_index, Caller};
-use crate::model::{days_in_month, CodeItem, CodeItemKind, KindFilter, Origin, SourceKind};
+use crate::model::{
+    clip, days_in_month, CodeItem, CodeItemKind, KindFilter, Origin, SourceKind,
+    ITEM_DOC_TEXT_MAX_CHARS,
+};
 use aho_corasick::AhoCorasick;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -104,6 +107,18 @@ pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
         format!("; closest: {}", near.join(", "))
     };
     format!("unknown page {arg:?}{closest} — use search to find ids")
+}
+
+impl Wiki {
+    /// Why `page_text`/`page` found no body for `id`: an indexed page whose
+    /// file is gone says so; anything else is an unknown page named `arg`.
+    pub fn page_error(&self, id: &str, arg: &str) -> String {
+        if self.has_page(id) && self.page(id).is_none() {
+            format!("page {id:?} is in the index but its file {id}.md is missing from the wiki folder — recompile the wiki")
+        } else {
+            unknown_page(arg, &[])
+        }
+    }
 }
 
 /// Normalizes a tag argument as the index stores tags: trimmed, no leading
@@ -1923,7 +1938,7 @@ impl Wiki {
             format!(
                 "# {} ({id})\n\n{}\n\n_body (~{} tokens) {OVER_BUDGET_NOTE}; read wiki://page/{id} for the full page_\n",
                 target.title,
-                target.summary.as_deref().unwrap_or("(no summary)"),
+                summary_line(target.summary.as_deref()),
                 target.token_estimate,
             )
         };
@@ -1942,7 +1957,7 @@ impl Wiki {
                     "## {} ({})\n{}\n\n",
                     e.title,
                     nid,
-                    e.summary.as_deref().unwrap_or("(no summary)")
+                    summary_line(e.summary.as_deref())
                 )
             };
             let outline = || self.outline(&nid, None).map(|o| o + "\n");
@@ -2002,6 +2017,14 @@ const _: () = assert!(
         && Wiki::IW_NAME_WORD > Wiki::IW_DOC
         && Wiki::IW_WHOLE > Wiki::IW_NAME_WORD + Wiki::IW_DOC
 );
+
+/// A page summary for a pack block: clipped, `(no summary)` when absent.
+fn summary_line(summary: Option<&str>) -> String {
+    summary.map_or_else(
+        || "(no summary)".to_string(),
+        |s| clip(s, ITEM_DOC_TEXT_MAX_CHARS),
+    )
+}
 
 #[cfg(test)]
 mod tests {

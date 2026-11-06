@@ -372,7 +372,8 @@ fn main() -> Result<()> {
                 .context("unknown id")?;
             print!(
                 "{}",
-                w.page_text(&rid, full, max_tokens).context("unknown id")?
+                w.page_text(&rid, full, max_tokens)
+                    .ok_or_else(|| anyhow::anyhow!(w.page_error(&rid, &id)))?
             );
         }
         Command::Search {

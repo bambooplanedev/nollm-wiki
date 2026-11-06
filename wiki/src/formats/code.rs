@@ -2,8 +2,8 @@
 
 use crate::formats::{first_real_sentence, summarize, Extractor};
 use crate::model::{
-    basename, one_line, slugify, title_from_slug, Arity, CallSite, CallVia, CodeItem, CodeItemKind,
-    Entity, PairRole, SourceKind,
+    basename, clip, slugify, title_from_slug, Arity, CallSite, CallVia, CodeItem, CodeItemKind,
+    Entity, PairRole, SourceKind, ITEM_DOC_TEXT_MAX_CHARS,
 };
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1541,13 +1541,10 @@ fn cap_chars(s: &str, max: usize) -> String {
     s.chars().take(max - 1).chain(['…']).collect()
 }
 
-/// The most chars of an item's whole doc kept in `items.json`.
-const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
-
 /// An item's whole raw doc on one line, capped at `ITEM_DOC_TEXT_MAX_CHARS`
 /// (the `…` included); `None` when it is just `doc`.
 fn item_doc_text(raw: &str, doc: Option<&str>) -> Option<String> {
-    let text = cap_chars(&one_line(raw), ITEM_DOC_TEXT_MAX_CHARS);
+    let text = clip(raw, ITEM_DOC_TEXT_MAX_CHARS);
     (!text.is_empty() && doc != Some(text.as_str())).then_some(text)
 }
 

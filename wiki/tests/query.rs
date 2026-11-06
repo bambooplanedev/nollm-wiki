@@ -5,7 +5,7 @@ use std::fs;
 mod common;
 use tempfile::tempdir;
 use wiki::model::{KindFilter, SourceKind};
-use wiki::query::{tag_filter, PackBudget, Wiki};
+use wiki::query::{tag_filter, PackBudget, Wiki, OVER_BUDGET_NOTE};
 use wiki::{compile, CompileOptions};
 
 fn build() -> tempfile::TempDir {
@@ -2294,4 +2294,38 @@ fn callers_reach_a_pointer_returning_definition() {
         .callers(&id, "pick_venue", Some(1), None)
         .unwrap_or_else(|e| e);
     assert!(out.contains("cost  calls pick_venue at 4"), "{out}");
+}
+
+#[test]
+fn outline_header_and_neighbors_cap_and_clean_the_summary() {
+    let para = format!(
+        "zebrafish \x1b[1mbold\x1b[0m bell\x07 {}",
+        "word ".repeat(240)
+    );
+    let (_d, w) = code_fixture(&[
+        ("docs/long.md", &format!("# Long\n\n{para}\n")),
+        ("docs/hub.md", "# Hub\n\nHub links [L](long.md).\n"),
+    ]);
+    let clean = |t: &str| !t.contains('\x1b') && !t.contains('\x07');
+    let outline = w.outline("long", None).unwrap();
+    let third = outline.lines().nth(2).unwrap();
+    assert_eq!(third.chars().count(), 1000, "{third}");
+    assert!(clean(&outline));
+
+    let pack = w.neighbors("hub", 1, &PackBudget::default()).unwrap();
+    assert!(pack.text.contains("## Long (long)"), "{}", pack.text);
+    assert!(clean(&pack.text));
+    assert!(pack.text.lines().all(|l| l.chars().count() <= 1000));
+
+    let small = PackBudget {
+        max_tokens: Some(100),
+        ..Default::default()
+    };
+    let pack = w.neighbors("long", 1, &small).unwrap();
+    assert!(pack.text.contains(OVER_BUDGET_NOTE), "{}", pack.text);
+    assert!(clean(&pack.text));
+    assert!(pack.text.lines().all(|l| l.chars().count() <= 1000));
+
+    let lines = wiki::serve::search_lines(&w.search("zebrafish", None, 10));
+    assert!(clean(&lines), "{lines}");
 }

@@ -45,7 +45,6 @@ pub fn labels(md: &str) -> Vec<Label> {
     let mut out: Vec<Label> = Vec::new();
     for (i, line) in mask_fenced_code(md).lines().enumerate() {
         let found = heading(line)
-            .filter(|(_, t)| !t.is_empty())
             .map(|(l, t)| (l as u8, t))
             .or_else(|| bold(line).map(|t| (BOLD, t)));
         if let Some((level, text)) = found {

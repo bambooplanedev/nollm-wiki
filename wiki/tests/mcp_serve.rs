@@ -1059,6 +1059,53 @@ fn mcp_page_resolves_a_path_and_reports_unknown() {
 }
 
 #[test]
+fn mcp_page_names_a_missing_page_file() {
+    let (_d, _raw, out) = common::compiled(&[
+        ("docs/a.md", "# Alpha\n\nAlpha doc.\n"),
+        ("src/g.rs", "/// Gamma fn.\npub fn gamma() {}\n"),
+    ]);
+    std::fs::remove_file(out.join("alpha.md")).unwrap();
+    std::fs::remove_file(out.join("g.md")).unwrap();
+    let a3 = "page \"alpha\" is in the index but its file alpha.md is missing from the wiki folder — recompile the wiki";
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let (err, text) = page(
+        &mut stdin,
+        &stdout,
+        2,
+        &json!({"id": "alpha", "full": true}),
+    );
+    assert!(err, "{text}");
+    assert_eq!(text, a3);
+    let (err, text) = page(&mut stdin, &stdout, 3, &json!({"id": "alpha"}));
+    assert!(!err, "{text}");
+    assert!(text.starts_with("# Alpha (alpha)"), "{text}");
+    let (err, text) = page(&mut stdin, &stdout, 4, &json!({"id": "g"}));
+    assert!(!err, "{text}");
+    assert!(
+        text.starts_with("# G (g)") && text.contains("gamma"),
+        "{text}"
+    );
+    let (err, text) = page(&mut stdin, &stdout, 5, &json!({"id": "nope", "full": true}));
+    assert!(err);
+    assert!(text.contains("unknown page \"nope\""), "{text}");
+    for (n, id, msg) in [
+        (6, "alpha", a3.to_string()),
+        (7, "nope", "no such resource: wiki://page/nope".to_string()),
+    ] {
+        send(
+            &mut stdin,
+            &json!({"jsonrpc": "2.0", "id": n, "method": "resources/read",
+                "params": {"uri": format!("wiki://page/{id}")}}),
+        );
+        let resp = read_response(&stdout, n);
+        assert_eq!(resp["error"]["code"], json!(-32002), "{resp}");
+        assert_eq!(resp["error"]["message"], json!(msg), "{resp}");
+    }
+    child.kill().ok();
+}
+
+#[test]
 fn mcp_page_names_a_skipped_folder() {
     let (_src, out, _id) = big_project();
     let (mut child, mut stdin, stdout) = spawn_server(&out);

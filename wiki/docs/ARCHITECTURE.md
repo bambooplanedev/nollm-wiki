@@ -56,9 +56,10 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `agents`, `graph`) is rewritten to `<id>_page`, `<id>_page_2`, ..., with a
    warning on stderr. Finally `extract_cpp::pair_declarations` pairs each C++
    header's declarations with the definitions in its same-stem implementation
-   file, else, for a body-less declaration, with the one guarded definition
-   (out of line, not `static`, not in an anonymous namespace) of a key unique
-   across the project: the
+   file (only its body-less declarations and guarded definitions; an
+   out-of-line `= default` counts as a definition), else, for a body-less
+   declaration, with the one guarded definition (out of line, not `static`,
+   not in an anonymous namespace) of a key unique across the project: the
    definition inherits the doc and both items' `twin` name the other's lines;
    overloads and ambiguous keys stay unpaired. Produces
    `BTreeMap<String, Entity>`.
@@ -162,7 +163,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 | `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
 | `src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
 | `src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
-| `src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, then project-unique keys guarded by `pair_role`). |
+| `src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, taking only body-less header declarations and guarded definitions with out-of-line `= default` as a definition, then project-unique keys guarded by `pair_role`). |
 | `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
 | `src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
 | `src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |

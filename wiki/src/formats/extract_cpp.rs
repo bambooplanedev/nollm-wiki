@@ -502,11 +502,10 @@ fn arity(signature: &str, name: &str) -> Option<usize> {
 /// declaration, or a definition that is out of line (no class body around
 /// it, so `MyOpts::` in a parameter cannot pass for a qualifier), not
 /// `static` (in any specifier position) and not in an anonymous namespace.
-/// Inline and in-class bodies and `= default` are neither: they still count
-/// toward uniqueness in `pair_project`, so they block but never pair. The
-/// `body.is_none()` check is what excludes `= default`/`= delete`: such a
-/// `function_definition` has no `body`, so an out-of-line `X::X() = default;`
-/// in a `.cpp` never pairs (a lost true pair, kept on the safe side).
+/// An out-of-line `X::X() = default;` has no `body` but counts as one: it is
+/// the definition. `= delete` does not. Inline and in-class bodies are
+/// neither: they still count toward uniqueness in both pairing steps, so
+/// they block but never pair.
 pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
     if def.kind() != "function_definition" {
         return PairRole::Declaration;
@@ -519,7 +518,10 @@ pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
         a.kind() == "field_declaration_list"
             || (a.kind() == "namespace_definition" && a.child_by_field_name("name").is_none())
     });
-    if def.child_by_field_name("body").is_none() || is_static || local {
+    let defaulted = def
+        .children(&mut cursor)
+        .any(|c| c.kind() == "default_method_clause");
+    if (def.child_by_field_name("body").is_none() && !defaulted) || is_static || local {
         PairRole::Neither
     } else {
         PairRole::OutOfLineDefinition
@@ -569,7 +571,9 @@ fn header_and_impl<'a>(
 /// `twin` names the other's lines. Two steps. Same stem first: a group with
 /// exactly one implementation file and a unique lowest-rank header pairs (a
 /// same-stem group that is not one pairs within each directory), on keys
-/// unique within that file pair. Then the whole project (`pair_project`):
+/// unique within that file pair, a `Declaration` header item with an
+/// `OutOfLineDefinition` implementation item (`pair_role`). Then the whole
+/// project (`pair_project`):
 /// keys unique among all header items and among all implementation items.
 /// A wrong pairing is worse than none, so overloads with the same parameter
 /// count and keys with two declarations or two definitions stay unpaired.
@@ -604,7 +608,10 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
             let (h, c) = (&entities[hdr].items, &entities[imp].items);
             let cu = unique_keys(c);
             for (key, hi) in unique_keys(h) {
-                if let Some(&ci) = cu.get(&key) {
+                let Some(&ci) = cu.get(&key) else { continue };
+                if h[hi].pair_role == PairRole::Declaration
+                    && c[ci].pair_role == PairRole::OutOfLineDefinition
+                {
                     pairs.push((hdr.to_string(), hi, imp.to_string(), ci));
                 }
             }

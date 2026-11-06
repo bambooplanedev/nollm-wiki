@@ -428,3 +428,69 @@ fn a_cpp_class_body_naming_another_class_never_pairs() {
     assert!(h.get("twin").is_none(), "{h}");
     no_twins(&idx, "app/main.cpp");
 }
+
+#[test]
+fn same_stem_pairing_skips_inline_header_bodies_and_file_local_definitions() {
+    let idx = compile_with_items(&[
+        ("x.h", "inline int f(int a) { return a + 1; }\nint g(int a);\n"),
+        (
+            "x.cpp",
+            "#include \"x.h\"\nnamespace {\nint f(int a) { return a * 2; }\n}\nint g(int a) { return f(a); }\n",
+        ),
+    ]);
+    for (p, other) in [("x.h", "x.cpp"), ("x.cpp", "x.h")] {
+        let f = &named(&idx, p, "f")[0];
+        assert!(f.get("twin").is_none(), "{p} {f}");
+        let g = &named(&idx, p, "g")[0];
+        assert!(
+            g["twin"].as_str().is_some_and(|t| t.starts_with(other)),
+            "{p} {g}"
+        );
+    }
+}
+
+/// The constructors `X` of `x.h` (the class item shares the name).
+fn ctors(idx: &(serde_json::Value, serde_json::Value)) -> Vec<serde_json::Value> {
+    named(idx, "x.h", "X")
+        .into_iter()
+        .filter(|i| i["kind"] != "type")
+        .collect()
+}
+
+#[test]
+fn an_out_of_line_default_pairs_with_its_declaration() {
+    let h = "class X {\npublic:\n  X();\n  ~X();\n  X(const X&);\n  void run();\n};\n";
+    for imp in ["x_impl.cpp", "x.cpp"] {
+        let idx = compile_with_items(&[
+            ("x.h", h),
+            (
+                imp,
+                "#include \"x.h\"\nX::X() = default;\nX::~X() = default;\nvoid X::run() {}\n",
+            ),
+        ]);
+        let ctors = ctors(&idx);
+        for it in [
+            &ctors[0],
+            &named(&idx, "x.h", "~X")[0],
+            &named(&idx, "x.h", "run")[0],
+        ] {
+            assert!(
+                it["twin"].as_str().is_some_and(|t| t.starts_with(imp)),
+                "{imp} {it}"
+            );
+        }
+    }
+    let idx = compile_with_items(&[
+        ("x.h", h),
+        (
+            "x.cpp",
+            "#include \"x.h\"\nX::X() = default;\nX::X(const X&) = delete;\n",
+        ),
+    ]);
+    let copy = &ctors(&idx)[1];
+    assert!(
+        copy["signature"].as_str().unwrap().contains("const X&"),
+        "{copy}"
+    );
+    assert!(copy.get("twin").is_none(), "{copy}");
+}
