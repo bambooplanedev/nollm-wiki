@@ -113,7 +113,6 @@ per question is noise-level: treat single results as anecdotes.
   the available score, above the code questions' lowest (0.59), and no
   measured statistic told them apart. Long task prompts lose lines too: 12
   of 35 that showed the page their task names went silent.
-- **Summaries keep control characters.** Summaries in search, hint, `llms.txt` and `index.md` lines keep control characters such as ANSI escapes; only whitespace is collapsed.
 
 ## Call chains (`neighbors` with `symbol`, `callers`)
 
@@ -171,17 +170,15 @@ per question is noise-level: treat single results as anecdotes.
   top-level block (`if {…}`, `for (let …)`) and `require` bindings are
   items. Go `var f = func…` is a `value`, while a JS arrow is an `fn`.
 - **C++ access is ignored:** every C++ item is `public: true`;
-  `private:` sections are not read.
+  `private:` sections are not read. Only `## Exports` would change, and a
+  static scan misreads `public:` from macros (97 nanobind members) and
+  specifiers under `#if`.
 - **C++ declaration ↔ definition pairing** crosses files and directories
   when the key `(owner, name, arity)` is unique among all header items and
   among all implementation items. In that project-wide step a header item
   with a body never pairs, and neither does a `static`, anonymous-namespace,
-  class-body or `= default` definition in a `.cpp`. Two definitions of one
-  key never pair. A same-stem `x.h`/`x.cpp` pair keeps the older rule: keys
-  unique within the two files, with no guard. So an inline `f(int)` in
-  `x.h` can pair with an anonymous-namespace `f(int)` in `x.cpp`. An
-  out-of-line `X::X() = default;` never pairs project-wide, so its header
-  declaration stays unpaired. Uniqueness can still
+  class-body definition in a `.cpp`. Two definitions of one
+  key never pair. Uniqueness can still
   mislead: namespaces are not compared (a unique-key free function in
   another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file
@@ -191,7 +188,12 @@ per question is noise-level: treat single results as anecdotes.
   are not compared either. Adding a file that defines a same-key function
   unpairs a distant pair, by design. Templates: `Ring<T>::size` out of line
   reaches its definition in walks, but the outline and `callers` asked on
-  the header are imprecise; not fixed.
+  the header are imprecise; not fixed. A template member defined out of
+  line keeps the owner `Ring<T>`, so the outline lists it in its own group
+  and a definition in the header gets a second call edge next to its
+  declaration. A leading macro can put the return type into the owner
+  (`handle api<Derived>`), and a free function with a template-id return
+  type can get that type as owner (`UniquePtr<TEST_INT>`).
 - **Shell (`.sh`, `.bash`) lists only function definitions.** A function
   passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
   of `f`, and a call in a part the grammar could not parse has no caller (unless a
@@ -232,11 +234,7 @@ per question is noise-level: treat single results as anecdotes.
 
 - `page` with `full` and no `max_tokens` has no ceiling: a large docs page
   comes back whole (20K chars seen), which a small agent then truncates.
-- Headings: a bare `#` gives a blank line, a closing `##` is kept, and
-  headings indented 1–3 spaces are skipped.
-- The outline header carries the page summary uncapped (a 5 KB summary
-  was seen on one pathological doc).
-- `page` on an entry without a body says "unknown page".
+- Headings: Setext headings (a line underlined with === or ---) and headings indented one to three spaces are not read.
 
 ## Notes and ids
 
