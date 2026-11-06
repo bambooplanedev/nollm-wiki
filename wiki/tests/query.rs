@@ -1218,12 +1218,18 @@ const CALLBACK_TS: &str = "export function renderCartLine(x: number): string {\n
 
 #[test]
 fn empty_callers_say_what_is_not_seen() {
-    const CLAUSE: &str = " (not seen: a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
+    const CLAUSE: &str = " (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
     // The b3 case: a function passed as a value has no seen callers.
     let (_d, w) = code_fixture(&[("src/cart.ts", CALLBACK_TS)]);
     assert_eq!(
         w.callers("cart", "renderCartLine", Some(1), None).unwrap(),
         format!("callers of renderCartLine  src/cart.ts:1-3 — 0 functions in 0 files{CLAUSE}renderCartLine)\n")
+    );
+    // A call at module level, outside any function, has no caller to list.
+    let (_t, w) = code_fixture(&[("src/app.ts", "export function init(): void {}\ninit();\n")]);
+    assert_eq!(
+        w.callers("app", "init", Some(1), None).unwrap(),
+        format!("callers of init  src/app.ts:1-1 — 0 functions in 0 files{CLAUSE}init)\n")
     );
     let (_dir, w) = code_fixture(&[("src/lib.rs", CALLERS_LIB_RS)]);
     // A true zero: nothing calls the test `checks`. A small budget keeps the line whole.
