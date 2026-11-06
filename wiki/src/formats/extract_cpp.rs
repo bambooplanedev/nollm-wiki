@@ -352,7 +352,10 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 ///     to a function that returns a pointer (`char *(*get_fn(void))(int)`) is
 ///     no longer an item either: its wrapped `function_declarator` names a
 ///     `parenthesized_declarator`, which the general `(_)` capture once
-///     extracted as the garbage name `(*get_fn(void))`;
+///     extracted as the garbage name `(*get_fn(void))`. The narrowed
+///     patterns also miss a pointer-returning definition qualified three or
+///     more levels deep (`Level* a::b::Book::top()`) and a definition named
+///     by a template-id (`void f<int>(int)`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
@@ -448,7 +451,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// descent those members render correctly in `## Exports` yet never reach
 /// `Entity::methods`, which `Wiki::search` scores on.
 ///
-/// Exactly ONE wrapper deep, deliberately: that is the reach of the ten
+/// Exactly ONE wrapper deep, deliberately: that is the reach of the
 /// wrapper patterns in `QUERY`, so this gate accepts precisely the members
 /// the query captures — `Level** grid()` is uncovered on both sides at once
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
@@ -500,7 +503,10 @@ fn arity(signature: &str, name: &str) -> Option<usize> {
 /// it, so `MyOpts::` in a parameter cannot pass for a qualifier), not
 /// `static` (in any specifier position) and not in an anonymous namespace.
 /// Inline and in-class bodies and `= default` are neither: they still count
-/// toward uniqueness in `pair_project`, so they block but never pair.
+/// toward uniqueness in `pair_project`, so they block but never pair. The
+/// `body.is_none()` check is what excludes `= default`/`= delete`: such a
+/// `function_definition` has no `body`, so an out-of-line `X::X() = default;`
+/// in a `.cpp` never pairs (a lost true pair, kept on the safe side).
 pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
     if def.kind() != "function_definition" {
         return PairRole::Declaration;

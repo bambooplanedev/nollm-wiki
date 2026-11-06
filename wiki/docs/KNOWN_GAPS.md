@@ -174,9 +174,14 @@ per question is noise-level: treat single results as anecdotes.
   `private:` sections are not read.
 - **C++ declaration ↔ definition pairing** crosses files and directories
   when the key `(owner, name, arity)` is unique among all header items and
-  among all implementation items. A header item with a body, and a
-  `static`, anonymous-namespace or class-body definition in a `.cpp`, never
-  pair; two definitions of one key never pair. Uniqueness can still
+  among all implementation items. In that project-wide step a header item
+  with a body never pairs, and neither does a `static`, anonymous-namespace,
+  class-body or `= default` definition in a `.cpp`. Two definitions of one
+  key never pair. A same-stem `x.h`/`x.cpp` pair keeps the older rule: keys
+  unique within the two files, with no guard. So an inline `f(int)` in
+  `x.h` can pair with an anonymous-namespace `f(int)` in `x.cpp`. An
+  out-of-line `X::X() = default;` never pairs project-wide, so its header
+  declaration stays unpaired. Uniqueness can still
   mislead: namespaces are not compared (a unique-key free function in
   another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file

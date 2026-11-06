@@ -56,8 +56,9 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `agents`, `graph`) is rewritten to `<id>_page`, `<id>_page_2`, ..., with a
    warning on stderr. Finally `extract_cpp::pair_declarations` pairs each C++
    header's declarations with the definitions in its same-stem implementation
-   file, else with the one guarded definition (out of line, not `static`, not
-   in an anonymous namespace) of a key unique across the project: the
+   file, else, for a body-less declaration, with the one guarded definition
+   (out of line, not `static`, not in an anonymous namespace) of a key unique
+   across the project: the
    definition inherits the doc and both items' `twin` name the other's lines;
    overloads and ambiguous keys stay unpaired. Produces
    `BTreeMap<String, Entity>`.
