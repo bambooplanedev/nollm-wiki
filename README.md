@@ -57,9 +57,11 @@ wiki/src/lib.rs
 - **Outlines.** `page` prints one line per symbol of a file with its line range, so an agent reads
   forty lines instead of four thousand.
 - **Calls both ways.** `callers` lists the functions that call a function, with the lines of each
-  call; `neighbors --symbol` lists everything a function calls, level by level.
+  call; `neighbors --symbol` (CLI; MCP with `--tools`) lists everything a function
+  calls, level by level.
 - **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
-  `search`, `page`, `neighbors` and `callers` to Claude Code, pi, Cursor, Codex or any MCP client.
+  `search`, `page` and `callers` (`neighbors` and `lint` with `--tools`) to Claude Code, pi, Cursor,
+  Codex or any MCP client.
   Several servers on one `.wiki` are fine: one compiles, the others serve what it wrote.
 - **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
@@ -151,8 +153,8 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 
 The workflow an agent follows is search → page → read lines: `search` finds the page and its
 symbols, `page` lists a file's symbols with line ranges, and the agent reads just those lines with
-its own file tool. `callers` answers "what breaks if this changes"; `neighbors` is for when the
-surrounding pages matter. Handed a plan, spec or ledger, the agent passes its paths in `search`'s
+its own file tool. `callers` answers "what breaks if this changes". Handed a plan, spec or ledger,
+the agent passes its paths in `search`'s
 `docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
 on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
 `load profile` match alike, after the exact matches. When the limit cuts a label repeated in one
@@ -319,9 +321,8 @@ file:
    Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are exact — do not
    re-derive them with grep.
-3. For a module's map, call `page` with the path; it lists every symbol with its lines. To follow
-   a function through the code, call `neighbors` with the path and `symbol`. To see what calls a
-   function, call `callers` with the path and `symbol` instead of grepping for its name.
+3. For a module's map, call `page` with the path; it lists every symbol with its lines. To see what
+   calls a function, call `callers` with the path and `symbol` instead of grepping for its name.
 4. Do not call grep, find or ls in the same turn as `search`. Wait for the `search` answer and
    read it first; most of the time it already holds what you need.
 5. Pick the tool by the question: where something is defined or handled, `search`; who calls a
@@ -351,7 +352,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 - `--source <project>` — also compile this project and keep the wiki in step with it.
 - `--dir <out>` (`<project>/.wiki` with `--source`, else `.wiki` if that directory exists, else
   `out`) — the compiled wiki to serve.
-- `--tools <list>` (`search,page,neighbors,callers`) — the tools to expose, comma-separated, from
+- `--tools <list>` (`search,page,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
 - `--memory <none|DIR>` (repeatable) — with `--source`, `none` turns off all memory, the agents'
   folders and `.agents/memory` alike, and a `DIR` replaces the discovery of the agents' folders
@@ -366,14 +367,18 @@ that does not, such as Claude Desktop, give the project's absolute path.
 |---|---|---|
 | `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
-| `neighbors` | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
+| `neighbors` (with `--tools`) | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
 The tools mirror the CLI with smaller defaults: `max_tokens` is 4000 where the CLI is unbounded, and
 `search` returns 5 hits where the CLI returns 10, because every hit line is re-read on each later
 turn. `lint` is exposed only when `--tools` names it: it serves the person keeping the wiki, and
-each exposed tool costs schema tokens on every request.
+each exposed tool costs schema tokens on every request. `neighbors` is opt-in too: agents almost
+never called it (16 of 11,056 calls in the measurement rig, 0 of 37 on the bench) and its schema
+took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors,callers` brings it
+back. After upgrading, rerun `wiki setup` so that a committed AGENTS.md block or skill stops naming
+it.
 
 **Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
 `wiki://llms.txt`.
