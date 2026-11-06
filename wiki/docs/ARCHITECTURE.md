@@ -666,7 +666,7 @@ or titles sharing a word). On a failure `Wiki::resolve` first asks
 `Wiki::skipped_path`: a relative path whose outermost pruned directory
 (`walk::pruned_dir`, the `SKIPPED_DIRS` and hidden-folder rule) is not at or
 above the compile input's name (`root`), and under which no indexed page
-lives, gets a note that the folder is not compiled. It BFS-collects ids to
+lives, gets a note that the folder is not compiled. `neighbors` then BFS-collects ids to
 `depth` hops over both edge directions, then builds a budgeted context pack:
 
 - `--max-tokens` is a hard ceiling on the pack's estimated size, using
