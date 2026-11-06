@@ -127,7 +127,7 @@ per question is noise-level: treat single results as anecdotes.
   lambdas stored and called later), CommonJS renames (`const m =
   require('./x')`, `const { a: b } = require(…)`), a TS default import
   used as a namespace (`import d from './m'; d.f()`), and calls inside a
-  `macro_rules!` body.
+  `macro_rules!` body. An empty `callers` result says so and points to grep.
 - **Rust macro arguments are read as tokens.** Any `name(…)` token tree
   inside a macro invocation (`format!`, `select!`, `assert_eq!`, …) counts
   as a call, so a tuple-struct or enum pattern in `matches!(x, Foo(y))`
