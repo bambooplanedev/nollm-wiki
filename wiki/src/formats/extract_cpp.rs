@@ -713,6 +713,26 @@ mod tests {
     }
 
     #[test]
+    fn pointer_and_reference_returning_in_class_definitions_are_captured() {
+        // pinning: guards the flat `@name` plain-name alternatives inside the
+        // wrapper alternation. A nested `[(identifier) (field_identifier) …]
+        // @name` there compiles but silently drops these in-class definitions.
+        let src = "class B {\npublic:\n  const Stats& stats() const { return s_; }\n  Stats* sp() { return nullptr; }\n};\n";
+        let s = syms("src/b.h", src);
+        assert!(s.iter().any(|x| x.contains("B::stats")), "{s:?}");
+        assert!(s.iter().any(|x| x.contains("B::sp")), "{s:?}");
+        let methods: Vec<String> = CodeExtractor
+            .extract("src/b.h", src)
+            .items
+            .into_iter()
+            .filter(|i| i.kind == crate::model::CodeItemKind::Method)
+            .map(|i| i.name)
+            .collect();
+        assert!(methods.iter().any(|m| m == "stats"), "{methods:?}");
+        assert!(methods.iter().any(|m| m == "sp"), "{methods:?}");
+    }
+
+    #[test]
     fn a_pointer_returning_out_of_line_definition_renders_its_owner_once() {
         // `qualified_owner` descends one wrapper on a definition, so the
         // `function_definition` wrapper patterns must capture only the last
