@@ -160,6 +160,7 @@ doc under the same head (`N11: …` in a ledger), both its first and last entrie
 plan, spec and ledger together, since an ID is often a label in only one of them; an empty query
 lists the first 200 labels (`limit` lists more, and a final line says how many were cut); body text
 is not searched, grep stays the tool for it.
+An empty answer says the label must hold the words in a row and suggests fewer words or grep.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|

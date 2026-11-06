@@ -74,6 +74,10 @@ pub const DOC_LIMIT: usize = 10;
 /// Labels listed for an empty query when no `limit` is given.
 pub const DOC_LIST_LIMIT: usize = 200;
 
+/// The line for an empty `docs` answer: why nothing matched and what to try.
+pub const DOC_NO_MATCH: &str =
+    "no matches: a label must hold the query words in a row; try fewer words or an ID like T5k, or grep for text inside a doc";
+
 /// A label found in one of the searched documents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocHit {
@@ -220,7 +224,8 @@ fn head(text: &str) -> String {
 }
 
 /// Hits grouped by consecutive path: the path alone on a line, then
-/// `  start-end  text` per hit; then the error lines; `no matches` if none.
+/// `  start-end  text` per hit; then the error lines; [`DOC_NO_MATCH`] if
+/// nothing else prints.
 pub fn doc_lines(hits: &[DocHit], errors: &[String], more: usize) -> String {
     let mut out = String::new();
     let mut path = None;
@@ -245,7 +250,8 @@ pub fn doc_lines(hits: &[DocHit], errors: &[String], more: usize) -> String {
         out.push('\n');
     }
     if out.is_empty() {
-        out.push_str("no matches\n");
+        out.push_str(DOC_NO_MATCH);
+        out.push('\n');
     }
     out
 }
