@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use wiki::labels::{doc_lines, doc_search, labels, DocHit, DOC_LIST_LIMIT};
+use wiki::labels::{doc_lines, doc_search, labels, DocHit, DOC_LIST_LIMIT, DOC_NO_MATCH};
 
 const PLAN: &str = "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n";
 
@@ -132,7 +132,25 @@ fn lines_render_like_symbol_ranges() {
         doc_lines(&hits("T2d"), &[], 0),
         "plan.md\n  5-10  T2d. Remaining matrix.\n"
     );
-    assert_eq!(doc_lines(&[], &[], 0), "no matches\n");
+    assert_eq!(doc_lines(&[], &[], 0), format!("{DOC_NO_MATCH}\n"));
+}
+#[test]
+fn no_match_line_only_when_nothing_else_prints() {
+    assert_eq!(
+        doc_lines(&[], &["nope.md: not found".into()], 0),
+        "nope.md: not found\n"
+    );
+    let cut = doc_lines(&[], &[], 3);
+    assert!(
+        cut.contains("… 3 more labels") && !cut.contains("no matches"),
+        "{cut}"
+    );
+    // An empty query on docs with no labels gets the same line (accepted).
+    let d = std::env::temp_dir().join(format!("wiki-nolabel-{}", std::process::id()));
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("p.md"), "plain text, no labels\n").unwrap();
+    let (h, e, more) = doc_search(&d, &["p.md".to_string()], "", None);
+    assert_eq!(doc_lines(&h, &e, more), format!("{DOC_NO_MATCH}\n"));
 }
 #[test]
 fn lines_print_each_path_once_and_errors_last() {
