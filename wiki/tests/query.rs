@@ -1214,6 +1214,39 @@ fn callers_list_one_level_by_default_with_tests_last() {
     );
 }
 
+const CALLBACK_TS: &str = "export function renderCartLine(x: number): string {\n  return String(x);\n}\nexport function renderCart(xs: number[]): string {\n  return xs.map(renderCartLine).join(\",\");\n}\n";
+
+#[test]
+fn empty_callers_say_what_is_not_seen() {
+    const CLAUSE: &str = " (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
+    // The b3 case: a function passed as a value has no seen callers.
+    let (_d, w) = code_fixture(&[("src/cart.ts", CALLBACK_TS)]);
+    assert_eq!(
+        w.callers("cart", "renderCartLine", Some(1), None).unwrap(),
+        format!("callers of renderCartLine  src/cart.ts:1-3 — 0 functions in 0 files{CLAUSE}renderCartLine)\n")
+    );
+    // A call at module level, outside any function, has no caller to list.
+    let (_t, w) = code_fixture(&[("src/app.ts", "export function init(): void {}\ninit();\n")]);
+    assert_eq!(
+        w.callers("app", "init", Some(1), None).unwrap(),
+        format!("callers of init  src/app.ts:1-1 — 0 functions in 0 files{CLAUSE}init)\n")
+    );
+    let (_dir, w) = code_fixture(&[("src/lib.rs", CALLERS_LIB_RS)]);
+    // A true zero: nothing calls the test `checks`. A small budget keeps the line whole.
+    let empty =
+        format!("callers of checks  src/lib.rs:15-18 — 0 functions in 0 files{CLAUSE}checks)\n");
+    assert_eq!(w.callers("lib", "checks", Some(1), None).unwrap(), empty);
+    assert_eq!(w.callers("lib", "checks", Some(1), Some(5)).unwrap(), empty);
+    // Regression guards (pass before the change): depth 0 and a budget cut get no clause.
+    assert!(!w
+        .callers("lib", "target", Some(0), None)
+        .unwrap()
+        .contains("not seen"));
+    let cut = w.callers("lib", "target", Some(1), Some(1)).unwrap();
+    assert!(cut.contains("more functions — pass max_tokens"), "{cut}");
+    assert!(!cut.contains("not seen"), "{cut}");
+}
+
 #[test]
 fn a_header_declaration_stands_for_its_definition() {
     let (_dir, w) = code_fixture(&[

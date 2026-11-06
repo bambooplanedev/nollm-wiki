@@ -428,6 +428,14 @@ impl Wiki {
             roots[0].qualified_name(),
             root_spans.join(", ")
         );
+        // Nothing seen calls it: say what the walk cannot see. The budget
+        // never cuts this line.
+        if up && order.is_empty() && depth != Some(0) {
+            return Ok(format!(
+                "{head} — 0 functions in 0 files (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for {})\n",
+                roots[0].name
+            ));
+        }
         let render = |n: usize| {
             let kept = &order[..n];
             let mut files: Vec<&str> = Vec::new();

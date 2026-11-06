@@ -123,11 +123,14 @@ per question is noise-level: treat single results as anecdotes.
   never ruled out. So `.get(k)` on a `HashMap` still lists a project
   `Mapping::get(key)`, and all C++ overloads that can take the count are
   listed.
-- **Not seen:** functions passed as values (callbacks, function pointers,
-  lambdas stored and called later), CommonJS renames (`const m =
+- **Not seen:** calls outside any function (module level, such as
+  Python under `if __name__ == "__main__":` or a TS top-level `init();`;
+  shell files are the exception, with a `<top level>` caller), functions
+  passed as values (callbacks, function pointers, lambdas stored and called
+  later), CommonJS renames (`const m =
   require('./x')`, `const { a: b } = require(…)`), a TS default import
   used as a namespace (`import d from './m'; d.f()`), and calls inside a
-  `macro_rules!` body.
+  `macro_rules!` body. An empty `callers` result says so and points to grep.
 - **Rust macro arguments are read as tokens.** Any `name(…)` token tree
   inside a macro invocation (`format!`, `select!`, `assert_eq!`, …) counts
   as a call, so a tuple-struct or enum pattern in `matches!(x, Foo(y))`
