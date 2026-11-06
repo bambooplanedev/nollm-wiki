@@ -257,3 +257,108 @@ fn a_pointer_or_reference_returning_definition_pairs_with_its_declaration() {
     assert_eq!(pick["doc"], "Picks a venue.");
     assert_eq!(pick["twin"], "include/router.h:3-4");
 }
+
+/// The items of `path` named `name`, in source order.
+fn named(
+    idx: &(serde_json::Value, serde_json::Value),
+    path: &str,
+    name: &str,
+) -> Vec<serde_json::Value> {
+    let found: Vec<_> = items_of(idx, path)
+        .into_iter()
+        .filter(|i| i["name"] == name)
+        .collect();
+    assert!(!found.is_empty(), "no {name} in {path}");
+    found
+}
+
+#[test]
+fn a_definition_in_a_different_stem_file_pairs_when_its_key_is_unique() {
+    let idx = compile_with_items(&[
+        (
+            "src/box.hpp",
+            "class Box {\npublic:\n  /// Apart.\n  int apart(int n) const;\n};\n",
+        ),
+        (
+            "src/box_impl.cpp",
+            "int Box::apart(int n) const { return n; }\n",
+        ),
+    ]);
+    let h = &named(&idx, "src/box.hpp", "apart")[0];
+    assert_eq!(h["twin"], "src/box_impl.cpp:1-1");
+    let c = &named(&idx, "src/box_impl.cpp", "apart")[0];
+    assert_eq!(c["twin"], "src/box.hpp:3-4");
+    assert_eq!(c["doc"], "Apart.");
+}
+
+#[test]
+fn a_public_header_pairs_with_definitions_under_src() {
+    let idx = compile_with_items(&[
+        (
+            "include/lib/api.h",
+            "void api_open(int fd);\nvoid api_reset(int fd);\nclass Book {\npublic:\n  const Level* find(int px) const;\n  Level* find(int px);\n};\n",
+        ),
+        ("src/internal.h", "void api_reset(int fd);\n"),
+        (
+            "src/open.cc",
+            "void api_open(int fd) {}\nvoid api_reset(int fd) {}\n",
+        ),
+        (
+            "src/book_find.cc",
+            "const Level* Book::find(int px) const { return nullptr; }\nLevel* Book::find(int px) { return nullptr; }\n",
+        ),
+    ]);
+    assert_eq!(
+        named(&idx, "include/lib/api.h", "api_open")[0]["twin"],
+        "src/open.cc:1-1"
+    );
+    // A key declared in two headers stays unpaired (Review Focus 2).
+    for path in ["include/lib/api.h", "src/internal.h", "src/open.cc"] {
+        for it in named(&idx, path, "api_reset") {
+            assert!(it.get("twin").is_none(), "{path}: {it}");
+        }
+    }
+    // Same-arity overloads stay unpaired across files (Review Focus 1).
+    for path in ["include/lib/api.h", "src/book_find.cc"] {
+        let finds = named(&idx, path, "find");
+        assert_eq!(finds.len(), 2, "{path}");
+        for it in finds {
+            assert!(it.get("twin").is_none(), "{path}: {it}");
+        }
+    }
+}
+
+#[test]
+fn two_definitions_of_one_key_never_pair() {
+    let idx = compile_with_items(&[
+        (
+            "src/thread.h",
+            "void spawn(int n);\nvoid join(int n);\nvoid wait(int n);\n",
+        ),
+        (
+            "src/posix/thread_posix.cc",
+            "void spawn(int n) {}\nvoid join(int n) {}\n",
+        ),
+        ("src/win/thread_win.cc", "void spawn(int n) {}\n"),
+        (
+            "src/wait.cc",
+            "#ifdef _WIN32\nvoid wait(int n) {}\n#else\nvoid wait(int n) {}\n#endif\n",
+        ),
+    ]);
+    assert_eq!(
+        named(&idx, "src/thread.h", "join")[0]["twin"],
+        "src/posix/thread_posix.cc:2-2"
+    );
+    for (path, name) in [
+        ("src/thread.h", "spawn"),
+        ("src/thread.h", "wait"),
+        ("src/posix/thread_posix.cc", "spawn"),
+        ("src/win/thread_win.cc", "spawn"),
+        ("src/wait.cc", "wait"),
+    ] {
+        for it in named(&idx, path, name) {
+            assert!(it.get("twin").is_none(), "{path} {name}: {it}");
+        }
+    }
+    assert_eq!(named(&idx, "src/wait.cc", "wait").len(), 2);
+}

@@ -533,14 +533,15 @@ fn header_and_impl<'a>(
     }
 }
 
-/// Pairs a header's declarations with the definitions in the one `.cpp` that
-/// implements it: the doc usually sits on the declaration, so the definition
-/// inherits it, and each side's `twin` names the other's lines. Only a
-/// group with exactly one implementation file and a unique lowest-rank header
-/// pairs (a same-stem group that is not one pairs within each directory),
-/// and only keys unique on both sides: a wrong pairing is worse than none,
-/// so overloads with the same parameter count and ambiguous groups stay
-/// untouched.
+/// Pairs a header's declarations with their definitions: the doc usually
+/// sits on the declaration, so the definition inherits it, and each side's
+/// `twin` names the other's lines. Two steps. Same stem first: a group with
+/// exactly one implementation file and a unique lowest-rank header pairs (a
+/// same-stem group that is not one pairs within each directory), on keys
+/// unique within that file pair. Then the whole project (`pair_project`):
+/// keys unique among all header items and among all implementation items.
+/// A wrong pairing is worse than none, so overloads with the same parameter
+/// count and keys with two declarations or two definitions stay unpaired.
 pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, e) in entities.iter() {
@@ -578,6 +579,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
             }
         }
     }
+    pair_project(entities, &mut pairs);
     for (hid, hi, cid, ci) in pairs {
         let span = |e: &Entity, i: usize| e.items[i].span(&e.source_path);
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
@@ -590,6 +592,49 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
         if c_item.doc.is_none() {
             c_item.doc = doc;
             c_item.doc_text = doc_text;
+        }
+    }
+}
+
+/// The project step of `pair_declarations`: appends every key
+/// `(owner, name, arity)` that occurs exactly once among the `Fn`/`Method`
+/// items of all C++ headers and exactly once among those of all
+/// implementation files. Uniqueness counts every item, paired or not, so an
+/// item the same-stem step paired blocks any other partner. There is no
+/// "already paired" set: a key unique project-wide is unique inside its file
+/// pair too, so this step can only re-find a same-stem pair, and applying a
+/// pair twice leaves `twin` and `doc` as after once (the definition's `doc`
+/// is filled only while empty).
+fn pair_project(
+    entities: &BTreeMap<String, Entity>,
+    pairs: &mut Vec<(String, usize, String, usize)>,
+) {
+    let unique = |header: bool| {
+        let mut seen: BTreeMap<Key<'_>, Option<(&str, usize)>> = BTreeMap::new();
+        for (id, e) in entities {
+            let sp = e.source_path.as_str();
+            if !is_cpp(&ext_of(sp)) || (source_rank(sp) < 2) != header {
+                continue;
+            }
+            for (i, it) in e.items.iter().enumerate() {
+                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+                    let key = (
+                        it.owner.as_deref(),
+                        it.name.as_str(),
+                        arity(&it.signature, &it.name),
+                    );
+                    seen.entry(key)
+                        .and_modify(|v| *v = None)
+                        .or_insert(Some((id.as_str(), i)));
+                }
+            }
+        }
+        seen
+    };
+    let impls = unique(false);
+    for (key, h) in unique(true) {
+        if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
+            pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
         }
     }
 }
