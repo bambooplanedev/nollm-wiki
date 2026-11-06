@@ -911,6 +911,107 @@ fn ambiguous_path_suffix_lists_candidates() {
     assert!(err.contains(&a) && err.contains(&b), "{err:?}");
 }
 
+#[test]
+fn resolve_names_a_skipped_or_hidden_folder() {
+    let (_d, raw, out) = common::compiled(&[
+        ("src/a.rs", "pub fn a() {}\n"),
+        ("docs/superpowers/plans/p.md", "# P\n\n## Step 1\n"),
+        ("third_party/x/lib.cpp", "int f();\n"),
+    ]);
+    let w = Wiki::load(&out).unwrap();
+    let r = |a: &str| w.resolve(a).unwrap_err();
+    assert_eq!(
+        r("docs/superpowers/plans/p.md"),
+        "\"docs/superpowers/plans/p.md\" is under a skipped `superpowers` folder, which the wiki does not compile; read it with your file tool, or pass \"docs/superpowers/plans/p.md\" in search's `docs` for its headings' line ranges"
+    );
+    assert_eq!(
+        r("./third_party/x/lib.cpp"),
+        "\"./third_party/x/lib.cpp\" is under a skipped `third_party` folder, which the wiki does not compile; read it with your file tool"
+    );
+    let e = r(".superpowers/specs/s.MD");
+    assert!(
+        e.contains("under a hidden `.superpowers` folder") && e.contains("in search's"),
+        "{e}"
+    );
+    let e = r(".github/vendor/x.js");
+    assert!(e.contains("hidden `.github` "), "{e}");
+    for a in [
+        "src/missing/a.rs",
+        "../superpowers/p.md",
+        "/abs/docs/superpowers/p.md",
+        ".env",
+        "Superpowers Plan",
+    ] {
+        assert!(r(a).starts_with("unknown page"), "{a}: {}", r(a));
+    }
+    assert!(
+        r("src/missing/a.rs").contains("closest: a"),
+        "{}",
+        r("src/missing/a.rs")
+    );
+    // The `docs` advice works: it reads the file from disk, not the index.
+    let docs = wiki::labels::doc_search(&raw, &["docs/superpowers/plans/p.md".into()], "", None);
+    assert!(docs
+        .0
+        .iter()
+        .any(|h| h.path == "docs/superpowers/plans/p.md"));
+}
+
+#[test]
+fn resolve_keeps_unknown_page_when_the_folder_was_compiled() {
+    let tmp = tempdir().unwrap();
+    // (a) The compile input is itself a skipped folder: root == "superpowers".
+    let input = tmp.path().join("docs/superpowers");
+    common::write(&input, "plans/p.md", "# P\n\n## Step 1\n");
+    let out = tmp.path().join("out-a");
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let e = Wiki::load(&out)
+        .unwrap()
+        .resolve("superpowers/plans/p.md")
+        .unwrap_err();
+    assert!(
+        e.starts_with("unknown page") && e.contains("closest: p"),
+        "{e}"
+    );
+    // (b) `--no-ignore` compiled `vendor/`.
+    let input = tmp.path().join("raw");
+    common::write(&input, "vendor/y.js", "function y() {}\n");
+    common::write(&input, "src/a.rs", "pub fn a() {}\n");
+    let out = tmp.path().join("out-b");
+    let opts = CompileOptions {
+        respect_ignore: false,
+        ..Default::default()
+    };
+    compile(&input, &out, &opts).unwrap();
+    let e = Wiki::load(&out)
+        .unwrap()
+        .resolve("vendor/typo.js")
+        .unwrap_err();
+    assert!(e.starts_with("unknown page"), "{e}");
+    // (c) The critique's repro: a path typed from above an input named `wiki`.
+    let input = tmp.path().join("wiki");
+    common::write(&input, "src/query.rs", "pub fn q() {}\n");
+    common::write(&input, "vendor/v.rs", "pub fn v() {}\n");
+    let out = tmp.path().join("out-c");
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let e = Wiki::load(&out)
+        .unwrap()
+        .resolve("wiki/src/query.rs")
+        .unwrap_err();
+    assert!(e.contains("closest: query"), "{e}");
+    // (d) A hidden folder an ignore file whitelists is compiled.
+    let input = tmp.path().join("gh");
+    common::write(&input, ".ignore", "!.github/\n");
+    common::write(&input, ".github/w/x.rs", "pub fn x() {}\n");
+    let out = tmp.path().join("out-d");
+    compile(&input, &out, &CompileOptions::default()).unwrap();
+    let e = Wiki::load(&out)
+        .unwrap()
+        .resolve(".github/w/typo.rs")
+        .unwrap_err();
+    assert!(e.starts_with("unknown page"), "{e}");
+}
+
 fn readme_fixture() -> (tempfile::TempDir, Wiki) {
     code_fixture(&[
         ("README.md", "# Root zebra\n\nzebra root.\n"),

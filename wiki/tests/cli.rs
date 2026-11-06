@@ -427,6 +427,23 @@ fn cli_page_prints_the_same_text_as_page_text() {
 }
 
 #[test]
+fn page_names_a_skipped_folder() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    let output = dir.path().join("out");
+    fs::create_dir_all(input.join("src")).unwrap();
+    fs::write(input.join("src/lib.rs"), "pub fn add() {}\n").unwrap();
+    wiki::compile(&input, &output, &wiki::CompileOptions::default()).unwrap();
+    Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["page", "docs/superpowers/plans/x.md", "--dir"])
+        .arg(&output)
+        .assert()
+        .failure()
+        .stderr(contains("pass \"docs/superpowers/plans/x.md\" in search's"));
+}
+
+#[test]
 fn compile_memory_flag_repeats_and_local_is_an_error() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");

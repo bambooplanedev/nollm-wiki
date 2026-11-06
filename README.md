@@ -560,8 +560,9 @@ and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
-directory. If nothing matches, the error lists the closest ids. `neighbors` and `callers` resolve
-`<ID>` the same way.
+directory. If nothing matches, the error lists the closest ids. A path under a folder the compile
+skips or a hidden folder gets a note that the folder is not compiled instead, with the `docs` search
+to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 
 ```
 $ wiki page calls.rs --dir .wiki

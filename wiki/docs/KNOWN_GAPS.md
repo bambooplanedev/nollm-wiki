@@ -237,6 +237,12 @@ per question is noise-level: treat single results as anecdotes.
   title is the slug) and unfenced code pages do not carry over; see the
   README, Obsidian and Quartz. Inferred from the page format, not tested in
   Obsidian.
+- **The not-compiled note covers relative paths under pruned folders only.**
+  An absolute path, a gitignored path or a hidden file (`.env`) keeps the
+  closest-ids text.
+- **The not-compiled note is conservative about the project's own name.** When
+  the compile input's folder name appears in the typed path at or after the
+  pruned folder, the error keeps the closest-ids text.
 
 ## `serve --source`
 
