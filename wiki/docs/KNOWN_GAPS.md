@@ -175,10 +175,10 @@ per question is noise-level: treat single results as anecdotes.
   specifiers under `#if`.
 - **C++ declaration ↔ definition pairing** crosses files and directories
   when the key `(owner, name, arity)` is unique among all header items and
-  among all implementation items. In that project-wide step a header item
-  with a body never pairs, and neither does a `static`, anonymous-namespace,
-  class-body definition in a `.cpp`. Two definitions of one
-  key never pair. Uniqueness can still
+  among all implementation items. In both steps (same-stem and
+  project-wide) a header item with a body never pairs, and neither does a
+  `static`, anonymous-namespace or class-body definition in a `.cpp`. Two
+  definitions of one key never pair. Uniqueness can still
   mislead: namespaces are not compared (a unique-key free function in
   another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file
@@ -188,10 +188,13 @@ per question is noise-level: treat single results as anecdotes.
   are not compared either. Adding a file that defines a same-key function
   unpairs a distant pair, by design. Templates: `Ring<T>::size` out of line
   reaches its definition in walks, but the outline and `callers` asked on
-  the header are imprecise; not fixed. A template member defined out of
-  line keeps the owner `Ring<T>`, so the outline lists it in its own group
-  and a definition in the header gets a second call edge next to its
-  declaration. A leading macro can put the return type into the owner
+  the header are imprecise; not fixed. A fix was measured and dropped:
+  stripping `<T>` from the owner touched 27 items, rewrote `## Exports` on
+  9 pages and broke `callers` asked with `Ring<T>::size`, while the corpora
+  have no out-of-line template member in an implementation file. A
+  template member defined out of line keeps the owner `Ring<T>`, so the
+  outline lists it in its own group and a definition in the header gets a
+  second call edge next to its declaration. A leading macro can put the return type into the owner
   (`handle api<Derived>`), and a free function with a template-id return
   type can get that type as owner (`UniquePtr<TEST_INT>`).
 - **Shell (`.sh`, `.bash`) lists only function definitions.** A function
@@ -234,7 +237,8 @@ per question is noise-level: treat single results as anecdotes.
 
 - `page` with `full` and no `max_tokens` has no ceiling: a large docs page
   comes back whole (20K chars seen), which a small agent then truncates.
-- Headings: Setext headings (a line underlined with === or ---) and headings indented one to three spaces are not read.
+- Headings: Setext headings (a line underlined with === or ---) and
+  headings indented one to three spaces are not read.
 
 ## Notes and ids
 
