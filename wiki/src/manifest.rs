@@ -1,6 +1,6 @@
 //! Manifest and index rendering: the page index (JSON and markdown), the llms-txt and AGENTS files, the graph export, and the per-page token estimate.
 
-use crate::model::{CodeItem, Edges, Entity, Graph, Origin};
+use crate::model::{clip, CodeItem, Edges, Entity, Graph, Origin, LINE_CHARS};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -177,9 +177,13 @@ pub fn render_index_md(m: &Manifest) -> String {
 
 /// `: <summary>` when the entry has one, nothing when it does not — so a
 /// page without a summary never ends its index line in a dangling colon.
+/// The summary is cut to one line of `LINE_CHARS` characters; a blank
+/// summary counts as none.
 fn summary_suffix(e: &ManifestEntry) -> String {
     e.summary
         .as_deref()
+        .map(|s| clip(s, LINE_CHARS))
+        .filter(|s| !s.is_empty())
         .map(|s| format!(": {s}"))
         .unwrap_or_default()
 }
@@ -309,6 +313,62 @@ mod tests {
         assert!(llms.contains("- [Beta](beta.md)\n"), "{llms}");
         assert!(md.contains("(in 1, out 0)\n"), "{md}");
         assert!(!llms.contains(": \n") && !md.contains(": \n"));
+    }
+
+    #[test]
+    fn index_lines_carry_one_clipped_summary_line() {
+        let uk = "Слово ".repeat(40); // 240 chars, Cyrillic
+        let uk_cut = format!("{}…", uk.trim().chars().take(159).collect::<String>());
+        let wrapped = "first line\nsecond   line\n\nthird";
+        let exact = "x".repeat(LINE_CHARS); // exactly 160 chars
+        let ents: BTreeMap<String, Entity> = vec![
+            ent("uk", "Uk", "nothing", Some(&uk)),
+            ent("nl", "Nl", "nothing", Some(wrapped)),
+            ent("ws", "Ws", "nothing", Some("  \n ")),
+            ent("ex", "Ex", "nothing", Some(&exact)),
+        ]
+        .into_iter()
+        .map(|e| (e.id.clone(), e))
+        .collect();
+        let g = build_graph(&ents);
+        let m = build_manifest("proj", "", &ents, &g);
+        let llms = render_llms_txt(&m);
+        let md = render_index_md(&m);
+
+        assert_eq!(uk_cut.chars().count(), 160);
+        assert!(uk_cut.ends_with('…'));
+        assert!(
+            llms.contains(&format!("- [Uk](uk.md): {uk_cut}\n")),
+            "{llms}"
+        );
+        assert!(md.contains(&format!("(in 0, out 0): {uk_cut}\n")), "{md}");
+
+        assert!(
+            llms.contains("- [Nl](nl.md): first line second line third\n"),
+            "{llms}"
+        );
+        assert!(
+            md.contains("(in 0, out 0): first line second line third\n"),
+            "{md}"
+        );
+
+        assert!(llms.contains("- [Ws](ws.md)\n"), "{llms}");
+        assert!(
+            md.lines()
+                .any(|l| l.contains("[Ws](ws.md)") && l.ends_with("(in 0, out 0)")),
+            "{md}"
+        );
+        for out in [&llms, &md] {
+            assert!(!out.contains(": \n"), "{out}");
+            assert!(
+                !out.lines().any(|l| l.starts_with(char::is_whitespace)),
+                "{out}"
+            );
+        }
+
+        let ex_line = format!("- [Ex](ex.md): {exact}\n");
+        assert!(llms.contains(&ex_line), "{llms}");
+        assert!(!ex_line.contains('…'));
     }
 
     #[test]
