@@ -705,7 +705,7 @@ A code page's body is its source; its symbols and line ranges are in `items.json
 | `index.json` | the catalog: entries, links, centrality | agents and tools |
 | `items.json` | each code page's items with their line ranges and calls | agents and tools |
 | `index.md` | the index page | people |
-| `llms.txt` | a compact index with one-line summaries | models |
+| `llms.txt` | a compact index with one-line summaries, each cut to 160 characters | models |
 | `AGENTS.md` | how an agent should use this wiki | agents |
 | `graph.json` | node/edge graph, only with `--emit-json` | graph tools |
 | `.wiki/cache.json` | the incremental render cache | the compiler |
@@ -727,7 +727,7 @@ A code page's body is its source; its symbols and line ranges are in `items.json
   `call_lines` (for each, the lines that call it). A shell file's calls outside any function hang
   off a `top_level` item.
 - **`llms.txt`** — pages at or above the median PageRank under `## Docs`, the rest under
-  `## Optional`.
+  `## Optional`. Each line carries the page summary cut to 160 characters.
 - **`AGENTS.md`** — where to start, how to fetch a neighborhood or a module's symbol map, and that
   each page's `## Notes` section is preserved across recompiles.
 

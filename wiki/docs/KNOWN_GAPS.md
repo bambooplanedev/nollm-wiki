@@ -105,6 +105,7 @@ per question is noise-level: treat single results as anecdotes.
   the available score, above the code questions' lowest (0.59), and no
   measured statistic told them apart. Long task prompts lose lines too: 12
   of 35 that showed the page their task names went silent.
+- **Summaries keep control characters.** Summaries in search, hint, `llms.txt` and `index.md` lines keep control characters such as ANSI escapes; only whitespace is collapsed.
 
 ## Call chains (`neighbors` with `symbol`, `callers`)
 
