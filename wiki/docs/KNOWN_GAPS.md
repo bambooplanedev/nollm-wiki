@@ -26,7 +26,7 @@ per question is noise-level: treat single results as anecdotes.
 - **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
   questions that ask for a call path. `symbol` is named only in the skill,
   the server instructions and the tool description; see the previous point.
-  Off by default since the release after 0.6.6 (`--tools` brings it back).
+  Off by default since 0.6.7 (`--tools` brings it back).
 - **The hook trades tools for hints.** With the prompt hook the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search. Measured 2026-10-28 with
