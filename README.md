@@ -378,7 +378,7 @@ each exposed tool costs schema tokens on every request. `neighbors` is opt-in to
 never called it (16 of 11,056 calls in the measurement rig, 0 of 37 on the bench) and its schema
 took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors,callers` brings it
 back. After upgrading, rerun `wiki setup` so that a committed AGENTS.md block or skill stops naming
-it.
+it; `wiki setup` leaves a copy you edited by hand alone, so delete its `neighbors` sentence yourself.
 
 **Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
 `wiki://llms.txt`.
