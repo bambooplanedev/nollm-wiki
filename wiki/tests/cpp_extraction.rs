@@ -383,8 +383,12 @@ fn a_header_function_with_a_body_never_pairs_as_the_declaration() {
             "src/main_combined.cpp",
             "void signal_handler(int sig) { (void)sig; }\nint Buffer::size() const { return 1; }\n",
         ),
+        // Pinning: uniqueness counts every item, whatever its role, so the
+        // in-class `Buffer::size` body above blocks this declaration.
+        ("src/buffer_decl.h", "struct Buffer {\n  int size() const;\n};\n"),
     ]);
     no_twins(&idx, "src/utils/system_utils.h");
+    no_twins(&idx, "src/buffer_decl.h");
     no_twins(&idx, "src/main_combined.cpp");
     let main = &named(&idx, "src/main_combined.cpp", "signal_handler")[0];
     assert!(main.get("doc").is_none(), "{main}");
