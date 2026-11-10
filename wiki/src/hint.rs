@@ -172,6 +172,7 @@ mod tests {
             signature: String::new(),
             doc: None,
             test,
+            also: None,
         }
     }
 

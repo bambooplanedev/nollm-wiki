@@ -407,6 +407,9 @@ pub struct SymbolLine {
     /// `None` also when an earlier line of the same page shows the same doc.
     pub doc: Option<String>,
     pub test: bool,
+    /// The one other definition of a function's name elsewhere in the
+    /// project, as `(path, start_line, end_line, name)`; see `same_name`.
+    pub also: Option<(String, usize, usize, String)>,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,
@@ -524,6 +527,9 @@ pub struct Wiki {
     symbol_fields: BTreeMap<String, SymbolFields>,
     /// Each function's callers by its `path:start-end` (`callers_index`).
     callers: BTreeMap<String, Vec<Caller>>,
+    /// Non-test function/method definitions by unqualified name, as
+    /// (page id, item index); built on first use by `same_name`.
+    by_name: std::sync::OnceLock<HashMap<String, Vec<(String, usize)>>>,
 }
 
 impl Wiki {
@@ -572,6 +578,7 @@ impl Wiki {
             items,
             symbol_fields,
             callers,
+            by_name: std::sync::OnceLock::new(),
         })
     }
 
@@ -1689,9 +1696,44 @@ impl Wiki {
                     signature: i.signature.clone(),
                     doc: i.doc.clone().filter(|d| docs.insert(d.clone())),
                     test: i.test,
+                    also: self.same_name(i, &hit.path),
                 })
                 .collect();
         }
+    }
+
+    /// The other definition of a function's name, when there is exactly one:
+    /// not test code, not in the same file, not a header declaration paired
+    /// with a definition, not the item's own other half. A name with more
+    /// copies (`new`, `main`) gets none, since a list would be noise.
+    fn same_name(&self, item: &CodeItem, path: &str) -> Option<(String, usize, usize, String)> {
+        if item.test || !matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+            return None;
+        }
+        let index = self.by_name.get_or_init(|| {
+            let mut m: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+            for (id, items) in &self.items {
+                for (k, i) in items.iter().enumerate() {
+                    if matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.test {
+                        m.entry(i.name.clone()).or_default().push((id.clone(), k));
+                    }
+                }
+            }
+            m
+        });
+        let mut others = index.get(&item.name)?.iter().filter_map(|(id, k)| {
+            let e = self.entries.get(id)?;
+            let i = &self.items[id][*k];
+            let header = [".h", ".hpp", ".hh", ".hxx"]
+                .iter()
+                .any(|x| e.path.ends_with(x));
+            let span = format!("{}:{}-{}", e.path, i.start_line, i.end_line);
+            let own_half = item.twin.as_deref() == Some(span.as_str());
+            (e.path != path && !(header && i.twin.is_some()) && !own_half)
+                .then(|| (e.path.clone(), i.start_line, i.end_line, i.qualified_name()))
+        });
+        let one = others.next()?;
+        others.next().is_none().then_some(one)
     }
 
     /// Ids within `depth` hops of `id` along either edge direction,

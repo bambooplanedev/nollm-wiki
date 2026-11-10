@@ -835,6 +835,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
             signature: "fn f(\n)".into(),
             doc: Some("do\tc\nline".into()),
             test: false,
+            also: None,
         }],
     };
     let out = wiki::serve::search_lines(&[hit]);
@@ -2328,4 +2329,40 @@ fn outline_header_and_neighbors_cap_and_clean_the_summary() {
 
     let lines = wiki::serve::search_lines(&w.search("zebrafish", None, 10));
     assert!(clean(&lines), "{lines}");
+}
+
+fn twin_note(files: &[(&str, &str)]) -> String {
+    let (_d, w) = code_fixture(files);
+    wiki::serve::search_lines(&w.search("slice_cap_for", None, 1))
+}
+
+#[test]
+fn search_notes_the_one_other_definition_of_a_name() {
+    let out = twin_note(&[
+        ("src/a.rs", "pub fn slice_cap_for() {}\n"),
+        ("src/b.rs", "pub fn slice_cap_for() {}\n"),
+    ]);
+    assert!(
+        out.contains("    also defined: src/b.rs:1-1  slice_cap_for\n"),
+        "{out}"
+    );
+}
+
+#[test]
+fn search_stays_silent_when_a_name_has_many_copies() {
+    let out = twin_note(&[
+        ("src/a.rs", "pub fn slice_cap_for() {}\n"),
+        ("src/b.rs", "pub fn slice_cap_for() {}\n"),
+        ("src/c.rs", "pub fn slice_cap_for() {}\n"),
+    ]);
+    assert!(!out.contains("also defined"), "{out}");
+}
+
+#[test]
+fn search_does_not_note_a_test_copy() {
+    let out = twin_note(&[
+        ("src/a.rs", "pub fn slice_cap_for() {}\n"),
+        ("tests/b.rs", "fn slice_cap_for() {}\n"),
+    ]);
+    assert!(!out.contains("also defined"), "{out}");
 }
