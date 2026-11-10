@@ -494,3 +494,28 @@ fn an_out_of_line_default_pairs_with_its_declaration() {
     );
     assert!(copy.get("twin").is_none(), "{copy}");
 }
+
+#[test]
+fn braces_split_across_ifdef_branches_keep_the_function_and_its_range() {
+    let idx = compile_with_items(&[(
+        "src/a.c",
+        "void a(int x){\n#ifdef A\n  if( x ){\n#else\n  if( !x ){\n#endif\n    x++;\n  }\n}\nvoid b(void){}\n",
+    )]);
+    let ranges: Vec<_> = items_of(&idx, "src/a.c")
+        .iter()
+        .map(|i| {
+            (
+                i["name"].clone(),
+                i["start_line"].clone(),
+                i["end_line"].clone(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        ranges,
+        vec![
+            ("a".into(), 1.into(), 9.into()),
+            ("b".into(), 10.into(), 10.into())
+        ]
+    );
+}

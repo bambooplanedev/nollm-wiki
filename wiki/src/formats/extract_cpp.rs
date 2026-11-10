@@ -6,7 +6,7 @@ use super::code::{
 };
 use crate::model::{CodeItem, CodeItemKind, Entity, PairRole};
 use std::collections::BTreeMap;
-use tree_sitter::Node;
+use tree_sitter::{Node, Parser, Tree};
 
 /// Every capture shape a definition's name can take. The general `(_)` form
 /// must NOT be used where a qualified-name pattern can also match:
@@ -682,6 +682,72 @@ fn pair_project(
             }
         }
     }
+}
+
+/// For a tree with errors: the tree of `first_branch(text)` when it is less
+/// damaged. Braces split across `#if`/`#else` branches otherwise make a
+/// definition run to the end of the file or vanish. The copy has the same
+/// bytes and newlines, so its nodes index `text` itself.
+pub(crate) fn reparse(parser: &mut Parser, text: &str, tree: &Tree) -> Option<Tree> {
+    if !tree.root_node().has_error() {
+        return None;
+    }
+    parser
+        .parse(first_branch(text), None)
+        .filter(|t| damage(t.root_node()) < damage(tree.root_node()))
+}
+
+/// Lines under the outermost ERROR nodes plus one per MISSING node.
+fn damage(n: Node) -> usize {
+    if n.is_error() {
+        return n.end_position().row - n.start_position().row + 1;
+    }
+    usize::from(n.is_missing()) + n.children(&mut n.walk()).map(damage).sum::<usize>()
+}
+
+/// `text` as the preprocessor's first branch, like ctags: conditional
+/// directive lines (with their `\` continuations) and every `#elif`/`#else`
+/// branch become spaces, newlines kept.
+fn first_branch(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    // Per open conditional: is the branch now being read past the first?
+    let mut skip: Vec<bool> = Vec::new();
+    let mut continued = false;
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let word = body.trim_start().strip_prefix('#').map(|r| {
+            r.trim_start()
+                .split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or("")
+        });
+        let directive = continued
+            || match word {
+                Some("if" | "ifdef" | "ifndef") => {
+                    skip.push(false);
+                    true
+                }
+                Some("elif" | "elifdef" | "elifndef" | "else") => {
+                    if let Some(top) = skip.last_mut() {
+                        *top = true;
+                    }
+                    true
+                }
+                Some("endif") => {
+                    skip.pop();
+                    true
+                }
+                _ => false,
+            };
+        if directive || skip.contains(&true) {
+            continued = directive && body.ends_with('\\');
+            out.extend(std::iter::repeat_n(' ', body.len()));
+            out.push_str(&line[body.len()..]);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

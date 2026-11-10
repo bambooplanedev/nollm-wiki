@@ -865,16 +865,22 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // language of its symbols while the compile exits 0 — `QUERIES` panics on
     // a bad query, and `validate_queries` forces that before any output.
     let query = QUERIES.get(&spec.language)?;
+    // A C/C++ tree of the first preprocessor branch: its items come first,
+    // the original tree adds what it lacks (`#else` definitions).
+    let mut first_branch = None;
     let tree = if let Some(tree) = pre_parsed {
         tree
     } else {
         let mut parser = Parser::new();
         parser.set_language(&spec.language).ok()?;
         let tree = parser.parse(text, None)?;
-        if spec.lang_name == "shell" {
-            super::extract_shell::reparse(&mut parser, text, tree)
-        } else {
-            tree
+        match spec.lang_name {
+            "shell" => super::extract_shell::reparse(&mut parser, text, tree),
+            "cpp" => {
+                first_branch = super::extract_cpp::reparse(&mut parser, text, &tree);
+                tree
+            }
+            _ => tree,
         }
     };
     let idx = CaptureIdx {
@@ -904,57 +910,60 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // and an @item pattern, and a JS @def (the `export_statement`) and its
     // @item (the declaration) share one name node.
     let mut items: BTreeMap<usize, CodeItem> = BTreeMap::new();
-    let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(query, tree.root_node(), text.as_bytes());
-    while let Some(m) = matches.next() {
-        let parts = split_captures(m, &idx, text, &mut imports);
-        let Some(def) = parts.def.or(parts.item) else {
-            continue;
-        };
-        let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-            continue;
-        };
-        let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
-        let shape = (spec.shape)(def);
-        let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
-        let public = if parts.def.is_some() {
-            let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
-            if keep {
-                // Resolved once, after `placement` has accepted the item, and
-                // then used for both the signature and the classification, so
-                // the node's kind is derived once.
-                let sig = build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
-                if !sig.is_empty() {
-                    let kind = classify(parts.name, owner.as_deref(), shape.rank);
-                    let group = group_key(owner.as_deref(), name_text, def, text, &spec);
-                    let trait_impl = owner
-                        .as_deref()
-                        .is_some_and(super::extract_rust::is_trait_impl);
-                    if kind == ItemKind::Member && is_function(def) && !trait_impl {
-                        if let Some(n) = name_text {
-                            methods.push(n.to_string());
+    for t in first_branch.iter().chain([&tree]) {
+        let mut cursor = QueryCursor::new();
+        let mut matches = cursor.matches(query, t.root_node(), text.as_bytes());
+        while let Some(m) = matches.next() {
+            let parts = split_captures(m, &idx, text, &mut imports);
+            let Some(def) = parts.def.or(parts.item) else {
+                continue;
+            };
+            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
+                continue;
+            };
+            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+            let shape = (spec.shape)(def);
+            let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
+            let public = if parts.def.is_some() {
+                let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
+                if keep {
+                    // Resolved once, after `placement` has accepted the item, and
+                    // then used for both the signature and the classification, so
+                    // the node's kind is derived once.
+                    let sig =
+                        build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
+                    if !sig.is_empty() {
+                        let kind = classify(parts.name, owner.as_deref(), shape.rank);
+                        let group = group_key(owner.as_deref(), name_text, def, text, &spec);
+                        let trait_impl = owner
+                            .as_deref()
+                            .is_some_and(super::extract_rust::is_trait_impl);
+                        if kind == ItemKind::Member && is_function(def) && !trait_impl {
+                            if let Some(n) = name_text {
+                                methods.push(n.to_string());
+                            }
                         }
+                        collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                     }
-                    collected.push((group, kind, name_text.unwrap_or("").to_string(), sig));
                 }
-            }
-            keep
-        } else {
-            !spec.query_gates_visibility
-                && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
-        };
-        merge_item(
-            &mut items,
-            code_item(
-                def,
-                parts.name,
-                owner.as_deref(),
-                public,
-                text,
-                &spec,
-                &shape,
-            ),
-        );
+                keep
+            } else {
+                !spec.query_gates_visibility
+                    && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
+            };
+            merge_item(
+                &mut items,
+                code_item(
+                    def,
+                    parts.name,
+                    owner.as_deref(),
+                    public,
+                    text,
+                    &spec,
+                    &shape,
+                ),
+            );
+        }
     }
     let mut items: Vec<CodeItem> = items.into_values().collect();
     items.sort_by(|a, b| {
