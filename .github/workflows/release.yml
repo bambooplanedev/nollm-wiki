@@ -51,9 +51,19 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      # Download each artifact by name: a name that is not listed yet fails the
+      # step, whereas a pattern or merge-multiple download silently takes a short list.
       - uses: actions/download-artifact@v8
         with:
-          merge-multiple: true
+          name: wiki-x86_64-unknown-linux-gnu
+      - uses: actions/download-artifact@v8
+        with:
+          name: wiki-aarch64-apple-darwin
+      - uses: actions/download-artifact@v8
+        with:
+          name: wiki-x86_64-apple-darwin
+      - name: Check all three tarballs are present
+        run: '[ "$(ls wiki-*.tar.gz | wc -l)" -eq 3 ] || { echo "expected 3 tarballs"; ls; exit 1; }'
       - run: sha256sum wiki-*.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v3
         with:
