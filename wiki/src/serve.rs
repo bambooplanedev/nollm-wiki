@@ -648,7 +648,8 @@ pub fn memory_prefix(o: &Origin) -> String {
 
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
-/// symbol, or
+/// symbol (a function with exactly one other definition elsewhere adds
+/// `    also defined: path:start-end  name`), or
 /// the snippet (four-space indent) when the page has no symbols. A summary,
 /// snippet or doc is cut at `LINE_CHARS`, as a hint line is.
 /// A memory note renders as the hook's one line, `memory (origin): path — summary`
@@ -659,6 +660,11 @@ pub fn search_lines(hits: &[Hit]) -> String {
     }
     // Fields are one-line text; collapse any newline or tab they carry.
     let mut out = String::new();
+    let shown: std::collections::HashSet<_> = hits
+        .iter()
+        .flat_map(|h| &h.symbols)
+        .map(|s| (&s.path, s.start_line, s.end_line))
+        .collect();
     for h in hits {
         if h.memory {
             let said = h.summary.as_deref().filter(|s| !s.trim().is_empty());
@@ -703,6 +709,11 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 out.push_str(&format!("  — {}", clip(d, LINE_CHARS)));
             }
             out.push('\n');
+            if let Some((p, a, b, name)) = &s.also {
+                if !shown.contains(&(p, *a, *b)) {
+                    out.push_str(&format!("    also defined: {p}:{a}-{b}  {name}\n"));
+                }
+            }
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
             out.push_str(&format!("    {}\n", clip(sn, LINE_CHARS)));

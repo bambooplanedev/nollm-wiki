@@ -554,7 +554,10 @@ The default output is one line per page, `id  path  [date  ]title — summary`. 
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
 inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30%
 of the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
-one, and test code ranks at half score. A page without symbol lines gets its body snippet on a
+one, and test code ranks at half score. A function whose name has exactly one other
+non-test definition in another file gets a four-space-indented line under it,
+`    also defined: path:start-end  name` (not for header declarations paired with their definition,
+not when the name has more copies, not in `--format json`). A page without symbol lines gets its body snippet on a
 four-space-indented line instead. A summary, snippet or doc longer than 160 characters is cut with
 `…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
 symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
