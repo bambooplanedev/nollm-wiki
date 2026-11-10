@@ -113,7 +113,7 @@ mod tests {
     use super::*;
     use crate::graph::build_graph;
     use crate::model::{Entity, SourceKind};
-    use crate::rewrite::render_page;
+    use crate::rewrite::{path_index, render_page};
     use std::collections::BTreeMap;
 
     fn ent(id: &str, name: &str, body: &str) -> Entity {
@@ -129,8 +129,9 @@ mod tests {
     fn render_all(v: Vec<Entity>) -> BTreeMap<String, String> {
         let ents: BTreeMap<String, Entity> = v.into_iter().map(|e| (e.id.clone(), e)).collect();
         let g = build_graph(&ents);
+        let bp = path_index(&ents);
         ents.iter()
-            .map(|(id, e)| (id.clone(), render_page(e, &g.edges[id], &ents, "")))
+            .map(|(id, e)| (id.clone(), render_page(e, &g.edges[id], &ents, &bp, "")))
             .collect()
     }
 

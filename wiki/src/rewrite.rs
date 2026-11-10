@@ -373,10 +373,20 @@ pub(crate) fn obsidian_fixups(
     out
 }
 
+/// Source path to page id, first id in id order wins; built once per compile.
+pub fn path_index(entities: &BTreeMap<String, Entity>) -> BTreeMap<&str, &str> {
+    let mut m = BTreeMap::new();
+    for e in entities.values() {
+        m.entry(e.source_path.as_str()).or_insert(e.id.as_str());
+    }
+    m
+}
+
 pub fn render_page(
     entity: &Entity,
     edges: &Edges,
     entities: &BTreeMap<String, Entity>,
+    by_path: &BTreeMap<&str, &str>,
     preserved_notes: &str,
 ) -> String {
     let mut out = String::new();
@@ -466,12 +476,7 @@ pub fn render_page(
                 body,
                 &entity.source_path,
                 &|id| entities.contains_key(id),
-                &|p| {
-                    entities
-                        .values()
-                        .find(|e| e.source_path == p)
-                        .map(|e| e.id.clone())
-                },
+                &|p| by_path.get(p).map(ToString::to_string),
             )),
         }
         out.push_str("\n\n");
@@ -643,8 +648,20 @@ mod tests {
             ent("beta", "Beta", "nothing"),
         ]);
         let g = build_graph(&ents);
-        let a = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
-        let b = render_page(&ents["beta"], &g.edges["beta"], &ents, "");
+        let a = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
+        let b = render_page(
+            &ents["beta"],
+            &g.edges["beta"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(a.contains("## Related") && a.contains("[[beta|Beta]]"));
         assert!(b.contains("## Mentioned in") && b.contains("[[alpha|Alpha]]"));
         assert!(a.contains("generated"));
@@ -663,7 +680,13 @@ mod tests {
         consumer.imports = vec![".text".into()];
         let ents = map(vec![text, consumer, ent("notes", "Notes", "see `text.py`")]);
         let g = build_graph(&ents);
-        let page = render_page(&ents["text"], &g.edges["text"], &ents, "");
+        let page = render_page(
+            &ents["text"],
+            &g.edges["text"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(
             page.contains(
                 "## Imported by\n- [[consumer|Consumer]]\n\n## Mentioned in\n- [[notes|Notes]]\n"
@@ -679,7 +702,13 @@ mod tests {
         e.tags = vec!["a".into(), "b/c".into(), "two words".into()];
         let ents = map(vec![e]);
         let g = build_graph(&ents);
-        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
+        let page = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(
             page.starts_with(
                 "---\ncreated: 2026-01-01\naliases: [\"x\"]\n\
@@ -702,7 +731,13 @@ mod tests {
             f(&mut e);
             let ents = map(vec![e]);
             let g = build_graph(&ents);
-            render_page(&ents["alpha"], &g.edges["alpha"], &ents, "")
+            render_page(
+                &ents["alpha"],
+                &g.edges["alpha"],
+                &ents,
+                &path_index(&ents),
+                "",
+            )
         };
         assert!(tag(&|e| e.kind = SourceKind::Code {
             lang: "rust".into()
@@ -719,7 +754,13 @@ mod tests {
         };
         let ents = map(vec![e]);
         let g = build_graph(&ents);
-        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
+        let page = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(
             page.contains("## Body\n````rust\nfn a() {}\n```\nx\n```\n````\n\n## Notes"),
             "{page}"
@@ -768,7 +809,13 @@ mod tests {
     fn preserved_notes_survive() {
         let ents = map(vec![ent("alpha", "Alpha", "body")]);
         let g = build_graph(&ents);
-        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "MY HAND NOTES");
+        let page = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            &path_index(&ents),
+            "MY HAND NOTES",
+        );
         assert!(page.contains("MY HAND NOTES"));
         let sections = parse_sections(&page);
         assert_eq!(
@@ -795,6 +842,7 @@ mod tests {
             &ents["alpha"],
             &g.edges["alpha"],
             &ents,
+            &path_index(&ents),
             "mine\n## Todo\nmore",
         );
         let sections = parse_sections(&page);
@@ -915,7 +963,13 @@ mod tests {
         let mut e = ent("alpha", "Alpha", "x");
         let render = |e: &Entity| {
             let ents = map(vec![e.clone()]);
-            render_page(e, &build_graph(&ents).edges["alpha"], &ents, "")
+            render_page(
+                e,
+                &build_graph(&ents).edges["alpha"],
+                &ents,
+                &path_index(&ents),
+                "",
+            )
         };
         assert!(!render(&e).contains("updated:"));
         e.updated = "2026-10-23".into();
@@ -981,12 +1035,24 @@ mod tests {
         };
         let ents = map(vec![a, b, c]);
         let g = build_graph(&ents);
-        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
+        let page = render_page(
+            &ents["alpha"],
+            &g.edges["alpha"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(
             page.contains("## Body\n[[wiki_rig]] [t](wiki_rig.md) \\#5-x\n"),
             "{page}"
         );
-        let page = render_page(&ents["code"], &g.edges["code"], &ents, "");
+        let page = render_page(
+            &ents["code"],
+            &g.edges["code"],
+            &ents,
+            &path_index(&ents),
+            "",
+        );
         assert!(page.contains("// [[wiki-rig]]"), "{page}");
     }
 }

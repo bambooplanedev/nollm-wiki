@@ -353,6 +353,7 @@ fn compile_inner(
     let source_index = rewrite::page_source_index(output);
     let prior_ids = cache::prior_page_ids(output);
 
+    let by_path = rewrite::path_index(&entities);
     let rendered: Vec<(String, String, String, Option<PathBuf>)> = entities
         .par_iter()
         .map(|(id, e)| {
@@ -363,7 +364,7 @@ fn compile_inner(
                 .and_then(|c| rewrite::prior_page_for(c, &page_path));
             let notes = rewrite::read_notes_from(prior.as_deref().unwrap_or(&page_path));
             let fp = hash::to_hex(&rewrite::render_fingerprint(e, &edges, &entities, &notes));
-            let content = rewrite::render_page(e, &edges, &entities, &notes);
+            let content = rewrite::render_page(e, &edges, &entities, &by_path, &notes);
             (id.clone(), content, fp, prior)
         })
         .collect();
