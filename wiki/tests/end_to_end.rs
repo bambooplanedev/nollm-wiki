@@ -529,10 +529,12 @@ fn relative_markdown_links_become_edges() {
         "root is linked by guide, orphans: {:?}",
         r.lint.orphans
     );
-    // The body never says "root", so only the link can have made the edge.
+    // The link target is rewritten to the page file, so Obsidian resolves it;
+    // external and unindexed links stay as written.
     let page = fs::read_to_string(out.join("guide.md")).unwrap();
     let body = page.split("## Body").nth(1).unwrap();
-    assert!(!body.to_lowercase().contains("root"), "{body}");
+    assert!(body.contains("[top page](root.md#start)"), "{body}");
+    assert!(body.contains("(https://example.org/README.md)") && body.contains("(missing.md)"));
 }
 
 /// A one-word code page is linked by a code-shaped mention (a `use` path,
