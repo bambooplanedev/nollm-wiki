@@ -258,10 +258,12 @@ per question is noise-level: treat single results as anecdotes.
   reverse) reports false broken links.
 - **`large` measures the compiled page** against the default 4000-token
   `neighbors` budget, not the source file's size.
-- **A body's own `[[Title]]` links do not carry over to Obsidian.** They
-  resolve only when the title is the slug. Pages have YAML front matter and
-  code bodies are fenced; see the README, Obsidian and Quartz. Inferred from
-  the page format, not tested in Obsidian.
+- **Body links to non-pages stay unresolved in Obsidian.** A `[[x]]` whose
+  slug is a page, and a relative Markdown link to an indexed page, are
+  rewritten to the page id (`rewrite::obsidian_fixups`); other targets, such
+  as `LICENSE` or a note naming no page, are left as written. Only a `#`
+  that starts a tag with a digit is escaped; letter tags (`#include`) in
+  prose still become tags. See the README, Obsidian and Quartz.
 - **Old pages keep the old format until recompiled.** Pages compiled by
   0.6.7 or earlier have `## Metadata` bullets and an unfenced code body. Readers accept
   both; a compile by a different tool version re-renders every page.

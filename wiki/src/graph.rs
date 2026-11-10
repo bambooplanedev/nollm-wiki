@@ -77,7 +77,7 @@ fn phrase_targets(
 /// lexically against the linking file's directory. `None` for an external
 /// link (any scheme), a bare `#anchor`, or a target that climbs above the
 /// project root. `../README.md#x` from `scripts/README.md` is `README.md`.
-fn resolve_link(source_path: &str, target: &str) -> Option<String> {
+pub(crate) fn resolve_link(source_path: &str, target: &str) -> Option<String> {
     let target = target.split('#').next().unwrap_or("");
     if target.is_empty() || target.split('/').next().unwrap_or("").contains(':') {
         return None;

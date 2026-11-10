@@ -754,12 +754,12 @@ tagged with the language, so comments, `#include` and `<T>` render as code. To c
 kind, add groups in Graph view > Groups with the queries `tag:#wiki/code`, `tag:#wiki/doc` and
 `tag:#wiki/memory`. The compiler writes no `.obsidian/` configuration.
 
-What does not carry over to Obsidian (inferred from the page format, not tested in Obsidian):
-
-- **Links inside a note's body.** The body is copied as written. `[[Matching Engine]]` in a note
-  whose target compiled to `matching_engine.md` points to a note Obsidian cannot find, and a
-  relative Markdown link resolves only when the file names happen to match, since all pages sit
-  in one folder. Such a link also shows up as an unresolved node in the graph.
+A note's or doc's own links are rewritten so Obsidian finds their target (code bodies are fenced
+and left alone): `[[Matching Engine]]` becomes `[[matching_engine]]` when that page exists, and a
+relative Markdown link to an indexed page, such as `[readme](../../README.md)`, becomes
+`[readme](nollm_wiki.md)`. Links to anything else stay as written and show up as unresolved nodes
+(in this repository, `LICENSE`). A `#` that Obsidian would read as a tag, like `#76→`, is
+escaped as `\#`.
 
 ### Page ids
 

@@ -112,7 +112,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 5. **Render** (`rewrite::render_page`, in parallel) — for each entity,
    reads any existing page to preserve its `## Notes` section, computes a
    content fingerprint (`rewrite::render_fingerprint`), and renders the
-   page body. Cross-links are emitted as slug-target, Obsidian-flavored
+   page body. A text body's own links go through `rewrite::obsidian_fixups`
+   (also applied to `index.md` summaries; prose only, never code): `[[x]]`
+   whose `slugify(x)` is a page becomes `[[id]]`, a relative Markdown link to
+   an indexed page becomes `[text](id.md)`, and a `#` Obsidian would read as
+   a digit-led tag is escaped. Cross-links are emitted as slug-target, Obsidian-flavored
    wikilinks — `[[slug|Name]]` (e.g. `[[gradient_descent|Gradient
    Descent]]`) — so each link target is a real `<slug>.md` file rather than
    a display name that has to be re-slugified to resolve. A page opens with

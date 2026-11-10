@@ -161,15 +161,22 @@ pub fn render_items_json(entities: &BTreeMap<String, Entity>) -> String {
 pub fn render_index_md(m: &Manifest) -> String {
     let mut out = format!("# {} — Index\n\n", m.project);
     out.push_str(&format!("{} pages.\n\n", m.entries.len()));
+    let by_path: BTreeMap<&str, &str> = m
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.id.as_str()))
+        .collect();
+    let ids: BTreeSet<&str> = m.entries.iter().map(|e| e.id.as_str()).collect();
     for e in &m.entries {
+        let summary = crate::rewrite::obsidian_fixups(
+            &summary_suffix(e),
+            &e.path,
+            &|id| ids.contains(id),
+            &|p| by_path.get(p).map(ToString::to_string),
+        );
         out.push_str(&format!(
             "- [{}]({}) — `{}` (in {}, out {}){}\n",
-            e.title,
-            e.page,
-            e.kind,
-            e.degree_in,
-            e.degree_out,
-            summary_suffix(e)
+            e.title, e.page, e.kind, e.degree_in, e.degree_out, summary
         ));
     }
     out
@@ -504,5 +511,17 @@ mod tests {
             serde_json::from_str(&render_index_json(&build_manifest("p", "", &ents, &g))).unwrap();
         assert_eq!(v["entries"][0]["memory"], true);
         assert!(v["entries"][1].get("memory").is_none());
+    }
+
+    #[test]
+    fn index_md_summaries_get_the_obsidian_fixups() {
+        let (ents, g) = setup();
+        let mut m = build_manifest("proj", "", &ents, &g);
+        m.entries[0].summary = Some("see [[Beta]], [b](beta.txt) and #5-x".into());
+        let md = render_index_md(&m);
+        assert!(
+            md.contains(": see [[beta]], [b](beta.md) and \\#5-x\n"),
+            "{md}"
+        );
     }
 }

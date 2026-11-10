@@ -296,6 +296,83 @@ fn longest_backtick_run(s: &str) -> usize {
     s.split(|c| c != '`').map(str::len).max().unwrap_or(0)
 }
 
+/// Obsidian fix-ups of prose, never of fenced or inline code, so a reader that
+/// resolves links by file name sees what `wiki lint` sees:
+/// - `[[x]]` whose `slugify(x)` is a page becomes `[[id]]` (anchor and
+///   `|display` kept); unresolvable links stay as written;
+/// - a relative markdown link to an indexed page becomes `[text](id.md)`
+///   (`id_of_path`: project-relative source path -> page id);
+/// - `#` that Obsidian would read as a tag (a digit first, not all digits) is
+///   escaped as `\#`. The rule was fitted in the app: after whitespace or line
+///   start, the tag runs to whitespace, ASCII punctuation other than `-_/`, or
+///   U+2000-206F / U+2E00-2E7F (`#76→` is a tag, `#1–#9` is not); a trailing
+///   `/` is dropped.
+pub(crate) fn obsidian_fixups(
+    text: &str,
+    source_path: &str,
+    is_page: &dyn Fn(&str) -> bool,
+    id_of_path: &dyn Fn(&str) -> Option<String>,
+) -> String {
+    static WIKI: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"\[\[([^\[\]|#\n]+)(#[^\[\]|\n]*)?(\|[^\[\]\n]*)?\]\]").unwrap()
+    });
+    static MD: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\[[^\[\]\n]*\]\(([^)\s]+)\)").unwrap());
+    static TAG: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r##"#[0-9][^\s!"#$%&'()*+,.:;<=>?@\[\\\]^`{|}~\x{2000}-\x{206F}\x{2E00}-\x{2E7F}]*"##,
+        )
+        .unwrap()
+    });
+    let mask = mask_code(text);
+    // (start, end, replacement); the three kinds never overlap.
+    let mut subs: Vec<(usize, usize, String)> = Vec::new();
+    for c in WIKI.captures_iter(&mask) {
+        let t = text[c.get(1).unwrap().range()].trim();
+        let id = crate::model::slugify(t);
+        if t == id || !is_page(&id) || is_page(t) {
+            continue;
+        }
+        let tail = |i| c.get(i).map_or("", |g| &text[g.range()]);
+        let m = c.get(0).unwrap();
+        subs.push((
+            m.start(),
+            m.end(),
+            format!("[[{id}{}{}]]", tail(2), tail(3)),
+        ));
+    }
+    for c in MD.captures_iter(&mask) {
+        let g = c.get(1).unwrap();
+        let target = &text[g.range()];
+        let Some(id) = crate::graph::resolve_link(source_path, target).and_then(|p| id_of_path(&p))
+        else {
+            continue;
+        };
+        let anchor = target.find('#').map_or("", |i| &target[i..]);
+        subs.push((g.start(), g.end(), format!("{id}.md{anchor}")));
+    }
+    for m in TAG.find_iter(&mask) {
+        let tag = text[m.start() + 1..m.end()].trim_end_matches('/');
+        let after_space = text[..m.start()]
+            .chars()
+            .next_back()
+            .is_none_or(char::is_whitespace);
+        if after_space && !tag.chars().all(|c| c.is_ascii_digit()) {
+            subs.push((m.start(), m.start(), "\\".to_string()));
+        }
+    }
+    subs.sort_by_key(|s| (s.0, s.1));
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut at = 0;
+    for (a, b, r) in subs {
+        out.push_str(&text[at..a]);
+        out.push_str(&r);
+        at = b;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
 pub fn render_page(
     entity: &Entity,
     edges: &Edges,
@@ -385,7 +462,17 @@ pub fn render_page(
                 let fence = "`".repeat((longest_backtick_run(body) + 1).max(3));
                 out.push_str(&format!("{fence}{lang}\n{body}\n{fence}"));
             }
-            _ => out.push_str(body),
+            _ => out.push_str(&obsidian_fixups(
+                body,
+                &entity.source_path,
+                &|id| entities.contains_key(id),
+                &|p| {
+                    entities
+                        .values()
+                        .find(|e| e.source_path == p)
+                        .map(|e| e.id.clone())
+                },
+            )),
         }
         out.push_str("\n\n");
     }
@@ -835,5 +922,71 @@ mod tests {
         assert!(render(&e).contains("created: 2026-01-01\nupdated: 2026-10-23\n"));
         e.created.clear();
         assert!(!render(&e).contains("created:"));
+    }
+
+    fn fix(text: &str) -> String {
+        let ids = ["alpha", "wiki_rig"];
+        obsidian_fixups(text, "docs/a.md", &|id| ids.contains(&id), &|p| match p {
+            "README.md" => Some("proj".to_string()),
+            "docs/b.md" => Some("beta".to_string()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn wikilink_to_a_slug_resolved_page_is_written_as_its_id() {
+        assert_eq!(
+            fix("see [[wiki-rig]] and [[Wiki Rig|rig]]"),
+            "see [[wiki_rig]] and [[wiki_rig|rig]]"
+        );
+        assert_eq!(fix("[[wiki-rig#Part]]"), "[[wiki_rig#Part]]");
+        assert_eq!(fix("[[alpha]] [[nope-x]]"), "[[alpha]] [[nope-x]]");
+    }
+
+    #[test]
+    fn relative_markdown_links_to_pages_become_page_files() {
+        assert_eq!(
+            fix("[r](../README.md) [b](b.md#x) [l](../LICENSE) [e](https://x.io/a.md)"),
+            "[r](proj.md) [b](beta.md#x) [l](../LICENSE) [e](https://x.io/a.md)"
+        );
+    }
+
+    #[test]
+    fn hash_is_escaped_only_where_obsidian_reads_a_tag() {
+        assert_eq!(
+            fix("#76\u{2192} x #1\u{2013}#9 #43/ (#12-) PR #76"),
+            "\\#76\u{2192} x #1\u{2013}#9 #43/ (#12-) PR #76"
+        );
+        assert_eq!(
+            fix("a #37-x #57-59 #12 #abc"),
+            "a \\#37-x \\#57-59 #12 #abc"
+        );
+    }
+
+    #[test]
+    fn fixups_skip_fenced_and_inline_code() {
+        let t = "`[[wiki-rig]] #76-x [r](../README.md)`\n```\n[[wiki-rig]] #76-x\n```\n";
+        assert_eq!(fix(t), t);
+    }
+
+    #[test]
+    fn render_page_applies_fixups_to_text_bodies_only() {
+        let mut a = ent("alpha", "Alpha", "[[wiki-rig]] [t](docs/beta.txt) #5-x");
+        a.source_path = "a.txt".into();
+        let mut b = ent("wiki_rig", "Rig", "x");
+        b.source_path = "docs/beta.txt".into();
+        let mut c = ent("code", "Code", "// [[wiki-rig]]");
+        c.kind = SourceKind::Code {
+            lang: "rust".into(),
+        };
+        let ents = map(vec![a, b, c]);
+        let g = build_graph(&ents);
+        let page = render_page(&ents["alpha"], &g.edges["alpha"], &ents, "");
+        assert!(
+            page.contains("## Body\n[[wiki_rig]] [t](wiki_rig.md) \\#5-x\n"),
+            "{page}"
+        );
+        let page = render_page(&ents["code"], &g.edges["code"], &ents, "");
+        assert!(page.contains("// [[wiki-rig]]"), "{page}");
     }
 }
