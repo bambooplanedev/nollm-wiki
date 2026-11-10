@@ -536,3 +536,15 @@ fn hint_keeps_its_answer_when_the_prompt_names_many_files() {
     );
     assert!(out.contains("target.rs:1-1"), "{out}");
 }
+
+#[test]
+fn hint_puts_first_the_line_whose_body_matches_the_prompt_by_stem() {
+    let tmp = project_of(&[(
+        "src/lib.rs",
+        "pub fn first_vault() {\n    let keys = 1;\n}\n\n\
+         /// Rotated credentials land in the vault.\npub fn second() {\n    rotate_keys();\n}\n",
+    )]);
+    let out = hint_in(&tmp, "rotation of keys in the vault credentials");
+    let first = out.lines().nth(1).unwrap_or_default();
+    assert!(first.contains("second"), "{out}");
+}

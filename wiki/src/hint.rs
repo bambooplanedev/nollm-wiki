@@ -58,11 +58,12 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     if is_harness_prompt(text) || Wiki::prompt_tokens(text).len() < HINT_MIN_TOKENS {
         return String::new();
     }
-    let (hits, available) = wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
+    let (hits, available, terms) =
+        wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let named = best >= HINT_MIN_SHARE * available;
     let mut seen = HashSet::new();
-    let mut rows: Vec<(String, Option<&SymbolLine>)> = Vec::new();
+    let mut rows: Vec<Row> = Vec::new();
     let mut left = HINT_LINES;
     for h in hits
         .iter()
@@ -70,7 +71,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     {
         let mut lines = page_lines(&h.symbols).peekable();
         if lines.peek().is_none() && left > 0 {
-            rows.push((format!("{}  {}", h.path, h.title), None));
+            rows.push((format!("{}  {}", h.path, h.title), None, 0));
             left -= 1;
         }
         for s in lines.filter(|s| seen.insert((s.path.clone(), s.start_line, s.end_line))) {
@@ -83,13 +84,15 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
                     s.path, s.start_line, s.end_line, s.name, s.signature
                 ),
                 Some(s),
+                wiki.item_term_score(&h.id, s.start_line, s.end_line, &terms),
             ));
             left -= 1;
         }
     }
     drop_listed_declarations(&mut rows);
+    promote_best_body(&mut rows);
     let mut out = String::new();
-    for (row, _) in &rows {
+    for (row, ..) in &rows {
         push_line(&mut out, row);
     }
     let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
@@ -153,12 +156,34 @@ fn page_lines(symbols: &[SymbolLine]) -> impl Iterator<Item = &SymbolLine> {
         .take(HINT_PAGE_LINES)
 }
 
+/// A hint line, its item and how many of the prompt's words its item matches.
+type Row<'a> = (String, Option<&'a SymbolLine>, usize);
+
+/// Moves the line whose own text (`Wiki::item_term_score`) matches the most
+/// prompt words to the front, when it matches strictly more than line 1 and
+/// at least 1.5 times as many; the first of equals wins, the rest keep order.
+fn promote_best_body(rows: &mut Vec<Row>) {
+    let Some(first) = rows.first().map(|r| r.2) else {
+        return;
+    };
+    let mut best = 0;
+    for (i, r) in rows.iter().enumerate() {
+        if r.2 > rows[best].2 {
+            best = i;
+        }
+    }
+    if best > 0 && 2 * rows[best].2 >= 3 * first {
+        let row = rows.remove(best);
+        rows.insert(0, row);
+    }
+}
+
 /// Drops a header line whose `owner::name` an earlier non-header line already
 /// shows: the definition is listed, the declaration adds nothing.
-fn drop_listed_declarations(rows: &mut Vec<(String, Option<&SymbolLine>)>) {
+fn drop_listed_declarations(rows: &mut Vec<Row>) {
     let header = |p: &str| [".h", ".hh", ".hpp", ".hxx"].iter().any(|e| p.ends_with(e));
     let mut defs = HashSet::new();
-    rows.retain(|(_, s)| match s {
+    rows.retain(|(_, s, _)| match s {
         Some(s) if header(&s.path) => !defs.contains(&s.name),
         Some(s) => {
             defs.insert(s.name.clone());
@@ -180,7 +205,10 @@ pub fn prompt_from_hook_json(json: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{drop_listed_declarations, is_harness_prompt, page_lines, prompt_from_hook_json};
+    use super::{
+        drop_listed_declarations, is_harness_prompt, page_lines, promote_best_body,
+        prompt_from_hook_json,
+    };
     use crate::query::SymbolLine;
 
     fn line(name: &str, start: usize, end: usize, test: bool) -> SymbolLine {
@@ -209,13 +237,33 @@ mod tests {
             at("a.hpp", "A::g"),
         );
         let mut rows = vec![
-            ("def".to_string(), Some(&def)),
-            ("decl".to_string(), Some(&decl)),
-            ("other".to_string(), Some(&other)),
+            ("def".to_string(), Some(&def), 0),
+            ("decl".to_string(), Some(&decl), 0),
+            ("other".to_string(), Some(&other), 0),
         ];
         drop_listed_declarations(&mut rows);
         let kept: Vec<_> = rows.iter().map(|r| r.0.as_str()).collect();
         assert_eq!(kept, ["def", "other"]);
+    }
+
+    fn order(scores: &[usize]) -> Vec<String> {
+        let mut rows: Vec<_> = scores.iter().map(|&n| (n.to_string(), None, n)).collect();
+        promote_best_body(&mut rows);
+        rows.into_iter().map(|r| r.0).collect()
+    }
+
+    #[test]
+    fn the_line_matching_one_and_a_half_times_line_one_goes_first() {
+        assert_eq!(order(&[2, 1, 3, 3]), ["3", "2", "1", "3"]);
+        assert_eq!(order(&[0, 1]), ["1", "0"]);
+    }
+
+    #[test]
+    fn a_tie_or_a_smaller_ratio_keeps_the_order() {
+        assert_eq!(order(&[3, 4, 3]), ["3", "4", "3"]);
+        assert_eq!(order(&[2, 2]), ["2", "2"]);
+        assert_eq!(order(&[0, 0]), ["0", "0"]);
+        assert_eq!(order(&[]), Vec::<String>::new());
     }
 
     #[test]
