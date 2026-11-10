@@ -62,7 +62,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let named = best >= HINT_MIN_SHARE * available;
     let mut seen = HashSet::new();
-    let mut out = String::new();
+    let mut rows: Vec<(String, Option<&SymbolLine>)> = Vec::new();
     let mut left = HINT_LINES;
     for h in hits
         .iter()
@@ -70,22 +70,27 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     {
         let mut lines = page_lines(&h.symbols).peekable();
         if lines.peek().is_none() && left > 0 {
-            push_line(&mut out, &format!("{}  {}", h.path, h.title));
+            rows.push((format!("{}  {}", h.path, h.title), None));
             left -= 1;
         }
         for s in lines.filter(|s| seen.insert((s.path.clone(), s.start_line, s.end_line))) {
             if left == 0 {
                 break;
             }
-            push_line(
-                &mut out,
-                &format!(
+            rows.push((
+                format!(
                     "{}:{}-{}  {}  {}",
                     s.path, s.start_line, s.end_line, s.name, s.signature
                 ),
-            );
+                Some(s),
+            ));
             left -= 1;
         }
+    }
+    drop_listed_declarations(&mut rows);
+    let mut out = String::new();
+    for (row, _) in &rows {
+        push_line(&mut out, row);
     }
     let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
     // The most trusted passing note; `min_by` keeps the first of equals.
@@ -148,6 +153,21 @@ fn page_lines(symbols: &[SymbolLine]) -> impl Iterator<Item = &SymbolLine> {
         .take(HINT_PAGE_LINES)
 }
 
+/// Drops a header line whose `owner::name` an earlier non-header line already
+/// shows: the definition is listed, the declaration adds nothing.
+fn drop_listed_declarations(rows: &mut Vec<(String, Option<&SymbolLine>)>) {
+    let header = |p: &str| [".h", ".hh", ".hpp", ".hxx"].iter().any(|e| p.ends_with(e));
+    let mut defs = HashSet::new();
+    rows.retain(|(_, s)| match s {
+        Some(s) if header(&s.path) => !defs.contains(&s.name),
+        Some(s) => {
+            defs.insert(s.name.clone());
+            true
+        }
+        None => true,
+    });
+}
+
 /// The `prompt` string of Claude Code's `UserPromptSubmit` hook input.
 #[must_use]
 pub fn prompt_from_hook_json(json: &str) -> Option<String> {
@@ -160,7 +180,7 @@ pub fn prompt_from_hook_json(json: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_harness_prompt, page_lines, prompt_from_hook_json};
+    use super::{drop_listed_declarations, is_harness_prompt, page_lines, prompt_from_hook_json};
     use crate::query::SymbolLine;
 
     fn line(name: &str, start: usize, end: usize, test: bool) -> SymbolLine {
@@ -174,6 +194,28 @@ mod tests {
             test,
             also: None,
         }
+    }
+
+    #[test]
+    fn a_header_declaration_is_dropped_when_its_definition_is_listed() {
+        let at = |path: &str, name: &str| {
+            let mut s = line(name, 1, 2, false);
+            s.path = path.into();
+            s
+        };
+        let (def, decl, other) = (
+            at("a.cpp", "A::f"),
+            at("a.hpp", "A::f"),
+            at("a.hpp", "A::g"),
+        );
+        let mut rows = vec![
+            ("def".to_string(), Some(&def)),
+            ("decl".to_string(), Some(&decl)),
+            ("other".to_string(), Some(&other)),
+        ];
+        drop_listed_declarations(&mut rows);
+        let kept: Vec<_> = rows.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(kept, ["def", "other"]);
     }
 
     #[test]
