@@ -645,7 +645,7 @@ The code locations for a task text, as a prompt hook injects them: a header line
 `path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the
 best-matching code pages, at most 2 per page, without docs, tests or a line whose range holds
 another of the page's lines; a page with no such line gets `path  title`. A header line (`.h`, `.hh`, `.hpp`, `.hxx`) is dropped when an earlier
-non-header line shows the same qualified name. Only the text's 24 rarest
+non-header line shows the same qualified name. The line whose own text (its lines plus the comment block above) matches the most counted words, by identifier, name word or word stem, goes first when it matches at least 1.5 times as many as line 1. Only the text's 24 rarest
 words rank the pages (vendored code is not compiled, see `compile`); one-character words never
 count. Prints nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a
 tag (a turn the harness wrote, such as `<task-notification>`) or it has fewer than two words of two

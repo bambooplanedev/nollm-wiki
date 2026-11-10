@@ -501,6 +501,8 @@ pub(crate) struct PassStats {
     /// For a prompt: the summed idf of the words that count, what a page
     /// hit once by each of them at weight 1 would score.
     available: f64,
+    /// For a prompt: the words that count.
+    terms: Vec<String>,
 }
 
 type StemMemo = std::sync::RwLock<HashMap<String, String>>;
@@ -1473,7 +1475,7 @@ impl Wiki {
         limit: usize,
         terms: usize,
         scope: MemoryScope,
-    ) -> (Vec<Hit>, f64) {
+    ) -> (Vec<Hit>, f64, Vec<String>) {
         let (hits, stats) = self.search_terms(
             q,
             Some(&KindFilter::Code),
@@ -1483,7 +1485,63 @@ impl Wiki {
             Some(terms),
             None,
         );
-        (hits, stats.available)
+        (hits, stats.available, stats.terms)
+    }
+
+    /// How many of `terms` the item at lines `start..=end` of code page `id`
+    /// (its `## Body`, plus the comment block right above `start`) matches:
+    /// a term matches as a whole identifier, as a name word of one, or when
+    /// every part of it shares a stem with such a name word.
+    pub(crate) fn item_term_score(
+        &self,
+        id: &str,
+        start: usize,
+        end: usize,
+        terms: &[String],
+    ) -> usize {
+        let sections = crate::rewrite::split_headings(self.body(id), false);
+        let Some(body) = sections.get("Body") else {
+            return 0;
+        };
+        let lines: Vec<&str> = unfence(body).lines().collect();
+        if start == 0 || start > lines.len() {
+            return 0;
+        }
+        let mut top = start - 1;
+        while top > 0 {
+            let t = lines[top - 1].trim_start();
+            let comment = ["//", "#", "/*", "*", "--", ";", "\"\"\"", "'''"]
+                .iter()
+                .any(|m| t.starts_with(m));
+            if !comment || t.starts_with("#include") || t.starts_with("#!") {
+                break;
+            }
+            top -= 1;
+        }
+        let text = lines[top..end.min(lines.len())].join("\n");
+        let lower = text.to_lowercase();
+        let idents: BTreeSet<&str> = text
+            .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|w| !w.is_empty())
+            .collect();
+        let whole: BTreeSet<String> = idents
+            .iter()
+            .map(|w| w.trim_matches('_').to_lowercase())
+            .collect();
+        let words: BTreeSet<String> = idents.iter().flat_map(|w| Self::name_words(w)).collect();
+        let stems: BTreeSet<String> = words.iter().map(|w| Self::stem(w)).collect();
+        terms
+            .iter()
+            .filter(|t| {
+                let punct = t.chars().any(|c| !(c.is_alphanumeric() || c == '_'));
+                whole.contains(*t)
+                    || (punct && lower.contains(t.as_str()))
+                    || words.contains(*t)
+                    || t.split(|c: char| !c.is_alphanumeric())
+                        .filter(|p| !p.is_empty())
+                        .all(|p| Self::with_query_stem(p, |sp| stems.contains(sp)))
+            })
+            .count()
     }
 
     /// Hits for `q` and the pass-1 statistics they were scored with. With
@@ -1607,6 +1665,11 @@ impl Wiki {
                 idf[i] = 0.0;
             }
             stats.available = seen.iter().take(terms).map(|&i| idf[i]).sum();
+            stats.terms = seen
+                .iter()
+                .take(terms)
+                .map(|&i| tokens[i].clone())
+                .collect();
         }
         let mut ranked: Vec<(Hit, f64)> = candidates
             .into_iter()
