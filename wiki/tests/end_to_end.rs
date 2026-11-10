@@ -287,10 +287,10 @@ fn same_named_files_in_different_directories_all_survive() {
     }
     // The qualified title is what the page is headed with, not just its slug.
     let page = fs::read_to_string(output.join("api_models.md")).unwrap();
-    assert!(page.starts_with("# Api Models\n"), "page head:\n{page}");
+    assert!(page.contains("\n---\n# Api Models\n"), "page head:\n{page}");
     // The directory-module page is headed with its directory's name.
     let page = fs::read_to_string(output.join("api.md")).unwrap();
-    assert!(page.starts_with("# Api\n"), "page head:\n{page}");
+    assert!(page.contains("\n---\n# Api\n"), "page head:\n{page}");
 }
 
 #[test]
@@ -821,12 +821,12 @@ fn incremental_compile_rerenders_on_tag_edit() {
     compile(&input, &output, &opts).unwrap();
     assert!(fs::read_to_string(output.join("n.md"))
         .unwrap()
-        .contains("- tags: a"));
+        .contains("tags: [\"wiki/doc\",\"a\"]"));
     write(&input, "n.md", "---\ntags: [b]\n---\n# N\nbody\n");
     compile(&input, &output, &opts).unwrap();
     assert!(fs::read_to_string(output.join("n.md"))
         .unwrap()
-        .contains("- tags: b"));
+        .contains("tags: [\"wiki/doc\",\"b\"]"));
 }
 
 /// `Канал` and `Kanal` slug to the same ascii stem; both keep a page (the

@@ -14,8 +14,8 @@ fn rendered_page_snapshot_is_stable() {
     let redacted: String = page
         .lines()
         .map(|l| {
-            if l.starts_with("- source_hash:") {
-                "- source_hash: <redacted>"
+            if l.starts_with("source_hash:") {
+                "source_hash: <redacted>"
             } else {
                 l
             }

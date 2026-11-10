@@ -349,7 +349,9 @@ fn truncating_a_huge_doc_is_the_longest_whole_line_prefix() {
     let (_d, w) = common::compiled_wiki(&[("big.md", &format!("# Big\n\n{body}"))]);
     let page = w.page("big").unwrap();
     let t = w.page_text("big", true, Some(50)).unwrap();
-    let (kept, marker) = t.trim_end().rsplit_once('\n').unwrap();
+    // Split at the marker, not at the last newline: the kept prefix may end in a blank line.
+    let cut = t.rfind("… truncated").unwrap();
+    let (kept, marker) = (t[..cut].strip_suffix('\n').unwrap(), t[cut..].trim_end());
     assert!(token_estimate(&t) <= 50, "{t}");
     assert!(page.starts_with(&format!("{kept}\n")));
     let b = token_estimate(&format!("{kept}\n"));
@@ -360,7 +362,7 @@ fn truncating_a_huge_doc_is_the_longest_whole_line_prefix() {
     // One more line would not fit.
     let more = page
         .split_inclusive('\n')
-        .nth(kept.lines().count())
+        .nth(t[..cut].lines().count())
         .unwrap();
     let longer = format!("{kept}\n{more}");
     let m = format!(

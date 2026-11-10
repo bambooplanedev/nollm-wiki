@@ -109,6 +109,24 @@ pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
     format!("unknown page {arg:?}{closest} — use search to find ids")
 }
 
+/// A code page's `## Body` without the fence lines `render_page` wraps it in,
+/// so the language word in the info string is not searchable text and never
+/// opens a snippet. Anything not fenced that way (pages from <= 0.6.7) is
+/// returned as is.
+fn unfence(body: &str) -> &str {
+    let fence_len = body.bytes().take_while(|&b| b == b'`').count();
+    let Some((open, rest)) = body.split_once('\n') else {
+        return body;
+    };
+    let closing = &"`".repeat(fence_len.max(3));
+    match rest.strip_suffix(closing.as_str()) {
+        Some(inner) if fence_len >= 3 && !open[fence_len..].contains('`') => {
+            inner.strip_suffix('\n').unwrap_or(inner)
+        }
+        _ => body,
+    }
+}
+
 impl Wiki {
     /// Why `page_text`/`page` found no body for `id`: an indexed page whose
     /// file is gone says so; anything else is an unknown page named `arg`.
@@ -1200,7 +1218,12 @@ impl Wiki {
         let in_one_name = query_words.len() > 1
             && !whole_symbol
             && symbols.is_some_and(|f| f.name_sets.iter().any(|n| query_words.is_subset(n)));
-        let sections = crate::rewrite::split_headings(self.body(&e.id), false);
+        let mut sections = crate::rewrite::split_headings(self.body(&e.id), false);
+        if e.kind.starts_with("code") {
+            if let Some(body) = sections.get_mut("Body") {
+                *body = unfence(body).to_string();
+            }
+        }
         let headings: Vec<String> = sections
             .keys()
             .filter(|k| {
@@ -2028,6 +2051,18 @@ fn summary_line(summary: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::unfence;
+
+    #[test]
+    fn unfence_drops_only_the_outer_fence_lines() {
+        assert_eq!(unfence("```rust\nfn a() {}\n```"), "fn a() {}");
+        assert_eq!(unfence("````rust\na\n```\nb\n```\n````"), "a\n```\nb\n```");
+        assert_eq!(unfence("```rust\n```"), "");
+        // Old, unfenced pages and unfenced text stay as they are.
+        assert_eq!(unfence("fn a() {}"), "fn a() {}");
+        assert_eq!(unfence("```\nquoted\n```\nmore"), "```\nquoted\n```\nmore");
+    }
+
     use super::{query_dates, AhoCorasick, QueryDate, Wiki};
     use crate::model::{CodeItem, CodeItemKind, PairRole};
     use std::collections::BTreeSet;
