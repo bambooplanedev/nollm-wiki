@@ -42,12 +42,14 @@ fn link_display(inner: &str) -> &str {
     inner.rsplit_once('|').map_or(inner, |(_, display)| display)
 }
 
-/// Whether a rendered page's `## Metadata` says `- kind: code:<lang>`.
-fn is_code_page(sections: &BTreeMap<String, String>) -> bool {
-    sections.get("Metadata").is_some_and(|m| {
-        m.lines()
-            .any(|l| l.trim_start().starts_with("- kind: code:"))
-    })
+/// Whether a rendered page's front matter says `kind: code:<lang>` (or, for
+/// pages compiled by 0.6.7 or earlier, its `## Metadata` says `- kind: code:<lang>`).
+fn is_code_page(text: &str, sections: &BTreeMap<String, String>) -> bool {
+    crate::rewrite::front_matter(text, "kind").is_some_and(|k| k.starts_with("code:"))
+        || sections.get("Metadata").is_some_and(|m| {
+            m.lines()
+                .any(|l| l.trim_start().starts_with("- kind: code:"))
+        })
 }
 
 /// `pages`: page id -> rendered markdown. Purely in-memory (no disk re-read).
@@ -62,7 +64,7 @@ pub fn lint(pages: &BTreeMap<String, String>) -> LintReport {
         // budget with it is degraded to a summary; code pages are exempt
         // (their outline is the intended view).
         let tokens = (text.chars().count() + Wiki::SEPARATOR.chars().count()) / 4;
-        let is_code = is_code_page(&sections);
+        let is_code = is_code_page(text, &sections);
         if !is_code && tokens > crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS {
             large.push((id.clone(), tokens));
         }
@@ -271,9 +273,20 @@ mod tests {
 
     /// A page whose `(chars + separator) / 4` tokens equal `tokens`.
     fn page_of_tokens(kind: &str, tokens: usize) -> String {
-        let head = format!("# T\n\n## Metadata\n- kind: {kind}\n\n## Body\n");
+        sized(&format!("---\nkind: {kind}\n---\n# T\n\n## Body\n"), tokens)
+    }
+
+    /// The same, in the `## Metadata` form of pages compiled by 0.6.7 or earlier.
+    fn old_page_of_tokens(kind: &str, tokens: usize) -> String {
+        sized(
+            &format!("# T\n\n## Metadata\n- kind: {kind}\n\n## Body\n"),
+            tokens,
+        )
+    }
+
+    fn sized(head: &str, tokens: usize) -> String {
         let chars = tokens * 4 - Wiki::SEPARATOR.chars().count();
-        head.clone() + &"x".repeat(chars - head.chars().count())
+        head.to_string() + &"x".repeat(chars - head.chars().count())
     }
 
     fn one(text: String) -> BTreeMap<String, String> {
@@ -290,6 +303,16 @@ mod tests {
             lint(&one(page_of_tokens("markdown", at))).large,
             [] as [(String, usize); 0]
         );
+    }
+
+    #[test]
+    fn large_skips_old_form_code_pages() {
+        let over = crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS + 1;
+        assert_eq!(
+            lint(&one(old_page_of_tokens("code:rust", over))).large,
+            [] as [(String, usize); 0]
+        );
+        assert_eq!(lint(&one(old_page_of_tokens("text", over))).large.len(), 1);
     }
 
     #[test]

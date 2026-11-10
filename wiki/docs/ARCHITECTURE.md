@@ -115,7 +115,13 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    page body. Cross-links are emitted as slug-target, Obsidian-flavored
    wikilinks — `[[slug|Name]]` (e.g. `[[gradient_descent|Gradient
    Descent]]`) — so each link target is a real `<slug>.md` file rather than
-   a display name that has to be re-slugified to resolve. Writes only land
+   a display name that has to be re-slugified to resolve. A page opens with
+   YAML front matter (`created`, `updated`, `aliases`, `tags` led by a
+   `wiki/code`, `wiki/doc` or `wiki/memory` kind tag, `kind`, `source`,
+   `source_hash`; readers also accept the `## Metadata` bullets of 0.6.7 and
+   earlier), and a code page's `## Body` is a fenced block tagged with the
+   language; search drops those two fence lines (`query::unfence`) so scoring
+   and snippets see the bare source. Writes only land
    on disk if not in incremental mode, or if the fingerprint changed (see
    [Incremental build](#incremental-build)).
 6. **Manifest** (`manifest::build_manifest`) — builds `index.json`,
@@ -147,7 +153,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `neighbors` pack (`large`: id and tokens); no disk re-read. Links are scanned
    on `rewrite::mask_code` output, so a `[[link]]` inside a fenced block or
    inline code span is never reported, and a code page's `## Body` (verbatim
-   source, per its `## Metadata` kind) is dropped from the scan altogether.
+   source, per its front-matter `kind`) is dropped from the scan altogether.
    The CLI exits 1 on any broken link; orphans are advisory.
 
 ## Module map
@@ -483,7 +489,8 @@ purposes, is its `source_path`, not its id — an id can change under
 [disambiguation](#disambiguation-ladder) or a source-file rename, and
 `<new_id>.md` would not exist yet even though the same source's notes do.
 `rewrite::page_source_index(output)` scans every already-written page,
-reads its `## Metadata` block, and maps `- source: <path>` back to **every**
+reads its front matter (or, for a page compiled by 0.6.7 or earlier, its `## Metadata`
+bullets), and maps the `source` back to **every**
 file that declared it. Before rendering, each entity looks itself up in that
 index by its own `source_path`: if a prior page is found, its `## Notes`
 section (`rewrite::read_notes_from`) is read and passed into `render_page`,
@@ -613,7 +620,7 @@ matching:
   `memory (<origin>): <path> — <summary>` (the title when the summary is empty) and, when the hit has one, its snippet on an indented line; `page` on a note returns its text, JSON
   as a full hit; tag-only listings have no tail and mark a superseded note.
 - The searched body text is the rendered page's parsed sections minus
-  generated chrome (`Metadata`, `Related`, `Imported by`, `Mentioned in`,
+  generated chrome (`Metadata` of pages from <= 0.6.7, `Related`, `Imported by`, `Mentioned in`,
   `Notes`) —
   subtractive on purpose, so text under a doc's own embedded `## `
   subheadings stays searchable. The heading names of those sections are

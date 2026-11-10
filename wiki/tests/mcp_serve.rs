@@ -219,7 +219,7 @@ fn serve_tools_flag_brings_back_neighbors() {
         &json!({"id": "gradient_descent", "max_tokens": 800}),
     );
     let text = text_of(&resp);
-    assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
+    assert!(text.contains("\n# Gradient Descent\n"), "pack: {text}");
     drop(stdin);
     let _ = child.wait();
 }
@@ -349,7 +349,7 @@ fn serve_lists_and_reads_resources() {
     );
     let resp = read_response(&stdout, 3);
     let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
-    assert!(text.starts_with("# Gradient Descent"));
+    assert!(text.contains("\n# Gradient Descent\n"));
     assert_eq!(
         resp["result"]["contents"][0]["mimeType"],
         json!("text/markdown")
