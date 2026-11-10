@@ -293,7 +293,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
         "rs" => super::extract_rust::rust_spec(),
         "py" => super::extract_python::python_spec(),
-        "js" => super::extract_simple::js_spec(),
+        "js" | "mjs" | "cjs" => super::extract_simple::js_spec(),
         "ts" => super::extract_simple::ts_spec(),
         "jsx" => super::extract_jsx::jsx_spec(),
         "tsx" => super::extract_jsx::tsx_spec(),
@@ -308,7 +308,7 @@ fn lang_for_ext(ext: &str) -> Option<LangSpec> {
 
 /// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them too.
 pub(crate) fn is_cpp(ext: &str) -> bool {
-    matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h")
+    matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" | "c")
 }
 
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
@@ -353,7 +353,7 @@ pub(crate) fn is_shell(source_path: &str) -> bool {
 /// a missing entry would strip that language of all symbols and imports.
 const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
-    "hxx", "h", "sh", "bash",
+    "hxx", "h", "c", "mjs", "cjs", "sh", "bash",
 ];
 
 /// Each grammar's query, compiled once per process instead of once per file,
@@ -2115,7 +2115,7 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
                 Some("")
             }
             "sh" | "bash" => line.strip_prefix('#'),
-            "js" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
+            "js" | "mjs" | "cjs" | "ts" | "jsx" | "tsx" | "vue" | "svelte" | "go" => {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
             _ if cpp => {
@@ -2163,13 +2163,14 @@ fn leading_doc(text: &str, ext: &str) -> Option<String> {
 /// tests and 22 real module imports resolving nowhere.
 ///
 /// `index.tsx` / `index.jsx` is the same barrel file in a component tree.
-/// `.mjs`/`.cjs` want the same entry but are not compiled at all yet, so they
-/// would be dead rows here.
+/// `index.mjs` / `index.cjs` likewise.
 const DIRECTORY_MODULES: &[(&str, &str)] = &[
     ("rs", "mod"),
     ("py", "__init__"),
     ("ts", "index"),
     ("js", "index"),
+    ("mjs", "index"),
+    ("cjs", "index"),
     ("tsx", "index"),
     ("jsx", "index"),
 ];
