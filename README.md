@@ -88,8 +88,8 @@ From a [release](https://github.com/bambooplanedev/llm-wiki-nollm/releases): dow
 for your platform (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`) and
 put the `wiki` binary in a directory on your `PATH`, since agents start it as plain `wiki`:
 
-    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.8/wiki-v0.6.8-aarch64-apple-darwin.tar.gz
-    tar -xzf wiki-v0.6.8-aarch64-apple-darwin.tar.gz
+    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.9/wiki-v0.6.9-aarch64-apple-darwin.tar.gz
+    tar -xzf wiki-v0.6.9-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
 
 Releases after v0.6.1 also carry `SHA256SUMS`. With the tarball and that file in one folder, run
