@@ -309,7 +309,7 @@ impl WikiServer {
 
     #[tool(
         annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
+        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. A query of identifiers alone (`_ack`, `OrderBook`) lists each one's definition, or `not found: <name>`. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
     )]
     async fn search(
         &self,
@@ -362,7 +362,8 @@ impl WikiServer {
         let text = if json {
             search_json(hits)
         } else {
-            search_lines(&hits)
+            let missing = wiki.not_found(&p.query, kind.as_ref(), tag.as_deref());
+            search_lines_missing(&hits, &missing)
         };
         Ok(with_stale(text_result(Ok(text)), stale.as_deref()))
     }
@@ -718,6 +719,16 @@ pub fn search_lines(hits: &[Hit]) -> String {
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {
             out.push_str(&format!("    {}\n", clip(sn, LINE_CHARS)));
         }
+    }
+    out
+}
+
+/// `search_lines` of `hits`, then one `not found: <name>` line per name in
+/// `missing` (`Wiki::not_found`).
+pub fn search_lines_missing(hits: &[Hit], missing: &[String]) -> String {
+    let mut out = search_lines(hits);
+    for name in missing {
+        out.push_str(&format!("not found: {name}\n"));
     }
     out
 }

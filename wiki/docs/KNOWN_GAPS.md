@@ -99,6 +99,15 @@ per question is noise-level: treat single results as anecdotes.
   wiki's bytes). A project's own code in a folder of such a name is left out
   too, unless compiled with `--no-ignore`; with it, vendored hits (e.g.
   `TooManyInputsFlag` for the word "too") take result and hint slots again.
+- **Only identifier-shaped words are names.** A plain word (`refuse`, `go`,
+  `Order`) is ranked like any word even when a function has exactly that
+  name, and a query mixing words with identifiers keeps the ranked order
+  (the definition is added, not moved first). A name defined by no item, such
+  as a function nested in another (Python), a lambda or a variable, gets
+  `not found`. `--format json` has no `not found` entries. On the 2026-11-11
+  bench replay of 137 definition greps, one search with all names found 329
+  of 371 defined names (113 before); each of the 27 distinct names it still
+  missed was a plain word, a prefix (`test_`) or a function nested in a test.
 - **A decision split across a function and an enum's docs is not found.**
   "Where does it refuse to start" lands on the file, not on `decide`.
 - **`wiki hint` shows at most 2 lines per page**, so a third relevant

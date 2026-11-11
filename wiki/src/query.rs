@@ -83,6 +83,19 @@ impl Entry {
     fn is_kind(&self, f: &KindFilter) -> bool {
         SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
     }
+
+    /// Whether the page passes a search's `kind` (a memory note passes the
+    /// `code` and `docs` groups whatever its real kind) and `tag` (it or a
+    /// sub-tag of it).
+    fn passes(&self, kind: Option<&KindFilter>, tag: Option<&str>) -> bool {
+        kind.is_none_or(|f| {
+            (self.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || self.is_kind(f)
+        }) && tag.is_none_or(|t| {
+            self.tags
+                .iter()
+                .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
+        })
+    }
 }
 
 #[derive(Deserialize)]
@@ -396,6 +409,7 @@ fn strip_comment_marker(line: &str) -> &str {
 }
 
 /// One code item shown under its page's hit.
+#[derive(Clone)]
 pub struct SymbolLine {
     pub path: String,
     /// 1-based, inclusive, in the original file.
@@ -1400,11 +1414,159 @@ impl Wiki {
         }
         let (mut hits, stats) =
             self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
+        // The ranked best, before `lift_names` may put an unscored page first.
         let best = hits.first().map_or(0.0, |h| h.score);
+        self.lift_names(&mut hits, q, kind, tag, limit.unwrap_or(10));
         // The tail counts pages of every kind, so the code pass's statistics
         // are its own only when `kind` narrowed nothing.
         hits.extend(self.memory_tail(q, tag, best, kind.is_none().then_some(&stats)));
         hits
+    }
+
+    /// Most definitions of one name that `lift_names` lists.
+    const DEFINITIONS_PER_NAME: usize = 3;
+
+    /// A query word as an identifier: surrounding punctuation trimmed but a
+    /// leading or trailing `_` kept (`_ack`, `run_`, `f()` gives `f`), and
+    /// `None` unless it reads as one: it has `_` or `::`, or an upper-case
+    /// letter after the first. Plain words (`order`, `Order`) stay with the
+    /// ranked search, where a name like `order` is too common to put first.
+    fn identifier(word: &str) -> Option<&str> {
+        let t = word.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+        let well_formed = !t.starts_with(|c: char| c.is_ascii_digit())
+            && t.split("::")
+                .all(|p| !p.is_empty() && p.chars().all(|c| c.is_alphanumeric() || c == '_'));
+        let named =
+            t.contains('_') || t.contains("::") || t.chars().skip(1).any(char::is_uppercase);
+        (well_formed && named).then_some(t)
+    }
+
+    /// The identifiers of `q` in order, deduplicated, and whether `q` is
+    /// made of them alone.
+    fn query_names(q: &str) -> (Vec<&str>, bool) {
+        let words: Vec<&str> = q
+            .split_whitespace()
+            .filter(|w| w.chars().any(char::is_alphanumeric))
+            .collect();
+        let mut names: Vec<&str> = Vec::new();
+        for n in words.iter().filter_map(|w| Self::identifier(w)) {
+            if !names.contains(&n) {
+                names.push(n);
+            }
+        }
+        let only = !words.is_empty() && words.iter().all(|w| Self::identifier(w).is_some());
+        (names, only)
+    }
+
+    /// The items called `name` (or `owner::name`) on pages that pass `kind`
+    /// and `tag`, matched case-sensitively, or in any case when nothing
+    /// matches so; module and top-level items never.
+    fn definitions(
+        &self,
+        name: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Vec<(&Entry, &CodeItem)> {
+        let qualified = name.contains("::");
+        let pick = |same: fn(&str, &str) -> bool| -> Vec<(&Entry, &CodeItem)> {
+            self.items
+                .iter()
+                .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
+                .filter(|(e, _)| e.passes(kind, tag))
+                .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+                .filter(|(_, i)| {
+                    !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
+                        && if qualified {
+                            same(&i.qualified_name(), name)
+                        } else {
+                            same(&i.name, name)
+                        }
+                })
+                .collect()
+        };
+        let exact = pick(|a, b| a == b);
+        if exact.is_empty() {
+            pick(|a, b| a.to_lowercase() == b.to_lowercase())
+        } else {
+            exact
+        }
+    }
+
+    /// The identifiers of a query made of identifiers alone (`query_names`)
+    /// that name no item on a page passing `kind` and `tag`; empty for any
+    /// other query.
+    pub fn not_found(&self, q: &str, kind: Option<&KindFilter>, tag: Option<&str>) -> Vec<String> {
+        let (names, only) = Self::query_names(q);
+        if !only {
+            return Vec::new();
+        }
+        names
+            .into_iter()
+            .filter(|n| self.definitions(n, kind, tag).is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Shows the definitions of `q`'s identifiers (`query_names`): per name
+    /// in query order, its definitions (at most `DEFINITIONS_PER_NAME` and
+    /// `limit`, pages ranked higher in `hits` first, then by pagerank). A query of
+    /// identifiers alone, when any is defined, gets just those lines, page by
+    /// page in the order the names first land, past the per-page line cap.
+    /// In any other query a definition the ranking missed is added after its
+    /// page's lines (the page after the hits), and nothing moves: on the
+    /// regression set, putting a named line first cost top-1 answers where
+    /// the name (`RejectCode`, `limits_for`) was context, not the target.
+    fn lift_names(
+        &self,
+        hits: &mut Vec<Hit>,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: usize,
+    ) {
+        let (names, only) = Self::query_names(q);
+        // Per page, in the order names first land on it: its definition lines.
+        let mut by_page: Vec<(String, Vec<SymbolLine>)> = Vec::new();
+        for name in names {
+            let mut defs = self.definitions(name, kind, tag);
+            let rank = |e: &Entry| hits.iter().position(|h| h.id == e.id).unwrap_or(usize::MAX);
+            defs.sort_by(|(a, x), (b, y)| {
+                rank(a)
+                    .cmp(&rank(b))
+                    .then_with(|| b.pagerank.total_cmp(&a.pagerank))
+                    .then_with(|| a.path.cmp(&b.path))
+                    .then_with(|| x.start_line.cmp(&y.start_line))
+            });
+            defs.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
+            for (e, i) in defs {
+                let line = self.symbol_line(&e.path, i);
+                let same = |s: &SymbolLine| {
+                    (s.start_line, s.end_line, &s.name)
+                        == (line.start_line, line.end_line, &line.name)
+                };
+                let at = hits.iter().position(|h| h.id == e.id).unwrap_or_else(|| {
+                    hits.push(Hit::from_entry(e, 0.0, None));
+                    hits.len() - 1
+                });
+                if !hits[at].symbols.iter().any(same) {
+                    hits[at].symbols.push(line.clone());
+                }
+                match by_page.iter_mut().find(|(id, _)| *id == e.id) {
+                    Some((_, lines)) if lines.iter().any(same) => {}
+                    Some((_, lines)) => lines.push(line),
+                    None => by_page.push((e.id.clone(), vec![line])),
+                }
+            }
+        }
+        if only && !by_page.is_empty() {
+            let mut by_id: HashMap<String, Hit> =
+                hits.drain(..).map(|h| (h.id.clone(), h)).collect();
+            for (id, lines) in by_page {
+                let mut hit = by_id.remove(&id).expect("a named page is a hit");
+                hit.symbols = lines;
+                hits.push(hit);
+            }
+        }
     }
 
     /// Whether note hit `h` may be shown for `q`: it is not superseded, and a
@@ -1571,15 +1733,7 @@ impl Wiki {
             MemoryScope::Without => !e.memory,
             MemoryScope::Only => e.memory,
         };
-        let filtered = |e: &Entry| {
-            kind.is_none_or(|f| {
-                (e.memory && matches!(f, KindFilter::Code | KindFilter::Docs)) || e.is_kind(f)
-            }) && tag.is_none_or(|t| {
-                e.tags
-                    .iter()
-                    .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
-            })
-        };
+        let filtered = |e: &Entry| e.passes(kind, tag);
         let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
@@ -1751,17 +1905,26 @@ impl Wiki {
             hit.symbols = lines
                 .into_iter()
                 .filter(|(s, _)| *s >= own || *s >= Self::MIN_REL_SYMBOL * best)
-                .map(|(_, i)| SymbolLine {
-                    path: hit.path.clone(),
-                    start_line: i.start_line,
-                    end_line: i.end_line,
-                    name: i.qualified_name(),
-                    signature: i.signature.clone(),
-                    doc: i.doc.clone().filter(|d| docs.insert(d.clone())),
-                    test: i.test,
-                    also: self.same_name(i, &hit.path),
+                .map(|(_, i)| {
+                    let mut line = self.symbol_line(&hit.path, i);
+                    line.doc = line.doc.filter(|d| docs.insert(d.clone()));
+                    line
                 })
                 .collect();
+        }
+    }
+
+    /// The symbol line of item `i` on the page at `path`.
+    fn symbol_line(&self, path: &str, i: &CodeItem) -> SymbolLine {
+        SymbolLine {
+            path: path.to_string(),
+            start_line: i.start_line,
+            end_line: i.end_line,
+            name: i.qualified_name(),
+            signature: i.signature.clone(),
+            doc: i.doc.clone(),
+            test: i.test,
+            also: self.same_name(i, path),
         }
     }
 

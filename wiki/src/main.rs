@@ -413,17 +413,14 @@ fn main() -> Result<()> {
                 .map(KindFilter::parse_arg)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
-            let hits = w.search_tagged(
-                query.as_deref().unwrap_or(""),
-                kind.as_ref(),
-                tag.as_deref(),
-                limit,
-            );
+            let q = query.as_deref().unwrap_or("");
+            let hits = w.search_tagged(q, kind.as_ref(), tag.as_deref(), limit);
 
             if format == "json" {
                 println!("{}", wiki::serve::search_json(hits));
             } else {
-                print!("{}", wiki::serve::search_lines(&hits));
+                let missing = w.not_found(q, kind.as_ref(), tag.as_deref());
+                print!("{}", wiki::serve::search_lines_missing(&hits, &missing));
             }
         }
         Command::Lint { dir } => {

@@ -655,6 +655,20 @@ matching:
   same page shows the same one. C++ gives each declarator of a shared
   declaration its own signature, which therefore may not be verbatim in
   the file.
+- **Named definitions** (`lift_names`) run after expansion, in `search`
+  (`search_tagged`), not in `hint`. A query word with `_` or `::`, or an
+  upper-case letter after the first, is an identifier (`identifier`: outer
+  punctuation trimmed, `_` kept). Its definitions are the items named so,
+  or `owner::name` so, case-sensitively, else in any case; modules and
+  top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
+  pages ranked higher first, then by pagerank. A query of identifiers
+  alone with any defined gets just those lines, page by page in the order
+  names first land, with no per-page cap; `not_found` lists the rest and
+  the line output prints `not found: <name>` after the hits. In any other
+  query a missing definition line is appended to its page, or its page to
+  the hits, and nothing moves: lifting named lines first cost three top-1
+  answers on the search regression set, where the name was context. The
+  memory tail's ratio gate uses the ranked best score, taken before.
 - **The test flag.** `CodeItem.test` is set at extraction (`formats/code.rs`):
   the file is a test path (`model::is_test_path`: a `tests` path component,
   or a file named `test_*`, `*_test.*`, `*_tests.*`), or, for Rust, the item
