@@ -211,7 +211,9 @@ per question is noise-level: treat single results as anecdotes.
   second call edge next to its declaration. A leading macro can put the return type into the owner
   (`handle api<Derived>`), and a free function with a template-id return
   type can get that type as owner (`UniquePtr<TEST_INT>`).
-- **Shell (`.sh`, `.bash`) lists only function definitions.** A function
+- **Shell (`.sh`, `.bash`) lists only function definitions.** Top-level
+  UPPERCASE assignments are found by `search` only by their exact name; other
+  variables (lowercase, inside a function or an `if`) are not indexed. A function
   passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
   of `f`, and a call in a part the grammar could not parse has no caller (unless a
   fully parsed function encloses it inside that part).
