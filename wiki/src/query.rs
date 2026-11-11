@@ -1491,7 +1491,10 @@ impl Wiki {
         };
         let exact = pick(|a, b| a == b);
         if exact.is_empty() {
-            pick(|a, b| a.to_lowercase() == b.to_lowercase())
+            // A shell global (a nested value) matches its exact name only.
+            let mut any_case = pick(|a, b| a.to_lowercase() == b.to_lowercase());
+            any_case.retain(|(_, i)| !(i.nested && i.kind == CodeItemKind::Value));
+            any_case
         } else {
             exact
         }

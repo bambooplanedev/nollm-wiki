@@ -2589,3 +2589,12 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     let hint = wiki::hint::hint_lines(&w, "where is the zb py derive script run");
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
 }
+
+#[test]
+fn a_shell_global_is_not_matched_in_another_case() {
+    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
+    assert_eq!(w.not_found("qx_py_derive", None, None), ["qx_py_derive"]);
+    assert!(symbol_lines(&w.search("qx_py_derive _qx_py_run", None, 10))
+        .iter()
+        .all(|l| l.3 != "QX_PY_DERIVE"));
+}

@@ -237,8 +237,13 @@ fn parse<'a>(w: &'a Wiki, id: &str) -> Option<Outline<'a>> {
     let imports = imports.iter().map(|i| one_line(i)).collect();
     let body = match SourceKind::parse(&e.kind) {
         Some(SourceKind::Code { .. }) => match w.items(id) {
-            [] => Body::NoItems(NO_ITEMS),
-            items if items.iter().all(|i| i.kind == CodeItemKind::TopLevel) => {
+            // Nested items are search-only: a page of them alone reads as before.
+            items if items.iter().all(|i| i.nested) => Body::NoItems(NO_ITEMS),
+            items
+                if items
+                    .iter()
+                    .all(|i| i.kind == CodeItemKind::TopLevel || i.nested) =>
+            {
                 Body::NoItems(NO_FUNCTIONS)
             }
             items => Body::Items(items),

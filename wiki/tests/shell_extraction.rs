@@ -489,3 +489,17 @@ fn assignment_in_a_top_level_and_or_list_is_a_value() {
     let (_d, wiki) = compiled_wiki(&[("env.sh", "T=\"$(date)\" || T=\"\"\n")]);
     assert_eq!(globals(&wiki, "env"), [g("T=\"$(date)\" || T=\"\"", 1, 1)]);
 }
+
+#[test]
+fn a_page_of_values_only_reads_as_before() {
+    for body in ["X=1\n", "X=1\necho hi\n"] {
+        let (_a, with) = compiled_wiki(&[("env.sh", body)]);
+        let (_b, without) = compiled_wiki(&[("env.sh", &body.replace('X', "x"))]);
+        assert_eq!(globals(&with, "env").len(), 1);
+        assert_eq!(
+            with.page_text("env", false, None),
+            without.page_text("env", false, None),
+            "{body}"
+        );
+    }
+}
