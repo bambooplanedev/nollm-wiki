@@ -86,13 +86,15 @@ per question is noise-level: treat single results as anecdotes.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
-- **Doc labels match words in a row.** `search` with `docs` finds a label
-  only when it holds the query words consecutively: `Step 5c flag above the
-  stamp` misses `Step 5c: a flag above the stamp's …` over the `a`, and a
-  paraphrase misses too. The empty answer says so and suggests fewer words
-  or grep. An in-order fallback with gaps was measured and dropped: 0 gains
-  on 380 lead grep terms, 1 wrong label, and 12.9% of empty two-common-word
-  queries turned non-empty.
+- **Doc labels match words, not meaning.** `search` with `docs` first wants
+  the query words in a row; when none match, labels opened (first or second
+  word) by the query's leading ID answer, else labels holding all its words
+  but a few stop words in any order, and a first line names the fallback.
+  A paraphrase still misses. The fallbacks can answer a content query with
+  a loose label: on 217 lead grep terms that matched no label, 4 now get one,
+  1 of them not what the lead read next (`record run` → a `T2a` label holding
+  `record` and `run`). An in-order fallback with gaps was measured earlier
+  and dropped (0 gains on 380 lead grep terms).
 - **Process folders and vendored code are skipped by name.** A `superpowers`
   folder and `third_party`/`vendor`/`node_modules`-style folders are not
   compiled (on one bench project 2,358 of 3,298 pages, 71%, and 77% of the

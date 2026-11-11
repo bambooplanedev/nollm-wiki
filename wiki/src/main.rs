@@ -386,16 +386,22 @@ fn main() -> Result<()> {
             dir,
         } => {
             if !docs.is_empty() {
-                let (hits, errors, more) = wiki::labels::doc_search(
+                let (hits, errors, more, fallback) = wiki::labels::doc_search(
                     Path::new("."),
                     &docs,
                     query.as_deref().unwrap_or(""),
                     limit,
                 );
                 if format == "json" {
-                    println!("{}", wiki::serve::doc_json(&hits, &errors, more));
+                    println!(
+                        "{}",
+                        wiki::serve::doc_json(&hits, &errors, more, fallback.as_deref())
+                    );
                 } else {
-                    print!("{}", wiki::labels::doc_lines(&hits, &errors, more));
+                    print!(
+                        "{}",
+                        wiki::labels::doc_lines(&hits, &errors, more, fallback.as_deref())
+                    );
                 }
                 return Ok(());
             }

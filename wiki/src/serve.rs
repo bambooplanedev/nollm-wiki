@@ -344,12 +344,12 @@ impl WikiServer {
                     None,
                 ));
             }
-            let (hits, errors, more) =
+            let (hits, errors, more, fallback) =
                 crate::labels::doc_search(&self.root, docs, &p.query, p.limit);
             let text = if json {
-                doc_json(&hits, &errors, more)
+                doc_json(&hits, &errors, more, fallback.as_deref())
             } else {
-                crate::labels::doc_lines(&hits, &errors, more)
+                crate::labels::doc_lines(&hits, &errors, more, fallback.as_deref())
             };
             return Ok(text_result(Ok(text)));
         }
@@ -554,8 +554,13 @@ impl ServerHandler for WikiServer {
     }
 }
 
-/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when the limit (or an empty query's default cap) cut n labels.
-pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) -> String {
+/// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when the limit (or an empty query's default cap) cut n labels and `"fallback": line` when a fallback answered.
+pub fn doc_json(
+    hits: &[crate::labels::DocHit],
+    errors: &[String],
+    more: usize,
+    fallback: Option<&str>,
+) -> String {
     let hits: Vec<_> = hits
         .iter()
         .map(|h| {
@@ -570,6 +575,9 @@ pub fn doc_json(hits: &[crate::labels::DocHit], errors: &[String], more: usize) 
     let mut out = serde_json::json!({"hits": hits, "errors": errors});
     if more > 0 {
         out["more"] = more.into();
+    }
+    if let Some(f) = fallback {
+        out["fallback"] = f.into();
     }
     out.to_string()
 }
