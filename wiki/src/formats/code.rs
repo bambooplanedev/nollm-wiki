@@ -1092,7 +1092,7 @@ fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: b
         let mut cursor = node.walk();
         stack.extend(node.named_children(&mut cursor));
         // `call` is Python's; every other grammar says `call_expression`.
-        let site = match node.kind() {
+        let mut sites: Vec<CallSite> = match node.kind() {
             "call_expression" | "call" => node
                 .child_by_field_name("function")
                 .and_then(|f| call_site(f, text))
@@ -1103,34 +1103,41 @@ fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: b
             "token_tree" => macro_call_site(node, text),
             "command" if shell => shell_call_site(node, text),
             _ => None,
-        };
-        let Some(mut site) = site else {
-            continue;
-        };
-        match &mut site.via {
-            CallVia::Bare => unalias(&mut site.name, node),
-            CallVia::Path(q) | CallVia::Member(Some(q)) => unalias(q, node),
-            _ => {}
         }
-        let line = node.start_position().row + 1;
-        site.line = line;
-        let holder = fns
-            .iter()
-            .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
-            .min_by_key(|&&i| items[i].end_line - items[i].start_line);
+        .into_iter()
+        .collect();
+        for site in &mut sites {
+            match &mut site.via {
+                CallVia::Bare => unalias(&mut site.name, node),
+                CallVia::Path(q) | CallVia::Member(Some(q)) => unalias(q, node),
+                _ => {}
+            }
+            site.line = node.start_position().row + 1;
+        }
+        if shell && node.kind() == "command" {
+            sites.extend(shell_string_calls(node, text));
+        }
         // An ERROR node met before any function definition: the tree is not
         // to be trusted for who holds this call.
-        if shell
-            && std::iter::successors(node.parent(), Node::parent)
-                .find(|a| a.is_error() || a.kind() == "function_definition")
-                .is_some_and(|a| a.is_error())
+        if sites.is_empty()
+            || shell
+                && std::iter::successors(node.parent(), Node::parent)
+                    .find(|a| a.is_error() || a.kind() == "function_definition")
+                    .is_some_and(|a| a.is_error())
         {
             continue;
         }
-        match holder {
-            Some(&i) => items[i].call_sites.push(site),
-            None if shell => top_level.push(site),
-            None => {}
+        for site in sites {
+            let line = site.line;
+            let holder = fns
+                .iter()
+                .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
+                .min_by_key(|&&i| items[i].end_line - items[i].start_line);
+            match holder {
+                Some(&i) => items[i].call_sites.push(site),
+                None if shell => top_level.push(site),
+                None => {}
+            }
         }
     }
     if !top_level.is_empty() {
@@ -1152,6 +1159,56 @@ fn shell_call_site(node: Node, text: &str) -> Option<CallSite> {
             args: None,
             line: 0,
         })
+}
+
+/// The commands in the quoted code a `trap`, `eval` or `sh -c` command
+/// runs, each a call at its own line; a command substitution in it is
+/// already one in the outer tree and is skipped.
+fn shell_string_calls(node: Node, text: &str) -> Vec<CallSite> {
+    let word = |n: &Node| text.get(n.byte_range()).unwrap_or("");
+    let mut cursor = node.walk();
+    let args: Vec<Node> = node
+        .children_by_field_name("argument", &mut cursor)
+        .collect();
+    let code = match node.child_by_field_name("name").map(|n| word(&n)) {
+        Some("trap" | "eval") => args.first(),
+        Some("bash" | "sh" | "zsh") => args
+            .iter()
+            .position(|a| {
+                word(a).starts_with('-') && !word(a).starts_with("--") && word(a).contains('c')
+            })
+            .and_then(|i| args.get(i + 1)),
+        _ => None,
+    };
+    let Some(code) = code.filter(|a| matches!(a.kind(), "raw_string" | "string")) else {
+        return Vec::new();
+    };
+    let inner = word(code);
+    let inner = inner.get(1..inner.len().saturating_sub(1)).unwrap_or("");
+    let mut parser = Parser::new();
+    let Some(tree) = parser
+        .set_language(&tree_sitter_bash::LANGUAGE.into())
+        .ok()
+        .and_then(|()| parser.parse(inner, None))
+    else {
+        return Vec::new();
+    };
+    let mut sites = Vec::new();
+    let mut stack = vec![tree.root_node()];
+    while let Some(n) = stack.pop() {
+        if n.kind() == "command_substitution" {
+            continue;
+        }
+        let mut c = n.walk();
+        stack.extend(n.named_children(&mut c));
+        if n.kind() == "command" {
+            if let Some(mut site) = shell_call_site(n, inner) {
+                site.line = code.start_position().row + n.start_position().row + 1;
+                sites.push(site);
+            }
+        }
+    }
+    sites
 }
 
 /// What a call's `function` node names, in any grammar this file dispatches
