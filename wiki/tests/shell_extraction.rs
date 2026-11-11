@@ -483,3 +483,9 @@ fn broken_file_keeps_its_assignments() {
     let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
     assert_eq!(globals(&wiki, "env"), [g("A=1", 1, 1), g("B=2", 3, 3)]);
 }
+
+#[test]
+fn assignment_in_a_top_level_and_or_list_is_a_value() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "T=\"$(date)\" || T=\"\"\n")]);
+    assert_eq!(globals(&wiki, "env"), [g("T=\"$(date)\" || T=\"\"", 1, 1)]);
+}

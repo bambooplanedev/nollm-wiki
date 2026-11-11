@@ -103,13 +103,21 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
 }
 
 /// The file's top-level `NAME=value` assignments, `export`, `readonly` and
-/// `declare` ones included, `NAME` in `[A-Z][A-Z0-9_]*`, the first of each
+/// `declare` ones and those in an `&&` / `||` list included, `NAME` in `[A-Z][A-Z0-9_]*`, the first of each
 /// name only: nested items, so `search` finds them by name and nothing else
 /// lists them. An item spans its statement; its signature is the first line.
 pub(crate) fn globals(root: Node, text: &str) -> Vec<CodeItem> {
     let mut out: Vec<CodeItem> = Vec::new();
-    for stmt in root.named_children(&mut root.walk()) {
+    // A stack in source order: an `a && b` / `a || b` list adds its parts.
+    let mut todo: Vec<Node> = root.named_children(&mut root.walk()).collect();
+    todo.reverse();
+    while let Some(stmt) = todo.pop() {
         let assignments: Vec<Node> = match stmt.kind() {
+            "list" => {
+                let parts: Vec<Node> = stmt.named_children(&mut stmt.walk()).collect();
+                todo.extend(parts.into_iter().rev());
+                continue;
+            }
             "variable_assignment" => vec![stmt],
             "declaration_command" if !text[stmt.byte_range()].starts_with("local") => stmt
                 .named_children(&mut stmt.walk())
