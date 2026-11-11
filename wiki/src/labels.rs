@@ -75,7 +75,7 @@ pub const DOC_LIST_LIMIT: usize = 200;
 
 /// The line for an empty `docs` answer: why nothing matched and what to try.
 pub const DOC_NO_MATCH: &str =
-    "no matches: a label must hold the query words in a row; try fewer words or an ID like T5k, or grep for text inside a doc";
+    "no matches: no label holds the query words in a row, opens with its leading ID, or holds all its words; try other words or an ID like T5k, or grep for text inside a doc";
 
 /// A label found in one of the searched documents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,13 +86,17 @@ pub struct DocHit {
     pub text: String,
 }
 
-/// Lowercased words: split on anything but alphanumerics, `-`, `_`, `.`;
-/// trailing `.` and `-` trimmed.
-fn words(s: &str) -> Vec<String> {
+/// Words split on anything but alphanumerics, `-`, `_`, `.`; trailing `.`
+/// and `-` trimmed.
+fn raw_words(s: &str) -> impl Iterator<Item = &str> {
     s.split(|c: char| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')))
-        .map(|w| w.trim_end_matches(['.', '-']).to_lowercase())
+        .map(|w| w.trim_end_matches(['.', '-']))
         .filter(|w| !w.is_empty())
-        .collect()
+}
+
+/// `raw_words`, lowercased.
+fn words(s: &str) -> Vec<String> {
+    raw_words(s).map(str::to_lowercase).collect()
 }
 
 /// `words` with every word also split on `-`.
@@ -109,63 +113,73 @@ fn find(w: &[String], q: &[String]) -> Option<usize> {
     w.windows(q.len()).position(|win| win == q)
 }
 
+/// Words dropped by the any-order fallback.
+const STOP_WORDS: &[&str] = &[
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "into", "is", "of", "on", "or", "the",
+    "to", "via", "with",
+];
+
 /// Labels of the markdown files `docs` (relative to `root`) whose text holds
 /// the query's words consecutively. Headings rank before bold labels, a match
 /// at the first word before a later one, then `docs` order, then document
 /// order. Matches that hold only once `-` also splits words (two or more such
 /// query words) rank after all the others. When the limit cuts some of the
 /// labels one doc repeats under a head (text before the first `: `), the
-/// slots they had go to the first and last of them alternately. Returns the hits grouped by doc,
-/// one error line per unusable path, and how many matching labels the limit
-/// (or an empty query's default cap) cut.
+/// slots they had go to the first and last of them alternately. When a query
+/// of two or more words matches nothing, labels whose first or second word is
+/// the query's leading word answer if that word has a digit (an ID like `11.4`
+/// or `T3a`), else labels holding all its words but stop words (two or more)
+/// in any order. Returns the hits grouped
+/// by doc, one error line per unusable path, how many matching labels the
+/// limit (or an empty query's default cap) cut, and the line naming the
+/// fallback that answered.
 pub fn doc_search(
     root: &Path,
     docs: &[String],
     query: &str,
     limit: Option<usize>,
-) -> (Vec<DocHit>, Vec<String>, usize) {
+) -> (Vec<DocHit>, Vec<String>, usize, Option<String>) {
     let q = words(query);
     let qs = split_words(query);
-    let mut ranked = Vec::new();
-    let mut errors = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for (doc, path) in docs.iter().enumerate() {
-        // The same file under another spelling is read once, at its first place.
-        let file = root.join(path);
-        if !seen.insert(file.canonicalize().unwrap_or(file)) {
-            continue;
+    let (mut ranked, errors) = matching(root, docs, |t| {
+        if q.is_empty() {
+            return Some((false, 0));
         }
-        if !Path::new(path)
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("md"))
-        {
-            errors.push(format!("{path}: not a markdown file"));
-            continue;
+        match find(&words(t), &q) {
+            Some(at) => Some((false, at)),
+            None if qs.len() > 1 => find(&split_words(t), &qs).map(|at| (true, at)),
+            None => None,
         }
-        let Ok(md) = std::fs::read_to_string(root.join(path)) else {
-            errors.push(format!("{path}: not found"));
-            continue;
-        };
-        for l in labels(&md) {
-            let exact = if q.is_empty() {
-                Some(0)
-            } else {
-                find(&words(&l.text), &q)
-            };
-            let found = match exact {
-                Some(at) => Some((false, at)),
-                None if qs.len() > 1 => find(&split_words(&l.text), &qs).map(|at| (true, at)),
-                None => None,
-            };
-            if let Some((loose, at)) = found {
-                let hit = DocHit {
-                    path: path.clone(),
-                    start: l.start,
-                    end: l.end,
-                    text: l.text,
-                };
-                ranked.push(((loose, l.level == BOLD, at > 0), doc, hit));
-            }
+    });
+    let mut fallback = None;
+    if ranked.is_empty() && q.len() > 1 {
+        let mut note = String::new();
+        let id = raw_words(query)
+            .next()
+            .filter(|w| w.contains(|c: char| c.is_ascii_digit()));
+        if let Some(id) = id {
+            ranked = matching(root, docs, |t| {
+                find(&words(t), &q[..1])
+                    .filter(|&at| at <= 1)
+                    .map(|at| (false, at))
+            })
+            .0;
+            note = format!("labels with the leading ID {id}");
+        }
+        let need: Vec<_> = qs
+            .iter()
+            .filter(|w| !STOP_WORDS.contains(&w.as_str()))
+            .collect();
+        if ranked.is_empty() && need.len() > 1 {
+            ranked = matching(root, docs, |t| {
+                let w = split_words(t);
+                need.iter().all(|n| w.contains(n)).then_some((false, 0))
+            })
+            .0;
+            note = "labels with all the words in any order, stop words dropped".into();
+        }
+        if !ranked.is_empty() {
+            fallback = Some(format!("no label holds the words in a row; {note}:"));
         }
     }
     if !q.is_empty() {
@@ -208,7 +222,51 @@ pub fn doc_search(
         .collect();
     ranked.sort_by_key(|(_, doc, _)| *doc);
     let hits = ranked.into_iter().map(|(_, _, h)| h).collect();
-    (hits, errors, more)
+    (hits, errors, more, fallback)
+}
+
+/// Rank key, `docs` index and hit of every label whose text `matches` (giving
+/// whether it matched loosely and at which word), plus one error per unusable path.
+type Ranked = Vec<((bool, bool, bool), usize, DocHit)>;
+fn matching(
+    root: &Path,
+    docs: &[String],
+    matches: impl Fn(&str) -> Option<(bool, usize)>,
+) -> (Ranked, Vec<String>) {
+    let mut ranked = Vec::new();
+    let mut errors = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (doc, path) in docs.iter().enumerate() {
+        // The same file under another spelling is read once, at its first place.
+        let file = root.join(path);
+        if !seen.insert(file.canonicalize().unwrap_or(file)) {
+            continue;
+        }
+        if !Path::new(path)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        {
+            errors.push(format!("{path}: not a markdown file"));
+            continue;
+        }
+        let Ok(md) = std::fs::read_to_string(root.join(path)) else {
+            errors.push(format!("{path}: not found"));
+            continue;
+        };
+        for l in labels(&md) {
+            if let Some((loose, at)) = matches(&l.text) {
+                let key = (loose, l.level == BOLD, at > 0);
+                let hit = DocHit {
+                    path: path.clone(),
+                    start: l.start,
+                    end: l.end,
+                    text: l.text,
+                };
+                ranked.push((key, doc, hit));
+            }
+        }
+    }
+    (ranked, errors)
 }
 
 /// What repeated labels share: the text before the first `: ` (or a trailing
@@ -222,11 +280,16 @@ fn head(text: &str) -> String {
     if h.is_empty() { text } else { h }.to_lowercase()
 }
 
-/// Hits grouped by consecutive path: the path alone on a line, then
-/// `  start-end  text` per hit; then the error lines; [`DOC_NO_MATCH`] if
-/// nothing else prints.
-pub fn doc_lines(hits: &[DocHit], errors: &[String], more: usize) -> String {
-    let mut out = String::new();
+/// The `fallback` line if any; hits grouped by consecutive path: the path
+/// alone on a line, then `  start-end  text` per hit; then the error lines;
+/// [`DOC_NO_MATCH`] if nothing else prints.
+pub fn doc_lines(
+    hits: &[DocHit],
+    errors: &[String],
+    more: usize,
+    fallback: Option<&str>,
+) -> String {
+    let mut out = fallback.map_or(String::new(), |f| format!("{f}\n"));
     let mut path = None;
     for h in hits {
         if path != Some(&h.path) {

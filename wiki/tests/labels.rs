@@ -92,7 +92,12 @@ fn id_inside_a_label_matches_after_first_word_hits() {
 #[test]
 fn title_words_consecutive_case_insensitive() {
     assert_eq!(texts("remaining MATRIX"), ["T2d. Remaining matrix."]);
-    assert_eq!(texts("matrix remaining").len(), 0);
+    // out of order only through the named any-order fallback
+    let (h, _, _, fb) = doc_search(dir(), &["plan.md".into()], "matrix remaining", None);
+    assert_eq!(
+        (h[0].text.as_str(), fb.is_some()),
+        ("T2d. Remaining matrix.", true)
+    );
 }
 #[test]
 fn heading_ranks_before_bold_and_fields_never_match() {
@@ -112,12 +117,12 @@ fn first_word_match_ranks_before_later_word() {
 #[test]
 fn empty_query_lists_every_label_unbounded() {
     assert_eq!(hits("").len(), 6 + 2);
-    let (h, _, _) = doc_search(dir(), &["plan.md".into()], "", Some(2));
+    let (h, _, _, _) = doc_search(dir(), &["plan.md".into()], "", Some(2));
     assert_eq!(h.len(), 2);
 }
 #[test]
 fn bad_paths_get_one_line_each_and_others_answer() {
-    let (h, e, _) = doc_search(
+    let (h, e, _, _) = doc_search(
         dir(),
         &["nope.md".into(), "x.txt".into(), "plan.md".into()],
         "T2d",
@@ -129,18 +134,18 @@ fn bad_paths_get_one_line_each_and_others_answer() {
 #[test]
 fn lines_render_like_symbol_ranges() {
     assert_eq!(
-        doc_lines(&hits("T2d"), &[], 0),
+        doc_lines(&hits("T2d"), &[], 0, None),
         "plan.md\n  5-10  T2d. Remaining matrix.\n"
     );
-    assert_eq!(doc_lines(&[], &[], 0), format!("{DOC_NO_MATCH}\n"));
+    assert_eq!(doc_lines(&[], &[], 0, None), format!("{DOC_NO_MATCH}\n"));
 }
 #[test]
 fn no_match_line_only_when_nothing_else_prints() {
     assert_eq!(
-        doc_lines(&[], &["nope.md: not found".into()], 0),
+        doc_lines(&[], &["nope.md: not found".into()], 0, None),
         "nope.md: not found\n"
     );
-    let cut = doc_lines(&[], &[], 3);
+    let cut = doc_lines(&[], &[], 3, None);
     assert!(
         cut.contains("… 3 more labels") && !cut.contains("no matches"),
         "{cut}"
@@ -149,8 +154,8 @@ fn no_match_line_only_when_nothing_else_prints() {
     let d = std::env::temp_dir().join(format!("wiki-nolabel-{}", std::process::id()));
     std::fs::create_dir_all(&d).unwrap();
     std::fs::write(d.join("p.md"), "plain text, no labels\n").unwrap();
-    let (h, e, more) = doc_search(&d, &["p.md".to_string()], "", None);
-    assert_eq!(doc_lines(&h, &e, more), format!("{DOC_NO_MATCH}\n"));
+    let (h, e, more, _) = doc_search(&d, &["p.md".to_string()], "", None);
+    assert_eq!(doc_lines(&h, &e, more, None), format!("{DOC_NO_MATCH}\n"));
 }
 #[test]
 fn lines_print_each_path_once_and_errors_last() {
@@ -162,7 +167,7 @@ fn lines_print_each_path_once_and_errors_last() {
     };
     let hs = [h("a.md", 1), h("a.md", 2), h("a.md", 4), h("b.md", 3)];
     assert_eq!(
-        doc_lines(&hs, &["c.md: not found".into()], 0),
+        doc_lines(&hs, &["c.md: not found".into()], 0, None),
         "a.md\n  1-1  x\n  2-2  x\n  4-4  x\nb.md\n  3-3  x\nc.md: not found\n"
     );
 }
@@ -171,7 +176,7 @@ fn texts_in(md: &str, q: &str) -> Vec<String> {
     let d = std::env::temp_dir().join(format!("wiki-hy-{}-{}", std::process::id(), md.len()));
     std::fs::create_dir_all(&d).unwrap();
     std::fs::write(d.join("p.md"), md).unwrap();
-    let (h, _, _) = doc_search(&d, &["p.md".to_string()], q, None);
+    let (h, _, _, _) = doc_search(&d, &["p.md".to_string()], q, None);
     h.into_iter().map(|h| h.text).collect()
 }
 #[test]
@@ -219,7 +224,7 @@ fn checkbox_steps_are_labels() {
     let dir = std::env::temp_dir().join(format!("wiki-cb-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("p.md"), CHECKBOX_PLAN).unwrap();
-    let (hits, _, _) = doc_search(&dir, &["p.md".to_string()], "T5k", None);
+    let (hits, _, _, _) = doc_search(&dir, &["p.md".to_string()], "T5k", None);
     assert_eq!(hits.len(), 1);
     assert_eq!((hits[0].start, hits[0].end), (2, 4));
 }
@@ -259,7 +264,7 @@ fn hits_are_grouped_by_doc_after_global_ranking() {
     // p.md: bold match ranks after q.md heading match, but output groups by doc.
     let d = write_tmp("group", "**Task B**\n## Task C\n");
     let docs = ["p.md".to_string(), "q.md".to_string()];
-    let (h, _, _) = doc_search(&d, &docs, "task", None);
+    let (h, _, _, _) = doc_search(&d, &docs, "task", None);
     let t: Vec<_> = h
         .iter()
         .map(|h| (h.path.as_str(), h.text.as_str()))
@@ -269,11 +274,11 @@ fn hits_are_grouped_by_doc_after_global_ranking() {
         [("p.md", "Task C"), ("p.md", "Task B"), ("q.md", "Task A")]
     );
     assert_eq!(
-        doc_lines(&h, &[], 0),
+        doc_lines(&h, &[], 0, None),
         "p.md\n  2-2  Task C\n  1-1  Task B\nq.md\n  1-1  Task A\n"
     );
     // the limit keeps the globally best hits, then groups them
-    let (h, _, _) = doc_search(&d, &docs, "task", Some(2));
+    let (h, _, _, _) = doc_search(&d, &docs, "task", Some(2));
     let t: Vec<_> = h.iter().map(|h| h.text.as_str()).collect();
     assert_eq!(t, ["Task C", "Task A"]);
 }
@@ -302,14 +307,14 @@ fn empty_query_listing_is_capped_unless_limit_given() {
     let md: String = (0..250).fold(String::new(), |s, i| s + &format!("**L{i}. x**\n"));
     let d = write_tmp("cap", &md);
     let docs = ["p.md".to_string()];
-    let (h, _, more) = doc_search(&d, &docs, "", None);
+    let (h, _, more, _) = doc_search(&d, &docs, "", None);
     assert_eq!((h.len(), more), (DOC_LIST_LIMIT, 50));
-    let out = doc_lines(&h, &["z.md: not found".into()], more);
+    let out = doc_lines(&h, &["z.md: not found".into()], more, None);
     assert!(out.ends_with("… 50 more labels; pass limit to list them\nz.md: not found\n"));
-    let (h, _, more) = doc_search(&d, &docs, "", Some(300));
+    let (h, _, more, _) = doc_search(&d, &docs, "", Some(300));
     assert_eq!((h.len(), more), (250, 0));
-    assert!(!doc_lines(&h, &[], 0).contains("more label"));
-    assert!(doc_lines(&h, &[], 1).ends_with("… 1 more label; pass limit to list them\n"));
+    assert!(!doc_lines(&h, &[], 0, None).contains("more label"));
+    assert!(doc_lines(&h, &[], 1, None).ends_with("… 1 more label; pass limit to list them\n"));
     assert_eq!(doc_search(&d, &docs, "L1", None).2, 0);
 }
 
@@ -367,4 +372,69 @@ fn labels_skip_bare_headings_and_strip_closing_hashes() {
     let md = "# Only\n\n#\n\n## Closing ##\n\n### Kept#\n\n## Tail ###   \n\n## ##\n\n  ## Indented\n    ## Code\n";
     let t: Vec<_> = labels(md).into_iter().map(|l| l.text).collect();
     assert_eq!(t, ["Only", "Closing", "Kept#", "Tail"]);
+}
+
+fn fallback_in(md: &str, q: &str) -> (Vec<String>, Option<String>) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let d = write_tmp(&format!("fb{n}"), md);
+    let (h, _, _, fb) = doc_search(&d, &["p.md".to_string()], q, None);
+    (h.into_iter().map(|h| h.text).collect(), fb)
+}
+const SPEC: &str = "## 11.4 The QX time line\n## 11.6 The crop-history export grammar (`tally --run`)\n**Step 5c: a flag above the stamp's per-batch N refuses.**\n**Task 9: brew_eval NOT SCORED, `--live-plots`**\n";
+#[test]
+fn leading_id_answers_when_the_words_miss() {
+    let (t, fb) = fallback_in(SPEC, "11.4 QX time line");
+    assert_eq!(t, ["11.4 The QX time line"]);
+    assert!(fb.unwrap().contains("leading ID 11.4"));
+    let (t, _) = fallback_in(SPEC, "11.6 export coverage tally --run");
+    assert_eq!(t, ["11.6 The crop-history export grammar (`tally --run`)"]);
+}
+#[test]
+fn all_words_in_any_order_answer_without_stop_words() {
+    let (t, fb) = fallback_in(SPEC, "Step 5c flag above the stamp");
+    assert_eq!(
+        t,
+        ["Step 5c: a flag above the stamp's per-batch N refuses."]
+    );
+    assert!(fb.unwrap().contains("any order"));
+    let (t, _) = fallback_in(SPEC, "NOT SCORED live plots");
+    assert_eq!(t, ["Task 9: brew_eval NOT SCORED, `--live-plots`"]);
+    let (t, _) = fallback_in(SPEC, "time line QX");
+    assert_eq!(t, ["11.4 The QX time line"]);
+}
+#[test]
+fn normal_matches_and_misses_name_no_fallback() {
+    assert_eq!(
+        fallback_in(SPEC, "QX time line"),
+        (vec!["11.4 The QX time line".to_string()], None)
+    );
+    // one word never falls back; nor do words a label lacks
+    assert_eq!(fallback_in(SPEC, "QXV"), (vec![], None));
+    assert_eq!(
+        fallback_in(SPEC, "11.9 QX time line coverage"),
+        (vec![], None)
+    );
+    assert_eq!(fallback_in(SPEC, "the a of"), (vec![], None));
+    // the ID must open the label (first or second word); one word left is not enough
+    let late = "## Row A: help is a usage error (QA-F Task 6 T3)\n**Step 5g: fee.**\n";
+    assert_eq!(fallback_in(late, "T3 (i-c)"), (vec![], None));
+    assert_eq!(fallback_in(late, "5g is complete").0, ["Step 5g: fee."]);
+    assert_eq!(fallback_in(late, "in usage"), (vec![], None));
+}
+#[test]
+fn the_fallback_is_named_first_in_lines() {
+    let d = write_tmp("fbl", SPEC);
+    let (h, e, more, fb) = doc_search(&d, &["p.md".to_string()], "11.4 QX", None);
+    let json: serde_json::Value =
+        serde_json::from_str(&wiki::serve::doc_json(&h, &e, more, fb.as_deref())).unwrap();
+    assert_eq!(json["fallback"].as_str(), fb.as_deref());
+    let plain: serde_json::Value =
+        serde_json::from_str(&wiki::serve::doc_json(&h, &e, more, None)).unwrap();
+    assert!(plain.get("fallback").is_none());
+    let out = doc_lines(&h, &e, more, fb.as_deref());
+    assert_eq!(
+        out,
+        format!("{}\np.md\n  1-1  11.4 The QX time line\n", fb.unwrap())
+    );
 }
