@@ -527,3 +527,44 @@ fn assignment_inside_an_error_node_is_a_value() {
     let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
     assert_eq!(globals(&wiki, "env"), [g("M=(a b)", 3, 3)]);
 }
+
+#[test]
+fn trap_string_command_is_a_call_from_its_function() {
+    let src = "cleanup() { :; }\nrun() {\n  trap 'cleanup now' EXIT\n}\ntrap \"cleanup $X\" INT\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    let text = callers_text(&wiki, "s", "cleanup", None);
+    assert!(text.contains("run  calls cleanup at 3"), "{text}");
+    assert!(text.contains("<top level>  calls cleanup at 5"), "{text}");
+}
+
+#[test]
+fn every_command_of_a_dash_c_string_is_a_call() {
+    let src = "a() { :; }\nb() { :; }\nc() { :; }\nd() { :; }\n\
+               run() {\n  bash -c 'a; b && c x | d'\n  sh -ec \"a\"\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    for f in ["a", "b", "c", "d"] {
+        let text = callers_text(&wiki, "s", f, None);
+        assert!(text.contains(&format!("run  calls {f} at 6")), "{text}");
+    }
+    assert!(callers_text(&wiki, "s", "a", None).contains("at 6, 7"));
+}
+
+#[test]
+fn eval_string_command_is_a_call_once() {
+    let src = "f() { :; }\ng() { :; }\nrun() {\n  eval 'f'\n  eval \"$(g)\"\n  eval \"$cmd\"\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    assert!(callers_text(&wiki, "s", "f", None).contains("run  calls f at 4"));
+    // `$(g)` is already a call in the outer tree: not counted twice.
+    let text = callers_text(&wiki, "s", "g", None);
+    assert!(
+        text.contains("run  calls g at 5\n") || text.ends_with("calls g at 5"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_string_that_is_no_code_names_no_call() {
+    let src = "f() { :; }\nrun() {\n  echo 'f'\n  trap - EXIT\n  bash 'f'\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
+    assert!(callers_text(&wiki, "s", "f", None).contains("0 functions"));
+}
