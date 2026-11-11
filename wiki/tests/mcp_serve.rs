@@ -1555,3 +1555,37 @@ fn mcp_search_empty_docs_is_plain_search() {
     assert!(!text_of(&plain).contains("no matches"), "{plain}");
     assert_eq!(text_of(&empty), text_of(&plain));
 }
+
+#[test]
+fn mcp_and_cli_search_carry_the_same_called_by_note() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+    std::fs::write(
+        tmp.path().join("src/lib.rs"),
+        "pub fn add_one() {}\npub fn use_a() { add_one(); }\npub fn use_b() { add_one(); }\n",
+    )
+    .unwrap();
+    let out = tmp.path().join("out");
+    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        9,
+        "search",
+        &json!({"query": "add_one"}),
+    );
+    child.kill().ok();
+    let mcp = text_of(&resp).to_string();
+    let cli = Command::new(env!("CARGO_BIN_EXE_wiki"))
+        .args(["search", "add_one", "--dir"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8(cli.stdout).unwrap(), mcp);
+    assert!(
+        mcp.contains("add_one  pub fn add_one()  [called by 2: `callers`]\n"),
+        "{mcp}"
+    );
+}

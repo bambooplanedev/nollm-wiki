@@ -565,7 +565,9 @@ the first (`_ack`, `Router::slice_cap_for`, `OrderBook`), is an identifier: its 
 counts and its definitions are items named exactly so (in any case only when none matches the case).
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
 however many sit in one file, then `not found: <name>` for each name nothing defines (when no name is
-defined, the ranked hits come before those lines). In any other query a definition the ranking missed
+defined, the ranked hits come before those lines). In such a query a function or method line ends its signature with
+`` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
+definition included), and has no note when N is 0. In any other query a definition the ranking missed
 is added after its page's lines, or as a page after the hits; the order does not change. A Python
 function defined in another function's body is a symbol for `search` only: no `page` line, no export,
 no hint line, no call edge (its calls are its enclosing function's). A summary,

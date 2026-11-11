@@ -657,7 +657,8 @@ pub fn memory_prefix(o: &Origin) -> String {
 
 /// Render search hits as the default line output: `id  path  [date  ]title — summary`
 /// per page, then one `  path:start-end  name  signature  — doc` line per
-/// symbol (a function with exactly one other definition elsewhere adds
+/// symbol (`SymbolLine::called_by` adds `  [called by N: callers]`, callers in backticks,
+/// before the doc; a function with exactly one other definition elsewhere adds
 /// `    also defined: path:start-end  name`), or
 /// the snippet (four-space indent) when the page has no symbols. A summary,
 /// snippet or doc is cut at `LINE_CHARS`, as a hint line is.
@@ -714,6 +715,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 s.name,
                 one_line(&s.signature)
             ));
+            if let Some(n) = s.called_by {
+                out.push_str(&format!("  [called by {n}: `callers`]"));
+            }
             if let Some(d) = &s.doc {
                 out.push_str(&format!("  — {}", clip(d, LINE_CHARS)));
             }

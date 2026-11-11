@@ -154,6 +154,12 @@ per question is noise-level: treat single results as anecdotes.
   require('./x')`, `const { a: b } = require(…)`), a TS default import
   used as a namespace (`import d from './m'; d.f()`), and calls inside a
   `macro_rules!` body. An empty `callers` result says so and points to grep.
+- **Shell code in strings is not read:** a call inside a `trap '…'`,
+  `bash -c "…"` or `eval "…"` string is no edge, so a function run only so
+  has no callers.
+- **A shell function passed to a wrapper is not called:** in `wrap fn args`
+  only `wrap` gets the call; `fn` has no caller, even when `wrap` runs
+  `"$@"`.
 - **Rust macro arguments are read as tokens.** Any `name(…)` token tree
   inside a macro invocation (`format!`, `select!`, `assert_eq!`, …) counts
   as a call, so a tuple-struct or enum pattern in `matches!(x, Foo(y))`

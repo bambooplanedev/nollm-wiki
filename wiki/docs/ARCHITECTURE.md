@@ -664,7 +664,11 @@ matching:
   pages ranked higher first, then by pagerank. A query of identifiers
   alone with any defined gets just those lines, page by page in the order
   names first land, with no per-page cap; `not_found` lists the rest and
-  the line output prints `not found: <name>` after the hits. In any other
+  the line output prints `not found: <name>` after the hits. There each
+  non-nested function or method line carries `called_by`
+  (`Wiki::caller_count`: the distinct callers of the item and its twin, as
+  `callers` lists them one level up, `None` at 0), which the line output
+  prints as `` [called by N: `callers`] `` after the signature. In any other
   query a missing definition line is appended to its page, or its page to
   the hits, and nothing moves: lifting named lines first cost three top-1
   answers on the search regression set, where the name was context. The

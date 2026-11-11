@@ -426,6 +426,9 @@ pub struct SymbolLine {
     /// The one other definition of a function's name elsewhere in the
     /// project, as `(path, start_line, end_line, name)`; see `same_name`.
     pub also: Option<(String, usize, usize, String)>,
+    /// How many functions call it, as `callers` lists them one level up;
+    /// set on a function's line in a query of names alone, when any does.
+    pub called_by: Option<usize>,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,
@@ -1547,7 +1550,11 @@ impl Wiki {
             });
             defs.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
             for (e, i) in defs {
-                let line = self.symbol_line(&e.path, i);
+                let mut line = self.symbol_line(&e.path, i);
+                if only && matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.nested {
+                    let n = self.caller_count(&e.path, i);
+                    line.called_by = (n > 0).then_some(n);
+                }
                 let same = |s: &SymbolLine| {
                     (s.start_line, s.end_line, &s.name)
                         == (line.start_line, line.end_line, &line.name)
@@ -1934,6 +1941,7 @@ impl Wiki {
             test: i.test,
             nested: i.nested,
             also: self.same_name(i, path),
+            called_by: None,
         }
     }
 
