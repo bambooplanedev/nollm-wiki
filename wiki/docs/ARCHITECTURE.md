@@ -794,7 +794,8 @@ resolution across files.
 -> None`, joined with `.` rather than Rust's `::`. `python_placement` walks
 upward from a captured definition and rejects it outright the moment it finds
 an enclosing `function_definition` or `lambda` — a **deny-list** of one
-excluded node kind, where Rust's `rust_placement` is an **allow-list** of
+excluded node kind (except a function directly in a function body, see
+below), where Rust's `rust_placement` is an **allow-list** of
 permitted containers; both walks otherwise keep definitions nested under
 `if`/`try`/`with`/`match`/`while`/`for`, since those are genuine module-level
 surface (`if TYPE_CHECKING: def …` and `try: def … except ImportError:` are
@@ -903,7 +904,15 @@ doc), and JS/TS top-level variables that hold no function. C++, Go and JS/TS
 values are `@item`-only, so `## Exports`, `defined` and `methods` never see
 them; Rust `const`/`static` and Python module assignments are `@def`s.
 Fields, variants, associated consts and types, impl headers and
-function-local definitions are not items. An item's range climbs from its
+function-local definitions are not items, except a Python `def` directly in
+a function body (`Placement::Nested`; one in a class defined there stays
+out): an item with `nested` set, never public, owner-less, found by
+`search` only. Outlines (`Keep::items`), the hint, `also defined`
+(`same_name`) and the call graph skip it: it is no call target and owns no
+call sites (`attach_call_sites`), so calls in its body stay its enclosing
+function's. As targets, same-named helpers nested in different test
+functions cross-wired (a private C++ project, 2026-11-11: 68 edges lost, 145
+wrong); without, the graph equals the one with no nested items. An item's range climbs from its
 signature node over the contiguous leads directly above it
 (`LangSpec::item_lead`: Rust attributes and `///` lines, Doxygen comments,
 JSDoc blocks, Go `//` lines, with Go directives such as `//go:generate`

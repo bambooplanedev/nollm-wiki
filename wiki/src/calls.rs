@@ -70,7 +70,9 @@ impl<'a> Index<'a> {
                 if it.kind == CodeItemKind::Type {
                     types.insert(&it.name);
                 }
-                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+                // A nested function is no call target: same-named helpers
+                // nested in test functions would cross-wire.
+                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) && !it.nested {
                     by_name.entry(&it.name).or_default().push((p, i));
                     by_span.insert(it.span(&e.source_path), (p, i));
                 }
@@ -351,9 +353,9 @@ impl Wiki {
     ) -> Result<String, String> {
         let path = self.entry(id).map_or("", |e| e.path.as_str());
         let fns = || {
-            self.items(id)
-                .iter()
-                .filter(|it| matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method))
+            self.items(id).iter().filter(|it| {
+                matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) && !it.nested
+            })
         };
         let symbol = symbol.trim().trim_end_matches("()");
         let roots: Vec<&CodeItem> = fns()

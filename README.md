@@ -564,7 +564,9 @@ counts and its definitions are items named exactly so (in any case only when non
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
 however many sit in one file, then `not found: <name>` for each name nothing defines (when no name is
 defined, the ranked hits come before those lines). In any other query a definition the ranking missed
-is added after its page's lines, or as a page after the hits; the order does not change. A summary,
+is added after its page's lines, or as a page after the hits; the order does not change. A Python
+function defined in another function's body is a symbol for `search` only: no `page` line, no export,
+no hint line, no call edge (its calls are its enclosing function's). A summary,
 snippet or doc longer than 160 characters is cut with
 `…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
 symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
