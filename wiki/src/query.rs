@@ -1007,6 +1007,8 @@ impl Wiki {
         for item in items
             .iter()
             .filter(|i| !i.test && !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+            // A shell global (a nested value) is found by its exact name only.
+            .filter(|i| !(i.nested && i.kind == CodeItemKind::Value))
         {
             let whole = item.name.to_lowercase();
             if !title_words.contains(&whole.as_str()) {
@@ -1109,6 +1111,7 @@ impl Wiki {
             .items(id)
             .iter()
             .filter(|i| !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+            .filter(|i| !(i.nested && i.kind == CodeItemKind::Value))
             .map(|i| (Self::item_score(i, tokens, query_words, idf), i))
             .filter(|(s, _)| *s > 0.0)
             .collect();
@@ -1488,7 +1491,10 @@ impl Wiki {
         };
         let exact = pick(|a, b| a == b);
         if exact.is_empty() {
-            pick(|a, b| a.to_lowercase() == b.to_lowercase())
+            // A shell global (a nested value) matches its exact name only.
+            let mut any_case = pick(|a, b| a.to_lowercase() == b.to_lowercase());
+            any_case.retain(|(_, i)| !(i.nested && i.kind == CodeItemKind::Value));
+            any_case
         } else {
             exact
         }

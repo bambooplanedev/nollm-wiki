@@ -68,7 +68,7 @@ wiki/src/lib.rs
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
   Code's) become searchable pages, listed after the code hits, with dates, aliases and `supersedes:`.
 - **Languages.** Rust, Python, C and C++, Go, JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (with JSX/TSX), `.vue` and `.svelte`
-  scripts, shell (`.sh`, `.bash`: functions only), Markdown and plain text.
+  scripts, shell (`.sh`, `.bash`: functions, plus top-level UPPERCASE variables found by exact name), Markdown and plain text.
 - **Deterministic.** Byte-identical output across runs, machines and thread counts; incremental
   recompiles.
 - **Opens in Obsidian.** The pages link each other with Obsidian wikilinks, so the output folder is

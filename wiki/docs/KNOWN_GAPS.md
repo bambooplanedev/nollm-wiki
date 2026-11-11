@@ -107,6 +107,8 @@ per question is noise-level: treat single results as anecdotes.
   (the definition is added, not moved first). A name defined by no item, such
   as a lambda, a variable, a function nested in another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
+  A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
+  A name defined on more than 3 pages shows 3 definitions and no "+N more" marker.
   `--format json` has no `not found` entries. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);
@@ -211,8 +213,12 @@ per question is noise-level: treat single results as anecdotes.
   second call edge next to its declaration. A leading macro can put the return type into the owner
   (`handle api<Derived>`), and a free function with a template-id return
   type can get that type as owner (`UniquePtr<TEST_INT>`).
-- **Shell (`.sh`, `.bash`) lists only function definitions.** A function
-  passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
+- **Shell (`.sh`, `.bash`) lists only function definitions.** Top-level
+  UPPERCASE assignments are found by `search` only by their exact name; other
+  variables (lowercase, inside a function or an `if`) are not indexed.
+  An assignment with a trailing redirect (`HISTSIZE=-1 2>/dev/null`) is not indexed: the grammar reads it as a command with a missing name, which also swallows an assignment on the next line.
+  In a file with parse errors, an assignment inside a function the line regex finds is skipped, and one the grammar could not parse spans its first line only.
+  A function passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
   of `f`, and a call in a part the grammar could not parse has no caller (unless a
   fully parsed function encloses it inside that part).
   tree-sitter-bash 0.25 rejects some code bash takes: a case pattern with a

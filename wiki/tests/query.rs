@@ -2524,3 +2524,77 @@ fn a_nested_python_function_stays_out_of_the_hint() {
     assert!(hint.contains("src/rotation.py:1-4"), "{hint}");
     assert!(!hint.contains("rotation_step"), "{hint}");
 }
+
+const GLOBALS_SH: &str = "\
+#!/usr/bin/env bash
+QX_PY_DERIVE=\"$(cat <<'PY'
+import sys
+PY
+)\"
+
+_qx_py_run() {
+  python3 -c \"$QX_PY_DERIVE\" \"$@\"
+}
+
+derive_python_step() {
+  _qx_py_run step
+}
+_qx_py_run go
+";
+
+#[test]
+fn a_shell_global_is_found_by_its_exact_name() {
+    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
+    assert_eq!(
+        symbol_lines(&w.search("QX_PY_DERIVE", None, 10)),
+        [("lib/qx.sh".to_string(), 2, 5, "QX_PY_DERIVE".to_string())]
+    );
+    let mixed = symbol_lines(&w.search("_qx_py_run QX_PY_DERIVE", None, 10));
+    assert_eq!(
+        mixed,
+        [
+            ("lib/qx.sh".to_string(), 7, 9, "_qx_py_run".to_string()),
+            ("lib/qx.sh".to_string(), 2, 5, "QX_PY_DERIVE".to_string()),
+        ]
+    );
+    assert_eq!(
+        w.not_found("_qx_py_run QX_PY_DERIVE", None, None),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn a_shell_global_leaves_word_queries_unchanged() {
+    // Lowercase `qx_py_derive=` is no item; the body reads the same.
+    let lower = GLOBALS_SH.replace("QX_PY_DERIVE", "qx_py_derive");
+    let (_a, with) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
+    let (_b, without) = code_fixture(&[("lib/qx.sh", &lower)]);
+    assert!(with.items("qx").iter().any(|i| i.name == "QX_PY_DERIVE"));
+    for q in ["derive python step", "py derive", "derive"] {
+        let show = |w: &Wiki| wiki::serve::search_lines(&w.search(q, None, 10));
+        assert_eq!(show(&with), show(&without), "{q}");
+    }
+}
+
+#[test]
+fn a_shell_global_stays_out_of_page_graph_and_hint() {
+    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
+    let outline = w.outline("qx", None).unwrap();
+    assert!(!outline.contains("QX_PY_DERIVE"), "{outline}");
+    assert!(w.callers("qx", "QX_PY_DERIVE", None, None).is_err());
+    let callers = w.callers("qx", "_qx_py_run", None, None).unwrap();
+    assert!(!callers.contains("QX_PY_DERIVE"), "{callers}");
+    let pack = w.neighbors("qx", 1, &PackBudget::default()).unwrap().text;
+    assert!(!pack.contains("QX_PY_DERIVE"), "{pack}");
+    let hint = wiki::hint::hint_lines(&w, "where is the zb py derive script run");
+    assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
+}
+
+#[test]
+fn a_shell_global_is_not_matched_in_another_case() {
+    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
+    assert_eq!(w.not_found("qx_py_derive", None, None), ["qx_py_derive"]);
+    assert!(symbol_lines(&w.search("qx_py_derive _qx_py_run", None, 10))
+        .iter()
+        .all(|l| l.3 != "QX_PY_DERIVE"));
+}

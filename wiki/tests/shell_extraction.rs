@@ -398,3 +398,132 @@ fn shellcheck_directive_is_no_summary() {
     let (_d, _, out) = compiled(&[("d.sh", src)]);
     assert_eq!(entry(&out, "d")["summary"], "Deploys things.");
 }
+
+/// `(signature, start, end)` of a page's top-level variable items.
+fn globals(wiki: &wiki::query::Wiki, id: &str) -> Vec<(String, usize, usize)> {
+    wiki.items(id)
+        .iter()
+        .filter(|i| i.nested && i.kind == wiki::model::CodeItemKind::Value)
+        .map(|i| (i.signature.clone(), i.start_line, i.end_line))
+        .collect()
+}
+
+fn g(sig: &str, a: usize, b: usize) -> (String, usize, usize) {
+    (sig.to_string(), a, b)
+}
+
+#[test]
+fn top_level_uppercase_assignment_is_a_search_only_value() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "X=1\nf() { :; }\n")]);
+    let it = wiki.items("env").iter().find(|i| i.name == "X").unwrap();
+    assert_eq!(
+        (it.kind, it.public, it.nested),
+        (wiki::model::CodeItemKind::Value, false, true)
+    );
+    assert_eq!(globals(&wiki, "env"), [g("X=1", 1, 1)]);
+    let page = wiki.page_text("env", false, None).unwrap();
+    assert!(!page.contains("X=1"), "{page}");
+    let full = wiki.page_text("env", true, None).unwrap();
+    assert!(
+        !common::exports(&full).iter().any(|s| s.contains('X')),
+        "{full}"
+    );
+}
+
+#[test]
+fn export_readonly_and_declare_assignments_are_values() {
+    let src = "export A=1\nreadonly B=2\ndeclare -r C=3\nexport D\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(
+        globals(&wiki, "env"),
+        [
+            g("export A=1", 1, 1),
+            g("readonly B=2", 2, 2),
+            g("declare -r C=3", 3, 3)
+        ]
+    );
+}
+
+#[test]
+fn heredoc_command_substitution_value_spans_to_its_close() {
+    let src = "QX_PY=\"$(cat <<'PY'\nimport sys\nprint(sys.argv)\nPY\n)\"\nNEXT=1\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(
+        globals(&wiki, "env"),
+        [g("QX_PY=\"$(cat <<'PY'", 1, 5), g("NEXT=1", 6, 6)]
+    );
+}
+
+#[test]
+fn multi_line_quoted_value_spans_to_its_closing_quote() {
+    let src = "USAGE=\"usage:\n  run it\n\"\nNEXT=1\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(
+        globals(&wiki, "env"),
+        [g("USAGE=\"usage:", 1, 3), g("NEXT=1", 4, 4)]
+    );
+}
+
+#[test]
+fn only_plain_top_level_uppercase_assignments_are_values() {
+    let src = "f() {\n  local A=1\n  B=2\n}\nif true; then\n  C=3\nfi\nfor i in 1; do\n  D=4\ndone\nE=5 cmd\nout=6\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), []);
+}
+
+#[test]
+fn only_the_first_assignment_of_a_name_is_an_item() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "X=1\nX=2\n")]);
+    assert_eq!(globals(&wiki, "env"), [g("X=1", 1, 1)]);
+}
+
+#[test]
+fn broken_file_keeps_its_assignments() {
+    let src = "A=1\ncase $P in a*' '*) x ;; esac\nB=2\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), [g("A=1", 1, 1), g("B=2", 3, 3)]);
+}
+
+#[test]
+fn assignment_in_a_top_level_and_or_list_is_a_value() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "T=\"$(date)\" || T=\"\"\n")]);
+    assert_eq!(globals(&wiki, "env"), [g("T=\"$(date)\" || T=\"\"", 1, 1)]);
+}
+
+#[test]
+fn a_page_of_values_only_reads_as_before() {
+    for body in ["X=1\n", "X=1\necho hi\n"] {
+        let (_a, with) = compiled_wiki(&[("env.sh", body)]);
+        let (_b, without) = compiled_wiki(&[("env.sh", &body.replace('X', "x"))]);
+        assert_eq!(globals(&with, "env").len(), 1);
+        assert_eq!(
+            with.page_text("env", false, None),
+            without.page_text("env", false, None),
+            "{body}"
+        );
+    }
+}
+
+#[test]
+fn function_body_in_a_broken_file_is_no_value() {
+    // The backquoted `$//` makes the parser lose `function f`: its body lands
+    // at the top level.
+    let src =
+        "A=1\nfunction f() {\nT=$1\n    N=`echo $T | sed s/\\.x$//`\n    print \"$N\"\n}\nC=2\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), [g("A=1", 1, 1), g("C=2", 7, 7)]);
+}
+
+#[test]
+fn assignment_with_a_parse_error_spans_its_first_line_only() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "X=\"a\nY=1\n")]);
+    assert_eq!(globals(&wiki, "env"), [g("X=\"a", 1, 1)]);
+}
+
+#[test]
+fn assignment_inside_an_error_node_is_a_value() {
+    // zsh `${${(@k)T}:|M}` turns the whole file into one ERROR node.
+    let src = "cd \"$Z\"\nlocal -a M\nM=(a b)\nI=(${${(@k)T}:|M})\nf() {\n  :\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), [g("M=(a b)", 3, 3)]);
+}
