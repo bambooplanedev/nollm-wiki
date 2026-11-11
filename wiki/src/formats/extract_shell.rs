@@ -106,16 +106,36 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
 /// `declare` ones and those in an `&&` / `||` list included, `NAME` in `[A-Z][A-Z0-9_]*`, the first of each
 /// name only: nested items, so `search` finds them by name and nothing else
 /// lists them. An item spans its statement; its signature is the first line.
-pub(crate) fn globals(root: Node, text: &str) -> Vec<CodeItem> {
+///
+/// In a file with parse errors a lost function leaves its body at the top
+/// level: a statement inside a function of `fns` is skipped, an ERROR node's
+/// statements are read, and one with an error spans its first line only.
+pub(crate) fn globals<'t>(root: Node<'t>, text: &str, fns: &[CodeItem]) -> Vec<CodeItem> {
     let mut out: Vec<CodeItem> = Vec::new();
+    let broken = root.has_error();
+    let statements = |n: Node<'t>| -> Vec<Node<'t>> {
+        let mut v: Vec<Node> = n.named_children(&mut n.walk()).collect();
+        v.retain(|s| {
+            let line = s.start_position().row + 1;
+            !broken
+                || !fns.iter().any(|f| {
+                    f.kind == CodeItemKind::Fn && f.start_line <= line && line <= f.end_line
+                })
+        });
+        v.reverse();
+        v
+    };
     // A stack in source order: an `a && b` / `a || b` list adds its parts.
-    let mut todo: Vec<Node> = root.named_children(&mut root.walk()).collect();
-    todo.reverse();
+    let mut todo = statements(root);
     while let Some(stmt) = todo.pop() {
         let assignments: Vec<Node> = match stmt.kind() {
             "list" => {
                 let parts: Vec<Node> = stmt.named_children(&mut stmt.walk()).collect();
                 todo.extend(parts.into_iter().rev());
+                continue;
+            }
+            "ERROR" => {
+                todo.extend(statements(stmt));
                 continue;
             }
             "variable_assignment" => vec![stmt],
@@ -137,7 +157,12 @@ pub(crate) fn globals(root: Node, text: &str) -> Vec<CodeItem> {
                 continue;
             }
             let first = text[stmt.start_byte()..].lines().next().unwrap_or("");
-            let mut item = top_level_item(stmt.end_position().row + 1);
+            let last = if stmt.has_error() {
+                stmt.start_position()
+            } else {
+                stmt.end_position()
+            };
+            let mut item = top_level_item(last.row + 1);
             item.kind = CodeItemKind::Value;
             item.name = name.to_string();
             item.signature = first.trim_end().to_string();

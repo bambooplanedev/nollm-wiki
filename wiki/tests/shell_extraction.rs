@@ -503,3 +503,27 @@ fn a_page_of_values_only_reads_as_before() {
         );
     }
 }
+
+#[test]
+fn function_body_in_a_broken_file_is_no_value() {
+    // The backquoted `$//` makes the parser lose `function f`: its body lands
+    // at the top level.
+    let src =
+        "A=1\nfunction f() {\nT=$1\n    N=`echo $T | sed s/\\.x$//`\n    print \"$N\"\n}\nC=2\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), [g("A=1", 1, 1), g("C=2", 7, 7)]);
+}
+
+#[test]
+fn assignment_with_a_parse_error_spans_its_first_line_only() {
+    let (_d, wiki) = compiled_wiki(&[("env.sh", "X=\"a\nY=1\n")]);
+    assert_eq!(globals(&wiki, "env"), [g("X=\"a", 1, 1)]);
+}
+
+#[test]
+fn assignment_inside_an_error_node_is_a_value() {
+    // zsh `${${(@k)T}:|M}` turns the whole file into one ERROR node.
+    let src = "cd \"$Z\"\nlocal -a M\nM=(a b)\nI=(${${(@k)T}:|M})\nf() {\n  :\n}\n";
+    let (_d, wiki) = compiled_wiki(&[("env.sh", src)]);
+    assert_eq!(globals(&wiki, "env"), [g("M=(a b)", 3, 3)]);
+}
