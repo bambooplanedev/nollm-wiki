@@ -492,6 +492,12 @@ fn mcp_search_defaults_to_lines() {
 }
 
 #[test]
+fn mcp_search_says_which_names_it_did_not_find() {
+    let text = search_text(&json!({"query": "add_nope"}));
+    assert!(text.ends_with("not found: add_nope\n"), "text: {text}");
+}
+
+#[test]
 fn mcp_search_json_on_request() {
     let text = search_text(&json!({"query": "add", "format": "json"}));
     let hits: Value = serde_json::from_str(&text).unwrap();

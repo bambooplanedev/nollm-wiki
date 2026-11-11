@@ -2366,3 +2366,96 @@ fn search_does_not_note_a_test_copy() {
     ]);
     assert!(!out.contains("also defined"), "{out}");
 }
+
+/// Names of the symbol lines of a response, in output order.
+fn line_names(hits: &[wiki::query::Hit]) -> Vec<String> {
+    symbol_lines(hits).into_iter().map(|l| l.3).collect()
+}
+
+const HARVEST: &str = "\
+def _parse_qx_bundle(): pass
+def _raw_artifact(): pass
+def _artifact(): pass
+def _ack(): pass
+def _tidy_stop_with(): pass
+def _stop_harvest(): pass
+def _set_engine(): pass
+";
+
+#[test]
+fn a_name_keeps_its_leading_underscore() {
+    let (_d, w) = code_fixture(&[
+        (
+            "workbench/src/store/events.ts",
+            "export function events() {}\n",
+        ),
+        ("scripts/state.py", "def _events():\n    pass\n"),
+    ]);
+    assert_eq!(line_names(&w.search("_events", None, 10)), ["_events"]);
+}
+
+#[test]
+fn an_exact_name_beats_its_look_alikes() {
+    let (_d, w) = code_fixture(&[("scripts/test_harvest_state.py", HARVEST)]);
+    assert_eq!(line_names(&w.search("_artifact", None, 3)), ["_artifact"]);
+}
+
+#[test]
+fn a_word_query_shows_a_named_definition_without_moving_the_ranking() {
+    let (_d, w) = code_fixture(&[
+        (
+            "workbench/src/store/events.ts",
+            "export function events() {}\n",
+        ),
+        ("scripts/state.py", "def _events():\n    pass\n"),
+    ]);
+    let names = line_names(&w.search("_events store", None, 10));
+    assert_eq!(names[0], "events");
+    assert!(names.contains(&"_events".to_string()), "{names:?}");
+    let (_d, w) = code_fixture(&[(
+        "scripts/state.py",
+        "def _parse_raw_artifact(): pass\ndef _raw_artifact_parse(): pass\n\
+         def _artifact_raw_parse(): pass\ndef _artifact(): pass\n",
+    )]);
+    let names = line_names(&w.search("_artifact parse raw", None, 3));
+    assert!(names.contains(&"_artifact".to_string()), "{names:?}");
+}
+
+#[test]
+fn a_query_of_names_gets_one_line_per_name() {
+    let (_d, w) = code_fixture(&[("scripts/test_harvest_state.py", HARVEST)]);
+    let q = "_tidy_stop_with _artifact _stop_harvest _set_engine _ack test_eh";
+    assert_eq!(
+        line_names(&w.search(q, None, 3)),
+        [
+            "_tidy_stop_with",
+            "_artifact",
+            "_stop_harvest",
+            "_set_engine",
+            "_ack"
+        ]
+    );
+    assert_eq!(w.not_found(q, None, None), ["test_eh"]);
+}
+
+#[test]
+fn a_word_query_reports_nothing_missing() {
+    let (_d, w) = code_fixture(&[("scripts/test_harvest_state.py", HARVEST)]);
+    assert_eq!(
+        w.not_found("stop harvest", None, None),
+        Vec::<String>::new()
+    );
+    assert_eq!(w.not_found("_ack stop", None, None), Vec::<String>::new());
+}
+
+#[test]
+fn an_exact_case_match_is_preferred() {
+    let (_d, w) = code_fixture(&[
+        ("src/book.py", "class OrderBook:\n    pass\n"),
+        ("src/util.py", "def orderbook():\n    pass\n"),
+    ]);
+    assert_eq!(line_names(&w.search("OrderBook", None, 10)), ["OrderBook"]);
+    let any_case = line_names(&w.search("orderBook", None, 10));
+    assert!(any_case.contains(&"OrderBook".to_string()), "{any_case:?}");
+    assert!(any_case.contains(&"orderbook".to_string()), "{any_case:?}");
+}

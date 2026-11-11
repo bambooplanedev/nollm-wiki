@@ -833,3 +833,16 @@ fn neighbors_symbol_walks_through_a_pointer_returning_definition() {
         .success()
         .stdout(contains("in_maintenance"));
 }
+
+#[test]
+fn cli_search_says_which_names_it_did_not_find() {
+    let (_dir, _, output) = common::compiled(&[("a.py", "def _ack():\n    pass\n")]);
+    let o = Command::cargo_bin("wiki")
+        .unwrap()
+        .args(["search", "_ack _nope", "--dir", output.to_str().unwrap()])
+        .assert()
+        .success();
+    let out = String::from_utf8(o.get_output().stdout.clone()).unwrap();
+    assert!(out.contains("a.py:1-2  _ack"), "{out}");
+    assert!(out.ends_with("not found: _nope\n"), "{out}");
+}

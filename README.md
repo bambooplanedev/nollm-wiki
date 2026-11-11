@@ -558,7 +558,14 @@ one, and test code ranks at half score. A function whose name has exactly one ot
 non-test definition in another file gets a four-space-indented line under it,
 `    also defined: path:start-end  name` (not for header declarations paired with their definition,
 not when the name has more copies, not in `--format json`). A page without symbol lines gets its body snippet on a
-four-space-indented line instead. A summary, snippet or doc longer than 160 characters is cut with
+four-space-indented line instead. A query word with `_` or `::` in it, or an upper-case letter after
+the first (`_ack`, `Router::slice_cap_for`, `OrderBook`), is an identifier: its leading underscore
+counts and its definitions are items named exactly so (in any case only when none matches the case).
+A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
+however many sit in one file, then `not found: <name>` for each name nothing defines (when no name is
+defined, the ranked hits come before those lines). In any other query a definition the ranking missed
+is added after its page's lines, or as a page after the hits; the order does not change. A summary,
+snippet or doc longer than 160 characters is cut with
 `…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
 symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
 and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
