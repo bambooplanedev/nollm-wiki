@@ -143,16 +143,17 @@ fn push_line(out: &mut String, line: &str) {
     out.push('\n');
 }
 
-/// A page's lines worth injecting: no test items, no line whose range holds
-/// another of the page's lines (a class around its method is thousands of
-/// lines no model reads), at most `HINT_PAGE_LINES`.
+/// A page's lines worth injecting: no test or nested items, no line whose
+/// range holds another of the page's lines (a class around its method is
+/// thousands of lines no model reads), at most `HINT_PAGE_LINES`.
 fn page_lines(symbols: &[SymbolLine]) -> impl Iterator<Item = &SymbolLine> {
     let holds = |a: &SymbolLine, b: &SymbolLine| {
         !std::ptr::eq(a, b) && a.start_line <= b.start_line && b.end_line <= a.end_line
     };
+    let shown = |a: &SymbolLine| !a.test && !a.nested;
     symbols
         .iter()
-        .filter(move |a| !a.test && !symbols.iter().any(|b| !b.test && holds(a, b)))
+        .filter(move |a| shown(a) && !symbols.iter().any(|b| shown(b) && holds(a, b)))
         .take(HINT_PAGE_LINES)
 }
 
@@ -220,6 +221,7 @@ mod tests {
             signature: String::new(),
             doc: None,
             test,
+            nested: false,
             also: None,
         }
     }

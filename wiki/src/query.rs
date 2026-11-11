@@ -421,6 +421,8 @@ pub struct SymbolLine {
     /// `None` also when an earlier line of the same page shows the same doc.
     pub doc: Option<String>,
     pub test: bool,
+    /// A function nested in another (`CodeItem::nested`).
+    pub nested: bool,
     /// The one other definition of a function's name elsewhere in the
     /// project, as `(path, start_line, end_line, name)`; see `same_name`.
     pub also: Option<(String, usize, usize, String)>,
@@ -1924,6 +1926,7 @@ impl Wiki {
             signature: i.signature.clone(),
             doc: i.doc.clone(),
             test: i.test,
+            nested: i.nested,
             also: self.same_name(i, path),
         }
     }
@@ -1933,14 +1936,18 @@ impl Wiki {
     /// with a definition, not the item's own other half. A name with more
     /// copies (`new`, `main`) gets none, since a list would be noise.
     fn same_name(&self, item: &CodeItem, path: &str) -> Option<(String, usize, usize, String)> {
-        if item.test || !matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+        if item.test || item.nested || !matches!(item.kind, CodeItemKind::Fn | CodeItemKind::Method)
+        {
             return None;
         }
         let index = self.by_name.get_or_init(|| {
             let mut m: HashMap<String, Vec<(String, usize)>> = HashMap::new();
             for (id, items) in &self.items {
                 for (k, i) in items.iter().enumerate() {
-                    if matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.test {
+                    if matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method)
+                        && !i.test
+                        && !i.nested
+                    {
                         m.entry(i.name.clone()).or_default().push((id.clone(), k));
                     }
                 }
@@ -2497,6 +2504,7 @@ mod tests {
             doc: doc.map(Into::into),
             doc_text: None,
             public: false,
+            nested: false,
             twin: None,
             test,
             calls: Vec::new(),

@@ -188,6 +188,11 @@ fn python_placement(def: Node, text: &str) -> Placement {
             // expression, and a walrus is `named_expression`). Probed — it
             // never fires. Kept because absorbing a grammar change is cheaper
             // than noticing one.
+            // A `def` directly in a function body; one in a class there is
+            // a local class's method and stays out.
+            "function_definition" if chain.is_empty() && super::code::is_function(def) => {
+                return Placement::Nested;
+            }
             "function_definition" | "lambda" => return Placement::Rejected,
             "class_definition" => {
                 let Some(name) = parent
@@ -522,6 +527,33 @@ mod tests {
             "symbols: {:?}",
             e.symbols
         );
+    }
+
+    #[test]
+    fn python_functions_in_function_bodies_are_nested_items() {
+        let src = "def outer():\n    @wraps(f)\n    def deco():\n        def deep():\n            pass\n    class Local:\n        def m(self):\n            pass\n\nclass A:\n    def meth(self):\n        def inner():\n            pass\n";
+        let e = CodeExtractor.extract("t.py", src);
+        let nested: Vec<(&str, usize, usize, bool)> = e
+            .items
+            .iter()
+            .map(|i| (i.name.as_str(), i.start_line, i.end_line, i.nested))
+            .collect();
+        assert_eq!(
+            nested,
+            [
+                ("outer", 1, 8, false),
+                ("deco", 2, 5, true),
+                ("deep", 4, 5, true),
+                ("A", 10, 13, false),
+                ("meth", 11, 13, false),
+                ("inner", 12, 13, true),
+            ]
+        );
+        assert!(e
+            .items
+            .iter()
+            .filter(|i| i.nested)
+            .all(|i| !i.public && i.owner.is_none()));
     }
 
     #[test]

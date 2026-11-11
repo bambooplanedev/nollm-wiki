@@ -66,7 +66,7 @@ impl Keep {
         let tests = self.tests;
         items
             .iter()
-            .filter(|i| i.kind != CodeItemKind::TopLevel)
+            .filter(|i| i.kind != CodeItemKind::TopLevel && !i.nested)
             .filter(move |i| tests || !i.test)
             .take(self.lines)
     }

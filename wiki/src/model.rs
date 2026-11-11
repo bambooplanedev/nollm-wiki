@@ -271,6 +271,10 @@ pub struct CodeItem {
     pub doc_text: Option<String>,
     /// Whether the item is part of the page's export surface (`symbols`).
     pub public: bool,
+    /// A Python function defined directly in another function's body: found
+    /// by `search` only, never in an outline, the exports or the call graph.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nested: bool,
     /// The `path` of the file holding this item's other half, when one is
     /// known.
     #[serde(skip_serializing_if = "Option::is_none")]

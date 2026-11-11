@@ -835,6 +835,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
             signature: "fn f(\n)".into(),
             doc: Some("do\tc\nline".into()),
             test: false,
+            nested: false,
             also: None,
         }],
     };
@@ -2458,4 +2459,68 @@ fn an_exact_case_match_is_preferred() {
     let any_case = line_names(&w.search("orderBook", None, 10));
     assert!(any_case.contains(&"OrderBook".to_string()), "{any_case:?}");
     assert!(any_case.contains(&"orderbook".to_string()), "{any_case:?}");
+}
+
+const NESTED_PY: &str = "\
+def outer(x):
+    def mk_run(y):
+        return helper(y)
+    class Local:
+        def in_local(self):
+            pass
+    return mk_run(x)
+
+def helper(y):
+    return y
+";
+
+#[test]
+fn a_nested_python_function_is_found_by_search() {
+    let (_d, w) = code_fixture(&[("src/runs.py", NESTED_PY)]);
+    assert_eq!(
+        symbol_lines(&w.search("mk_run", None, 10)),
+        [("src/runs.py".to_string(), 2, 3, "mk_run".to_string())]
+    );
+    // A method of a class defined inside a function stays out.
+    assert_eq!(w.not_found("in_local", None, None), ["in_local"]);
+}
+
+#[test]
+fn a_nested_python_function_stays_off_the_page() {
+    let (_d, w) = code_fixture(&[("src/runs.py", NESTED_PY)]);
+    let outline = w.outline("runs", None).unwrap();
+    assert!(!outline.contains("mk_run"), "{outline}");
+}
+
+#[test]
+fn a_nested_python_function_is_not_in_the_call_graph() {
+    let (_d, w) = code_fixture(&[("src/runs.py", NESTED_PY)]);
+    // The call inside `mk_run` is its enclosing function's; `mk_run(x)` is
+    // no edge.
+    assert_eq!(callees(&w, "runs", "outer"), ["src/runs.py:9-10"]);
+    assert_eq!(callees(&w, "runs", "mk_run"), [] as [String; 0]);
+    assert!(w.callers("runs", "mk_run", None, None).is_err());
+}
+
+#[test]
+fn search_does_not_note_a_nested_copy() {
+    let out = twin_note(&[
+        ("src/a.py", "def slice_cap_for():\n    pass\n"),
+        (
+            "src/b.py",
+            "def run():\n    def slice_cap_for():\n        pass\n",
+        ),
+    ]);
+    assert!(!out.contains("also defined"), "{out}");
+}
+
+#[test]
+fn a_nested_python_function_stays_out_of_the_hint() {
+    let (_d, w) = code_fixture(&[(
+        "src/rotation.py",
+        "def schedule_rotation(keys):\n    def rotation_step(k):\n        return k\n    return [rotation_step(k) for k in keys]\n",
+    )]);
+    let hint = wiki::hint::hint_lines(&w, "where is the rotation schedule step for keys");
+    assert!(hint.contains("src/rotation.py:1-4"), "{hint}");
+    assert!(!hint.contains("rotation_step"), "{hint}");
 }

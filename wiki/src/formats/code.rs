@@ -287,6 +287,9 @@ pub(crate) enum Placement {
     /// Enclosing scope names, outermost first. Empty means a free item whose
     /// signature is used verbatim.
     Scoped(Vec<String>),
+    /// A function defined directly in a function body (Python): an item for
+    /// `search`, never an export, an outline line or a call-graph node.
+    Nested,
 }
 
 fn lang_for_ext(ext: &str) -> Option<LangSpec> {
@@ -918,13 +921,17 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             let Some(def) = parts.def.or(parts.item) else {
                 continue;
             };
-            let Placement::Scoped(chain) = (spec.placement)(def, text) else {
-                continue;
+            let (chain, nested) = match (spec.placement)(def, text) {
+                Placement::Scoped(chain) => (chain, false),
+                Placement::Nested => (Vec::new(), true),
+                Placement::Rejected => continue,
             };
             let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
             let shape = (spec.shape)(def);
             let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
-            let public = if parts.def.is_some() {
+            let public = if nested {
+                false
+            } else if parts.def.is_some() {
                 let keep = should_keep(parts.vis, &chain, name_text, exports.as_ref(), &spec);
                 if keep {
                     // Resolved once, after `placement` has accepted the item, and
@@ -951,18 +958,19 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 !spec.query_gates_visibility
                     && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
             };
-            merge_item(
-                &mut items,
-                code_item(
-                    def,
-                    parts.name,
-                    owner.as_deref(),
-                    public,
-                    text,
-                    &spec,
-                    &shape,
-                ),
+            let mut item = code_item(
+                def,
+                parts.name,
+                owner.as_deref(),
+                public,
+                text,
+                &spec,
+                &shape,
             );
+            if let Some((_, it)) = item.as_mut() {
+                it.nested = nested;
+            }
+            merge_item(&mut items, item);
         }
     }
     let mut items: Vec<CodeItem> = items.into_values().collect();
@@ -1041,10 +1049,13 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 /// hold it. A call outside every function (a static initializer) is dropped,
 /// except in a shell file: there it goes to the file's `<top level>` item,
 /// pushed last. A shell call has no caller when a parse-ERROR node is closer
-/// to it than any function definition.
+/// to it than any function definition. A nested function owns no calls: they
+/// stay its enclosing function's.
 fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: bool) {
     let fns: Vec<usize> = (0..items.len())
-        .filter(|&i| matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method))
+        .filter(|&i| {
+            matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method) && !items[i].nested
+        })
         .collect();
     if fns.is_empty() && !shell {
         return;
@@ -1698,6 +1709,7 @@ fn code_item(
     };
 
     let mut item = CodeItem {
+        nested: false,
         kind,
         name: name_text.to_string(),
         owner: owner.map(str::to_string),
