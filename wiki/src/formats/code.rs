@@ -1275,6 +1275,10 @@ fn import_aliases(root: Node, text: &str) -> BTreeMap<String, String> {
                     .and_then(|s| s.child_by_field_name("source"))
                     .map(|s| last(text_of(s))),
             ),
+            // C++ `namespace d = a::b;` names `b`.
+            "namespace_alias_definition" => {
+                field("name").zip(node.named_child(1).map(|n| last(text_of(n))))
+            }
             _ => None,
         };
         if let Some((alias, orig)) = pair {
@@ -1734,6 +1738,11 @@ fn code_item(
             super::extract_cpp::pair_role(def, text)
         } else {
             PairRole::Neither
+        },
+        namespace: if spec.lang_name == "cpp" {
+            super::extract_cpp::namespace_of(def, text)
+        } else {
+            None
         },
     };
     item.doc_text = raw_doc

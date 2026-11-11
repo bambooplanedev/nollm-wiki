@@ -303,6 +303,10 @@ pub struct CodeItem {
     /// C++ only: which side of project-wide pairing this item may take.
     #[serde(skip)]
     pub pair_role: PairRole,
+    /// C++ only: the innermost named, non-inline namespace around the
+    /// item, its last segment (`lab::planner` gives `planner`).
+    #[serde(skip)]
+    pub namespace: Option<String>,
 }
 
 /// C++ only: which side of project-wide pairing an item may take.
