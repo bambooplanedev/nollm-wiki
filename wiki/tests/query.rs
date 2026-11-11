@@ -2300,6 +2300,41 @@ fn callers_reach_a_pointer_returning_definition() {
 }
 
 #[test]
+fn a_namespace_qualified_cpp_call_reaches_the_function_in_that_namespace() {
+    let (_d, w) = code_fixture(&[
+        (
+            "src/opt.h",
+            "namespace lab {\ninline void do_not_optimize(int v) {}\n}\nnamespace other { void helper(int x) {} }\nvoid loose(int x) {}\nnamespace fmtx { inline namespace v1 { void put(int x) {} } }\n",
+        ),
+        (
+            "src/strategy.h",
+            "namespace lab::planner {\nnamespace detail {\ninline int quantum(int x) { return x; }\n}\n}\n",
+        ),
+        (
+            "src/bench.cpp",
+            "#include \"opt.h\"\n#include \"strategy.h\"\nnamespace d = lab::planner::detail;\nvoid by_ns() { lab::do_not_optimize(1); }\nvoid by_alias() { d::quantum(2); }\nvoid by_full() { lab::planner::detail::quantum(3); }\nvoid by_inline() { fmtx::put(8); }\nvoid outside() {\n  std::loose(4);\n  std::helper(5);\n  lab::helper(6);\n  ext::do_not_optimize(7);\n}\n",
+        ),
+    ]);
+    assert_eq!(callees(&w, "bench", "by_ns"), ["src/opt.h:2-2"]);
+    assert_eq!(callees(&w, "bench", "by_alias"), ["src/strategy.h:3-3"]);
+    assert_eq!(callees(&w, "bench", "by_full"), ["src/strategy.h:3-3"]);
+    // An inline namespace is looked through.
+    assert_eq!(callees(&w, "bench", "by_inline"), ["src/opt.h:6-6"]);
+    // A qualifier naming no namespace the function sits in is no match:
+    // `std::`, an external namespace, or another project namespace.
+    assert_eq!(callees(&w, "bench", "outside"), [] as [String; 0]);
+}
+
+#[test]
+fn a_rust_path_call_outside_the_project_stays_unresolved() {
+    let (_d, w) = code_fixture(&[(
+        "src/r.rs",
+        "pub fn swap(a: u8, b: u8) {}\npub fn user() {\n    other_crate::swap(1, 2);\n    std::mem::swap(1, 2);\n}\n",
+    )]);
+    assert_eq!(callees(&w, "r", "user"), [] as [String; 0]);
+}
+
+#[test]
 fn outline_header_and_neighbors_cap_and_clean_the_summary() {
     let para = format!(
         "zebrafish \x1b[1mbold\x1b[0m bell\x07 {}",

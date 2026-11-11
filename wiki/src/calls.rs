@@ -165,8 +165,11 @@ impl<'a> Index<'a> {
         let method_only = || only(self.pick(page, site, is_method));
         let qualified = |q: &str| {
             let in_module = self.modules.get(q);
+            let in_namespace = |c: FnRef| self.item(c).namespace.as_deref() == Some(q);
             self.pick(page, site, |c| {
-                owned_by(q, c) || (is_fn(c) && in_module.is_some_and(|m| m.contains(&c.0)))
+                owned_by(q, c)
+                    || (is_fn(c)
+                        && (in_module.is_some_and(|m| m.contains(&c.0)) || in_namespace(c)))
             })
         };
         let first = |tries: &[&dyn Fn() -> Vec<FnRef>]| {
@@ -205,8 +208,10 @@ impl<'a> Index<'a> {
 ///   C++ base class's); the one free function of that name in the project.
 /// - `Q::f()`: `Self::f` is the caller's owner's; `self`/`crate`/`super`
 ///   read as a free `f()`; any other `Q` is a type (an owner whose last
-///   segment is `Q`) or a module (a file whose stem or directory is `Q`). A
-///   `Q` that is neither is outside the project.
+///   segment is `Q`), a module (a file whose stem or directory is `Q`), or
+///   a C++ namespace (a free function's innermost one is `Q`, a
+///   `namespace Q = a::b;` alias read as `b`). A `Q` that is none of them
+///   is outside the project: `std::f()` never reaches a project `f`.
 /// - `self.f()`: the caller's owner's; a method of a file it sees; the one
 ///   method of that name.
 /// - `x.f()`: as `x::f()` when `x` names a project type or module; a method

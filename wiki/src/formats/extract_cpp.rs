@@ -528,6 +528,19 @@ pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
     }
 }
 
+/// The innermost named namespace around `def` that is not `inline`, its
+/// last segment: what `ns::f()` writes as `ns`. An anonymous or inline
+/// namespace is looked through, as a qualified call looks through it.
+pub(crate) fn namespace_of(def: Node, text: &str) -> Option<String> {
+    std::iter::successors(def.parent(), Node::parent)
+        .filter(|a| a.kind() == "namespace_definition")
+        .filter(|a| a.child(0).is_none_or(|c| c.kind() != "inline"))
+        .find_map(|a| a.child_by_field_name("name"))
+        .and_then(|n| text.get(n.byte_range()))
+        .and_then(|n| n.rsplit("::").next())
+        .map(|n| n.trim().to_string())
+}
+
 type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
 
 /// The `(owner, name, arity)` keys that occur exactly once among `items`,

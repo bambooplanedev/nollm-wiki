@@ -2526,6 +2526,7 @@ mod tests {
             call_sites: Vec::new(),
             arity: None,
             pair_role: PairRole::Neither,
+            namespace: None,
         }
     }
 

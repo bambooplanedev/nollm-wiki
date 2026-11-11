@@ -460,6 +460,7 @@ mod tests {
                 call_sites: Vec::new(),
                 arity: None,
                 pair_role: PairRole::Neither,
+                namespace: None,
             },
             CodeItem {
                 kind: CodeItemKind::Method,
@@ -479,6 +480,7 @@ mod tests {
                 call_sites: Vec::new(),
                 arity: None,
                 pair_role: PairRole::Neither,
+                namespace: None,
             },
         ];
         // Each item's keys in declaration order, the `None` ones skipped;

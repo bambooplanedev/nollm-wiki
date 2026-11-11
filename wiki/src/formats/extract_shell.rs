@@ -97,6 +97,7 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
             call_sites: Vec::new(),
             arity: None,
             pair_role: PairRole::Neither,
+            namespace: None,
         });
     }
     out
@@ -195,6 +196,7 @@ pub(crate) fn top_level_item(last: usize) -> CodeItem {
         call_sites: Vec::new(),
         arity: None,
         pair_role: PairRole::Neither,
+        namespace: None,
     }
 }
 
