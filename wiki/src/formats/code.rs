@@ -984,6 +984,9 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             collected.push((n.clone(), ItemKind::FreeDef, n, sig));
         }
         items.extend(missed);
+    }
+    if spec.lang_name == "shell" {
+        items.extend(super::extract_shell::globals(tree.root_node(), text));
         items.sort_by(|a, b| {
             (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
         });

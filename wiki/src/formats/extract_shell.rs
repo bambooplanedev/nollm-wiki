@@ -1,4 +1,5 @@
-//! Shell (`.sh`, `.bash`): functions only, each listed as `name()`. The doc of
+//! Shell (`.sh`, `.bash`): functions, each listed as `name()`, and top-level
+//! UPPERCASE assignments as search-only values (`globals`). The doc of
 //! a function is the `#` run directly above it; a file the grammar can't fully
 //! parse is parsed again from a blanked copy (`reparse`), and gets the
 //! functions still missing from a line regex (`missed_functions`).
@@ -97,6 +98,45 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
             arity: None,
             pair_role: PairRole::Neither,
         });
+    }
+    out
+}
+
+/// The file's top-level `NAME=value` assignments, `export`, `readonly` and
+/// `declare` ones included, `NAME` in `[A-Z][A-Z0-9_]*`, the first of each
+/// name only: nested items, so `search` finds them by name and nothing else
+/// lists them. An item spans its statement; its signature is the first line.
+pub(crate) fn globals(root: Node, text: &str) -> Vec<CodeItem> {
+    let mut out: Vec<CodeItem> = Vec::new();
+    for stmt in root.named_children(&mut root.walk()) {
+        let assignments: Vec<Node> = match stmt.kind() {
+            "variable_assignment" => vec![stmt],
+            "declaration_command" if !text[stmt.byte_range()].starts_with("local") => stmt
+                .named_children(&mut stmt.walk())
+                .filter(|n| n.kind() == "variable_assignment")
+                .collect(),
+            _ => continue,
+        };
+        for a in assignments {
+            let Some(name) = a.child_by_field_name("name").map(|n| &text[n.byte_range()]) else {
+                continue;
+            };
+            let upper = name.starts_with(|c: char| c.is_ascii_uppercase())
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+            if !upper || out.iter().any(|it| it.name == name) {
+                continue;
+            }
+            let first = text[stmt.start_byte()..].lines().next().unwrap_or("");
+            let mut item = top_level_item(stmt.end_position().row + 1);
+            item.kind = CodeItemKind::Value;
+            item.name = name.to_string();
+            item.signature = first.trim_end().to_string();
+            item.start_line = stmt.start_position().row + 1;
+            item.nested = true;
+            out.push(item);
+        }
     }
     out
 }
