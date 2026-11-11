@@ -164,6 +164,14 @@ per question is noise-level: treat single results as anecdotes.
   matches too, and two imports aliased `m` in different functions both read
   as the later one. A parameter or receiver named like the alias keeps its
   own name.
+- **C++ `ns::f()` matches by the namespace's last segment.** A free
+  function records its innermost named namespace, inline and anonymous ones
+  looked through, and a same-file `namespace d = a::b;` reads as `b`. Not
+  handled: `using namespace X;` (a bare call resolves by name anyway), a call
+  written through an inline namespace (`fmt::v12::f()`), an alias declared in
+  another file, and a namespace opened by a macro (`FMT_BEGIN_NAMESPACE`) or
+  lost to a parse error. On a private C++ project and fmt the first three cost no
+  call site; the last costs fmt about 60 `fmt::` and `detail::` calls.
 - **No calls across languages.** A Python binding calling C++, or FFI, is
   not an edge, by design.
 - **Unresolved names are dropped silently.** Builtins and std calls
