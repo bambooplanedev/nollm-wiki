@@ -426,6 +426,9 @@ pub struct SymbolLine {
     /// The one other definition of a function's name elsewhere in the
     /// project, as `(path, start_line, end_line, name)`; see `same_name`.
     pub also: Option<(String, usize, usize, String)>,
+    /// How many functions call it, as `callers` lists them one level up;
+    /// set on a function's line in a query of names alone, when any does.
+    pub called_by: Option<usize>,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,
@@ -1007,6 +1010,8 @@ impl Wiki {
         for item in items
             .iter()
             .filter(|i| !i.test && !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+            // A shell global (a nested value) is found by its exact name only.
+            .filter(|i| !(i.nested && i.kind == CodeItemKind::Value))
         {
             let whole = item.name.to_lowercase();
             if !title_words.contains(&whole.as_str()) {
@@ -1109,6 +1114,7 @@ impl Wiki {
             .items(id)
             .iter()
             .filter(|i| !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+            .filter(|i| !(i.nested && i.kind == CodeItemKind::Value))
             .map(|i| (Self::item_score(i, tokens, query_words, idf), i))
             .filter(|(s, _)| *s > 0.0)
             .collect();
@@ -1488,7 +1494,10 @@ impl Wiki {
         };
         let exact = pick(|a, b| a == b);
         if exact.is_empty() {
-            pick(|a, b| a.to_lowercase() == b.to_lowercase())
+            // A shell global (a nested value) matches its exact name only.
+            let mut any_case = pick(|a, b| a.to_lowercase() == b.to_lowercase());
+            any_case.retain(|(_, i)| !(i.nested && i.kind == CodeItemKind::Value));
+            any_case
         } else {
             exact
         }
@@ -1541,7 +1550,11 @@ impl Wiki {
             });
             defs.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
             for (e, i) in defs {
-                let line = self.symbol_line(&e.path, i);
+                let mut line = self.symbol_line(&e.path, i);
+                if only && matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.nested {
+                    let n = self.caller_count(&e.path, i);
+                    line.called_by = (n > 0).then_some(n);
+                }
                 let same = |s: &SymbolLine| {
                     (s.start_line, s.end_line, &s.name)
                         == (line.start_line, line.end_line, &line.name)
@@ -1928,6 +1941,7 @@ impl Wiki {
             test: i.test,
             nested: i.nested,
             also: self.same_name(i, path),
+            called_by: None,
         }
     }
 

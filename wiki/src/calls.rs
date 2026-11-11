@@ -347,6 +347,21 @@ impl Wiki {
         self.call_walk(id, symbol, depth, max_tokens, true)
     }
 
+    /// How many functions call item `it` on the page at `path`, as
+    /// `callers` lists them one level up: its twin's callers count too, and
+    /// neither half counts as its own caller.
+    pub(crate) fn caller_count(&self, path: &str, it: &CodeItem) -> usize {
+        let roots: Vec<String> = std::iter::once(it.span(path))
+            .chain(it.twin.clone())
+            .collect();
+        let by: BTreeSet<String> = roots
+            .iter()
+            .flat_map(|s| self.callers_of(s).iter().map(Caller::span))
+            .filter(|s| !roots.contains(s))
+            .collect();
+        by.len()
+    }
+
     /// `calls`, or with `up` `callers`.
     fn call_walk(
         &self,
