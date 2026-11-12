@@ -516,3 +516,65 @@ fn single_label_answers_do_not_change() {
         ]
     );
 }
+fn bold_texts(md: &str) -> Vec<(usize, usize, String)> {
+    labels(md)
+        .into_iter()
+        .filter(|l| l.level == 7)
+        .map(|l| (l.start, l.end, l.text))
+        .collect()
+}
+#[test]
+fn a_wrapped_step_label_is_one_line_from_its_first_line() {
+    let md = "- [x] **T9j. Evidence is a file.**\n  body\n- [x] **T9o. `tally` refuses while a process holds store.db (rows N11,\n  UNMATCHED-REMAINDER).** Tests-only.\n  more\n- [x] **T9g. Next.**\n";
+    assert_eq!(
+        bold_texts(md),
+        [
+            (1, 2, "T9j. Evidence is a file.".to_string()),
+            (
+                3,
+                5,
+                "T9o. `tally` refuses while a process holds store.db (rows N11, UNMATCHED-REMAINDER)."
+                    .to_string()
+            ),
+            (6, 6, "T9g. Next.".to_string()),
+        ]
+    );
+}
+#[test]
+fn a_wrapped_label_closes_within_three_more_lines() {
+    let close_on = |n: usize| {
+        let mut md = String::from("- **Step 1 opens");
+        for i in 2..n {
+            md.push_str(&format!("\n  line {i}"));
+        }
+        md.push_str("\n  ends.** body\n");
+        bold_texts(&md).into_iter().map(|l| l.2).collect::<Vec<_>>()
+    };
+    assert_eq!(close_on(2), ["Step 1 opens ends."]);
+    assert_eq!(close_on(3), ["Step 1 opens line 2 ends."]);
+    assert_eq!(close_on(4), ["Step 1 opens line 2 line 3 ends."]);
+    assert_eq!(close_on(5), Vec::<String>::new());
+}
+#[test]
+fn no_wrapped_label_across_breaks_code_or_an_open_span() {
+    // Python outside a fence: `(**kwargs)` opens a span, it does not close one
+    let code =
+        "        **kwargs: Any,\n    ) -> None:\n        super().__init_subclass__(**kwargs)\n";
+    assert_eq!(bold_texts(code), vec![]);
+    for stop in ["", "## Heading", "- next item", "**Other.** text"] {
+        let md = format!("- **T1 opens\n{stop}\n  ends.** body\n");
+        let t: Vec<_> = bold_texts(&md).into_iter().map(|l| l.2).collect();
+        assert!(!t.iter().any(|t| t.starts_with("T1")), "{stop:?}: {t:?}");
+    }
+    // never closed
+    assert_eq!(bold_texts("- **T1 opens\n  and runs on\n"), vec![]);
+    // a wrapped field is still a field
+    assert_eq!(bold_texts("**Files\nof the task:** a.rs\n"), vec![]);
+}
+#[test]
+fn one_line_labels_are_unchanged_by_wrapping() {
+    assert_eq!(
+        bold_texts("- **T1. A.** x\n  y **z** w\n**Files:**\n- **T2. B.**\n"),
+        [(1, 3, "T1. A.".to_string()), (4, 4, "T2. B.".to_string())]
+    );
+}

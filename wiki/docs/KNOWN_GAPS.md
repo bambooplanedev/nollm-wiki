@@ -99,10 +99,16 @@ per question is noise-level: treat single results as anecdotes.
   1 of them not what the lead read next (`record run` → a `T2a` label holding
   `record` and `run`). An in-order fallback with gaps was measured earlier
   and dropped (0 gains on 380 lead grep terms).
-- **A bold label that wraps is not a label.** A step like
-  `- [x] **T9i-1. … ; row` that closes its `**` on the next line is not
-  indexed, so `T9i-1` gets no answer: 3 of 203 ID-led bold labels in one
-  bench project's plans and specs.
+- **A bold label may wrap onto at most 3 more lines.** A bold-led line
+  whose `**` closes on one of the next 3 lines of its block is a label, its
+  text joined onto one line; a blank line, heading, new list item or
+  bold-led line before the close, a close further down, or a `**` never
+  closed gives no label. The close must be right-flanking as in CommonMark
+  (not after a space, and after punctuation only before a space,
+  punctuation or the line end), with an ASCII-only punctuation test. On
+  11,080 markdown files this adds 241 labels (+0.46%, none from code); the
+  3 bold-led lines that close further down (8-9 lines, all pasted code) and
+  the 11 never closed in their block stay unlabelled.
 - **Process folders and vendored code are skipped by name.** A `superpowers`
   folder and `third_party`/`vendor`/`node_modules`-style folders are not
   compiled (on one bench project 2,358 of 3,298 pages, 71%, and 77% of the
