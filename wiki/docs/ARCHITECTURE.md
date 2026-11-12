@@ -661,9 +661,12 @@ matching:
   punctuation trimmed, `_` kept). Its definitions are the items named so,
   or `owner::name` so, case-sensitively, else in any case; modules and
   top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
-  pages ranked higher first, then by pagerank. A query of identifiers
-  alone with any defined gets just those lines, page by page in the order
-  names first land, with no per-page cap; `not_found` lists the rest and
+  pages ranked higher first, then by pagerank. In a query of identifiers
+  alone a name equal, in any case, to a page's `module_stem` puts that page
+  (`stem_pages`, same cap and order) before its definitions, as a page with
+  no lines: a module is no item. Such a query with any defined or stem page
+  gets just those lines, page by page in the order names first land, with no
+  per-page cap; `not_found` lists the names with neither and
   the line output prints `not found: <name>` after the hits. There each
   non-nested function or method line carries `called_by`
   (`Wiki::caller_count`: the distinct callers of the item and its twin, as
