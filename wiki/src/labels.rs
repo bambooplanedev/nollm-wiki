@@ -19,10 +19,11 @@ pub struct Label {
     pub text: String,
 }
 
-/// The text of a bold label line: after leading spaces and an optional list
-/// marker it starts with `**` and closes it. A text ending in `:` is a field.
-fn bold(line: &str) -> Option<String> {
+/// `line` after leading spaces, an optional list marker and a checkbox, and
+/// whether a list marker was there.
+fn lead(line: &str) -> (&str, bool) {
     let mut s = line.trim_start();
+    let n = s.len();
     for marker in ["- ", "* ", "+ "] {
         s = s.strip_prefix(marker).unwrap_or(s);
     }
@@ -31,11 +32,54 @@ fn bold(line: &str) -> Option<String> {
     if digits > 0 && (s[digits..].starts_with(". ") || s[digits..].starts_with(") ")) {
         s = &s[digits + 2..];
     }
+    let item = s.len() < n;
     for box_ in ["[ ] ", "[x] ", "[X] "] {
         s = s.strip_prefix(box_).unwrap_or(s);
     }
-    let text = s.strip_prefix("**")?.split_once("**")?.0.trim();
-    (!text.is_empty() && !text.ends_with(':')).then(|| text.to_string())
+    (s, item)
+}
+
+/// A label text, unless empty or a field (ending in `:`).
+fn label_text(t: &str) -> Option<String> {
+    let t = t.trim();
+    (!t.is_empty() && !t.ends_with(':')).then(|| t.to_string())
+}
+
+/// Lines a bold label may run on past its first.
+const WRAP: usize = 3;
+
+/// The text of a bold label opening on `lines[0]`: after leading spaces, an
+/// optional list marker and checkbox it starts with `**`, closed on that line
+/// or on one of the next [`WRAP`] lines of the same block (each line up to the
+/// close is not blank, a heading, a list item or bold-led), the lines joined
+/// with spaces. A text ending in `:` is a field.
+fn bold(lines: &[&str]) -> Option<String> {
+    let first = lead(lines[0]).0.strip_prefix("**")?;
+    if let Some((t, _)) = first.split_once("**") {
+        return label_text(t);
+    }
+    let mut text = first.trim().to_string();
+    for l in lines.iter().skip(1).take(WRAP) {
+        let (s, item) = lead(l);
+        if l.trim().is_empty() || heading(l).is_some() || item || s.starts_with("**") {
+            return None;
+        }
+        let Some((part, rest)) = l.split_once("**") else {
+            text = format!("{text} {}", l.trim());
+            continue;
+        };
+        // The close must be right-flanking, as in CommonMark: `**kwargs` after
+        // a space or a `(` opens a span instead.
+        let before = part.chars().next_back();
+        let after = rest.chars().next();
+        let punct = |c: Option<char>| c.is_some_and(|c| c.is_ascii_punctuation());
+        let space = |c: Option<char>| c.is_none_or(char::is_whitespace);
+        if space(before) || (punct(before) && !(space(after) || punct(after))) {
+            return None;
+        }
+        return label_text(&format!("{text} {}", part.trim()));
+    }
+    None
 }
 
 /// Headings and bold labels of `md` in document order, skipping fenced code.
@@ -43,10 +87,12 @@ fn bold(line: &str) -> Option<String> {
 /// level, else on the last line.
 pub fn labels(md: &str) -> Vec<Label> {
     let mut out: Vec<Label> = Vec::new();
-    for (i, line) in mask_fenced_code(md).lines().enumerate() {
+    let masked = mask_fenced_code(md);
+    let lines: Vec<&str> = masked.lines().collect();
+    for (i, line) in lines.iter().enumerate() {
         let found = heading(line)
             .map(|(l, t)| (l as u8, t))
-            .or_else(|| bold(line).map(|t| (BOLD, t)));
+            .or_else(|| bold(&lines[i..]).map(|t| (BOLD, t)));
         if let Some((level, text)) = found {
             out.push(Label {
                 start: i + 1,
