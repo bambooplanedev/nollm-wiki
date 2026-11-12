@@ -565,7 +565,7 @@ non-test definition in another file gets a four-space-indented line under it,
 not when the name has more copies, not in `--format json`). A page without symbol lines gets its body snippet on a
 four-space-indented line instead. A query word with `_` or `::` in it, or an upper-case letter after
 the first (`_ack`, `Router::slice_cap_for`, `OrderBook`), is an identifier: its leading underscore
-counts and its definitions are items named exactly so (in any case only when none matches the case).
+counts and its definitions are items named exactly so, in the same case (`max_weekly_fee_usd` is not `MAX_WEEKLY_FEE_USD`).
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
 however many sit in one file; a name that is a file's module name in any case (`auto_refill` for
 `auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. Then `not found: <name>`

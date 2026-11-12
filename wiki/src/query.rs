@@ -1467,8 +1467,9 @@ impl Wiki {
     }
 
     /// The items called `name` (or `owner::name`) on pages that pass `kind`
-    /// and `tag`, matched case-sensitively, or in any case when nothing
-    /// matches so; module and top-level items never.
+    /// and `tag`, matched case-sensitively: a name in another case is another
+    /// item (`max_weekly_fee_usd` is a field, `MAX_WEEKLY_FEE_USD` a
+    /// constant). Module and top-level items never.
     fn definitions(
         &self,
         name: &str,
@@ -1476,31 +1477,20 @@ impl Wiki {
         tag: Option<&str>,
     ) -> Vec<(&Entry, &CodeItem)> {
         let qualified = name.contains("::");
-        let pick = |same: fn(&str, &str) -> bool| -> Vec<(&Entry, &CodeItem)> {
-            self.items
-                .iter()
-                .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
-                .filter(|(e, _)| e.passes(kind, tag))
-                .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
-                .filter(|(_, i)| {
-                    !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
-                        && if qualified {
-                            same(&i.qualified_name(), name)
-                        } else {
-                            same(&i.name, name)
-                        }
-                })
-                .collect()
-        };
-        let exact = pick(|a, b| a == b);
-        if exact.is_empty() {
-            // A shell global (a nested value) matches its exact name only.
-            let mut any_case = pick(|a, b| a.to_lowercase() == b.to_lowercase());
-            any_case.retain(|(_, i)| !(i.nested && i.kind == CodeItemKind::Value));
-            any_case
-        } else {
-            exact
-        }
+        self.items
+            .iter()
+            .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
+            .filter(|(e, _)| e.passes(kind, tag))
+            .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+            .filter(|(_, i)| {
+                !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
+                    && if qualified {
+                        i.qualified_name() == name
+                    } else {
+                        i.name == name
+                    }
+            })
+            .collect()
     }
 
     /// The identifiers of a query made of identifiers alone (`query_names`)

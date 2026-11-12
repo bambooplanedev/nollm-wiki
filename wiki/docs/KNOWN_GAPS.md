@@ -446,5 +446,6 @@ per question is noise-level: treat single results as anecdotes.
 - The ratio branch of the gate (a note scoring twice the best code hit) can
   be gamed by a note whose summary is stuffed with common code words; the
   origin label on the row is the defence, nothing filters such a note.
+- A name asked in the wrong case (`orderBook` for `OrderBook`) is `not found` as a definition; the ranked list still shows it.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
 - A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.
