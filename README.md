@@ -162,9 +162,12 @@ doc under the same head (`N11: …` in a ledger), both its first and last entrie
 plan, spec and ledger together, since an ID is often a label in only one of them; an empty query
 lists the first 200 labels (`limit` lists more, and a final line says how many were cut); body text
 is not searched, grep stays the tool for it.
-When no label holds the words in a row, labels opened by the query's leading ID (`11.4`, `T3a`) answer
-instead, else labels holding all its words except stop words in any order; a first line names the
-fallback. An empty answer says no label matched and suggests other words or grep.
+When no label holds the words in a row, a query that names several labels one after another
+(`Global constraints Per-batch procedure Pins`, `T9a T9k Rows`) lists each of them in query order: a
+part of two or more words or one led by an ID opens its label, a single plain word must be the whole
+label, and the first line names the words that open none. Otherwise labels opened by the query's
+leading ID (`11.4`, `T3a`) answer, else labels holding all its words except stop words in any order;
+a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
 
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|

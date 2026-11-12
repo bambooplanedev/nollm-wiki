@@ -126,7 +126,9 @@ const STOP_WORDS: &[&str] = &[
 /// query words) rank after all the others. When the limit cuts some of the
 /// labels one doc repeats under a head (text before the first `: `), the
 /// slots they had go to the first and last of them alternately. When a query
-/// of two or more words matches nothing, labels whose first or second word is
+/// of two or more words matches nothing, it is read as several labels named
+/// one after another (see `several`) when two or more of them are found;
+/// else labels whose first or second word is
 /// the query's leading word answer if that word has a digit (an ID like `11.4`
 /// or `T3a`), else labels holding all its words but stop words (two or more)
 /// in any order. Returns the hits grouped
@@ -152,6 +154,20 @@ pub fn doc_search(
         }
     });
     let mut fallback = None;
+    if ranked.is_empty() && q.len() > 1 {
+        let (parts, missed) = several(root, docs, query);
+        if !parts.is_empty() {
+            ranked = parts;
+            let missed = if missed.is_empty() {
+                String::new()
+            } else {
+                format!(" (no label opens with {})", missed.join(", "))
+            };
+            fallback = Some(format!(
+                "no label holds the words in a row; labels each part of the query opens, in query order{missed}:"
+            ));
+        }
+    }
     if ranked.is_empty() && q.len() > 1 {
         let mut note = String::new();
         let id = raw_words(query)
@@ -223,6 +239,64 @@ pub fn doc_search(
     ranked.sort_by_key(|(_, doc, _)| *doc);
     let hits = ranked.into_iter().map(|(_, _, h)| h).collect();
     (hits, errors, more, fallback)
+}
+
+/// Where the query part `run` names a label of words `w`: a part of two or
+/// more words, or one led by an ID (a word with a digit and a letter or `.`;
+/// a bare `7` is not one), opens the label at
+/// its first word, or the ID at its second (`Task T4`); one plain word must be
+/// the whole label (`Pins`).
+fn names(w: &[String], run: &[String]) -> Option<usize> {
+    let id = run[0].contains(|c: char| c.is_ascii_digit())
+        && run[0].contains(|c: char| c.is_alphabetic() || c == '.');
+    if run.len() == 1 && !id {
+        (w == run).then_some(0)
+    } else if w.starts_with(run) {
+        Some(0)
+    } else if id && w.get(1..)?.starts_with(run) {
+        Some(1)
+    } else {
+        None
+    }
+}
+
+/// A query naming several labels one after another: from each word, the
+/// longest run of words that names a label is one part; a word that starts
+/// none is skipped and returned. The labels of the parts, in part order, each
+/// listed once; none unless two or more parts list a new label.
+fn several(root: &Path, docs: &[String], query: &str) -> (Ranked, Vec<String>) {
+    let all = matching(root, docs, |_| Some((false, 0))).0;
+    let lw: Vec<Vec<String>> = all.iter().map(|(_, _, h)| words(&h.text)).collect();
+    let raw: Vec<&str> = raw_words(query).collect();
+    let q = words(query);
+    let (mut out, mut missed, mut parts) = (Vec::new(), Vec::new(), 0);
+    let mut taken = vec![false; all.len()];
+    let mut i = 0;
+    while i < q.len() {
+        let n = (1..=q.len() - i)
+            .rev()
+            .find(|&n| lw.iter().any(|w| names(w, &q[i..i + n]).is_some()));
+        let Some(n) = n else {
+            missed.push(raw[i].to_string());
+            i += 1;
+            continue;
+        };
+        let mut part: Vec<_> = (0..all.len())
+            .filter_map(|k| names(&lw[k], &q[i..i + n]).map(|at| ((all[k].0 .1, at), k)))
+            .filter(|&(_, k)| !taken[k])
+            .collect();
+        part.sort_unstable();
+        parts += usize::from(!part.is_empty());
+        for (_, k) in part {
+            taken[k] = true;
+            out.push(((false, false, false), all[k].1, all[k].2.clone()));
+        }
+        i += n;
+    }
+    if parts < 2 {
+        out.clear();
+    }
+    (out, missed)
 }
 
 /// Rank key, `docs` index and hit of every label whose text `matches` (giving

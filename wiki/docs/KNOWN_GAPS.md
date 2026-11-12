@@ -87,14 +87,22 @@ per question is noise-level: treat single results as anecdotes.
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
 - **Doc labels match words, not meaning.** `search` with `docs` first wants
-  the query words in a row; when none match, labels opened (first or second
-  word) by the query's leading ID answer, else labels holding all its words
-  but a few stop words in any order, and a first line names the fallback.
+  the query words in a row; when none match, a query naming several labels
+  one after another lists each, else labels opened (first or second word) by
+  the query's leading ID answer, else labels holding all its words but a few
+  stop words in any order, and a first line names the fallback. A bare number
+  (`7`, `2`) is not an ID there and a lone common word must be a whole label,
+  so `items 1, 2` gets no numbered sections; on 506 lead grep terms 1 answer
+  changed, on 124 joined lead greps 23 turned into label lists.
   A paraphrase still misses. The fallbacks can answer a content query with
   a loose label: on 217 lead grep terms that matched no label, 4 now get one,
   1 of them not what the lead read next (`record run` → a `T2a` label holding
   `record` and `run`). An in-order fallback with gaps was measured earlier
   and dropped (0 gains on 380 lead grep terms).
+- **A bold label that wraps is not a label.** A step like
+  `- [x] **T9i-1. … ; row` that closes its `**` on the next line is not
+  indexed, so `T9i-1` gets no answer: 3 of 203 ID-led bold labels in one
+  bench project's plans and specs.
 - **Process folders and vendored code are skipped by name.** A `superpowers`
   folder and `third_party`/`vendor`/`node_modules`-style folders are not
   compiled (on one bench project 2,358 of 3,298 pages, 71%, and 77% of the
