@@ -94,8 +94,8 @@ wiki/src/lib.rs
 платформи (`aarch64-apple-darwin`, `x86_64-apple-darwin` або `x86_64-unknown-linux-gnu`) і покладіть
 бінарник `wiki` у теку, що є в `PATH`, бо агенти запускають його просто як `wiki`:
 
-    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.12/wiki-v0.6.12-aarch64-apple-darwin.tar.gz
-    tar -xzf wiki-v0.6.12-aarch64-apple-darwin.tar.gz
+    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
+    tar -xzf wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
 
 Релізи після v0.6.1 також містять `SHA256SUMS`. Коли архів і цей файл лежать в одній теці, виконайте
