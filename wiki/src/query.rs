@@ -1513,14 +1513,31 @@ impl Wiki {
         }
         names
             .into_iter()
-            .filter(|n| self.definitions(n, kind, tag).is_empty())
+            .filter(|n| {
+                self.definitions(n, kind, tag).is_empty()
+                    && self.stem_pages(n, kind, tag).is_empty()
+            })
             .map(str::to_string)
+            .collect()
+    }
+
+    /// The pages passing `kind` and `tag` whose file is known by `name`
+    /// (`module_stem`, any case): `auto_refill` names `auto_refill.rs`, which
+    /// is no item. Never a memory note.
+    fn stem_pages(&self, name: &str, kind: Option<&KindFilter>, tag: Option<&str>) -> Vec<&Entry> {
+        let name = name.to_lowercase();
+        self.entries
+            .values()
+            .filter(|e| !e.memory && e.passes(kind, tag))
+            .filter(|e| crate::formats::code::module_stem(&e.path).to_lowercase() == name)
             .collect()
     }
 
     /// Shows the definitions of `q`'s identifiers (`query_names`): per name
     /// in query order, its definitions (at most `DEFINITIONS_PER_NAME` and
-    /// `limit`, pages ranked higher in `hits` first, then by pagerank). A query of
+    /// `limit`, pages ranked higher in `hits` first, then by pagerank), after
+    /// the pages a name is the stem of when the query is of names alone
+    /// (`stem_pages`). A query of
     /// identifiers alone, when any is defined, gets just those lines, page by
     /// page in the order the names first land, past the per-page line cap.
     /// In any other query a definition the ranking missed is added after its
@@ -1539,6 +1556,29 @@ impl Wiki {
         // Per page, in the order names first land on it: its definition lines.
         let mut by_page: Vec<(String, Vec<SymbolLine>)> = Vec::new();
         for name in names {
+            let rank = |e: &Entry| hits.iter().position(|h| h.id == e.id).unwrap_or(usize::MAX);
+            // In a query of names, a file the name is the stem of comes
+            // first, as a page line: its module is no item.
+            let mut stems = if only {
+                self.stem_pages(name, kind, tag)
+            } else {
+                Vec::new()
+            };
+            stems.sort_by(|a, b| {
+                rank(a)
+                    .cmp(&rank(b))
+                    .then_with(|| b.pagerank.total_cmp(&a.pagerank))
+                    .then_with(|| a.path.cmp(&b.path))
+            });
+            stems.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
+            for e in stems {
+                if !hits.iter().any(|h| h.id == e.id) {
+                    hits.push(Hit::from_entry(e, 0.0, None));
+                }
+                if !by_page.iter().any(|(id, _)| *id == e.id) {
+                    by_page.push((e.id.clone(), Vec::new()));
+                }
+            }
             let mut defs = self.definitions(name, kind, tag);
             let rank = |e: &Entry| hits.iter().position(|h| h.id == e.id).unwrap_or(usize::MAX);
             defs.sort_by(|(a, x), (b, y)| {

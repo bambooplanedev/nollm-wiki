@@ -567,7 +567,9 @@ four-space-indented line instead. A query word with `_` or `::` in it, or an upp
 the first (`_ack`, `Router::slice_cap_for`, `OrderBook`), is an identifier: its leading underscore
 counts and its definitions are items named exactly so (in any case only when none matches the case).
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
-however many sit in one file, then `not found: <name>` for each name nothing defines (when no name is
+however many sit in one file; a name that is a file's module name in any case (`auto_refill` for
+`auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. Then `not found: <name>`
+for each name that nothing defines and no file is named after (when no name is
 defined, the ranked hits come before those lines). In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
 definition included), and has no note when N is 0. In any other query a definition the ranking missed
