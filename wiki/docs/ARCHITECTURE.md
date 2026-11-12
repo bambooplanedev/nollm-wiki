@@ -659,7 +659,7 @@ matching:
   (`search_tagged`), not in `hint`. A query word with `_` or `::`, or an
   upper-case letter after the first, is an identifier (`identifier`: outer
   punctuation trimmed, `_` kept). Its definitions are the items named so,
-  or `owner::name` so, case-sensitively, else in any case; modules and
+  or `owner::name` so, case-sensitively only (a name in another case is another item); modules and
   top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
   pages ranked higher first, then by pagerank. In a query of identifiers
   alone a name equal, in any case, to a page's `module_stem` puts that page

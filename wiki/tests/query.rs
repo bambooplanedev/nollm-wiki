@@ -2481,9 +2481,18 @@ fn hit_paths(hits: &[wiki::query::Hit]) -> Vec<String> {
 }
 
 #[test]
+fn a_name_in_another_case_is_not_the_constant_of_that_name() {
+    // `max_weekly_fee_usd` is a field elsewhere; the constant of the same
+    // letters is another item and must not answer for it.
+    let (_d, w) = code_fixture(&[("src/other.rs", "pub const MAX_WEEKLY_FEE_USD: f64 = 1.0;\n")]);
+    let q = "max_weekly_fee_usd";
+    assert_eq!(w.not_found(q, None, None), [q]);
+}
+
+#[test]
 fn a_name_that_is_a_file_stem_keeps_that_file() {
-    // `auto_refill` names no item but the module file; an any-case constant
-    // elsewhere must not push the file out of the answer.
+    // `auto_refill` names no item but the module file; the constant
+    // `AUTO_REFILL` elsewhere is another item and stays out.
     let (_d, w) = code_fixture(&[
         (
             "src/ingress/auto_refill.rs",
@@ -2495,11 +2504,7 @@ fn a_name_that_is_a_file_stem_keeps_that_file() {
     let q = "auto_refill fan_out_stop_valve";
     assert_eq!(
         hit_paths(&w.search(q, None, 5)),
-        [
-            "src/ingress/auto_refill.rs",
-            "scripts/tune_knobs.py",
-            "src/manager/risk.rs"
-        ]
+        ["src/ingress/auto_refill.rs", "src/manager/risk.rs"]
     );
     assert_eq!(w.not_found(q, None, None), Vec::<String>::new());
 }
@@ -2540,15 +2545,18 @@ fn a_word_query_reports_nothing_missing() {
 }
 
 #[test]
-fn an_exact_case_match_is_preferred() {
+fn a_name_in_the_wrong_case_is_not_found_but_its_page_is_listed() {
     let (_d, w) = code_fixture(&[
         ("src/book.py", "class OrderBook:\n    pass\n"),
         ("src/util.py", "def orderbook():\n    pass\n"),
     ]);
     assert_eq!(line_names(&w.search("OrderBook", None, 10)), ["OrderBook"]);
-    let any_case = line_names(&w.search("orderBook", None, 10));
-    assert!(any_case.contains(&"OrderBook".to_string()), "{any_case:?}");
-    assert!(any_case.contains(&"orderbook".to_string()), "{any_case:?}");
+    assert_eq!(w.not_found("OrderBook", None, None), Vec::<String>::new());
+    // A case typo defines nothing, yet word search still lists both pages.
+    assert_eq!(w.not_found("orderBook", None, None), ["orderBook"]);
+    let hits = hit_paths(&w.search("orderBook", None, 10));
+    assert!(hits.contains(&"src/book.py".to_string()), "{hits:?}");
+    assert!(hits.contains(&"src/util.py".to_string()), "{hits:?}");
 }
 
 const NESTED_PY: &str = "\
