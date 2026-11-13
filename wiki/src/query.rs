@@ -630,6 +630,11 @@ impl Wiki {
         self.bodies.get(id).cloned()
     }
 
+    /// Every page's rendered Markdown body by id, as it was when loaded.
+    pub(crate) fn bodies(&self) -> &BTreeMap<String, String> {
+        &self.bodies
+    }
+
     /// A page's body without cloning it; empty when the id is unknown.
     fn body(&self, id: &str) -> &str {
         self.bodies.get(id).map_or("", String::as_str)

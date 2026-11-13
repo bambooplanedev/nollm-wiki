@@ -15,7 +15,9 @@
 //! which notes the event generation it had on seeing it and, once a compile
 //! has reached that, writes `ack-<id>-<token>`: a line naming that compile,
 //! then its error or nothing. The reader reloads from disk unless it already
-//! loaded that compile. While it waits it keeps trying for `writer.lock`, and
+//! loaded that compile; a compile holding `compile.lock` past the call's
+//! bound leaves the old snapshot, and the next ack retries. While it waits it
+//! keeps trying for `writer.lock`, and
 //! on getting it finishes the call as the writer. The OS drops the lock with
 //! its holder, so a dead writer leaves nothing behind. An idle writer rescans
 //! `.serve` every second, for a barrier whose event was lost, and removes
@@ -38,7 +40,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 /// How long a tool call waits for a fresh snapshot before answering from the
 /// one it has.
-const WAIT: Duration = Duration::from_secs(5);
+pub(crate) const WAIT: Duration = Duration::from_secs(5);
 
 /// How much of `WAIT` a call gives the start-up compile: enough for a small
 /// project, while a large one answers from the old wiki without the full wait.
@@ -48,7 +50,7 @@ const START_WAIT: Duration = Duration::from_secs(1);
 const RESCAN: Duration = Duration::from_secs(1);
 
 /// The stale reason while a compile has yet to catch up.
-const RUNNING: &str = "recompile still running";
+pub(crate) const RUNNING: &str = "recompile still running";
 
 /// When the worker compiles after an edit: once events pause for `quiet`,
 /// but no later than `cap` after the first of them.
@@ -258,7 +260,7 @@ impl Live {
         let writer = live.try_become_writer(true);
         // Never wait out a compile here: with `compile.lock` busy, start
         // empty and catch up like a reader with no wiki on disk.
-        let loaded = live.reload(false);
+        let loaded = live.reload(Some(Instant::now()));
         let missing = matches!(loaded, Some(Err(_)));
         let skipped = loaded.is_none();
         if loaded == Some(Ok(())) && !writer {
@@ -303,7 +305,7 @@ impl Live {
             // Load what start-up skipped, so a failing first compile still
             // leaves the wiki on disk to serve.
             if skipped {
-                let _ = worker.reload(true);
+                let _ = worker.reload(None);
             }
             loop {
                 // A reader idles here until it takes over as the writer.
@@ -497,7 +499,7 @@ impl Live {
         if let Err(e) = wrote {
             // No barrier, no ack: answer from disk at once.
             drop(s);
-            let _ = self.reload(true);
+            let _ = self.reload(Some(end));
             return Some((self.wiki(), Some(format!("barrier: {e}"))));
         }
         let ack = self
@@ -537,16 +539,18 @@ impl Live {
             stale = Some(reason).filter(|r| !r.is_empty());
             let unchanged = compiled.is_some() && compiled == self.lock().loaded;
             match if unchanged {
-                Ok(())
+                Some(Ok(()))
             } else {
-                self.reload(true).unwrap_or(Ok(()))
+                self.reload(Some(end))
             } {
-                Ok(()) => {
+                Some(Ok(())) => {
                     let mut s = self.lock();
                     s.compiled_gen = s.compiled_gen.max(1);
                     s.loaded = compiled;
                 }
-                Err(e) => stale = stale.or(Some(e)),
+                Some(Err(e)) => stale = stale.or(Some(e)),
+                // A compile holds the lock past the call: the next ack retries.
+                None => stale = Some(RUNNING.to_string()),
             }
         }
         let _ = std::fs::remove_file(&barrier);
@@ -558,13 +562,13 @@ impl Live {
     }
 
     /// Load the wiki on disk under the shared lock; on an error the old
-    /// snapshot stays. Without `wait`, `None` while a compile holds the lock.
-    fn reload(&self, wait: bool) -> Option<Result<(), String>> {
+    /// snapshot stays. With `until`, `None` if a compile still holds the lock
+    /// then.
+    fn reload(&self, until: Option<Instant>) -> Option<Result<(), String>> {
         let load = || Wiki::load(&self.dir);
-        let loaded = if wait {
-            crate::dirlock::shared(&self.dir, load)
-        } else {
-            crate::dirlock::try_shared(&self.dir, load)?
+        let loaded = match until {
+            None => crate::dirlock::shared(&self.dir, load),
+            Some(t) => crate::dirlock::shared_until(&self.dir, t, load)?,
         };
         Some(
             loaded
@@ -1211,6 +1215,49 @@ mod tests {
         let (two, stale) = b.fresh();
         assert_eq!(stale, None);
         assert!(!Arc::ptr_eq(&one, &two));
+    }
+
+    #[test]
+    fn a_reader_reload_gives_up_at_the_call_deadline() {
+        let (_src, _out, a, b) = pair();
+        let _ = a.fresh();
+        let (one, _) = b.fresh();
+        // The writer stalls: no acks of its own.
+        a.lock().compiling = true;
+        let ack = |token: u64| {
+            b.dir
+                .join(BARRIER_DIR)
+                .join(format!("ack-{}-{token}", b.id))
+        };
+        // An ack from another compile, waiting for b's next call.
+        std::fs::write(ack(b.lock().barrier_sent + 1), "other 99\n").unwrap();
+        // A compile holds the lock past the call's deadline.
+        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+        let d = b.dir.clone();
+        let cli = std::thread::spawn(move || {
+            crate::dirlock::exclusive(&d, || {
+                held.0.send(()).unwrap();
+                let _ = release.1.recv_timeout(WAIT + Duration::from_secs(3));
+            });
+        });
+        held.1.recv().unwrap();
+        let t = Instant::now();
+        let (two, stale) = b.fresh();
+        assert!(
+            t.elapsed() < WAIT + Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
+        );
+        assert_eq!(stale.as_deref(), Some(RUNNING));
+        assert!(Arc::ptr_eq(&one, &two));
+        assert_ne!(b.lock().loaded.as_deref(), Some("other 99"));
+        release.0.send(()).unwrap();
+        cli.join().unwrap();
+        // The next ack still reloads.
+        std::fs::write(ack(b.lock().barrier_sent + 1), "other 99\n").unwrap();
+        let (three, stale) = b.fresh();
+        assert_eq!(stale, None);
+        assert!(!Arc::ptr_eq(&one, &three));
     }
 
     #[test]

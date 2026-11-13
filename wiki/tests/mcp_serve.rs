@@ -384,6 +384,52 @@ fn serve_lists_and_reads_resources() {
 }
 
 #[test]
+fn a_resource_read_does_not_wait_out_a_compile() {
+    let (_tmp, out) = compile_fixture();
+    std::fs::create_dir(out.join(".serve")).unwrap();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+
+    // A compile holds the lock past RESPONSE_DEADLINE.
+    let (held, release) = (mpsc::channel(), mpsc::channel::<()>());
+    let d = out.clone();
+    let cli = std::thread::spawn(move || {
+        wiki::dirlock::exclusive(&d, || {
+            held.0.send(()).unwrap();
+            let _ = release.1.recv_timeout(Duration::from_secs(15));
+        });
+    });
+    held.1.recv().unwrap();
+    let read = |stdin: &mut ChildStdin, id: u64, uri: &str| {
+        send(
+            stdin,
+            &json!({"jsonrpc": "2.0", "id": id, "method": "resources/read", "params": {"uri": uri}}),
+        );
+        read_response(&stdout, id)
+    };
+
+    // Pages come from the snapshot.
+    let resp = read(&mut stdin, 2, "wiki://page/gradient_descent");
+    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
+    assert!(text.contains("\n# Gradient Descent\n"), "{resp}");
+    // Files on disk cannot be read meanwhile.
+    let resp = read(&mut stdin, 3, "wiki://index");
+    let msg = resp["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.contains("recompile still running"), "{resp}");
+
+    release.0.send(()).unwrap();
+    cli.join().unwrap();
+    let resp = read(&mut stdin, 4, "wiki://index");
+    assert_eq!(
+        resp["result"]["contents"][0]["mimeType"],
+        json!("application/json")
+    );
+
+    drop(stdin);
+    let _ = child.wait();
+}
+
+#[test]
 fn serve_refuses_path_traversal_outside_index() {
     let (_tmp, out) = compile_fixture();
     // Plant a decoy file outside the served directory.

@@ -3,7 +3,7 @@
 //! pages as resources over stdio.
 
 use crate::lint::{lint, load_compiled_pages};
-use crate::live::{Live, EXE, OUTDATED};
+use crate::live::{Live, EXE, OUTDATED, RUNNING, WAIT};
 use crate::model::{clip, one_line, KindFilter, Origin, LINE_CHARS};
 use crate::query::Wiki;
 use crate::query::{Hit, PackBudget};
@@ -24,7 +24,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::{LazyLock, Mutex, OnceLock};
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
 
@@ -154,7 +154,7 @@ impl WikiState {
         }
     }
 
-    /// `reload` takes a file lock that may wait out a compile: off the runtime thread.
+    /// `reload` waits up to `WAIT` for a compile's file lock: off the runtime thread.
     async fn reload_blocking(self: &Arc<Self>) -> Arc<Wiki> {
         let this = Arc::clone(self);
         tokio::task::spawn_blocking(move || this.reload())
@@ -170,7 +170,8 @@ impl WikiState {
         let mut guard = inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        crate::dirlock::shared(&self.dir, || {
+        // A compile holding the lock past `WAIT`: keep the old snapshot, retry next call.
+        let _ = crate::dirlock::shared_until(&self.dir, Instant::now() + WAIT, || {
             if let Ok(current) = fingerprint(&self.dir) {
                 if Some(current) != guard.fingerprint {
                     if let Ok(wiki) = Wiki::load(&self.dir) {
@@ -443,15 +444,21 @@ impl WikiServer {
         description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
     )]
     async fn lint(&self) -> Result<CallToolResult, McpError> {
-        let (_, stale) = self.state.snapshot().await;
+        let deadline = Instant::now() + WAIT;
+        let (wiki, stale) = self.state.snapshot().await;
         let ws = Arc::clone(&self.state);
         let pages = tokio::task::spawn_blocking(move || {
-            crate::dirlock::shared(ws.dir(), || load_compiled_pages(ws.dir()))
+            crate::dirlock::shared_until(ws.dir(), deadline, || load_compiled_pages(ws.dir()))
         })
         .await
         .expect("lint read panicked")
+        .transpose()
         .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
-        let r = lint(&pages);
+        // A compile holding the lock past the call: lint the snapshot.
+        let (r, stale) = match pages {
+            Some(pages) => (lint(&pages), stale),
+            None => (lint(wiki.bodies()), stale.or(Some(RUNNING.to_string()))),
+        };
         let report = serde_json::json!({
             "total_pages": r.total_pages,
             "broken_links": r.broken_links,
@@ -503,6 +510,7 @@ impl ServerHandler for WikiServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         let uri = request.uri.as_str();
+        let deadline = Instant::now() + WAIT;
         let (wiki, stale) = self.state.snapshot().await;
         let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
         // Only a missing file is "no such resource"; a permission or read
@@ -512,12 +520,13 @@ impl ServerHandler for WikiServer {
             let ws = Arc::clone(&self.state);
             async move {
                 tokio::task::spawn_blocking(move || {
-                    crate::dirlock::shared(ws.dir(), || {
+                    crate::dirlock::shared_until(ws.dir(), deadline, || {
                         std::fs::read_to_string(ws.dir().join(name))
                     })
                 })
                 .await
                 .expect("read panicked")
+                .ok_or_else(|| McpError::internal_error(format!("read {name}: {RUNNING}"), None))?
                 .map_err(|e| {
                     if e.kind() == std::io::ErrorKind::NotFound {
                         not_found()
@@ -830,6 +839,7 @@ pub fn run(
 mod tests {
     use super::*;
     use crate::{compile, CompileOptions};
+    use std::time::{Duration, Instant};
 
     fn fixture(files: usize) -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
@@ -949,6 +959,89 @@ mod tests {
         release.0.send(()).unwrap();
         cli.join().unwrap();
         assert_eq!(pages(&state), 3);
+    }
+
+    /// A compile that holds `compile.lock` on `out`, recompiling `raw` with 5
+    /// files inside the hold; returns once the disk has moved on. It releases
+    /// on a message, or after `WAIT` + 3 s.
+    fn hold(
+        tmp: &tempfile::TempDir,
+        out: &Path,
+    ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        std::fs::create_dir_all(out.join(".serve")).unwrap();
+        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
+        let (raw, out) = (tmp.path().join("raw"), out.to_path_buf());
+        let cli = std::thread::spawn(move || {
+            crate::dirlock::exclusive(&out, || {
+                crate::generator::generate_corpus(&raw, 5, 42).unwrap();
+                compile(&raw, &out, &CompileOptions::default()).unwrap();
+                held.0.send(()).unwrap();
+                let _ = release
+                    .1
+                    .recv_timeout(crate::live::WAIT + Duration::from_secs(3));
+            });
+        });
+        held.1.recv().unwrap();
+        (release.0, cli)
+    }
+
+    #[test]
+    fn snapshot_does_not_wait_out_a_compile() {
+        let (tmp, out) = fixture(3);
+        let state = WikiState::load(&out).unwrap();
+        let (release, cli) = hold(&tmp, &out);
+        let t = Instant::now();
+        assert_eq!(pages(&state), 3);
+        assert!(
+            t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
+        );
+        release.send(()).unwrap();
+        cli.join().unwrap();
+        assert_eq!(pages(&state), 5);
+    }
+
+    #[test]
+    fn lint_answers_from_the_snapshot_while_a_compile_holds_the_lock() {
+        let (tmp, out) = fixture(3);
+        let state = WikiState::load(&out).unwrap();
+        let server = WikiServer::new(Arc::clone(&state), out.clone(), &["lint"]);
+        let (release, cli) = hold(&tmp, &out);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let t = Instant::now();
+        let r = rt.block_on(server.lint()).unwrap();
+        // One wait, not two.
+        assert!(
+            t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
+        );
+        release.send(()).unwrap();
+        cli.join().unwrap();
+        let texts: Vec<&str> = r
+            .content
+            .iter()
+            .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+            .collect();
+        let report: serde_json::Value = serde_json::from_str(texts[0]).unwrap();
+        assert_eq!(report["total_pages"], 3);
+        assert_eq!(
+            texts.last().copied(),
+            Some(stale_line(crate::live::RUNNING).as_str())
+        );
+    }
+
+    #[test]
+    fn snapshot_lint_matches_the_disk_lint() {
+        let (_tmp, out) = fixture(3);
+        let wiki = Wiki::load(&out).unwrap();
+        assert_eq!(
+            format!("{:?}", lint(wiki.bodies())),
+            format!("{:?}", lint(&load_compiled_pages(&out).unwrap()))
+        );
     }
 
     #[test]

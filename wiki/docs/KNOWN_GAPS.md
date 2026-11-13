@@ -348,7 +348,8 @@ per question is noise-level: treat single results as anecdotes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
 - `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
-  not the live snapshot.
+  not the live snapshot; `lint` falls back to the snapshot when that read
+  would outrun the call.
 - A generated file ignored at file level still triggers a recompile when
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
@@ -362,8 +363,9 @@ per question is noise-level: treat single results as anecdotes.
   Restart old sessions after an upgrade.
 - Servers on one `--dir` are assumed to share inputs (`--source`,
   `--memory`). If they differ, the writer's inputs win.
-- A reader's reload waits on `compile.lock`: during a long compile its call
-  can take longer than the usual 5 s bound.
+- A call that meets a compile holding `compile.lock` past its 5 s answers
+  from the snapshot it has, with `recompile still running`; `wiki://index`
+  and `wiki://llms.txt` return an error instead.
 - A reader can load the output of a later compile that failed part way,
   under the earlier ack's empty stale reason. The window is narrow; a plain
   `serve` without `--source` has the same exposure.
