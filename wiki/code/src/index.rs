@@ -38,6 +38,7 @@ impl Family {
         }
     }
 
+    /// The family's lowercase name.
     pub fn as_str(self) -> &'static str {
         match self {
             Family::Rust => "rust",
@@ -50,7 +51,8 @@ impl Family {
     }
 }
 
-/// A function item: (page, item) indexes into `Index::pages`.
+/// A function item: (page, item), the page a position in the map's key order
+/// and the item an index into that unit's items.
 pub type FnRef = (usize, usize);
 
 /// What call sites resolve against: every function by name, every page by
@@ -128,11 +130,13 @@ impl<'a, U: CodeUnit> Index<'a, U> {
         }
     }
 
+    /// The item `c` names.
     pub fn item(&self, c: FnRef) -> &'a CodeItem {
         let unit: &'a U = self.pages[c.0];
         &unit.items()[c.1]
     }
 
+    /// The unit of page `page`.
     pub fn unit(&self, page: usize) -> &'a U {
         self.pages[page]
     }

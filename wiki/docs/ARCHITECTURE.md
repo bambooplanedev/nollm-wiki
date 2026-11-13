@@ -162,6 +162,18 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 ## Module map
 
+The workspace in `wiki/` holds two crates. `wiki` (the root package) owns
+everything about a wiki: the pipeline, pages and their ids, the graph,
+rendering, the manifest, queries, the CLI, `serve` and `setup`. `wiki-code`
+(`wiki/code`, lib `wiki_code`) owns the code layer a sibling tool can use
+without the wiki: the item model, the source tree walk, tree-sitter extraction
+(`extract`, and `analyze`, which also hands back the parse trees, each item's
+node, the calls under a node with their literal text, and comment text), the
+candidate index call sites resolve against, and import resolution. Its crate
+doc lists that contract; its `support` module is shared text helpers and not
+part of it. It pins tree-sitter and every grammar to an exact version, since a
+consumer that depends on it by git does not use this lock file.
+
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |

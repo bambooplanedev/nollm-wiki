@@ -4,7 +4,7 @@ use crate::support::{is_shell, module_stem, source_rank};
 use crate::CodeUnit;
 use std::collections::{BTreeMap, BTreeSet};
 
-/// Import-string resolution, precomputed once per `build_graph`.
+/// Import-string resolution, precomputed once per map of units.
 ///
 /// Segment matching, not module resolution: a `::` path is followed only
 /// under a local root, and each remaining segment is looked up as a module
@@ -16,24 +16,24 @@ use std::collections::{BTreeMap, BTreeSet};
 /// segments, and is resolved separately by `resolve_include`.
 ///
 /// Ties between two files are broken by the smallest key. A caller keyed by
-/// path and one keyed by page id can therefore disagree when two headers
-/// share an include suffix.
+/// path and one keyed by some other name can therefore disagree when two
+/// headers share an include suffix.
 pub struct Imports<'a> {
     /// First segments a `::` path may start with and still be followed:
     /// `crate`, `super`, `self`, plus every local crate — the directory
-    /// holding a `src/lib.rs` or `src/main.rs` page (`wiki` on this repo).
+    /// holding a `src/lib.rs` or `src/main.rs` unit (`wiki` on this repo).
     local_roots: BTreeSet<&'a str>,
-    /// Module stem → (`source_rank`, `source_path`, page id).
+    /// Module stem → (`source_rank`, the unit's path, the map's key).
     ///
     /// The two-pages-per-component design gives a `.h`/`.cpp` pair the same
     /// stem, and the header — not whichever path sorts first — is what an
     /// `#include` of the bare stem should mean, so the tie-break is
     /// `source_rank` first (a header always ranks below its implementation)
-    /// and `source_path` only to break a tie between two files of the same
+    /// and the path only to break a tie between two files of the same
     /// rank. Without a header extension every file ties on rank and this
     /// reduces to the smallest-path rule.
     by_stem: BTreeMap<&'a str, (u8, &'a str, &'a str)>,
-    /// Defined name → (`source_rank`, page id) of the lowest-rank claimant,
+    /// Defined name → (`source_rank`, the map's key) of the lowest-rank claimant,
     /// or `None` once two pages of the *same* rank both claim it.
     ///
     /// A C++ free function is declared in a header and defined in its
@@ -44,11 +44,12 @@ pub struct Imports<'a> {
     /// a lower one; only a tie (both pages the same rank, as every
     /// pre-existing corpus is) still sets `None`.
     by_defined: BTreeMap<&'a str, Option<(u8, &'a str)>>,
-    /// `source_path` → page id, for `resolve_include`'s suffix match.
+    /// The unit's path → the map's key, for `resolve_include`'s suffix match.
     by_path: BTreeMap<&'a str, &'a str>,
 }
 
 impl<'a> Imports<'a> {
+    /// The lookup tables for `units`, keyed as the map is.
     pub fn new<U: CodeUnit>(units: &'a BTreeMap<String, U>) -> Self {
         let mut local_roots: BTreeSet<&str> = ["crate", "super", "self"].into_iter().collect();
         let mut by_stem: BTreeMap<&str, (u8, &str, &str)> = BTreeMap::new();
@@ -114,7 +115,7 @@ impl<'a> Imports<'a> {
         }
     }
 
-    /// Every code page one import string refers to.
+    /// The keys of every code unit one import string refers to.
     ///
     /// A C/C++ include is routed to `resolve_include` instead of segment
     /// resolution when it is angle-bracketed (`<vector>`) or its path ends in
@@ -162,9 +163,9 @@ impl<'a> Imports<'a> {
     /// `#include "core/book/orderbook.h"` hit pages named `core`, `book` and
     /// `h` as well as the intended one, and `<boost/algorithm/string.hpp>`
     /// invented edges to a project's own `algorithm` and `string`. Matching
-    /// the bracket-stripped path as a suffix of a page's `source_path` yields
+    /// the bracket-stripped path as a suffix of a unit's path yields
     /// at most one edge and resolves a project's own `<mylib/core.h>` while
-    /// leaving third-party headers unresolved, since no page's path ends in
+    /// leaving third-party headers unresolved, since no unit's path ends in
     /// `boost/algorithm/string.hpp`.
     ///
     /// The match must land on a path-segment boundary: `src.ends_with(path)`
@@ -172,9 +173,9 @@ impl<'a> Imports<'a> {
     /// `book/orderbook.h`, so the byte immediately before the suffix must be
     /// `/` (or the suffix must be the whole path).
     ///
-    /// More than one page's path can end in the same suffix (two `-I` roots
+    /// More than one unit's path can end in the same suffix (two `-I` roots
     /// shadowing a name); determinism requires picking one candidate the
-    /// same way on every run, so the candidate ids are collected, sorted,
+    /// same way on every run, so the candidate keys are collected, sorted,
     /// and only the lexicographically smallest is kept.
     fn resolve_include(&self, imp: &str) -> BTreeSet<String> {
         let path = imp
@@ -189,7 +190,7 @@ impl<'a> Imports<'a> {
         hits.into_iter().map(str::to_string).collect()
     }
 
-    /// Ids of the pages whose `source_path` ends in `path` on a `/` boundary.
+    /// Keys of the units whose path ends in `path` on a `/` boundary.
     fn suffix_hits(&self, path: &str) -> Vec<&'a str> {
         self.by_path
             .iter()
@@ -202,12 +203,12 @@ impl<'a> Imports<'a> {
             .collect()
     }
 
-    /// The page a shell `source` / `.` argument names, by path only.
+    /// The key of the unit a shell `source` / `.` argument names, by path only.
     ///
     /// Quotes are dropped. A literal path is tried as written, relative to
     /// the importing file's directory and then the project root. Otherwise
     /// (a variable in the way) only the tail after the last expansion is
-    /// used. A suffix match counts only when exactly one page matches; an
+    /// used. A suffix match counts only when exactly one unit matches; an
     /// empty tail (`source "$1"`) gives no edge.
     fn resolve_source(&self, imp: &str, from: &str) -> BTreeSet<String> {
         let arg: String = imp.chars().filter(|c| !matches!(c, '"' | '\'')).collect();
@@ -262,14 +263,14 @@ fn normalize(base: &str, rel: &str) -> String {
 /// The obvious shape test — angle-bracketed, or containing both `/` and `.`
 /// — is wrong: a TypeScript `import x from "./client"` contains both a `/`
 /// and a `.` (in the leading `./`) and would be routed here, find no
-/// `source_path` suffix match (no page's path ends in `./client`), and
+/// path suffix match (no unit's path ends in `./client`), and
 /// silently drop the import edge. Requiring a known C/C++ header extension
 /// instead of a bare "has a dot" test keeps every other language's imports —
 /// none of which end in `.h`/`.hpp`/`.hh`/`.hxx` — on the segment path.
 ///
 /// A bracketed `<vector>` has no extension at all, so it is still routed on
 /// the angle-bracket shape alone; `resolve_include` correctly resolves it to
-/// nothing when no page's path matches.
+/// nothing when no unit's path matches.
 fn is_cpp_include(trimmed: &str) -> bool {
     if trimmed.starts_with('<') {
         return true;

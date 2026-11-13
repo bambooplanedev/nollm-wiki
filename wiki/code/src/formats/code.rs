@@ -18,14 +18,28 @@ use tree_sitter::{
 pub struct CodeFile {
     /// The `rel_path` given to `extract`.
     pub path: String,
+    /// The language: `rust`, `python`, `cpp`, `go`, `shell`, `javascript`,
+    /// `typescript`, …; `vue` or `svelte` for a component, whatever language
+    /// its script is in; the extension for a file with no grammar.
     pub lang: String,
+    /// The derived page name: the title-cased module stem, the directory's
+    /// for a directory module (`mod.rs`, `__init__.py`, `index.*`).
     pub name: String,
+    /// The text the page shows: the file's, with a Rust `#[cfg(test)]`
+    /// module replaced by a one-line omission marker.
     pub body: String,
+    /// The one-line summary: the file's doc, else an exported signature.
     pub summary: Option<String>,
+    /// The exported signatures, grouped by owner.
     pub symbols: Vec<String>,
+    /// The import strings as written, sorted and deduplicated.
     pub imports: Vec<String>,
+    /// The bare names of top-level definitions, sorted and deduplicated.
     pub defined: Vec<String>,
+    /// The names of exported methods (not a trait impl's), sorted and
+    /// deduplicated.
     pub methods: Vec<String>,
+    /// Every item with its lines, doc and call sites, in line order.
     pub items: Vec<CodeItem>,
 }
 
@@ -360,8 +374,9 @@ pub fn is_cpp(ext: &str) -> bool {
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
 /// extension (`Makefile`) or is a dotfile (`.gitignore`).
 ///
-/// Lowercasing matters: `Registry::ext_of` dispatches on the lowercase form, so
-/// `Book.H` must also reach `lang_for_ext` as `h`, not fall through to zero symbols.
+/// Lowercasing matters: `handles` and the grammar lookup match the lowercase
+/// form, so `Book.H` must reach `lang_for_ext` as `h`, not fall through to
+/// zero symbols.
 pub fn ext_of(rel_path: &str) -> String {
     let base = basename(rel_path);
     match base.rsplit_once('.') {
@@ -394,9 +409,9 @@ pub fn is_shell(source_path: &str) -> bool {
     matches!(ext_of(source_path).as_str(), "sh" | "bash")
 }
 
-/// Every extension `CodeExtractor` claims. Shared by `extensions()` and by
-/// `QUERIES` so the registry can never miss a language the extractor accepts —
-/// a missing entry would strip that language of all symbols and imports.
+/// Every extension `extract` has a grammar for (`handles` checks it). A test
+/// pins it to the extensions `QUERIES` builds a query for, so the two cannot
+/// drift: a missing query would strip that language of all symbols and imports.
 pub const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
     "hxx", "h", "c", "mjs", "cjs", "sh", "bash",
@@ -447,7 +462,8 @@ pub fn validate_queries() {
 }
 
 /// Whether `extract` claims `rel_path`: its lowercased extension is in
-/// `CODE_EXTENSIONS`.
+/// `CODE_EXTENSIONS`. A file whose name is only an extension (`.rs`) has none
+/// (see `ext_of`) and is not handled.
 pub fn handles(rel_path: &str) -> bool {
     CODE_EXTENSIONS.contains(&ext_of(rel_path).as_str())
 }
