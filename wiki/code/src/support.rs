@@ -1,3 +1,5 @@
+//! For the `wiki` crate only. Not a contract; may change in any release.
+//!
 //! Small text and path helpers shared by the wiki and the code layer.
 
 use std::path::Path;
