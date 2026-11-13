@@ -536,6 +536,9 @@ for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermo
 - `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
+- `WIKI_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
+  per-stage milliseconds, files read, pages written. `wiki serve --source` and `wiki setup` honour
+  it too; it never changes the output.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an earlier version, or sources
 renamed since), `compile` warns on stderr and leaves them in place: delete them or recompile into a

@@ -164,7 +164,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 | Module | Responsibility |
 |---|---|
-| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`. |
+| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
 | `src/memory.rs` | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `data_dir_for`, `data_dir`, `repo_key` and `local_dir` (the old per-user folder under the root commit) stay only to render the `wiki-memory` skill earlier releases wrote, so `setup` can remove it; they go one release after 0.6. |
 | `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
