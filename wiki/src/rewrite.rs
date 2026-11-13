@@ -2,6 +2,7 @@
 
 use crate::hash::{combine, to_hex};
 use crate::model::{Edges, Entity, SourceKind};
+use rayon::prelude::*;
 use regex::Regex;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -221,27 +222,27 @@ pub(crate) fn page_source_index(output: &Path) -> BTreeMap<String, BTreeSet<Path
     };
     entries.sort();
 
+    // Read and parse in parallel (the files are independent); the map is then
+    // built sequentially, and a `BTreeMap`/`BTreeSet` is order-independent.
+    let found: Vec<(String, PathBuf)> = entries
+        .par_iter()
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(path).ok()?;
+            // Front matter (current) or a `## Metadata` bullet (pages from <= 0.6.7).
+            let src = front_matter(&text, "source")
+                .map(|v| serde_json::from_str::<String>(&v).unwrap_or(v))
+                .or_else(|| {
+                    parse_sections(&text)
+                        .get("Metadata")?
+                        .lines()
+                        .find_map(|l| l.trim().strip_prefix("- source: ").map(str::to_string))
+                })?;
+            Some((src.trim().to_string(), path.clone()))
+        })
+        .collect();
     let mut index: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
-    for path in entries {
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let sections = parse_sections(&text);
-        // Front matter (current) or a `## Metadata` bullet (pages from <= 0.6.7).
-        let src = front_matter(&text, "source")
-            .map(|v| serde_json::from_str::<String>(&v).unwrap_or(v))
-            .or_else(|| {
-                sections
-                    .get("Metadata")?
-                    .lines()
-                    .find_map(|l| l.trim().strip_prefix("- source: ").map(str::to_string))
-            });
-        if let Some(src) = src {
-            index
-                .entry(src.trim().to_string())
-                .or_default()
-                .insert(path.clone());
-        }
+    for (src, path) in found {
+        index.entry(src).or_default().insert(path);
     }
     index
 }
@@ -940,6 +941,50 @@ mod tests {
             .map(|p| p.file_name().unwrap().to_str().unwrap())
             .collect();
         assert_eq!(got, vec!["alpha_one.md", "alpha_two.md"]);
+    }
+
+    #[test]
+    fn page_source_index_prefers_front_matter_over_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("p.md"),
+            "---\nsource: \"a.rs\"\n---\n# P\n\n## Metadata\n- source: b.rs\n",
+        )
+        .unwrap();
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(idx["a.rs"], BTreeSet::from([dir.path().join("p.md")]));
+    }
+
+    #[test]
+    fn page_source_index_keeps_every_front_matter_page_declaring_one_source() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["one.md", "two.md"] {
+            std::fs::write(dir.path().join(name), "---\nsource: \"a.rs\"\n---\n# A\n").unwrap();
+        }
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(
+            idx["a.rs"],
+            BTreeSet::from([dir.path().join("one.md"), dir.path().join("two.md")])
+        );
+    }
+
+    #[test]
+    fn page_source_index_skips_unreadable_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bad.md"), [0xffu8, 0xfe]).unwrap();
+        std::fs::write(
+            dir.path().join("good.md"),
+            "---\nsource: \"a.rs\"\n---\n# G\n",
+        )
+        .unwrap();
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(idx["a.rs"], BTreeSet::from([dir.path().join("good.md")]));
     }
 
     #[test]
