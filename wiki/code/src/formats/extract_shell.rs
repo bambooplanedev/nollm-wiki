@@ -35,7 +35,7 @@ fn shell_lead(node: Node, text: &str) -> Lead {
         .get(node.byte_range())
         .and_then(|t| t.strip_prefix('#'))
     {
-        Some(b) if node.kind() == "comment" && !b.starts_with('!') => b.trim(),
+        Some(b) if node.kind() == "comment" && !b.starts_with('!') => comment_body(b),
         _ => return Lead::Stop,
     };
     if !body.chars().any(char::is_alphanumeric) {
@@ -45,6 +45,11 @@ fn shell_lead(node: Node, text: &str) -> Lead {
     } else {
         Lead::Doc(body.to_string())
     }
+}
+
+/// A `#` comment's text after its `#`, as a doc line takes it.
+pub(crate) fn comment_body(after_hash: &str) -> &str {
+    after_hash.trim()
 }
 
 /// `name() {`, `function name {`, `function name() (`: a function opening line.
@@ -107,12 +112,17 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
 /// `declare` ones and those in an `&&` / `||` list included, `NAME` in `[A-Z][A-Z0-9_]*`, the first of each
 /// name only: nested items, so `search` finds them by name and nothing else
 /// lists them. An item spans its statement; its signature is the first line.
+/// Each item comes with that statement's node.
 ///
 /// In a file with parse errors a lost function leaves its body at the top
 /// level: a statement inside a function of `fns` is skipped, an ERROR node's
 /// statements are read, and one with an error spans its first line only.
-pub(crate) fn globals<'t>(root: Node<'t>, text: &str, fns: &[CodeItem]) -> Vec<CodeItem> {
-    let mut out: Vec<CodeItem> = Vec::new();
+pub(crate) fn globals<'t>(
+    root: Node<'t>,
+    text: &str,
+    fns: &[CodeItem],
+) -> Vec<(CodeItem, Node<'t>)> {
+    let mut out: Vec<(CodeItem, Node<'t>)> = Vec::new();
     let broken = root.has_error();
     let statements = |n: Node<'t>| -> Vec<Node<'t>> {
         let mut v: Vec<Node> = n.named_children(&mut n.walk()).collect();
@@ -154,7 +164,7 @@ pub(crate) fn globals<'t>(root: Node<'t>, text: &str, fns: &[CodeItem]) -> Vec<C
                 && name
                     .chars()
                     .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
-            if !upper || out.iter().any(|it| it.name == name) {
+            if !upper || out.iter().any(|(it, _)| it.name == name) {
                 continue;
             }
             let first = text[stmt.start_byte()..].lines().next().unwrap_or("");
@@ -169,7 +179,7 @@ pub(crate) fn globals<'t>(root: Node<'t>, text: &str, fns: &[CodeItem]) -> Vec<C
             item.signature = first.trim_end().to_string();
             item.start_line = stmt.start_position().row + 1;
             item.nested = true;
-            out.push(item);
+            out.push((item, stmt));
         }
     }
     out

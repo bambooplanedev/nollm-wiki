@@ -1,5 +1,6 @@
 //! `wiki-code`: the code layer shared by the wiki compiler and its sibling tools: the item model, the source tree walk, tree-sitter code extraction, the candidate index calls resolve against, and import resolution.
 
+pub mod analyze;
 pub mod imports;
 pub mod index;
 pub mod model;
@@ -19,6 +20,7 @@ mod formats {
 }
 mod summary;
 
+pub use analyze::{analyze, Analyzed, Call, Def, Source};
 pub use formats::code::{extract, handles, CodeFile, CodeUnit};
 pub use formats::extract_cpp::pair_declarations;
 pub use tree_sitter;

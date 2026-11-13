@@ -158,11 +158,16 @@ fn python_lead(node: Node, text: &str) -> Lead {
                 && !(node.start_position().row <= 1
                     && (body.contains("coding:") || body.contains("coding="))) =>
         {
-            // A Sphinx attribute doc is `#:`.
-            Lead::Plain(body.strip_prefix(':').unwrap_or(body).trim().to_string())
+            Lead::Plain(comment_body(body).to_string())
         }
         _ => Lead::Stop,
     }
+}
+
+/// A `#` comment's text after its `#`, as a plain lead takes it: a Sphinx
+/// attribute doc is `#:`.
+pub(crate) fn comment_body(after_hash: &str) -> &str {
+    after_hash.strip_prefix(':').unwrap_or(after_hash).trim()
 }
 
 /// Python's module-level guard and owner chain, resolved in one upward walk.

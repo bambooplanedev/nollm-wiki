@@ -1,5 +1,7 @@
 //! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
 
+use crate::analyze::{Call, Def, Source};
+use crate::index::Family;
 use crate::model::{Arity, CallSite, CallVia, CodeItem, CodeItemKind, PairRole};
 use crate::support::{
     basename, clip, first_real_sentence, summarize, title_from_slug, ITEM_DOC_TEXT_MAX_CHARS,
@@ -452,6 +454,16 @@ pub fn handles(rel_path: &str) -> bool {
 
 /// Extract one source file: its symbols, imports, items and summary.
 pub fn extract(rel_path: &str, text: &str) -> CodeFile {
+    extract_file(rel_path, text).0
+}
+
+/// The trees a file's items came from, and each item's node (parallel to
+/// `items`).
+pub(crate) type Found = (Vec<Source>, Vec<Option<Def>>);
+
+/// The one extraction path behind `extract` and `analyze`: the file, and
+/// what its items were built from when its extension has a grammar.
+pub(crate) fn extract_file(rel_path: &str, text: &str) -> (CodeFile, Option<Found>) {
     let ext = ext_of(rel_path);
     let ext = ext.as_str();
 
@@ -492,7 +504,9 @@ pub fn extract(rel_path: &str, text: &str) -> CodeFile {
         .as_ref()
         .map_or((ext, source.as_str()), |v| (v.ext, v.text.as_str()));
 
-    let info = extract_code(code_ext, code, pre_parsed).unwrap_or_else(|| CodeInfo {
+    let parsed = extract_code(code_ext, code, pre_parsed);
+    let grammar = parsed.is_some();
+    let info = parsed.unwrap_or_else(|| CodeInfo {
         lang: ext.to_string(),
         ..CodeInfo::default()
     });
@@ -500,11 +514,10 @@ pub fn extract(rel_path: &str, text: &str) -> CodeFile {
     // bare `pub fn` inside the test module passes too. Exports come from
     // the stripped text, so an item is public only if the stripped pass
     // has the same item as public.
-    let mut items = match original {
+    let (mut items, sources, defs) = match original {
         Some(tree) => {
-            let mut items = extract_code(ext, text, Some(tree))
-                .map(|i| i.items)
-                .unwrap_or_default();
+            let orig = extract_code(ext, text, Some(tree)).unwrap_or_default();
+            let mut items = orig.items;
             for item in &mut items {
                 item.public &= info.items.iter().any(|s| {
                     s.public
@@ -513,9 +526,9 @@ pub fn extract(rel_path: &str, text: &str) -> CodeFile {
                         && s.signature == item.signature
                 });
             }
-            items
+            (items, orig.sources, orig.defs)
         }
-        None => info.items,
+        None => (info.items, info.sources, info.defs),
     };
     let test_file = crate::model::is_test_path(rel_path);
     for item in &mut items {
@@ -548,7 +561,7 @@ pub fn extract(rel_path: &str, text: &str) -> CodeFile {
     );
     let name = derive_code_name(rel_path);
 
-    CodeFile {
+    let file = CodeFile {
         path: rel_path.to_string(),
         lang: lang_name,
         name,
@@ -559,7 +572,8 @@ pub fn extract(rel_path: &str, text: &str) -> CodeFile {
         defined: info.defined,
         methods: info.methods,
         items,
-    }
+    };
+    (file, grammar.then_some((sources, defs)))
 }
 
 /// What one `extract_code` pass yields. The summary fallback is chosen here
@@ -575,6 +589,9 @@ struct CodeInfo {
     items: Vec<CodeItem>,
     docstring: Option<String>,
     summary_fallback: Option<String>,
+    /// The trees `items` came from, and each item's node in them.
+    sources: Vec<Source>,
+    defs: Vec<Option<Def>>,
 }
 
 /// The shape a captured definition has, recorded at the point of capture
@@ -927,6 +944,15 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             _ => tree,
         }
     };
+    // The first-branch tree comes first, as its items do. Both index `text`.
+    let family = Family::of(Some(spec.lang_name));
+    let sources: Vec<Source> = first_branch
+        .into_iter()
+        .chain([tree])
+        .map(|t| Source::new(t, text, family))
+        .collect();
+    let main = sources.len() - 1;
+    let tree = sources[main].tree();
     let idx = CaptureIdx {
         def: query.capture_index_for_name("def"),
         name: query.capture_index_for_name("name"),
@@ -934,7 +960,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         imp: query.capture_index_for_name("import"),
         item: query.capture_index_for_name("item"),
     };
-    let exports = (spec.export_set)(&tree, text);
+    let exports = (spec.export_set)(tree, text);
 
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
@@ -953,10 +979,10 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // Keyed by the `@name` node's start byte: a `pub fn` matches both a @def
     // and an @item pattern, and a JS @def (the `export_statement`) and its
     // @item (the declaration) share one name node.
-    let mut items: BTreeMap<usize, CodeItem> = BTreeMap::new();
-    for t in first_branch.iter().chain([&tree]) {
+    let mut items: BTreeMap<usize, (CodeItem, Option<Def>)> = BTreeMap::new();
+    for (source, t) in sources.iter().enumerate() {
         let mut cursor = QueryCursor::new();
-        let mut matches = cursor.matches(query, t.root_node(), text.as_bytes());
+        let mut matches = cursor.matches(query, t.tree().root_node(), text.as_bytes());
         while let Some(m) = matches.next() {
             let parts = split_captures(m, &idx, text, &mut imports);
             let Some(def) = parts.def.or(parts.item) else {
@@ -999,7 +1025,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 !spec.query_gates_visibility
                     && should_keep(None, &chain, name_text, exports.as_ref(), &spec)
             };
-            let mut item = code_item(
+            let item = code_item(
                 def,
                 parts.name,
                 owner.as_deref(),
@@ -1008,37 +1034,44 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 &spec,
                 &shape,
             );
-            if let Some((_, it)) = item.as_mut() {
+            let item = item.map(|(key, mut it, node)| {
                 it.nested = nested;
-            }
+                let def = Def {
+                    source,
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
+                };
+                (key, (it, Some(def)))
+            });
             merge_item(&mut items, item);
         }
     }
-    let mut items: Vec<CodeItem> = items.into_values().collect();
-    items.sort_by(|a, b| {
-        (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
-    });
+    let (mut items, mut defs): (Vec<CodeItem>, Vec<Option<Def>>) = items.into_values().unzip();
+    sort_items(&mut items, &mut defs);
     if spec.lang_name == "shell" && tree.root_node().has_error() {
         let missed = super::extract_shell::missed_functions(text, &items);
         for it in &missed {
             let (n, sig) = (it.name.clone(), it.signature.clone());
             collected.push((n.clone(), ItemKind::FreeDef, n, sig));
         }
+        defs.resize(defs.len() + missed.len(), None);
         items.extend(missed);
     }
     if spec.lang_name == "shell" {
         let globals = super::extract_shell::globals(tree.root_node(), text, &items);
-        items.extend(globals);
-        items.sort_by(|a, b| {
-            (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
-        });
+        for (item, stmt) in globals {
+            items.push(item);
+            defs.push(Some(Def {
+                source: main,
+                start_byte: stmt.start_byte(),
+                end_byte: stmt.end_byte(),
+            }));
+        }
+        sort_items(&mut items, &mut defs);
     }
-    attach_call_sites(
-        &mut items,
-        tree.root_node(),
-        text,
-        spec.lang_name == "shell",
-    );
+    attach_call_sites(&mut items, &sources[main]);
+    // A shell file's `<top level>` item, pushed last, has no single node.
+    defs.resize(items.len(), None);
     // Sort by (group, kind, name, signature): a definition's group places it
     // next to its own members instead of scattering across the section under
     // plain lexicographic order on the rendered signature, and within a group
@@ -1087,7 +1120,19 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         items,
         docstring,
         summary_fallback,
+        sources,
+        defs,
     })
+}
+
+/// Items in (start line, end line, name) order, each def kept with its item.
+/// The sort is stable, as the one over the items alone was.
+fn sort_items(items: &mut Vec<CodeItem>, defs: &mut Vec<Option<Def>>) {
+    let mut both: Vec<(CodeItem, Option<Def>)> = items.drain(..).zip(defs.drain(..)).collect();
+    both.sort_by(|(a, _), (b, _)| {
+        (a.start_line, a.end_line, &a.name).cmp(&(b.start_line, b.end_line, &b.name))
+    });
+    (*items, *defs) = both.into_iter().unzip();
 }
 
 /// Gives each call in the tree to the narrowest function item whose lines
@@ -1096,7 +1141,8 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
 /// pushed last. A shell call has no caller when a parse-ERROR node is closer
 /// to it than any function definition. A nested function owns no calls: they
 /// stay its enclosing function's.
-fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: bool) {
+fn attach_call_sites(items: &mut Vec<CodeItem>, source: &Source) {
+    let shell = source.family() == Family::Shell;
     let fns: Vec<usize> = (0..items.len())
         .filter(|&i| {
             matches!(items[i].kind, CodeItemKind::Fn | CodeItemKind::Method) && !items[i].nested
@@ -1106,7 +1152,43 @@ fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: b
         return;
     }
     let mut top_level: Vec<CallSite> = Vec::new();
-    let aliases = import_aliases(root, text);
+    let mut stack = vec![source.tree().root_node()];
+    while let Some(node) = stack.pop() {
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+        for Call { site, .. } in source.calls_at(node) {
+            let line = site.line;
+            let holder = fns
+                .iter()
+                .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
+                .min_by_key(|&&i| items[i].end_line - items[i].start_line);
+            match holder {
+                Some(&i) => items[i].call_sites.push(site),
+                None if shell => top_level.push(site),
+                None => {}
+            }
+        }
+    }
+    if !top_level.is_empty() {
+        let lines = source.text().lines().count();
+        let mut item = super::extract_shell::top_level_item(lines.max(1));
+        item.call_sites = top_level;
+        items.push(item);
+    }
+}
+
+/// The calls `node` itself makes, each with the byte range of its own text:
+/// a call node's, or for a call inside a Rust macro's token tree, from the
+/// callee's first token to the end of its arguments. `aliases` is the file's
+/// `import_aliases`. A shell call under a parse-ERROR node closer than any
+/// function definition is not reported: the tree is not to be trusted for who
+/// holds it.
+pub(crate) fn calls_at(
+    node: Node,
+    text: &str,
+    aliases: &BTreeMap<String, String>,
+    shell: bool,
+) -> Vec<Call> {
     // An alias a parameter or receiver of an enclosing function shadows
     // (Go's `func (m *T)` beside an import `m`) stays as written.
     let unalias = |n: &mut String, at: Node| {
@@ -1128,64 +1210,48 @@ fn attach_call_sites(items: &mut Vec<CodeItem>, root: Node, text: &str, shell: b
         }
         n.clone_from(o);
     };
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        let mut cursor = node.walk();
-        stack.extend(node.named_children(&mut cursor));
-        // `call` is Python's; every other grammar says `call_expression`.
-        let mut sites: Vec<CallSite> = match node.kind() {
-            "call_expression" | "call" => node
-                .child_by_field_name("function")
-                .and_then(|f| call_site(f, text))
-                .map(|mut s| {
-                    s.args = call_args(node);
-                    s
-                }),
-            "token_tree" => macro_call_site(node, text),
-            "command" if shell => shell_call_site(node, text),
-            _ => None,
-        }
-        .into_iter()
-        .collect();
-        for site in &mut sites {
-            match &mut site.via {
-                CallVia::Bare => unalias(&mut site.name, node),
-                CallVia::Path(q) | CallVia::Member(Some(q)) => unalias(q, node),
-                _ => {}
-            }
-            site.line = node.start_position().row + 1;
-        }
-        if shell && node.kind() == "command" {
-            sites.extend(shell_string_calls(node, text));
-        }
-        // An ERROR node met before any function definition: the tree is not
-        // to be trusted for who holds this call.
-        if sites.is_empty()
-            || shell
-                && std::iter::successors(node.parent(), Node::parent)
-                    .find(|a| a.is_error() || a.kind() == "function_definition")
-                    .is_some_and(|a| a.is_error())
-        {
-            continue;
-        }
-        for site in sites {
-            let line = site.line;
-            let holder = fns
-                .iter()
-                .filter(|&&i| items[i].start_line <= line && line <= items[i].end_line)
-                .min_by_key(|&&i| items[i].end_line - items[i].start_line);
-            match holder {
-                Some(&i) => items[i].call_sites.push(site),
-                None if shell => top_level.push(site),
-                None => {}
-            }
-        }
+    let call = |site: CallSite, start_byte: usize| Call {
+        site,
+        start_byte,
+        end_byte: node.end_byte(),
+    };
+    // `call` is Python's; every other grammar says `call_expression`.
+    let mut calls: Vec<Call> = match node.kind() {
+        "call_expression" | "call" => node
+            .child_by_field_name("function")
+            .and_then(|f| call_site(f, text))
+            .map(|mut s| {
+                s.args = call_args(node);
+                call(s, node.start_byte())
+            }),
+        "token_tree" => macro_call_site(node, text).map(|(s, start)| call(s, start)),
+        "command" if shell => shell_call_site(node, text).map(|s| call(s, node.start_byte())),
+        _ => None,
     }
-    if !top_level.is_empty() {
-        let mut item = super::extract_shell::top_level_item(text.lines().count().max(1));
-        item.call_sites = top_level;
-        items.push(item);
+    .into_iter()
+    .collect();
+    for Call { site, .. } in &mut calls {
+        match &mut site.via {
+            CallVia::Bare => unalias(&mut site.name, node),
+            CallVia::Path(q) | CallVia::Member(Some(q)) => unalias(q, node),
+            _ => {}
+        }
+        site.line = node.start_position().row + 1;
     }
+    if shell && node.kind() == "command" {
+        calls.extend(shell_string_calls(node, text));
+    }
+    // An ERROR node met before any function definition: the tree is not
+    // to be trusted for who holds this call.
+    if shell
+        && !calls.is_empty()
+        && std::iter::successors(node.parent(), Node::parent)
+            .find(|a| a.is_error() || a.kind() == "function_definition")
+            .is_some_and(|a| a.is_error())
+    {
+        return Vec::new();
+    }
+    calls
 }
 
 /// A shell `command` whose word is a plain name; a variable, a path or a
@@ -1203,9 +1269,9 @@ fn shell_call_site(node: Node, text: &str) -> Option<CallSite> {
 }
 
 /// The commands in the quoted code a `trap`, `eval` or `sh -c` command
-/// runs, each a call at its own line; a command substitution in it is
-/// already one in the outer tree and is skipped.
-fn shell_string_calls(node: Node, text: &str) -> Vec<CallSite> {
+/// runs, each a call at its own line and range; a command substitution in it
+/// is already one in the outer tree and is skipped.
+fn shell_string_calls(node: Node, text: &str) -> Vec<Call> {
     let word = |n: &Node| text.get(n.byte_range()).unwrap_or("");
     let mut cursor = node.walk();
     let args: Vec<Node> = node
@@ -1245,7 +1311,13 @@ fn shell_string_calls(node: Node, text: &str) -> Vec<CallSite> {
         if n.kind() == "command" {
             if let Some(mut site) = shell_call_site(n, inner) {
                 site.line = code.start_position().row + n.start_position().row + 1;
-                sites.push(site);
+                // `inner` starts one byte, the opening quote, into `code`.
+                let at = code.start_byte() + 1;
+                sites.push(Call {
+                    site,
+                    start_byte: at + n.start_byte(),
+                    end_byte: at + n.end_byte(),
+                });
             }
         }
     }
@@ -1330,7 +1402,7 @@ fn call_site(f: Node, text: &str) -> Option<CallSite> {
 /// './a/b'`, `import a.b as m`, `use a::b::{self as m}`, Go's `m "a/b"`)
 /// gives `m` → `b`, the module's last segment, past an `index` file or a Go
 /// `/vN` suffix.
-fn import_aliases(root: Node, text: &str) -> BTreeMap<String, String> {
+pub(crate) fn import_aliases(root: Node, text: &str) -> BTreeMap<String, String> {
     let text_of = |n: Node| text.get(n.byte_range()).unwrap_or("");
     let last = |s: &str| {
         let segment = match s.strip_prefix(['"', '\'', '`']) {
@@ -1401,8 +1473,9 @@ fn import_aliases(root: Node, text: &str) -> BTreeMap<String, String> {
 /// tokens: a `(…)` token tree right after a name, read as `f(…)`, `q::f(…)`
 /// or `x.f(…)`, generic arguments skipped. Attribute arguments,
 /// `macro_rules!` bodies and the names an item inside a macro defines
-/// (`fn f(…)`, `struct P(…)`) are not calls.
-fn macro_call_site(tree: Node, text: &str) -> Option<CallSite> {
+/// (`fn f(…)`, `struct P(…)`) are not calls. Beside the site: where the
+/// call's text starts, the first token of its `q::f` / `x.f` chain.
+fn macro_call_site(tree: Node, text: &str) -> Option<(CallSite, usize)> {
     // The token before `n`, stepping over `<…>` and the turbofish `::` before it.
     fn back<'t>(n: Node<'t>, text: &str) -> Option<Node<'t>> {
         let text_of = |n: Node| text.get(n.byte_range()).unwrap_or("");
@@ -1477,12 +1550,24 @@ fn macro_call_site(tree: Node, text: &str) -> Option<CallSite> {
         [] => Some(0),
         _ => Some(commas + 1 - usize::from(trailing)),
     };
-    Some(CallSite {
-        name: text_of(name).to_string(),
-        via,
-        args,
-        line: 0,
-    })
+    // The callee's text starts at the first word of its `::` / `.` chain.
+    let mut start = name;
+    while let Some(w) = back(start, text)
+        .filter(|s| matches!(text_of(*s), "::" | "."))
+        .and_then(|s| back(s, text))
+        .filter(|w| word(*w))
+    {
+        start = w;
+    }
+    Some((
+        CallSite {
+            name: text_of(name).to_string(),
+            via,
+            args,
+            line: 0,
+        },
+        start.start_byte(),
+    ))
 }
 
 /// How many arguments a call passes; `None` when a spread, splat or pack
@@ -1704,15 +1789,15 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 /// a `Stop` lead (other code) ends the climb, so a stray doc comment never
 /// stretches the range. A plain block directly above the item (or its
 /// attributes) extends the range only when `plain_doc` makes it the doc.
-fn code_item(
-    def: Node,
+fn code_item<'t>(
+    def: Node<'t>,
     name: Option<Node>,
     owner: Option<&str>,
     public: bool,
     text: &str,
     spec: &LangSpec,
     shape: &Shape,
-) -> Option<(usize, CodeItem)> {
+) -> Option<(usize, CodeItem, Node<'t>)> {
     let name = name?;
     // JS exports match on the `export_statement`, which is no function: the
     // item is its declaration. `sig_start` climbs back to the statement, so
@@ -1850,18 +1935,21 @@ fn code_item(
     item.doc_text = raw_doc
         .as_deref()
         .and_then(|r| item_doc_text(r, item.doc.as_deref()));
-    Some((name.start_byte(), item))
+    Some((name.start_byte(), item, def))
 }
 
 /// Keep the first item seen for a name node. A later match of the same node
 /// only ORs in its `public` flag: of a `pub fn`'s two matches, the @item one
 /// alone says private.
-fn merge_item(items: &mut BTreeMap<usize, CodeItem>, found: Option<(usize, CodeItem)>) {
+fn merge_item(
+    items: &mut BTreeMap<usize, (CodeItem, Option<Def>)>,
+    found: Option<(usize, (CodeItem, Option<Def>))>,
+) {
     if let Some((key, item)) = found {
-        let public = item.public;
+        let public = item.0.public;
         items
             .entry(key)
-            .and_modify(|kept| kept.public |= public)
+            .and_modify(|kept| kept.0.public |= public)
             .or_insert(item);
     }
 }
@@ -1899,7 +1987,7 @@ fn normalize(raw: &str, spec: &LangSpec) -> String {
 
 /// A comment node, in any of the five grammars: Rust's `line_comment` and
 /// `block_comment`, everyone else's `comment`.
-fn is_comment_kind(kind: &str) -> bool {
+pub(crate) fn is_comment_kind(kind: &str) -> bool {
     kind.contains("comment")
 }
 
