@@ -1,9 +1,22 @@
-//! `wiki-code`: the code layer shared by the wiki compiler and its sibling tools: the item model and the source tree walk.
+//! `wiki-code`: the code layer shared by the wiki compiler and its sibling tools: the item model, the source tree walk and tree-sitter code extraction.
 
 pub mod model;
 pub mod support;
 pub mod walk;
 
+mod formats {
+    pub(crate) mod code;
+    pub(crate) mod extract_cpp;
+    pub(crate) mod extract_jsx;
+    pub(crate) mod extract_python;
+    pub(crate) mod extract_rust;
+    pub(crate) mod extract_shell;
+    pub(crate) mod extract_simple;
+    pub(crate) mod extract_svelte;
+    pub(crate) mod extract_vue;
+}
 mod summary;
 
+pub use formats::code::{extract, handles, CodeFile, CodeUnit};
+pub use formats::extract_cpp::pair_declarations;
 pub use tree_sitter;

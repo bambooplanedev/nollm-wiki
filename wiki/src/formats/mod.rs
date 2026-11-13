@@ -1,14 +1,6 @@
 //! Extractor registry: routes a file by extension to its extractor and fills in `source_path` and `content_hash`.
 
 pub mod code;
-pub mod extract_cpp;
-pub mod extract_jsx;
-pub mod extract_python;
-pub mod extract_rust;
-pub mod extract_shell;
-pub mod extract_simple;
-pub mod extract_svelte;
-pub mod extract_vue;
 pub mod markdown;
 pub mod text;
 

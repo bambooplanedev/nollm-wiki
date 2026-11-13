@@ -327,7 +327,7 @@ fn compile_inner(
     let mut entities = remap_reserved_names(entities);
     resolve_supersedes(&mut entities);
     // Needs the final ids and `source_path`s, so it follows the remap.
-    formats::extract_cpp::pair_declarations(&mut entities);
+    wiki_code::pair_declarations(&mut entities);
 
     // 3. Graph.
     let graph = graph::build_graph(&entities);

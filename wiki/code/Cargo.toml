@@ -9,8 +9,16 @@ publish = false
 
 [dependencies]
 ignore = "0.4"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 tree-sitter = "0.27"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-go = "0.25"
+tree-sitter-bash = "0.25"
+tree-sitter-cpp = "0.23"
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }

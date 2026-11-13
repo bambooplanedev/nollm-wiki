@@ -4,7 +4,43 @@
 
 use std::path::Path;
 
+pub use crate::formats::code::{
+    ext_of, is_cpp, is_shell, module_stem, source_rank, validate_queries, CODE_EXTENSIONS,
+};
 pub use crate::summary::{first_real_sentence, summarize};
+
+/// The words of an identifier, lowercased: split on `_`/`-`, at a
+/// lower→Upper boundary, and at an Upper→Upper-lower boundary so an
+/// acronym run stays one word (`HTTPServer` → `http`, `server`;
+/// `PackBudget` → `pack`, `budget`; `CACHE_VERSION` → `cache`,
+/// `version`). Must run on the ORIGINAL-case name: lowercasing first
+/// erases every CamelCase boundary.
+pub fn name_words(name: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let chars: Vec<char> = name.chars().collect();
+    for (i, &c) in chars.iter().enumerate() {
+        if c == '_' || c == '-' {
+            if !cur.is_empty() {
+                words.push(std::mem::take(&mut cur));
+            }
+            continue;
+        }
+        let boundary = c.is_uppercase()
+            && i > 0
+            && (chars[i - 1].is_lowercase()
+                || (chars[i - 1].is_uppercase()
+                    && chars.get(i + 1).is_some_and(|n| n.is_lowercase())));
+        if boundary && !cur.is_empty() {
+            words.push(std::mem::take(&mut cur));
+        }
+        cur.extend(c.to_lowercase());
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
+}
 
 /// True if `path` lies within `dir`, compared on lexically-absolute components
 /// (`std::path::absolute` — no filesystem access, no symlink resolution). This

@@ -2,9 +2,9 @@
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
     default_cut, default_shape, ext_of, is_cpp, module_stem, outermost, plain_comment_text,
-    source_rank, value_shape, LangSpec, Lead, Placement, Shape,
+    source_rank, value_shape, CodeUnit, LangSpec, Lead, Placement, Shape,
 };
-use crate::model::{CodeItem, CodeItemKind, Entity, PairRole};
+use crate::model::{CodeItem, CodeItemKind, PairRole};
 use std::collections::BTreeMap;
 use tree_sitter::{Node, Parser, Tree};
 
@@ -565,11 +565,11 @@ fn unique_keys(items: &[CodeItem]) -> BTreeMap<Key<'_>, usize> {
 
 /// The header and the implementation file of a group of files: its only
 /// `.cpp` and its only lowest-rank header, when both are unique.
-fn header_and_impl<'a>(
-    entities: &BTreeMap<String, Entity>,
+fn header_and_impl<'a, U: CodeUnit>(
+    entities: &BTreeMap<String, U>,
     ids: &[&'a str],
 ) -> Option<(&'a str, &'a str)> {
-    let rank = |id: &str| source_rank(&entities[id].source_path);
+    let rank = |id: &str| source_rank(entities[id].path());
     let impls: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == 2).collect();
     let min = ids.iter().map(|id| rank(id)).min().filter(|r| *r < 2)?;
     let headers: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == min).collect();
@@ -590,10 +590,10 @@ fn header_and_impl<'a>(
 /// keys unique among all header items and among all implementation items.
 /// A wrong pairing is worse than none, so overloads with the same parameter
 /// count and keys with two declarations or two definitions stay unpaired.
-pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
+pub fn pair_declarations<U: CodeUnit>(entities: &mut BTreeMap<String, U>) {
     let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for (id, e) in entities.iter() {
-        let sp = e.source_path.as_str();
+        let sp = e.path();
         if is_cpp(&ext_of(sp)) {
             groups.entry(module_stem(sp)).or_default().push(id);
         }
@@ -606,7 +606,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
                 // `src/execution/x.cpp`) pair within each directory.
                 let mut dirs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
                 for &id in ids {
-                    let sp = entities[id].source_path.as_str();
+                    let sp = entities[id].path();
                     dirs.entry(sp.rsplit_once('/').map_or("", |(d, _)| d))
                         .or_default()
                         .push(id);
@@ -618,7 +618,7 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
             |p| vec![p],
         );
         for (hdr, imp) in found {
-            let (h, c) = (&entities[hdr].items, &entities[imp].items);
+            let (h, c) = (entities[hdr].items(), entities[imp].items());
             let cu = unique_keys(c);
             for (key, hi) in unique_keys(h) {
                 let Some(&ci) = cu.get(&key) else { continue };
@@ -632,13 +632,13 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
     }
     pair_project(entities, &mut pairs);
     for (hid, hi, cid, ci) in pairs {
-        let span = |e: &Entity, i: usize| e.items[i].span(&e.source_path);
+        let span = |e: &U, i: usize| e.items()[i].span(e.path());
         let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
-        let h_doc = &entities[&hid].items[hi];
+        let h_doc = &entities[&hid].items()[hi];
         let (doc, doc_text) = (h_doc.doc.clone(), h_doc.doc_text.clone());
-        let h_item = &mut entities.get_mut(&hid).unwrap().items[hi];
+        let h_item = &mut entities.get_mut(&hid).unwrap().items_mut()[hi];
         h_item.twin = Some(c_span);
-        let c_item = &mut entities.get_mut(&cid).unwrap().items[ci];
+        let c_item = &mut entities.get_mut(&cid).unwrap().items_mut()[ci];
         c_item.twin = Some(h_span);
         if c_item.doc.is_none() {
             c_item.doc = doc;
@@ -658,18 +658,18 @@ pub(crate) fn pair_declarations(entities: &mut BTreeMap<String, Entity>) {
 /// pair too, so this step can only re-find a same-stem pair, and applying a
 /// pair twice leaves `twin` and `doc` as after once (the definition's `doc`
 /// is filled only while empty).
-fn pair_project(
-    entities: &BTreeMap<String, Entity>,
+fn pair_project<U: CodeUnit>(
+    entities: &BTreeMap<String, U>,
     pairs: &mut Vec<(String, usize, String, usize)>,
 ) {
     let unique = |header: bool| {
         let mut seen: BTreeMap<Key<'_>, Option<(&str, usize)>> = BTreeMap::new();
         for (id, e) in entities {
-            let sp = e.source_path.as_str();
+            let sp = e.path();
             if !is_cpp(&ext_of(sp)) || (source_rank(sp) < 2) != header {
                 continue;
             }
-            for (i, it) in e.items.iter().enumerate() {
+            for (i, it) in e.items().iter().enumerate() {
                 if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
                     let key = (
                         it.owner.as_deref(),
@@ -684,7 +684,7 @@ fn pair_project(
         }
         seen
     };
-    let role = |id: &str, i: usize| entities[id].items[i].pair_role;
+    let role = |id: &str, i: usize| entities[id].items()[i].pair_role;
     let impls = unique(false);
     for (key, h) in unique(true) {
         if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
@@ -766,15 +766,13 @@ fn first_branch(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use crate::formats::code::testutil::{assert_lacks, doc_of, item_lines};
-    use crate::formats::code::CodeExtractor;
-    use crate::formats::Extractor;
 
     fn syms(path: &str, src: &str) -> Vec<String> {
-        CodeExtractor.extract(path, src).symbols
+        crate::extract(path, src).symbols
     }
 
     fn summary(path: &str, src: &str) -> Option<String> {
-        CodeExtractor.extract(path, src).summary
+        crate::extract(path, src).summary
     }
 
     #[test]
@@ -890,8 +888,7 @@ mod tests {
         let s = syms("src/b.h", src);
         assert!(s.iter().any(|x| x.contains("B::stats")), "{s:?}");
         assert!(s.iter().any(|x| x.contains("B::sp")), "{s:?}");
-        let methods: Vec<String> = CodeExtractor
-            .extract("src/b.h", src)
+        let methods: Vec<String> = crate::extract("src/b.h", src)
             .items
             .into_iter()
             .filter(|i| i.kind == crate::model::CodeItemKind::Method)
@@ -1002,7 +999,7 @@ mod tests {
 
     #[test]
     fn includes_are_captured_in_both_forms() {
-        let e = CodeExtractor.extract("src/ob.cpp", "#include <vector>\n#include \"ring.h\"\n");
+        let e = crate::extract("src/ob.cpp", "#include <vector>\n#include \"ring.h\"\n");
         assert!(
             e.imports.iter().any(|i| i.contains("ring.h")),
             "{:?}",
@@ -1017,7 +1014,7 @@ mod tests {
 
     #[test]
     fn header_members_reach_the_methods_index() {
-        let e = CodeExtractor.extract(
+        let e = crate::extract(
             "src/orderbook.h",
             "class OrderBook {\npublic:\n  void apply(const Order& o);\n  int best_bid() const;\n};\n",
         );
@@ -1040,7 +1037,7 @@ mod tests {
         // `Level& front();` a `reference_declarator`. Both render fine in
         // `## Exports`; without descending through the wrapper they are
         // absent from `methods`, which `Wiki::search` scores on.
-        let e = CodeExtractor.extract(
+        let e = crate::extract(
             "src/orderbook.h",
             "class OrderBook {\npublic:\n  Level* top();\n  Level& front();\n  Level** grid();\n};\n",
         );
@@ -1069,7 +1066,7 @@ mod tests {
 
     #[test]
     fn out_of_line_definition_indexes_the_bare_method_name() {
-        let e = CodeExtractor.extract("src/ob.cpp", "void OrderBook::apply(const Order& o) {}\n");
+        let e = crate::extract("src/ob.cpp", "void OrderBook::apply(const Order& o) {}\n");
         assert_eq!(
             e.methods,
             vec!["apply".to_string()],
@@ -1265,7 +1262,7 @@ mod tests {
     #[test]
     fn cpp_items_take_doxygen_docs_and_skip_labels() {
         let src = "class Book {\npublic:\n  /// Applies an order.\n  void apply(int o);\n  // plain\n  int size() const;\n};\n/** Frees all. */\nvoid reset();\n";
-        let e = CodeExtractor.extract("book.h", src);
+        let e = crate::extract("book.h", src);
         assert_eq!(
             item_lines(&e.items),
             vec![
@@ -1287,7 +1284,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join(", ");
         let src = format!("namespace app {{\n/// The count.\nint g_count;\nstatic const int K = 3;\nconstexpr int N = 4;\ninline constexpr const char* kName = \"x\";\nint table[] = {{{table}}};\n}}\nclass B {{\n  int a;\n  static constexpr int M = 1;\n}};\nvoid f() {{\n  int local = 0;\n}}\n");
-        let e = CodeExtractor.extract("app.h", &src);
+        let e = crate::extract("app.h", &src);
         assert_eq!(
             item_lines(&e.items),
             vec![
@@ -1318,7 +1315,7 @@ mod tests {
 
     #[test]
     fn a_multi_declarator_variable_renders_its_own_declarator_for_each_name() {
-        let e = CodeExtractor.extract("app.h", "int a = 1, b = 2;\n");
+        let e = crate::extract("app.h", "int a = 1, b = 2;\n");
         assert_eq!(
             item_lines(&e.items),
             vec!["1-1 value a pub", "1-1 value b pub"]
@@ -1330,7 +1327,7 @@ mod tests {
     #[test]
     fn a_multi_line_doxygen_block_attaches_and_a_plain_block_does_not() {
         let src = "/**\n * Applies an order\n * to the book. More text.\n */\nvoid apply(int o);\n/* plain block */\nvoid reset();\n";
-        let e = CodeExtractor.extract("book.h", src);
+        let e = crate::extract("book.h", src);
         assert_eq!(
             item_lines(&e.items),
             vec!["1-5 fn apply pub", "7-7 fn reset pub"]
@@ -1345,7 +1342,7 @@ mod tests {
     #[test]
     fn a_trailing_member_doc_never_documents_the_next_item() {
         let src = "class Book {\n  int size_; ///< Number of orders.\n  void apply(int o);\n  int count; //!< Count.\n  /** Resets everything. */\n  void reset();\n  int x;\n  ///< The x.\n  void clear();\n};\n";
-        let e = CodeExtractor.extract("book.h", src);
+        let e = crate::extract("book.h", src);
         assert_eq!(
             item_lines(&e.items),
             vec![

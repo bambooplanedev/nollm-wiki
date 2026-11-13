@@ -212,6 +212,27 @@ pub struct Entity {
     pub items: Vec<CodeItem>,
 }
 
+impl wiki_code::CodeUnit for Entity {
+    fn path(&self) -> &str {
+        &self.source_path
+    }
+    fn lang(&self) -> Option<&str> {
+        match &self.kind {
+            SourceKind::Code { lang } => Some(lang),
+            _ => None,
+        }
+    }
+    fn items(&self) -> &[CodeItem] {
+        &self.items
+    }
+    fn items_mut(&mut self) -> &mut Vec<CodeItem> {
+        &mut self.items
+    }
+    fn defined(&self) -> &[String] {
+        &self.defined
+    }
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct Edges {
     pub outgoing: BTreeSet<String>,
