@@ -944,6 +944,50 @@ mod tests {
     }
 
     #[test]
+    fn page_source_index_prefers_front_matter_over_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("p.md"),
+            "---\nsource: \"a.rs\"\n---\n# P\n\n## Metadata\n- source: b.rs\n",
+        )
+        .unwrap();
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(idx["a.rs"], BTreeSet::from([dir.path().join("p.md")]));
+    }
+
+    #[test]
+    fn page_source_index_keeps_every_front_matter_page_declaring_one_source() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["one.md", "two.md"] {
+            std::fs::write(dir.path().join(name), "---\nsource: \"a.rs\"\n---\n# A\n").unwrap();
+        }
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(
+            idx["a.rs"],
+            BTreeSet::from([dir.path().join("one.md"), dir.path().join("two.md")])
+        );
+    }
+
+    #[test]
+    fn page_source_index_skips_unreadable_pages() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bad.md"), [0xffu8, 0xfe]).unwrap();
+        std::fs::write(
+            dir.path().join("good.md"),
+            "---\nsource: \"a.rs\"\n---\n# G\n",
+        )
+        .unwrap();
+
+        let idx = page_source_index(dir.path());
+        assert_eq!(idx.len(), 1, "{idx:?}");
+        assert_eq!(idx["a.rs"], BTreeSet::from([dir.path().join("good.md")]));
+    }
+
+    #[test]
     fn prior_page_for_prefers_the_page_s_own_file_over_a_smaller_orphan() {
         let orphan = PathBuf::from("/out/alpha_one.md");
         let own = PathBuf::from("/out/alpha_two.md");
