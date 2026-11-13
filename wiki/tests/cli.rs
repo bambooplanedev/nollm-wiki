@@ -846,3 +846,80 @@ fn cli_search_says_which_names_it_did_not_find() {
     assert!(out.contains("a.py:1-2  _ack"), "{out}");
     assert!(out.ends_with("not found: _nope\n"), "{out}");
 }
+
+#[test]
+fn compile_prints_stage_timings_only_with_wiki_timings() {
+    let dir = tempdir().unwrap();
+    let input = dir.path().join("raw");
+    fs::create_dir_all(&input).unwrap();
+    fs::write(input.join("alpha.txt"), "# Alpha\n\nAlpha mentions Beta.\n").unwrap();
+    fs::write(input.join("beta.txt"), "# Beta\n\nBeta content.\n").unwrap();
+
+    let run = |name: &str, env: Option<&str>| {
+        let out = dir.path().join(name);
+        let mut cmd = Command::cargo_bin("wiki").unwrap();
+        cmd.args(["compile", input.to_str().unwrap(), out.to_str().unwrap()]);
+        if let Some(v) = env {
+            cmd.env("WIKI_TIMINGS", v);
+        }
+        let o = cmd.assert().success().get_output().clone();
+        (out, String::from_utf8(o.stderr).unwrap())
+    };
+    let (out1, err1) = run("out1", Some("1"));
+    let (out2, err2) = run("out2", None);
+    let (out3, err3) = run("out3", Some("0"));
+
+    let lines: Vec<&str> = err1
+        .lines()
+        .filter(|l| l.starts_with("timings: "))
+        .collect();
+    assert_eq!(lines.len(), 1, "stderr: {err1}");
+    let pairs: Vec<(&str, &str)> = lines[0]["timings: ".len()..]
+        .split(' ')
+        .map(|kv| kv.split_once('=').unwrap())
+        .collect();
+    let keys: Vec<&str> = pairs.iter().map(|p| p.0).collect();
+    assert_eq!(
+        keys,
+        ["total", "walk", "extract", "global", "render", "write", "tail", "files", "written"]
+    );
+    let micros = |s: &str| -> u64 {
+        let ms = s.strip_suffix("ms").unwrap_or_else(|| panic!("no ms: {s}"));
+        let (w, f) = ms.split_once('.').unwrap();
+        assert_eq!(f.len(), 3, "{s}");
+        w.parse::<u64>().unwrap() * 1000 + f.parse::<u64>().unwrap()
+    };
+    let total = micros(pairs[0].1);
+    let stages: u64 = pairs[1..7].iter().map(|p| micros(p.1)).sum();
+    assert_eq!(stages, total);
+    assert_eq!(
+        (
+            pairs[7].1.parse::<usize>().unwrap(),
+            pairs[8].1.parse::<usize>().unwrap()
+        ),
+        (2, 2)
+    );
+    assert!(!err2.contains("timings:"), "{err2}");
+    assert!(!err3.contains("timings:"), "{err3}");
+
+    let snapshot = |root: &std::path::Path| {
+        let mut v = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    let rel = p.strip_prefix(root).unwrap().to_path_buf();
+                    v.push((rel, fs::read(&p).unwrap()));
+                }
+            }
+        }
+        v.sort();
+        v
+    };
+    let s1 = snapshot(&out1);
+    assert_eq!(s1, snapshot(&out2));
+    assert_eq!(s1, snapshot(&out3));
+}

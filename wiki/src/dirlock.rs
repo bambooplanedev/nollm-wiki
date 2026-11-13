@@ -3,6 +3,7 @@
 
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 pub(crate) const SERVE_DIR: &str = ".serve";
 
@@ -38,9 +39,21 @@ pub fn shared<T>(dir: &Path, f: impl FnOnce() -> T) -> T {
 
 /// `shared` without waiting: `None` while a compile holds the lock.
 pub fn try_shared<T>(dir: &Path, f: impl FnOnce() -> T) -> Option<T> {
+    shared_until(dir, Instant::now(), f)
+}
+
+/// `shared` waiting no later than `until`: tries at least once, then every
+/// 10 ms; `None` if a compile still holds the lock.
+pub fn shared_until<T>(dir: &Path, until: Instant, f: impl FnOnce() -> T) -> Option<T> {
     let lock = open(dir, "compile.lock").ok();
-    if let Some(Err(std::fs::TryLockError::WouldBlock)) = lock.as_ref().map(File::try_lock_shared) {
-        return None;
+    if let Some(l) = &lock {
+        while let Err(std::fs::TryLockError::WouldBlock) = l.try_lock_shared() {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            std::thread::sleep(left.min(Duration::from_millis(10)));
+        }
     }
     let out = f();
     drop(lock);
@@ -70,10 +83,32 @@ pub fn try_writer(dir: &Path, at_start: bool) -> Option<Writer> {
     }
 }
 
+/// Test helper: a thread takes the exclusive lock on `dir`, runs `inside`,
+/// then holds until the returned sender gets a message or `max` passes.
+/// Returns once the lock is held and `inside` has run.
+#[cfg(test)]
+pub(crate) fn hold(
+    dir: &Path,
+    max: Duration,
+    inside: impl FnOnce() + Send + 'static,
+) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+    let (held, held_rx) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let dir = dir.to_path_buf();
+    let thread = std::thread::spawn(move || {
+        exclusive(&dir, || {
+            inside();
+            held.send(()).unwrap();
+            let _ = release_rx.recv_timeout(max);
+        });
+    });
+    held_rx.recv().unwrap();
+    (release, thread)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
 
     #[test]
     fn shared_waits_for_exclusive() {
@@ -155,6 +190,36 @@ mod tests {
         done_tx.send(()).unwrap();
         a.join().unwrap();
         assert_eq!(try_shared(&d, || 2), Some(2));
+    }
+
+    #[test]
+    fn shared_until_gives_up_at_the_deadline() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
+        let (release, a) = hold(d, Duration::from_secs(10), || ());
+        let t = Instant::now();
+        assert_eq!(shared_until(d, t + Duration::from_millis(200), || ()), None);
+        assert!(
+            t.elapsed() >= Duration::from_millis(200) && t.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
+        );
+        release.send(()).unwrap();
+        a.join().unwrap();
+        assert_eq!(shared_until(d, Instant::now(), || 7), Some(7));
+    }
+
+    #[test]
+    fn shared_until_runs_once_the_lock_frees() {
+        let t = tempfile::tempdir().unwrap();
+        let d = t.path();
+        std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
+        let (_release, a) = hold(d, Duration::from_millis(100), || ());
+        let t = Instant::now();
+        assert_eq!(shared_until(d, t + Duration::from_secs(2), || 1), Some(1));
+        assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+        a.join().unwrap();
     }
 
     #[test]

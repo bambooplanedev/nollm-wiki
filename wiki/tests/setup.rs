@@ -1089,3 +1089,40 @@ fn instructions_have_no_dangling_callers_clause() {
         "{text}"
     );
 }
+
+#[test]
+fn setup_waits_for_a_compile_holding_the_lock() {
+    use std::sync::mpsc::channel;
+    use std::time::Duration;
+    let f = fixture(true, true);
+    let root = f.root();
+    fs::create_dir_all(root.join(".wiki/.serve")).unwrap();
+    let (held_tx, held_rx) = channel();
+    let (release_tx, release_rx) = channel::<()>();
+    std::thread::scope(|s| {
+        let root_ref = &root;
+        s.spawn(move || {
+            wiki::dirlock::exclusive(&root_ref.join(".wiki"), || {
+                held_tx.send(()).unwrap();
+                let _ = release_rx.recv_timeout(Duration::from_secs(20));
+            });
+        });
+        held_rx.recv().unwrap();
+        let setup = s.spawn(|| {
+            f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+        });
+        std::thread::sleep(Duration::from_secs(1));
+        assert!(!root.join(".wiki/index.json").exists());
+        release_tx.send(()).unwrap();
+        setup.join().unwrap();
+    });
+    assert!(root.join(".wiki/index.json").exists());
+}
+
+#[test]
+fn setup_on_a_fresh_repo_creates_no_serve_dir() {
+    let f = fixture(true, true);
+    f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(f.root().join(".wiki/index.json").exists());
+    assert!(!f.root().join(".wiki/.serve").exists());
+}

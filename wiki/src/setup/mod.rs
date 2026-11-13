@@ -375,7 +375,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             memory: agent_dirs,
             ..CompileOptions::default()
         };
-        let res = compile(root, &wiki, &c)?;
+        let res = crate::dirlock::exclusive(&wiki, || compile(root, &wiki, &c))?;
         r.line(&format!("Compiled {} pages into .wiki", res.pages_total))?;
         if res.pages_total == 0 {
             r.line("warning: no pages compiled; is this the project root?")?;
