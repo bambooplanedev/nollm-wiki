@@ -355,6 +355,9 @@ per question is noise-level: treat single results as anecdotes.
   count against `fs.inotify.max_user_watches`.
 - Every server on one `--dir`, readers too, watches the whole `--source`
   recursively: N servers hold N copies of those watches.
+- Under edits that never pause for 150 ms, a compile starts 2 s after the
+  first of them; a call then answers with `recompile still running` if that
+  compile takes longer than 3 s.
 - Servers from 0.6.2 or older do not take `writer.lock` and still race.
   Restart old sessions after an upgrade.
 - Servers on one `--dir` are assumed to share inputs (`--source`,

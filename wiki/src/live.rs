@@ -50,6 +50,19 @@ const RESCAN: Duration = Duration::from_secs(1);
 /// The stale reason while a compile has yet to catch up.
 const RUNNING: &str = "recompile still running";
 
+/// When the worker compiles after an edit: once events pause for `quiet`,
+/// but no later than `cap` after the first of them.
+#[derive(Clone, Copy)]
+struct Debounce {
+    quiet: Duration,
+    cap: Duration,
+}
+
+const DEBOUNCE: Debounce = Debounce {
+    quiet: watch::DEBOUNCE,
+    cap: Duration::from_secs(2),
+};
+
 /// Barrier files go in this subdirectory of `--dir`: it stays writable when
 /// the `--dir` root is not, and no `.md` name there is a page the prune knows.
 use crate::dirlock::SERVE_DIR as BARRIER_DIR;
@@ -168,6 +181,9 @@ struct State {
     stale: Option<String>,
     /// `None` until the first compile ends: then every event counts.
     watch_set: Option<WatchSet>,
+    /// When the last relevant event came: the worker compiles once events
+    /// have paused for `Debounce::quiet`.
+    last_edit: Instant,
 }
 
 pub(crate) struct Live {
@@ -180,6 +196,7 @@ pub(crate) struct Live {
     writer: Mutex<Option<Writer>>,
     state: Mutex<State>,
     changed: Condvar,
+    debounce: Debounce,
     #[cfg(test)]
     compiles: std::sync::atomic::AtomicUsize,
 }
@@ -191,6 +208,15 @@ impl Live {
     /// and its failure is the error. A reader never compiles: it serves the
     /// wiki on disk, or an empty one until the writer's first ack.
     pub fn start(source: &Path, dir: &Path, opts: CompileOptions) -> Result<Arc<Live>, WikiError> {
+        Self::start_with(source, dir, opts, DEBOUNCE)
+    }
+
+    fn start_with(
+        source: &Path,
+        dir: &Path,
+        opts: CompileOptions,
+        debounce: Debounce,
+    ) -> Result<Arc<Live>, WikiError> {
         static COUNT: AtomicU64 = AtomicU64::new(0);
         let named = |e: &dyn std::fmt::Display| {
             WikiError::Serve(format!("--source {}: {e}", source.display()))
@@ -221,8 +247,10 @@ impl Live {
                 loaded: None,
                 stale: None,
                 watch_set: None,
+                last_edit: Instant::now(),
             }),
             changed: Condvar::new(),
+            debounce,
             #[cfg(test)]
             compiles: std::sync::atomic::AtomicUsize::new(0),
             dir,
@@ -296,8 +324,18 @@ impl Live {
                     }
                     continue;
                 }
+                // Compile once edits pause, or `cap` after the first of them.
+                let Debounce { quiet, cap } = worker.debounce;
+                let latest = Instant::now() + cap;
+                let due = |s: &State| (s.last_edit + quiet).min(latest);
+                loop {
+                    let left = due(&s).saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    s = worker.wait(s, left, |s| Instant::now() < due(s));
+                }
                 drop(s);
-                std::thread::sleep(watch::DEBOUNCE);
                 if worker.is_writer() {
                     // A failure is kept in `stale`; the next edit retries.
                     let _ = worker.compile_step();
@@ -594,6 +632,7 @@ impl Live {
         };
         if relevant {
             s.event_gen += 1;
+            s.last_edit = Instant::now();
         }
         if lost && self.is_writer() && !EXE.replaced() {
             self.scan_barriers(&mut s, Duration::ZERO);
@@ -1223,5 +1262,70 @@ mod tests {
     fn a_panicking_compile_is_an_error() {
         let r: Result<(), WikiError> = unpanicked(|| panic!("boom"));
         assert_eq!(r.unwrap_err().to_string(), "the compile panicked");
+    }
+
+    /// A writer on a fresh source with `a.md`, its start-up compile done, and
+    /// the compile count at that point.
+    fn debounced(
+        quiet_ms: u64,
+        cap_ms: u64,
+    ) -> (tempfile::TempDir, tempfile::TempDir, Arc<Live>, usize) {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("a.md"), "# A\n\nalpha\n").unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let debounce = Debounce {
+            quiet: Duration::from_millis(quiet_ms),
+            cap: Duration::from_millis(cap_ms),
+        };
+        let live =
+            Live::start_with(src.path(), out.path(), CompileOptions::default(), debounce).unwrap();
+        let _ = live.fresh();
+        let before = live.compiles.load(Ordering::Relaxed);
+        (src, out, live, before)
+    }
+
+    #[test]
+    fn a_burst_longer_than_the_quiet_window_compiles_once() {
+        let (src, _out, live, before) = debounced(400, 10_000);
+        // 12 writes 50 ms apart: a 600 ms burst, longer than the 400 ms window.
+        for i in 0..12 {
+            std::fs::write(src.path().join("a.md"), format!("# A\n\nword{i}\n")).unwrap();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let (wiki, stale) = live.fresh();
+        assert_eq!(stale, None);
+        assert!(finds(&wiki, "word11"));
+        // Anything still pending would compile by now.
+        std::thread::sleep(Duration::from_millis(1200));
+        assert_eq!(live.compiles.load(Ordering::Relaxed) - before, 1);
+    }
+
+    #[test]
+    fn a_constant_writer_still_compiles_within_the_cap() {
+        let (src, _out, live, before) = debounced(300, 600);
+        // A write every 50 ms for 2 s: the 300 ms window never passes.
+        let until = Instant::now() + Duration::from_secs(2);
+        let mut i = 0;
+        while Instant::now() < until {
+            std::fs::write(src.path().join("a.md"), format!("# A\n\nword{i}\n")).unwrap();
+            i += 1;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(live.compiles.load(Ordering::Relaxed) > before);
+    }
+
+    #[test]
+    fn serve_files_do_not_extend_the_quiet_window() {
+        let (src, out, live, before) = debounced(300, 10_000);
+        std::fs::write(src.path().join("a.md"), "# A\n\nbeta\n").unwrap();
+        // `.serve` churn every 50 ms for 1.5 s is not an edit.
+        let until = Instant::now() + Duration::from_millis(1500);
+        let mut i = 0;
+        while Instant::now() < until {
+            std::fs::write(out.path().join(BARRIER_DIR).join(format!("x-{i}")), "").unwrap();
+            i += 1;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(live.compiles.load(Ordering::Relaxed) > before);
     }
 }
