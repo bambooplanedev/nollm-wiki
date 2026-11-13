@@ -30,6 +30,7 @@ use crate::model::{
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WikiError {
@@ -153,7 +154,7 @@ fn compile_inner(
     // already committed for other files.
     formats::code::validate_queries();
     let timings = std::env::var_os("WIKI_TIMINGS").is_some_and(|v| v == "1");
-    let t0 = std::time::Instant::now();
+    let t0 = Instant::now();
 
     let project = opts.project.clone().unwrap_or_else(|| {
         input
@@ -254,7 +255,7 @@ fn compile_inner(
             .into_iter()
             .chain(opts.memory.iter().cloned()),
     );
-    let t_walk = std::time::Instant::now();
+    let t_walk = Instant::now();
     let mut extracted: Vec<Entity> = files
         .par_iter()
         .filter_map(|sf| registry.extract(&sf.rel_path, &sf.bytes))
@@ -268,7 +269,7 @@ fn compile_inner(
             e
         })
         .collect();
-    let t_extract = std::time::Instant::now();
+    let t_extract = Instant::now();
 
     // 1b. Qualify names that would otherwise share a slug. An extractor names
     // a page from its own file alone and cannot see the rest of the tree, so
@@ -331,7 +332,7 @@ fn compile_inner(
     let graph = graph::build_graph(&entities);
     // Reads the import edges, so it follows the graph.
     calls::resolve_calls(&mut entities, &graph);
-    let t_global = std::time::Instant::now();
+    let t_global = Instant::now();
 
     // 4. Incremental cache + parallel render. Only the LOAD is gated: a plain
     // compile re-renders everything, but still records what it wrote (see the
@@ -375,7 +376,7 @@ fn compile_inner(
         .collect();
     // The prior page files whose notes were migrated onto a live page this run.
     let consumed: BTreeSet<PathBuf> = rendered.iter().filter_map(|r| r.3.clone()).collect();
-    let t_render = std::time::Instant::now();
+    let t_render = Instant::now();
 
     let mut pages: BTreeMap<String, String> = BTreeMap::new();
     let mut written = 0usize;
@@ -387,7 +388,7 @@ fn compile_inner(
         cache.set(&id, &fp);
         pages.insert(id, content);
     }
-    let t_write = std::time::Instant::now();
+    let t_write = Instant::now();
 
     // 5. Prune pages this compiler previously wrote that are no longer live.
     // Runs unconditionally: `--incremental` decides whether to TRUST the cache
@@ -464,14 +465,14 @@ fn compile_inner(
     let lint = lint::lint(&pages);
 
     if timings {
-        let us = |a: std::time::Instant, b: std::time::Instant| (b - a).as_micros();
+        let us = |a: Instant, b: Instant| (b - a).as_micros();
         let stages = [
             us(t0, t_walk),
             us(t_walk, t_extract),
             us(t_extract, t_global),
             us(t_global, t_render),
             us(t_render, t_write),
-            us(t_write, std::time::Instant::now()),
+            us(t_write, Instant::now()),
         ];
         let ms = |u: u128| format!("{}.{:03}ms", u / 1000, u % 1000);
         eprintln!(

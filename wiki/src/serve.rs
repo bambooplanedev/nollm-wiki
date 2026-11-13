@@ -166,14 +166,7 @@ impl WikiState {
         let (wiki, done) = tokio::task::spawn_blocking(move || this.reload(deadline))
             .await
             .expect("reload panicked");
-        (
-            wiki,
-            if done {
-                stale
-            } else {
-                stale.or(Some(RUNNING.to_string()))
-            },
-        )
+        (wiki, stale.or((!done).then(|| RUNNING.to_string())))
     }
 
     /// The current snapshot, and whether the reload check ran: `false` when a
@@ -961,17 +954,9 @@ mod tests {
     fn load_does_not_wait_for_a_compile() {
         let (_tmp, out) = fixture(3);
         std::fs::create_dir(out.join(".serve")).unwrap();
-        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
-        let d = out.clone();
-        let cli = std::thread::spawn(move || {
-            crate::dirlock::exclusive(&d, || {
-                held.0.send(()).unwrap();
-                release.1.recv().unwrap();
-            });
-        });
-        held.1.recv().unwrap();
+        let (release, cli) = crate::dirlock::hold(&out, Duration::from_secs(10), || ());
         let state = WikiState::load(&out).unwrap();
-        release.0.send(()).unwrap();
+        release.send(()).unwrap();
         cli.join().unwrap();
         assert_eq!(pages(&state), 3);
     }
@@ -984,37 +969,15 @@ mod tests {
         out: &Path,
     ) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
         std::fs::create_dir_all(out.join(".serve")).unwrap();
-        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
-        let (raw, out) = (tmp.path().join("raw"), out.to_path_buf());
-        let cli = std::thread::spawn(move || {
-            crate::dirlock::exclusive(&out, || {
-                crate::generator::generate_corpus(&raw, 5, 42).unwrap();
-                compile(&raw, &out, &CompileOptions::default()).unwrap();
-                held.0.send(()).unwrap();
-                let _ = release
-                    .1
-                    .recv_timeout(crate::live::WAIT + Duration::from_secs(3));
-            });
-        });
-        held.1.recv().unwrap();
-        (release.0, cli)
-    }
-
-    #[test]
-    fn snapshot_does_not_wait_out_a_compile() {
-        let (tmp, out) = fixture(3);
-        let state = WikiState::load(&out).unwrap();
-        let (release, cli) = hold(&tmp, &out);
-        let t = Instant::now();
-        assert_eq!(pages(&state), 3);
-        assert!(
-            t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
-            "{:?}",
-            t.elapsed()
+        let (raw, dir) = (tmp.path().join("raw"), out.to_path_buf());
+        let (o, max) = (
+            out.to_path_buf(),
+            crate::live::WAIT + Duration::from_secs(3),
         );
-        release.send(()).unwrap();
-        cli.join().unwrap();
-        assert_eq!(pages(&state), 5);
+        crate::dirlock::hold(&dir, max, move || {
+            crate::generator::generate_corpus(&raw, 5, 42).unwrap();
+            compile(&raw, &o, &CompileOptions::default()).unwrap();
+        })
     }
 
     #[test]
@@ -1025,12 +988,20 @@ mod tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
+        let t = Instant::now();
         let (wiki, reason) = rt.block_on(state.snapshot());
-        release.send(()).unwrap();
-        cli.join().unwrap();
+        assert!(
+            t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
+            "{:?}",
+            t.elapsed()
+        );
         assert_eq!(wiki.list_pages().len(), 3);
         assert_eq!(reason.as_deref(), Some(crate::live::RUNNING));
-        assert_eq!(rt.block_on(state.snapshot()).1, None);
+        release.send(()).unwrap();
+        cli.join().unwrap();
+        let (wiki, reason) = rt.block_on(state.snapshot());
+        assert_eq!(wiki.list_pages().len(), 5);
+        assert_eq!(reason, None);
     }
 
     #[test]

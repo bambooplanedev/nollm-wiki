@@ -1160,21 +1160,13 @@ mod tests {
         let out = tempfile::tempdir().unwrap();
         compile(src.path(), out.path(), &CompileOptions::default()).unwrap();
         std::fs::create_dir(out.path().join(BARRIER_DIR)).unwrap();
-        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
-        let d = out.path().to_path_buf();
-        let cli = std::thread::spawn(move || {
-            crate::dirlock::exclusive(&d, || {
-                held.0.send(()).unwrap();
-                release.1.recv().unwrap();
-            });
-        });
-        held.1.recv().unwrap();
+        let (release, cli) = crate::dirlock::hold(out.path(), Duration::from_secs(10), || ());
         let t = Instant::now();
         let a = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
         let b = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
         assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
         assert!(a.is_writer() && !b.is_writer());
-        release.0.send(()).unwrap();
+        release.send(()).unwrap();
         cli.join().unwrap();
         assert!(finds(&a.fresh().0, "alpha"));
         assert!(finds(&b.fresh().0, "alpha"));
@@ -1232,15 +1224,7 @@ mod tests {
         // An ack from another compile, waiting for b's next call.
         std::fs::write(ack(b.lock().barrier_sent + 1), "other 99\n").unwrap();
         // A compile holds the lock past the call's deadline.
-        let (held, release) = (std::sync::mpsc::channel(), std::sync::mpsc::channel::<()>());
-        let d = b.dir.clone();
-        let cli = std::thread::spawn(move || {
-            crate::dirlock::exclusive(&d, || {
-                held.0.send(()).unwrap();
-                let _ = release.1.recv_timeout(WAIT + Duration::from_secs(3));
-            });
-        });
-        held.1.recv().unwrap();
+        let (release, cli) = crate::dirlock::hold(&b.dir, WAIT + Duration::from_secs(3), || ());
         let t = Instant::now();
         let (two, stale) = b.fresh();
         assert!(
@@ -1251,7 +1235,7 @@ mod tests {
         assert_eq!(stale.as_deref(), Some(RUNNING));
         assert!(Arc::ptr_eq(&one, &two));
         assert_ne!(b.lock().loaded.as_deref(), Some("other 99"));
-        release.0.send(()).unwrap();
+        release.send(()).unwrap();
         cli.join().unwrap();
         // The next ack still reloads.
         std::fs::write(ack(b.lock().barrier_sent + 1), "other 99\n").unwrap();

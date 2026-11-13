@@ -83,6 +83,29 @@ pub fn try_writer(dir: &Path, at_start: bool) -> Option<Writer> {
     }
 }
 
+/// Test helper: a thread takes the exclusive lock on `dir`, runs `inside`,
+/// then holds until the returned sender gets a message or `max` passes.
+/// Returns once the lock is held and `inside` has run.
+#[cfg(test)]
+pub(crate) fn hold(
+    dir: &Path,
+    max: Duration,
+    inside: impl FnOnce() + Send + 'static,
+) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+    let (held, held_rx) = std::sync::mpsc::channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let dir = dir.to_path_buf();
+    let thread = std::thread::spawn(move || {
+        exclusive(&dir, || {
+            inside();
+            held.send(()).unwrap();
+            let _ = release_rx.recv_timeout(max);
+        });
+    });
+    held_rx.recv().unwrap();
+    (release, thread)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,28 +192,12 @@ mod tests {
         assert_eq!(try_shared(&d, || 2), Some(2));
     }
 
-    /// Holds the exclusive lock on `d` in a thread until `release` gets a
-    /// message or `max` passes; returns once the lock is held.
-    fn hold(d: &Path, max: Duration) -> (std::sync::mpsc::Sender<()>, std::thread::JoinHandle<()>) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let (release, done) = std::sync::mpsc::channel::<()>();
-        let d = d.to_path_buf();
-        let a = std::thread::spawn(move || {
-            exclusive(&d, || {
-                tx.send(()).unwrap();
-                let _ = done.recv_timeout(max);
-            });
-        });
-        rx.recv().unwrap();
-        (release, a)
-    }
-
     #[test]
     fn shared_until_gives_up_at_the_deadline() {
         let t = tempfile::tempdir().unwrap();
         let d = t.path();
         std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
-        let (release, a) = hold(d, Duration::from_secs(10));
+        let (release, a) = hold(d, Duration::from_secs(10), || ());
         let t = Instant::now();
         assert_eq!(shared_until(d, t + Duration::from_millis(200), || ()), None);
         assert!(
@@ -208,7 +215,7 @@ mod tests {
         let t = tempfile::tempdir().unwrap();
         let d = t.path();
         std::fs::create_dir(d.join(SERVE_DIR)).unwrap();
-        let (_release, a) = hold(d, Duration::from_millis(100));
+        let (_release, a) = hold(d, Duration::from_millis(100), || ());
         let t = Instant::now();
         assert_eq!(shared_until(d, t + Duration::from_secs(2), || 1), Some(1));
         assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
