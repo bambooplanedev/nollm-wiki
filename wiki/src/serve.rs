@@ -133,9 +133,10 @@ impl WikiState {
     /// The wiki to answer from, and why it may be stale. A live wait runs off
     /// the MCP runtime thread, so pings and cancels keep working meanwhile.
     pub async fn snapshot(self: &Arc<Self>) -> (Arc<Wiki>, Option<String>) {
+        let deadline = Instant::now() + WAIT;
         let outdated = EXE.replaced().then(|| OUTDATED.to_string());
         match &self.freshness {
-            Freshness::Fingerprint(_) => (self.reload_blocking().await, outdated),
+            Freshness::Fingerprint(_) => self.reload_blocking(deadline, outdated).await,
             Freshness::Live(live, frozen) if outdated.is_some() => {
                 frozen.get_or_init(|| {
                     Mutex::new(Loaded {
@@ -143,7 +144,7 @@ impl WikiState {
                         fingerprint: None,
                     })
                 });
-                (self.reload_blocking().await, outdated)
+                self.reload_blocking(deadline, outdated).await
             }
             Freshness::Live(live, _) => {
                 let live = Arc::clone(live);
@@ -154,15 +155,30 @@ impl WikiState {
         }
     }
 
-    /// `reload` waits up to `WAIT` for a compile's file lock: off the runtime thread.
-    async fn reload_blocking(self: &Arc<Self>) -> Arc<Wiki> {
+    /// `reload` waits until `deadline` for a compile's file lock: off the
+    /// runtime thread. Past it, `stale` falls back to `RUNNING`.
+    async fn reload_blocking(
+        self: &Arc<Self>,
+        deadline: Instant,
+        stale: Option<String>,
+    ) -> (Arc<Wiki>, Option<String>) {
         let this = Arc::clone(self);
-        tokio::task::spawn_blocking(move || this.reload())
+        let (wiki, done) = tokio::task::spawn_blocking(move || this.reload(deadline))
             .await
-            .expect("reload panicked")
+            .expect("reload panicked");
+        (
+            wiki,
+            if done {
+                stale
+            } else {
+                stale.or(Some(RUNNING.to_string()))
+            },
+        )
     }
 
-    fn reload(&self) -> Arc<Wiki> {
+    /// The current snapshot, and whether the reload check ran: `false` when a
+    /// compile held the lock past `deadline`, so the old snapshot stays.
+    fn reload(&self, deadline: Instant) -> (Arc<Wiki>, bool) {
         let inner = match &self.freshness {
             Freshness::Fingerprint(m) => m,
             Freshness::Live(_, frozen) => frozen.get().expect("frozen set before reload"),
@@ -170,8 +186,7 @@ impl WikiState {
         let mut guard = inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        // A compile holding the lock past `WAIT`: keep the old snapshot, retry next call.
-        let _ = crate::dirlock::shared_until(&self.dir, Instant::now() + WAIT, || {
+        let done = crate::dirlock::shared_until(&self.dir, deadline, || {
             if let Ok(current) = fingerprint(&self.dir) {
                 if Some(current) != guard.fingerprint {
                     if let Ok(wiki) = Wiki::load(&self.dir) {
@@ -184,7 +199,7 @@ impl WikiState {
                 }
             }
         });
-        Arc::clone(&guard.wiki)
+        (Arc::clone(&guard.wiki), done.is_some())
     }
 }
 
@@ -1000,6 +1015,49 @@ mod tests {
         release.send(()).unwrap();
         cli.join().unwrap();
         assert_eq!(pages(&state), 5);
+    }
+
+    #[test]
+    fn a_timed_out_snapshot_says_recompile_still_running() {
+        let (tmp, out) = fixture(3);
+        let state = WikiState::load(&out).unwrap();
+        let (release, cli) = hold(&tmp, &out);
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let (wiki, reason) = rt.block_on(state.snapshot());
+        release.send(()).unwrap();
+        cli.join().unwrap();
+        assert_eq!(wiki.list_pages().len(), 3);
+        assert_eq!(reason.as_deref(), Some(crate::live::RUNNING));
+        assert_eq!(rt.block_on(state.snapshot()).1, None);
+    }
+
+    #[test]
+    fn concurrent_snapshots_share_one_wait() {
+        let (tmp, out) = fixture(3);
+        let state = WikiState::load(&out).unwrap();
+        let (release, cli) = hold(&tmp, &out);
+        let t = Instant::now();
+        let calls: Vec<_> = (0..2)
+            .map(|_| {
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    let n = pages(&state);
+                    (n, t.elapsed())
+                })
+            })
+            .collect();
+        let done: Vec<_> = calls.into_iter().map(|c| c.join().unwrap()).collect();
+        let _ = release.send(());
+        cli.join().unwrap();
+        for (n, took) in done {
+            assert!(
+                took < crate::live::WAIT + Duration::from_secs(1),
+                "{took:?}"
+            );
+            assert_eq!(n, 3);
+        }
     }
 
     #[test]
