@@ -391,7 +391,7 @@ it; `wiki setup` leaves a copy you edited by hand alone, so delete its `neighbor
 **Freshness.** With `--source` the server compiles the project itself. An existing wiki is served
 at once while the compile runs in the background, and a call waits at most 1 s for that first
 compile; with none, the first compile runs before serving and a failure exits. It then watches
-the project and recompiles incrementally on edits (ignored paths such as `target/`, build dirs and
+the project and recompiles incrementally once edits pause for 150 ms (at most 2 s; ignored paths such as `target/`, build dirs and
 `.git` never trigger it). Each tool call waits up to 5 s
 until edits made before it are compiled. If a recompile fails or is still running, the last good
 snapshot keeps serving and results gain a line `wiki may be stale: <reason>`. Short-lived barrier
