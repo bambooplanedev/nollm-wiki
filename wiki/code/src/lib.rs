@@ -1,5 +1,7 @@
-//! `wiki-code`: the code layer shared by the wiki compiler and its sibling tools: the item model, the source tree walk and tree-sitter code extraction.
+//! `wiki-code`: the code layer shared by the wiki compiler and its sibling tools: the item model, the source tree walk, tree-sitter code extraction, the candidate index calls resolve against, and import resolution.
 
+pub mod imports;
+pub mod index;
 pub mod model;
 pub mod support;
 pub mod walk;

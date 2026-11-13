@@ -6,196 +6,51 @@
 //! called on a value of unknown type links every same-named method the
 //! caller's file can see.
 
-use crate::formats::code::{module_stem, source_rank};
 use crate::manifest::{largest_fit, token_estimate};
-use crate::model::{CallSite, CallVia, CodeItem, CodeItemKind, Entity, Graph, SourceKind};
+use crate::model::{CallSite, CallVia, CodeItem, CodeItemKind, Entity, Graph};
 use crate::query::Wiki;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use wiki_code::index::{owner_key, sees, FnRef, Index};
 
-/// The last segment of an owner, generics dropped: `Outer.Inner` and
-/// `a::Inner<T>` are both `Inner`.
-fn owner_key(owner: &str) -> &str {
-    let head = owner.split('<').next().unwrap_or("");
-    head.rsplit([':', '.']).next().unwrap_or("").trim()
-}
-
-/// The languages whose code calls each other: a page's code language, with
-/// every JavaScript dialect and component format as one.
-fn family(e: &Entity) -> &str {
-    match &e.kind {
-        SourceKind::Code { lang }
-            if matches!(lang.as_str(), "rust" | "python" | "cpp" | "go" | "shell") =>
-        {
-            lang
-        }
-        _ => "ecma",
-    }
-}
-
-/// A function item: (page, item) indexes into `Index::pages`.
-type FnRef = (usize, usize);
-
-/// What call sites resolve against: every function by name, every page by
-/// module name, every type name.
-struct Index<'a> {
-    pages: Vec<&'a Entity>,
-    by_name: BTreeMap<&'a str, Vec<FnRef>>,
-    /// Pages by module stem and by directory name.
-    modules: BTreeMap<&'a str, BTreeSet<usize>>,
-    /// Owner last segments and type item names.
-    types: BTreeSet<&'a str>,
-    /// A header declaration's definition: its `twin`, else the one function
-    /// of the same name and owner in a file of the same stem.
-    def_of: BTreeMap<FnRef, FnRef>,
-}
-
-impl<'a> Index<'a> {
-    fn new(entities: &'a BTreeMap<String, Entity>) -> Self {
-        let pages: Vec<&Entity> = entities.values().collect();
-        let mut by_name: BTreeMap<&str, Vec<FnRef>> = BTreeMap::new();
-        let mut by_span: BTreeMap<String, FnRef> = BTreeMap::new();
-        let mut modules: BTreeMap<&str, BTreeSet<usize>> = BTreeMap::new();
-        let mut types: BTreeSet<&str> = BTreeSet::new();
-        for (p, e) in pages.iter().enumerate() {
-            if e.items.is_empty() {
-                continue;
-            }
-            let path = e.source_path.as_str();
-            modules.entry(module_stem(path)).or_default().insert(p);
-            if let Some(dir) = path.rsplit('/').nth(1) {
-                modules.entry(dir).or_default().insert(p);
-            }
-            for (i, it) in e.items.iter().enumerate() {
-                types.extend(it.owner.as_deref().map(owner_key));
-                if it.kind == CodeItemKind::Type {
-                    types.insert(&it.name);
-                }
-                // A nested function is no call target: same-named helpers
-                // nested in test functions would cross-wire.
-                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) && !it.nested {
-                    by_name.entry(&it.name).or_default().push((p, i));
-                    by_span.insert(it.span(&e.source_path), (p, i));
-                }
-            }
-        }
-        let header = |c: FnRef| source_rank(&pages[c.0].source_path) < 2;
-        let key = |c: FnRef| {
-            let it = &pages[c.0].items[c.1];
-            let stem = module_stem(&pages[c.0].source_path);
-            (it.owner.as_deref().map(owner_key), stem)
-        };
-        let mut def_of = BTreeMap::new();
-        for fns in by_name.values() {
-            for &h in fns.iter().filter(|&&c| header(c)) {
-                let twin = pages[h.0].items[h.1].twin.as_ref();
-                let def = twin.and_then(|t| by_span.get(t).copied()).or_else(|| {
-                    let mut defs = fns.iter().filter(|&&c| !header(c) && key(c) == key(h));
-                    match (defs.next(), defs.next()) {
-                        (Some(&d), None) => Some(d),
-                        _ => None,
-                    }
-                });
-                def_of.extend(def.map(|d| (h, d)));
-            }
-        }
-        Index {
-            pages,
-            by_name,
-            modules,
-            types,
-            def_of,
-        }
-    }
-
-    fn item(&self, c: FnRef) -> &'a CodeItem {
-        &self.pages[c.0].items[c.1]
-    }
-
-    /// The functions `site` names in the language of page `page` that its
-    /// argument count fits and that pass `keep`, each declaration taken as
-    /// its definition, deduplicated.
-    fn pick(&self, page: usize, site: &CallSite, keep: impl Fn(FnRef) -> bool) -> Vec<FnRef> {
-        let named = self
-            .by_name
-            .get(site.name.as_str())
-            .map_or(&[][..], Vec::as_slice);
-        let lang = family(self.pages[page]);
-        // `Q::f(x, …)` and Python's `K.f(x, …)` may pass the receiver.
-        let path = match &site.via {
-            CallVia::Path(_) => true,
-            CallVia::Member(Some(x)) => self.types.contains(x.as_str()),
-            _ => false,
-        };
-        let fits = |c: FnRef| match (self.item(c).arity, site.args) {
-            (Some(a), Some(n)) => a.fits(n, path),
-            _ => true,
-        };
-        let found: BTreeSet<FnRef> = named
+/// The functions one call site names, from a function owned by `own`
+/// on page `page`, which sees the pages `sees`; see `resolve_calls`.
+fn resolve(
+    index: &Index<Entity>,
+    site: &CallSite,
+    own: Option<&str>,
+    page: usize,
+    sees: &BTreeSet<usize>,
+) -> Vec<FnRef> {
+    let scope = index.scope(page, own, sees);
+    let only = |v: Vec<FnRef>| if v.len() == 1 { v } else { Vec::new() };
+    let own_methods = || scope.own_methods(site);
+    let fn_here = || scope.fns_here(site);
+    let fn_seen = || scope.fns_seen(site);
+    let method_seen = || scope.methods_seen(site);
+    let fn_only = || only(scope.fns_anywhere(site));
+    let method_only = || only(scope.methods_anywhere(site));
+    let qualified = |q: &str| scope.qualified(site, q);
+    let first = |tries: &[&dyn Fn() -> Vec<FnRef>]| {
+        tries
             .iter()
-            .copied()
-            .filter(|&c| family(self.pages[c.0]) == lang && fits(c) && keep(c))
-            .map(|c| self.def_of.get(&c).copied().unwrap_or(c))
-            .collect();
-        found.into_iter().collect()
-    }
-
-    /// The functions one call site names, from a function owned by `own`
-    /// on page `page`, which sees the pages `sees`; see `resolve_calls`.
-    fn resolve(
-        &self,
-        site: &CallSite,
-        own: Option<&str>,
-        page: usize,
-        sees: &BTreeSet<usize>,
-    ) -> Vec<FnRef> {
-        let is_fn = |c: FnRef| self.item(c).kind == CodeItemKind::Fn;
-        let is_method = |c: FnRef| self.item(c).kind == CodeItemKind::Method;
-        let owned_by = |key: &str, c: FnRef| {
-            is_method(c) && self.item(c).owner.as_deref().map(owner_key) == Some(key)
-        };
-        let only = |v: Vec<FnRef>| if v.len() == 1 { v } else { Vec::new() };
-        let own_methods = || {
-            own.map(|o| self.pick(page, site, |c| owned_by(o, c)))
-                .unwrap_or_default()
-        };
-        let fn_here = || self.pick(page, site, |c| is_fn(c) && c.0 == page);
-        let fn_seen = || self.pick(page, site, |c| is_fn(c) && sees.contains(&c.0));
-        let method_seen = || self.pick(page, site, |c| is_method(c) && sees.contains(&c.0));
-        let fn_only = || only(self.pick(page, site, is_fn));
-        let method_only = || only(self.pick(page, site, is_method));
-        let qualified = |q: &str| {
-            let in_module = self.modules.get(q);
-            let in_namespace = |c: FnRef| self.item(c).namespace.as_deref() == Some(q);
-            self.pick(page, site, |c| {
-                owned_by(q, c)
-                    || (is_fn(c)
-                        && (in_module.is_some_and(|m| m.contains(&c.0)) || in_namespace(c)))
-            })
-        };
-        let first = |tries: &[&dyn Fn() -> Vec<FnRef>]| {
-            tries
-                .iter()
-                .map(|t| t())
-                .find(|v| !v.is_empty())
-                .unwrap_or_default()
-        };
-        match &site.via {
-            // A method of a base class is called bare too (C++).
-            CallVia::Bare => first(&[&own_methods, &fn_here, &fn_seen, &method_seen, &fn_only]),
-            CallVia::Path(q) if q == "Self" => own_methods(),
-            CallVia::Path(q) if matches!(q.as_str(), "self" | "crate" | "super") => {
-                first(&[&fn_here, &fn_seen, &fn_only])
-            }
-            CallVia::Path(q) => qualified(q.as_str()),
-            CallVia::SelfRecv => first(&[&own_methods, &method_seen, &method_only]),
-            CallVia::Member(Some(x))
-                if self.types.contains(x.as_str()) || self.modules.contains_key(x.as_str()) =>
-            {
-                let q = || qualified(x.as_str());
-                first(&[&q, &method_seen, &method_only])
-            }
-            CallVia::Member(_) => first(&[&method_seen, &method_only]),
+            .map(|t| t())
+            .find(|v| !v.is_empty())
+            .unwrap_or_default()
+    };
+    match &site.via {
+        // A method of a base class is called bare too (C++).
+        CallVia::Bare => first(&[&own_methods, &fn_here, &fn_seen, &method_seen, &fn_only]),
+        CallVia::Path(q) if q == "Self" => own_methods(),
+        CallVia::Path(q) if matches!(q.as_str(), "self" | "crate" | "super") => {
+            first(&[&fn_here, &fn_seen, &fn_only])
         }
+        CallVia::Path(q) => qualified(q.as_str()),
+        CallVia::SelfRecv => first(&[&own_methods, &method_seen, &method_only]),
+        CallVia::Member(Some(x)) if index.is_type(x.as_str()) || index.is_module(x.as_str()) => {
+            let q = || qualified(x.as_str());
+            first(&[&q, &method_seen, &method_only])
+        }
+        CallVia::Member(_) => first(&[&method_seen, &method_only]),
     }
 }
 
@@ -220,7 +75,7 @@ impl<'a> Index<'a> {
 /// Before any rule, a function whose parameters cannot take the call's
 /// argument count (`Arity::fits`) is no candidate.
 ///
-/// Only functions in the caller's language family (`family`) count. The
+/// Only functions in the caller's language family (`Family::of`) count. The
 /// files a caller sees are its own, the pages it imports, and theirs:
 /// a `.cpp` reaches its types through its own header's includes. A header
 /// declaration stands for its definition, which holds the body. A function
@@ -237,20 +92,18 @@ pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph) {
         })
     };
     let mut resolved: Vec<(usize, usize, BTreeMap<String, BTreeSet<usize>>)> = Vec::new();
-    for (p, e) in index.pages.iter().enumerate() {
+    for (p, e) in entities.values().enumerate() {
         if e.items.iter().all(|it| it.call_sites.is_empty()) {
             continue;
         }
-        let mut sees: BTreeSet<usize> = imports(p).collect();
-        sees.extend(sees.clone().into_iter().flat_map(imports));
-        sees.insert(p);
+        let sees = sees(p, |q| imports(q).collect());
         for (i, caller) in e.items.iter().enumerate() {
             let own = caller.owner.as_deref().map(owner_key);
             let mut calls: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
             for site in &caller.call_sites {
-                for c in index.resolve(site, own, p, &sees) {
+                for c in resolve(&index, site, own, p, &sees) {
                     if c != (p, i) {
-                        let span = index.item(c).span(&index.pages[c.0].source_path);
+                        let span = index.item(c).span(&index.unit(c.0).source_path);
                         calls.entry(span).or_default().insert(site.line);
                     }
                 }
