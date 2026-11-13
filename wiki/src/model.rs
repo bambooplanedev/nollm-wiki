@@ -3,7 +3,13 @@
 use crate::hash::{hash_str, to_hex};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+pub use wiki_code::model::{
+    is_test_path, Arity, CallSite, CallVia, CodeItem, CodeItemKind, PairRole,
+};
+pub use wiki_code::support::normalize_path;
+pub(crate) use wiki_code::support::{
+    basename, clip, one_line, title_case, title_from_slug, ITEM_DOC_TEXT_MAX_CHARS,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
@@ -206,197 +212,6 @@ pub struct Entity {
     pub items: Vec<CodeItem>,
 }
 
-impl CodeItemKind {
-    /// The serde name, as `items.json` and the outline print it.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            CodeItemKind::Fn => "fn",
-            CodeItemKind::Method => "method",
-            CodeItemKind::Type => "type",
-            CodeItemKind::Value => "value",
-            CodeItemKind::Module => "module",
-            CodeItemKind::TopLevel => "top_level",
-        }
-    }
-}
-
-/// What a `CodeItem` is. Fields, enum variants and impl headers are not items.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CodeItemKind {
-    /// A free function.
-    Fn,
-    /// A function with an owner: an `impl` or class method, a trait method.
-    Method,
-    /// A struct, class, enum, trait, interface, union, type alias, or
-    /// exported macro.
-    Type,
-    /// A constant, static, or module-level variable.
-    Value,
-    /// A module declaration.
-    Module,
-    /// A shell file's `<top level>`: the pseudo-caller of its calls outside
-    /// every function. It is no symbol: search and the outline skip it; only
-    /// `callers` shows it.
-    #[serde(rename = "top_level")]
-    TopLevel,
-}
-
-/// One definition of a code page and where it lives. Field order is the
-/// `items.json` key order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CodeItem {
-    pub kind: CodeItemKind,
-    /// The name as the source writes it.
-    pub name: String,
-    /// The enclosing scopes, joined the way the language's signatures join
-    /// them (`Wiki`, `<T as Display>`, `Outer.Inner`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner: Option<String>,
-    /// The one-line signature as the source reads it, with no owner spliced
-    /// in, so it can be searched for in the file. Exception: each C++
-    /// declarator of a shared declaration gets its own signature, which may
-    /// not appear verbatim (`int a, *b;` gives `b` the signature `int *b`).
-    pub signature: String,
-    /// 1-based, inclusive, in the original file: from the first attached doc
-    /// comment or attribute line to the item's last line.
-    pub start_line: usize,
-    pub end_line: usize,
-    /// The first sentence of the item's own doc comment, capped.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub doc: Option<String>,
-    /// The item's whole doc, whitespace collapsed and capped; `None` when it
-    /// equals `doc`. Scored at half weight, never shown.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub doc_text: Option<String>,
-    /// Whether the item is part of the page's export surface (`symbols`).
-    pub public: bool,
-    /// A Python function defined directly in another function's body, or a
-    /// shell file's top-level `NAME=` (a `Value`, matched by exact name
-    /// only): found by `search` only, never in an outline, the exports or the
-    /// call graph.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub nested: bool,
-    /// The `path` of the file holding this item's other half, when one is
-    /// known.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub twin: Option<String>,
-    /// Whether the item is test code: in a test file (`is_test_path`), inside
-    /// a Rust `#[cfg(test)]` module, or a Rust `#[test]` function. Search
-    /// shows such items but does not let them lift their page.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub test: bool,
-    /// The functions this function calls, as `path:start-end`, sorted: the
-    /// call sites in its body matched to project items by name (see
-    /// `graph::resolve_calls`). Empty for anything but a function.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub calls: Vec<String>,
-    /// For each entry of `calls`, the lines of this function that call it.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub call_lines: Vec<Vec<usize>>,
-    /// The call sites as the source names them, until `resolve_calls` turns
-    /// them into `calls`.
-    #[serde(skip)]
-    pub call_sites: Vec<CallSite>,
-    /// The argument counts a call to this function can pass, when the
-    /// extractor knows them; `resolve_calls` drops a match that cannot fit.
-    #[serde(skip)]
-    pub arity: Option<Arity>,
-    /// C++ only: which side of project-wide pairing this item may take.
-    #[serde(skip)]
-    pub pair_role: PairRole,
-    /// C++ only: the innermost named, non-inline namespace around the
-    /// item, its last segment (`lab::planner` gives `planner`).
-    #[serde(skip)]
-    pub namespace: Option<String>,
-}
-
-/// C++ only: which side of project-wide pairing an item may take.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum PairRole {
-    /// Not a candidate: other languages; inline or in-class bodies,
-    /// `= delete`, `static` or anonymous-namespace definitions.
-    #[default]
-    Neither,
-    /// A body-less declaration.
-    Declaration,
-    /// An out-of-line definition: a body or `= default`, no class-body
-    /// ancestor, not `static`, not inside an anonymous namespace.
-    OutOfLineDefinition,
-}
-
-/// The argument counts a function accepts: `min..=max`, `max` unbounded
-/// for a variadic. `receiver` is a `self` that a `Type::f(x, …)` call
-/// passes as the first argument.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Arity {
-    pub min: usize,
-    pub max: Option<usize>,
-    pub receiver: bool,
-}
-
-impl Arity {
-    /// Whether a call passing `args` arguments can be a call of this
-    /// function; `path` is a call through a type (`Q::f()`, Python
-    /// `K.f()`), which may pass the receiver.
-    pub fn fits(self, args: usize, path: bool) -> bool {
-        let extra = usize::from(self.receiver && path);
-        args >= self.min && self.max.is_none_or(|m| args <= m + extra)
-    }
-}
-
-/// A call in a function body, as the source writes its target.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CallSite {
-    /// The called name: `f` of `f()`, `a::f()`, `x.f()`.
-    pub name: String,
-    pub via: CallVia,
-    /// The arguments it passes; `None` when a spread or splat hides the count.
-    pub args: Option<usize>,
-    /// 1-based, in the original file.
-    pub line: usize,
-}
-
-/// How a call site reaches its name.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CallVia {
-    /// `f()`.
-    Bare,
-    /// `q::f()`: the qualifier's last segment, generics dropped.
-    Path(String),
-    /// `self.f()`, `this->f()`.
-    SelfRecv,
-    /// `x.f()`: the receiver when it is a plain name.
-    Member(Option<String>),
-}
-
-impl CodeItem {
-    /// `path:start-end`, the item's lines in its source file.
-    pub fn span(&self, path: &str) -> String {
-        format!("{path}:{}-{}", self.start_line, self.end_line)
-    }
-
-    /// `owner::name`, or `name` when the item has no owner: how search
-    /// prints the item, and a whole-name match for it.
-    pub fn qualified_name(&self) -> String {
-        match &self.owner {
-            Some(o) => format!("{o}::{}", self.name),
-            None => self.name.clone(),
-        }
-    }
-}
-
-/// Whether `rel_path` is a test file in any language: a path component
-/// `tests`, or a file name `test_*`, `*_test.*`, `*_tests.*`.
-pub fn is_test_path(rel_path: &str) -> bool {
-    let mut parts = rel_path.split('/');
-    let name = parts.next_back().unwrap_or("");
-    let stem = name.split('.').next().unwrap_or("");
-    parts.any(|c| c == "tests")
-        || name.starts_with("test_")
-        || (name.contains('.') && (stem.ends_with("_test") || stem.ends_with("_tests")))
-}
-
 #[derive(Default, Clone, Debug)]
 pub struct Edges {
     pub outgoing: BTreeSet<String>,
@@ -434,81 +249,9 @@ pub(crate) fn days_in_month(year: Option<u32>, month: u32) -> u32 {
     }
 }
 
-/// The last `/`-separated segment of `path`.
-pub(crate) fn basename(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
-}
-
-/// `title_case` of a file stem or directory name, `_` and `-` read as spaces.
-pub(crate) fn title_from_slug(s: &str) -> String {
-    title_case(&s.replace(['_', '-'], " "))
-}
-
-/// `s` with every whitespace run, newlines included, collapsed to one space,
-/// and with ANSI escape sequences, other control characters and bidi format
-/// characters dropped (a tool log's colours must not reach the terminal).
-pub(crate) fn one_line(s: &str) -> String {
-    let mut clean = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        match c {
-            '\x1b' => {
-                // A CSI sequence runs to its first final byte; `[` itself is
-                // in that range, so the scan starts after it.
-                if chars.as_str().starts_with('[') {
-                    chars.next();
-                    for c in chars.by_ref() {
-                        if ('@'..='~').contains(&c) {
-                            break;
-                        }
-                    }
-                }
-            }
-            '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' => {}
-            c if c.is_control() && !c.is_whitespace() => {}
-            c => clean.push(c),
-        }
-    }
-    clean.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// The most chars of an item's whole doc kept in `items.json`, and of a
-/// summary printed by the page view.
-pub(crate) const ITEM_DOC_TEXT_MAX_CHARS: usize = 1000;
-
 /// Longest field a search or hint line carries, in characters: a run log's
 /// summary ran 7k characters on the bench and `search` printed it whole.
 pub(crate) const LINE_CHARS: usize = 160;
-
-/// `one_line(s)` cut to `chars` characters, the last one `…` when cut.
-pub(crate) fn clip(s: &str, chars: usize) -> String {
-    let line = one_line(s);
-    if line.chars().count() > chars {
-        let mut cut: String = line.chars().take(chars - 1).collect();
-        cut.push('…');
-        cut
-    } else {
-        line
-    }
-}
-
-/// Capitalize each whitespace-separated word and lowercase the rest of it.
-/// Shared by every name-deriving path — the text extractor's ALL-CAPS first
-/// line, the markdown/code filename fallbacks, and `disambiguate_ids`'
-/// directory prefixes — so that a page named from a path and a page named
-/// from its own content are cased by one rule rather than three copies of it.
-pub(crate) fn title_case(s: &str) -> String {
-    s.split_whitespace()
-        .map(|w| {
-            let mut ch = w.chars();
-            match ch.next() {
-                Some(f) => f.to_uppercase().collect::<String>() + &ch.as_str().to_lowercase(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
-}
 
 /// Ascii spelling of one lowercase char: Ukrainian (KMU 2010, position
 /// independent) and Russian Cyrillic, plus Latin-1 / Extended-A letters folded
@@ -641,29 +384,9 @@ pub fn slugify(name: &str) -> String {
 /// `<id>.md.tmp`), and common file systems cap a name at 255 bytes.
 pub const MAX_ID_LEN: usize = 200;
 
-/// Repo-relative, forward-slash-normalized path string. Falls back to the raw
-/// path (lossy) if `path` is not under `root`.
-pub fn normalize_path(root: &Path, path: &Path) -> String {
-    let rel = path.strip_prefix(root).unwrap_or(path);
-    rel.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn one_line_drops_control_characters_and_ansi_sequences() {
-        assert_eq!(one_line("a \x1b[31mred\x1b[0m b\x07c\x00d"), "a red bcd");
-        assert_eq!(one_line("x\x1b[0;37my"), "xy");
-        assert_eq!(one_line("left\u{202E}right\u{2066}x\u{2069}"), "leftrightx");
-        assert_eq!(one_line("[0;37m é 日本 🚀\t\n  z"), "[0;37m é 日本 🚀 z");
-        assert_eq!(one_line("cr\rtail"), "cr tail");
-    }
 
     #[test]
     fn origin_label_covers_every_form() {
@@ -706,20 +429,6 @@ mod tests {
             mine: false,
         };
         assert_eq!(anonymous.trust(), 0.5);
-    }
-
-    #[test]
-    fn code_item_kind_names_match_serde() {
-        for k in [
-            CodeItemKind::Fn,
-            CodeItemKind::Method,
-            CodeItemKind::Type,
-            CodeItemKind::Value,
-            CodeItemKind::Module,
-            CodeItemKind::TopLevel,
-        ] {
-            assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
-        }
     }
 
     #[test]
@@ -818,13 +527,6 @@ mod tests {
         assert_eq!(s, slugify(&long)); // deterministic
         assert_ne!(s, slugify(&format!("{long} x"))); // same prefix, distinct id
         assert_eq!(slugify(&s), s); // an id resolves to itself
-    }
-
-    #[test]
-    fn normalize_path_is_relative_and_forward_slashed() {
-        let root = Path::new("/tmp/proj");
-        let p = Path::new("/tmp/proj/src/graph.rs");
-        assert_eq!(normalize_path(root, p), "src/graph.rs");
     }
 
     #[test]

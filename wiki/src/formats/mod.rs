@@ -10,14 +10,13 @@ pub mod extract_simple;
 pub mod extract_svelte;
 pub mod extract_vue;
 pub mod markdown;
-pub mod summary;
 pub mod text;
 
 pub use code::CodeExtractor;
 pub use markdown::MarkdownExtractor;
-pub(crate) use summary::first_real_sentence;
-pub use summary::summarize;
 pub use text::TextExtractor;
+pub(crate) use wiki_code::support::first_real_sentence;
+pub use wiki_code::support::summarize;
 
 use crate::hash::hash_bytes;
 use crate::model::Entity;

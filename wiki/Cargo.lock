@@ -1658,6 +1658,18 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "wiki-code",
+]
+
+[[package]]
+name = "wiki-code"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tree-sitter",
 ]
 
 [[package]]
