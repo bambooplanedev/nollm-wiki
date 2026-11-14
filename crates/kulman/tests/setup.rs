@@ -324,9 +324,9 @@ fn setup_gives_the_modules_bin_on_their_path() {
     let f = installed(logs_path, "kalka");
     let out = f.setup(&["--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    let own = std::env::var("PATH").unwrap();
+    let own = std::env::var_os("PATH").unwrap_or_default();
     let bin = f.home.join("bin");
-    assert_eq!(f.logged(), [format!("{}:{own}", bin.display())]);
+    assert_eq!(f.logged(), [format!("{}:{}", bin.display(), own.display())]);
 }
 
 #[test]
@@ -355,8 +355,8 @@ fn setup_agent_without_kalka_is_usage() {
     assert_eq!(f.logged(), NONE);
 }
 
-/// `out`'s stderr ends with `kulman: <failed> setup failed (<how>)` for each failure, then the
-/// summary naming them all.
+/// `out`'s stderr contains the line `kulman: <failed> setup failed (<how>)` for each failure and
+/// ends with the summary naming them all.
 fn failed(out: &std::process::Output, failures: &[(&str, &str)]) {
     let err = stderr(out);
     for (name, how) in failures {
