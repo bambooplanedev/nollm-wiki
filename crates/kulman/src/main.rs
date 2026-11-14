@@ -699,14 +699,16 @@ fn setup(a: SetupArgs) -> Result<()> {
         }
     }
     // The modules find each other (kalka its own name) on PATH: `bin/` first when it is not on
-    // it, in their environment only.
-    let modules_path = (!on_path(&bin)).then(|| {
-        let own = std::env::var_os("PATH").unwrap_or_default();
-        std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own)))
-    });
-    let modules_path =
-        (modules_path.transpose()).context("cannot put bin/ on the modules' PATH")?;
-    if modules_path.is_some() && kalka && !a.remove {
+    // it, in their environment only; one that cannot be on a PATH (a `:` in it) leaves PATH as
+    // it is.
+    let off_path = !on_path(&bin);
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let modules_path = if off_path {
+        std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own))).ok()
+    } else {
+        None
+    };
+    if off_path && kalka && !a.remove {
         let bin = bin.display();
         eprintln!("kulman: {bin} is not on PATH");
         eprintln!(

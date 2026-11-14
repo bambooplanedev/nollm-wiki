@@ -330,6 +330,36 @@ fn setup_gives_the_modules_bin_on_their_path() {
 }
 
 #[test]
+fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
+    // `bin/` cannot be put on a PATH (`:` separates its entries): the modules get the PATH as it is.
+    let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$KULMAN_TEST_LOG\"\n";
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", logs_path)]);
+    let home = t.path().join("kulman:home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    let project = t.path().join("project");
+    fs::create_dir(&project).unwrap();
+    let log = t.path().join("log");
+    let out = kulman(&home, &base)
+        .args(["setup", "--scope", "repo"])
+        .current_dir(&project)
+        .env("KULMAN_TEST_LOG", &log)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        format!("{}\n", own.display())
+    );
+    let first = format!("kulman: {} is not on PATH", home.join("bin").display());
+    assert_eq!(stderr(&out).lines().next(), Some(first.as_str()));
+}
+
+#[test]
 fn setup_without_asking_gives_the_modules_no_input() {
     let reads: &[u8] = b"#!/bin/sh\nread -r line; echo \"read [$line]\" >> \"$KULMAN_TEST_LOG\"\n";
     let f = installed(reads, "kalka");

@@ -102,7 +102,8 @@ Before the first module runs, every chosen module's binary must be in `bin/` and
 no module installed there is nothing to set up (exit 1). The modules write into the project's
 `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that folder is kulman's home
 (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`, the modules run with it
-put first on their own `PATH` (kulman's own environment and your shell are not changed), and a
+put first on their own `PATH` (kulman's own environment and your shell are not changed; a `bin/`
+path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a
 setup of kalka first says on stderr that `bin/` is not on `PATH`, that the agent configs it writes
 start `kalka` by name, and what to add to `PATH`.
 
