@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [lints]

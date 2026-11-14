@@ -6,8 +6,8 @@
 
 **Карта вашого проєкту для агентів, що пишуть код: де лежить кожна функція, хто її викликає і які рядки читати. Без жодної LLM під час компіляції.**
 
-[![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
-[![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
+[![CI](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml)
+[![Release](https://img.shields.io/github/v/release/bambooplanedev/kulman)](https://github.com/bambooplanedev/kulman/releases)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -94,11 +94,11 @@ crates/kalka/src/lib.rs
 
 ## Встановлення
 
-З [релізу](https://github.com/bambooplanedev/llm-wiki-nollm/releases): завантажте архів для своєї
+З [релізу](https://github.com/bambooplanedev/kulman/releases): завантажте архів для своєї
 платформи (`aarch64-apple-darwin`, `x86_64-apple-darwin` або `x86_64-unknown-linux-gnu`) і покладіть
 бінарник у теку, що є в `PATH`, бо агенти запускають його за назвою:
 
-    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
+    curl -LO https://github.com/bambooplanedev/kulman/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     tar -xzf wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
 
@@ -109,8 +109,8 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
 
 З коду:
 
-    git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm
+    git clone https://github.com/bambooplanedev/kulman
+    cd kulman
     cargo install --path crates/kalka      # у ~/.cargo/bin
 
 ### Через kulman (буде доступно з першого релізу набору, 0.7.0)
@@ -965,8 +965,8 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 
 ## Розробка
 
-    git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm
+    git clone https://github.com/bambooplanedev/kulman
+    cd kulman
 
     cargo test             # модульні, інтеграційні, snapshot-тести й оцінка пошуку
     cargo clippy --all-targets -- -D warnings

@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Per-function decision charts and call targets of a codebase, drawn deterministically from its syntax trees"
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]

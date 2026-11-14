@@ -6,8 +6,8 @@
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
-[![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
-[![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
+[![CI](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml)
+[![Release](https://img.shields.io/github/v/release/bambooplanedev/kulman)](https://github.com/bambooplanedev/kulman/releases)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
@@ -89,11 +89,11 @@ crates/kalka/src/lib.rs
 
 ## Installation
 
-From a [release](https://github.com/bambooplanedev/llm-wiki-nollm/releases): download the tarball
+From a [release](https://github.com/bambooplanedev/kulman/releases): download the tarball
 for your platform (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`) and
 put the binary in a directory on your `PATH`, since agents start it by its name:
 
-    curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
+    curl -LO https://github.com/bambooplanedev/kulman/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     tar -xzf wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
 
@@ -105,8 +105,8 @@ Releases after v0.6.1 also carry `SHA256SUMS`. With the tarball and that file in
 
 From source:
 
-    git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm
+    git clone https://github.com/bambooplanedev/kulman
+    cd kulman
     cargo install --path crates/kalka      # into ~/.cargo/bin
 
 ### With kulman (available from the first release of the set, 0.7.0)
@@ -947,8 +947,8 @@ Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHI
 
 ## Development
 
-    git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm
+    git clone https://github.com/bambooplanedev/kulman
+    cd kulman
 
     cargo test             # unit, integration, snapshot and retrieval-eval tests
     cargo clippy --all-targets -- -D warnings

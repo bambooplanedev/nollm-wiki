@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Where agent memory lives: the repo's own folder and the folders agents keep outside it"
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [dev-dependencies]
