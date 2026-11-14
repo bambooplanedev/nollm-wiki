@@ -46,6 +46,27 @@ pub struct SetupOptions {
     pub scope: Scope,
     pub hook: bool,
     pub remove: bool,
+    /// Agent memory: the `.agents/memory` folder, the skill's Memory section and the server's
+    /// memory. Off, the server runs with `--memory none`. `--remove` takes either variant.
+    pub memory: bool,
+}
+
+/// The server's arguments; without memory, `serve --memory none`'s.
+fn serve_args(memory: bool) -> Vec<&'static str> {
+    let mut a = vec!["serve", "--source", "."];
+    if !memory {
+        a.extend(["--memory", "none"]);
+    }
+    a
+}
+
+/// The skill, with its Memory section only when `memory`.
+fn skill_text(memory: bool) -> String {
+    let text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
+    match text.split_once("\n# Memory\n") {
+        Some((nav, _)) if !memory => format!("{}\n", nav.trim_end()),
+        _ => text,
+    }
 }
 
 #[cfg(unix)]
@@ -184,56 +205,60 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
 
 /// Codex's MCP server, through its CLI. Its config is global, so one entry serves every project:
 /// Codex starts the server in the directory it runs in.
-fn codex_mcp(root: &Path, remove: bool) -> Outcome {
+/// Either memory variant is ours; the other one is replaced.
+fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = cli("codex", root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
-            if !(has(&format!("command: {CMD}")) && has("args: serve --source .")) {
+            let args = |m| has(&format!("args: {}", serve_args(m).join(" ")));
+            if !(has(&format!("command: {CMD}")) && (args(true) || args(false))) {
                 return Ok(Outcome::Foreign(
                     "another \"kalka\" server is configured".into(),
                 ));
             }
-            if !remove {
+            if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
             cli("codex", root, &["mcp", "remove", "kalka"])?;
-            return Ok(Outcome::Done);
-        }
-        if remove {
+            if remove {
+                return Ok(Outcome::Done);
+            }
+        } else if remove {
             return Ok(Outcome::AlreadyThere);
         }
-        cli(
-            "codex",
-            root,
-            &["mcp", "add", "kalka", "--", CMD, "serve", "--source", "."],
-        )?;
+        let mut add = vec!["mcp", "add", "kalka", "--", CMD];
+        add.extend(serve_args(memory));
+        cli("codex", root, &add)?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)
 }
 
-/// Claude Code's own local-scope MCP config, through its CLI.
-fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
+/// Claude Code's own local-scope MCP config, through its CLI. Either memory variant is ours; the
+/// other one is replaced by `entry`.
+fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = claude(root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
+            let args = |m| has(&format!("Args: {}", serve_args(m).join(" ")));
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
                 && has(&format!("Command: {CMD}"))
-                && has("Args: serve --source .");
+                && (args(true) || args(false));
             if !ours {
                 return Ok(Outcome::Foreign(
                     "another \"kalka\" server is configured".into(),
                 ));
             }
-            if !remove {
+            if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
             claude(root, &["mcp", "remove", "kalka", "--scope", "local"])?;
-            return Ok(Outcome::Done);
-        }
-        if remove {
+            if remove {
+                return Ok(Outcome::Done);
+            }
+        } else if remove {
             return Ok(Outcome::AlreadyThere);
         }
         let json = entry.to_string();
@@ -288,38 +313,46 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
-    let skill_text = skill_text.as_str();
+    // Own variants, this run's choice first; `--remove` takes either.
+    let choice = [opts.memory, !opts.memory];
+    let skills = choice.map(skill_text);
+    let skills = skills.each_ref().map(String::as_str);
+    let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
     if !opts.remove {
-        let d = root.join(memory::REPO_DIR);
-        let what = format!("memory folder {}", memory::display_path(&d));
-        let existed = d.is_dir();
-        std::fs::create_dir_all(&d)?;
-        let o = if existed {
-            Outcome::AlreadyThere
-        } else {
-            Outcome::Done
-        };
-        r.item(&what, false, Ok(o))?;
-        let agent_dirs = memory::agent_dirs(root);
-        for d in &agent_dirs {
-            let state = if d.is_dir() {
-                "found"
+        // As the registered server compiles: `--memory none` has no memory at all.
+        let mut agent_dirs = Vec::new();
+        if opts.memory {
+            let d = root.join(memory::REPO_DIR);
+            let what = format!("memory folder {}", memory::display_path(&d));
+            let existed = d.is_dir();
+            std::fs::create_dir_all(&d)?;
+            let o = if existed {
+                Outcome::AlreadyThere
             } else {
-                "not yet created"
+                Outcome::Done
             };
-            r.line(&format!(
-                "agent memory folder {} ({state})",
-                memory::display_path(d)
-            ))?;
-        }
-        if agent_dirs.is_empty() {
-            r.line("no agent memory folders found")?;
+            r.item(&what, false, Ok(o))?;
+            agent_dirs = memory::agent_dirs(root);
+            for d in &agent_dirs {
+                let state = if d.is_dir() {
+                    "found"
+                } else {
+                    "not yet created"
+                };
+                r.line(&format!(
+                    "agent memory folder {} ({state})",
+                    memory::display_path(d)
+                ))?;
+            }
+            if agent_dirs.is_empty() {
+                r.line("no agent memory folders found")?;
+            }
         }
         let wiki = root.join(OUT_DIR);
         let c = CompileOptions {
             incremental: true,
             memory: agent_dirs,
+            repo_memory: opts.memory,
             ..CompileOptions::default()
         };
         let res = crate::dirlock::exclusive(&wiki, || compile(root, &wiki, &c))?;
@@ -335,9 +368,11 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     if !opts.remove && find_on_path("kalka").is_none() {
         r.line("warning: kalka is not on PATH; the agents will not find it until it is")?;
     }
-    let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
-    let mut ignore = vec![format!("{OUT_DIR}/"), format!("/{}/", memory::REPO_DIR)];
+    let mut ignore = vec![format!("{OUT_DIR}/")];
+    if opts.memory {
+        ignore.push(format!("/{}/", memory::REPO_DIR));
+    }
     let mut cursor_added = false;
 
     for agent in agents {
@@ -349,9 +384,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(file);
                 let res = || {
                     if opts.remove {
-                        edit::remove_entry(root, &path, &["mcpServers"], "kalka", &entry)
+                        edit::remove_entry(root, &path, &["mcpServers"], "kalka", &entries)
                     } else {
-                        edit::upsert_entry(&path, &["mcpServers"], "kalka", &entry)
+                        edit::upsert_entry(&path, &["mcpServers"], "kalka", &entries)
                     }
                 };
                 let before = path.exists();
@@ -364,7 +399,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 continue;
             }
             Agent::Codex => {
-                let o = codex_mcp(root, opts.remove);
+                let o = codex_mcp(root, opts.remove, opts.memory);
                 r.item("Codex kalka server (~/.codex/config.toml)", false, Ok(o))?;
                 // The navigation steps, which Codex otherwise never reads.
                 let file = "AGENTS.md";
@@ -405,11 +440,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // MCP
         if pi || !local {
             let (file, value) = if pi {
-                let mut v = entry.clone();
-                v["exposure"] = json!("direct");
+                let v = entries.clone().map(|mut v| {
+                    v["exposure"] = json!("direct");
+                    v
+                });
                 (".pi/mcp.json", v)
             } else {
-                (".mcp.json", entry.clone())
+                (".mcp.json", entries.clone())
             };
             let path = root.join(file);
             let res = || {
@@ -423,7 +460,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, &entry, opts.remove);
+            let o = claude_local_mcp(root, &entries[0], opts.remove, opts.memory);
             r.item("Claude Code local kalka server", false, Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
@@ -433,9 +470,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let file = skill.join("SKILL.md");
             let res = || {
                 if opts.remove {
-                    edit::remove_file(root, &root.join(&file), skill_text)
+                    edit::remove_file(root, &root.join(&file), &skills)
                 } else {
-                    edit::write_file(&root.join(&file), skill_text)
+                    edit::write_file(&root.join(&file), &skills)
                 }
             };
             let what = format!("{} skill for {name}", file.display());
@@ -451,9 +488,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &content)
+                        edit::remove_file(root, &path, &[&content])
                     } else {
-                        edit::write_file(&path, &content)
+                        edit::write_file(&path, &[&content])
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");

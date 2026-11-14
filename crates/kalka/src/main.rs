@@ -180,6 +180,12 @@ enum Command {
         /// Undo what setup wrote (ignore lines and `.kulman/` stay).
         #[arg(long)]
         remove: bool,
+        /// Set up agent memory (the default).
+        #[arg(long, conflicts_with = "no_memory")]
+        memory: bool,
+        /// No agent memory: no `.agents/memory`, and the server runs with `--memory none`.
+        #[arg(long)]
+        no_memory: bool,
     },
     /// Write a synthetic corpus (same seed, same files).
     Generate {
@@ -517,6 +523,8 @@ fn run() -> Result<()> {
             scope,
             no_hook,
             remove,
+            memory: _,
+            no_memory,
         } => {
             let scope = scope.map_or_else(ask_scope, Ok)?;
             let opts = SetupOptions {
@@ -524,6 +532,7 @@ fn run() -> Result<()> {
                 scope,
                 hook: !no_hook,
                 remove,
+                memory: !no_memory,
             };
             let root = std::env::current_dir()?;
             if !kalka::setup::run(&root, &opts, &mut std::io::stdout())? {

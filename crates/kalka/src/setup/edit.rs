@@ -90,12 +90,13 @@ fn prune(map: &mut Map<String, Value>, parents: &[&str]) {
     }
 }
 
-pub fn upsert_entry(path: &Path, parents: &[&str], key: &str, value: &Value) -> Result<Outcome> {
+/// Sets `key` to `own[0]`; the other values in `own` are kalka's too and are replaced in place.
+pub fn upsert_entry(path: &Path, parents: &[&str], key: &str, own: &[Value]) -> Result<Outcome> {
     edit(path, parents, true, |m| match m.get(key) {
-        Some(v) if v == value => Outcome::AlreadyThere,
-        Some(_) => Outcome::Foreign(format!("\"{key}\" has another value")),
-        None => {
-            m.insert(key.to_string(), value.clone());
+        Some(v) if *v == own[0] => Outcome::AlreadyThere,
+        Some(v) if !own.contains(v) => Outcome::Foreign(format!("\"{key}\" has another value")),
+        _ => {
+            m.insert(key.to_string(), own[0].clone());
             Outcome::Done
         }
     })
@@ -114,17 +115,18 @@ fn prune_dirs(root: &Path, path: &Path) {
     }
 }
 
-/// Deletes the file too (and the directories it leaves empty, up to `root`) when the entry was its last content.
+/// Removes `key` when it holds one of the `own` values. Deletes the file too (and the directories
+/// it leaves empty, up to `root`) when the entry was its last content.
 pub fn remove_entry(
     root: &Path,
     path: &Path,
     parents: &[&str],
     key: &str,
-    value: &Value,
+    own: &[Value],
 ) -> Result<Outcome> {
     let out = edit(path, parents, false, |m| match m.get(key) {
         None => Outcome::AlreadyThere,
-        Some(v) if v == value => {
+        Some(v) if own.contains(v) => {
             m.shift_remove(key);
             Outcome::Done
         }
@@ -192,24 +194,24 @@ pub fn remove_item(root: &Path, path: &Path, parents: &[&str], item: &Value) -> 
     Ok(out)
 }
 
-/// Writes `content`; any other content already there is foreign.
-pub fn write_file(path: &Path, content: &str) -> Result<Outcome> {
+/// Writes `own[0]`, over one of the other `own` contents; any other content already there is foreign.
+pub fn write_file(path: &Path, own: &[&str]) -> Result<Outcome> {
     match read_opt(path)? {
-        Some(s) if s == content => Ok(Outcome::AlreadyThere),
-        Some(_) => Ok(foreign("file has other content")),
-        None => {
+        Some(s) if s == own[0] => Ok(Outcome::AlreadyThere),
+        Some(s) if !own.contains(&s.as_str()) => Ok(foreign("file has other content")),
+        _ => {
             create_parent(path)?;
-            std::fs::write(path, content)?;
+            std::fs::write(path, own[0])?;
             Ok(Outcome::Done)
         }
     }
 }
 
-/// Removes `path` when it holds exactly `content`, then the parent directories it leaves empty, up to but excluding `root`.
-pub fn remove_file(root: &Path, path: &Path, content: &str) -> Result<Outcome> {
+/// Removes `path` when it holds exactly one of the `own` contents, then the parent directories it leaves empty, up to but excluding `root`.
+pub fn remove_file(root: &Path, path: &Path, own: &[&str]) -> Result<Outcome> {
     match read_opt(path)? {
         None => return Ok(Outcome::AlreadyThere),
-        Some(s) if s != content => return Ok(foreign("file has other content")),
+        Some(s) if !own.contains(&s.as_str()) => return Ok(foreign("file has other content")),
         Some(_) => {}
     }
     std::fs::remove_file(path)?;
@@ -303,13 +305,13 @@ mod tests {
         let p = d.path().join(".mcp.json");
         let v = json!({"command": "kalka", "args": ["serve"]});
         assert_eq!(
-            upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap(),
+            upsert_entry(&p, &["mcpServers"], "kalka", std::slice::from_ref(&v)).unwrap(),
             Outcome::Done
         );
         let want = pretty(&json!({"mcpServers": {"kalka": v}}));
         assert_eq!(fs::read_to_string(&p).unwrap(), want);
         assert_eq!(
-            upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap(),
+            upsert_entry(&p, &["mcpServers"], "kalka", std::slice::from_ref(&v)).unwrap(),
             Outcome::AlreadyThere
         );
         assert_eq!(fs::read_to_string(&p).unwrap(), want);
@@ -321,7 +323,7 @@ mod tests {
         let p = d.path().join("a.json");
         let orig = r#"{"zeta":1,"mcpServers":{"other":{"command":"x"}},"alpha":2}"#;
         fs::write(&p, orig).unwrap();
-        upsert_entry(&p, &["mcpServers"], "kalka", &json!({"command": "kalka"})).unwrap();
+        upsert_entry(&p, &["mcpServers"], "kalka", &[json!({"command": "kalka"})]).unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
         let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
         assert_eq!(keys(&v), ["zeta", "mcpServers", "alpha"]);
@@ -334,7 +336,7 @@ mod tests {
         let p = d.path().join("a.json");
         let orig = pretty(&json!({"mcpServers": {"kalka": {"command": "other"}}}));
         fs::write(&p, &orig).unwrap();
-        let o = upsert_entry(&p, &["mcpServers"], "kalka", &json!({"command": "kalka"})).unwrap();
+        let o = upsert_entry(&p, &["mcpServers"], "kalka", &[json!({"command": "kalka"})]).unwrap();
         assert!(is_foreign(&o));
         assert_eq!(fs::read_to_string(&p).unwrap(), orig);
     }
@@ -344,7 +346,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("a.json");
         fs::write(&p, "{ not json").unwrap();
-        let o = upsert_entry(&p, &["mcpServers"], "kalka", &json!(1)).unwrap();
+        let o = upsert_entry(&p, &["mcpServers"], "kalka", &[json!(1)]).unwrap();
         assert!(is_foreign(&o));
         assert_eq!(fs::read_to_string(&p).unwrap(), "{ not json");
     }
@@ -354,15 +356,29 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join(".pi/a.json");
         let v = json!({"command": "kalka"});
-        upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap();
+        upsert_entry(&p, &["mcpServers"], "kalka", std::slice::from_ref(&v)).unwrap();
         assert_eq!(
-            remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap(),
+            remove_entry(
+                d.path(),
+                &p,
+                &["mcpServers"],
+                "kalka",
+                std::slice::from_ref(&v)
+            )
+            .unwrap(),
             Outcome::Done
         );
         assert!(!p.exists());
         assert!(!d.path().join(".pi").exists());
         assert_eq!(
-            remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap(),
+            remove_entry(
+                d.path(),
+                &p,
+                &["mcpServers"],
+                "kalka",
+                std::slice::from_ref(&v)
+            )
+            .unwrap(),
             Outcome::AlreadyThere
         );
     }
@@ -374,8 +390,15 @@ mod tests {
         let orig = pretty(&json!({"b": 1, "mcpServers": {"other": {"command": "x"}}, "a": [1]}));
         fs::write(&p, &orig).unwrap();
         let v = json!({"command": "kalka"});
-        upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap();
-        remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap();
+        upsert_entry(&p, &["mcpServers"], "kalka", std::slice::from_ref(&v)).unwrap();
+        remove_entry(
+            d.path(),
+            &p,
+            &["mcpServers"],
+            "kalka",
+            std::slice::from_ref(&v),
+        )
+        .unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), orig);
     }
 
@@ -403,21 +426,21 @@ mod tests {
         let p = root.join(".claude/skills/kalka-navigation/SKILL.md");
         fs::create_dir_all(root.join(".claude")).unwrap();
         fs::write(root.join(".claude/settings.json"), "{}").unwrap();
-        assert_eq!(write_file(&p, "body").unwrap(), Outcome::Done);
-        assert_eq!(write_file(&p, "body").unwrap(), Outcome::AlreadyThere);
-        assert!(is_foreign(&write_file(&p, "other").unwrap()));
-        assert!(is_foreign(&remove_file(root, &p, "other").unwrap()));
-        assert_eq!(remove_file(root, &p, "body").unwrap(), Outcome::Done);
+        assert_eq!(write_file(&p, &["body"]).unwrap(), Outcome::Done);
+        assert_eq!(write_file(&p, &["body"]).unwrap(), Outcome::AlreadyThere);
+        assert!(is_foreign(&write_file(&p, &["other"]).unwrap()));
+        assert!(is_foreign(&remove_file(root, &p, &["other"]).unwrap()));
+        assert_eq!(remove_file(root, &p, &["body"]).unwrap(), Outcome::Done);
         assert!(!root.join(".claude/skills").exists());
         assert!(root.join(".claude").exists());
         assert_eq!(
-            remove_file(root, &p, "body").unwrap(),
+            remove_file(root, &p, &["body"]).unwrap(),
             Outcome::AlreadyThere
         );
 
         fs::remove_file(root.join(".claude/settings.json")).unwrap();
-        write_file(&p, "body").unwrap();
-        remove_file(root, &p, "body").unwrap();
+        write_file(&p, &["body"]).unwrap();
+        remove_file(root, &p, &["body"]).unwrap();
         assert!(!root.join(".claude").exists());
         assert!(root.exists());
     }
