@@ -181,7 +181,7 @@ targets from the code layer in `wiki-code`, depends on nothing of `kalka`, and w
 
 | Module | Responsibility |
 |---|---|
-| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
+| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `KALKA_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
 | `crates/techlog/src/lib.rs` (crate `techlog`, re-exported as `memory`) | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `Origin` (a note's origin: `local`, or `repo` with its last author and whether it was edited; `trust` ranks them) and `repo_origins`, which reads it from git, live here too; kalka reaches them as `memory::Origin`. |
 | `crates/wiki-code/src/walk.rs` (re-exported by `src/walk.rs`) | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
@@ -638,7 +638,7 @@ matching:
   best code hit's. Note scores come from `MemoryScope::Only`, whose `N`, `df`
   and `avglen` count project pages and notes alike, so the ratio compares
   scores on the project's scale; only the candidates are notes. The
-  environment variable `WIKI_MEMORY_GATE` sets the gate length; it exists for
+  environment variable `KALKA_MEMORY_GATE` sets the gate length; it exists for
   measurement and is not a user setting. `lines` prints a tail row as
   `memory (<origin>): <path> — <summary>` (the title when the summary is empty) and, when the hit has one, its snippet on an indented line; `page` on a note returns its text, JSON
   as a full hit; tag-only listings have no tail and mark a superseded note.

@@ -541,7 +541,7 @@ for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermo
 - `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
-- `WIKI_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
+- `KALKA_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
   per-stage milliseconds, files read, pages written. `kalka serve --source` and `kalka setup` honour
   it too; it never changes the output.
 

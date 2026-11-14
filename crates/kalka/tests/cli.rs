@@ -883,7 +883,7 @@ fn compile_prints_stage_timings_only_with_wiki_timings() {
         let mut cmd = Command::cargo_bin("kalka").unwrap();
         cmd.args(["compile", input.to_str().unwrap(), out.to_str().unwrap()]);
         if let Some(v) = env {
-            cmd.env("WIKI_TIMINGS", v);
+            cmd.env("KALKA_TIMINGS", v);
         }
         let o = cmd.assert().success().get_output().clone();
         (out, String::from_utf8(o.stderr).unwrap())

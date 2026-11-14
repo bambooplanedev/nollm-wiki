@@ -179,12 +179,12 @@ pub(crate) const MEMORY_GATE_LEN: usize = 4;
 /// passes the gate without a name.
 pub(crate) const MEMORY_GATE_RATIO: f64 = 2.0;
 
-/// The gate length: `WIKI_MEMORY_GATE` when set to a number, else
+/// The gate length: `KALKA_MEMORY_GATE` when set to a number, else
 /// `MEMORY_GATE_LEN`; read once per process.
 pub(crate) fn gate_len() -> usize {
     static LEN: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *LEN.get_or_init(|| {
-        std::env::var("WIKI_MEMORY_GATE")
+        std::env::var("KALKA_MEMORY_GATE")
             .ok()
             .and_then(|v| v.trim().parse().ok())
             .filter(|n| *n > 0)
