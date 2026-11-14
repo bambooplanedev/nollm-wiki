@@ -66,10 +66,12 @@ default; to leave one out, name the others.
 at the installed version, and puts back any listed binary missing from `bin/`; an installed
 `bin/kulman` is then left as it is (`kulman update` always replaces it). When a newer release
 exists, it still installs at the installed version and says so (`newer release X.Y.Z: kulman
-update`). If the installed version differs from `--version`, or is newer than the latest release,
-it changes nothing and exits 1: an older one gets the advice to run `kulman update`; a newer one,
-to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful install ends with
-the next steps: adding `bin/` to `PATH` if it is not there, then `kulman setup` in a project.
+update`); when the latest release cannot be read, it says that instead (`could not check for a
+newer release (<base>: <reason>)`). The installed version is read once `.lock` is held. If the
+installed version differs from `--version`, or is newer than the latest release, it changes
+nothing and exits 1: an older one gets the advice to run `kulman update`; a newer one, to run
+`kulman remove`, then `kulman install --version <X.Y.Z>`. A successful install ends with the next
+steps: adding `bin/` to `PATH` if it is not there, then `kulman setup` in a project.
 
     kulman update [--yes]
 

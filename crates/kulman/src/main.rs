@@ -250,28 +250,59 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     let base = release_base()?;
     let home_path = store::home_path()?;
     let target = target()?;
-    // Installed at V with no --version: V's manifest, so a newer release does not block adding
-    // modules; that one is only announced. The lock re-checks the version.
-    let installed = match version {
-        None => State::load(&home_path)?.map(|s| s.version),
-        Some(_) => None,
-    };
-    let (manifest, raw, newer) = match installed {
-        None => {
-            let (manifest, raw) = release::manifest(&base, version, release::WAIT)?;
-            (manifest, raw, None)
+    let home = Home::open(home_path)?;
+    match place(&home, &base, wanted, version, target, ask) {
+        Ok(true) => {}
+        // Declined: as if never run.
+        done => {
+            home.abandon();
+            return done.map(|_| ());
         }
-        Some(v) => match release::manifest(&base, None, release::WAIT) {
-            // Not newer: used as it is (an older one is refused under the lock).
-            Ok((m, raw)) if release::version_key(&m.version) <= release::version_key(&v) => {
-                (m, raw, None)
+    }
+    let bin = home.path.join("bin");
+    if !on_path(&bin) {
+        println!("add to PATH: {}", bin.display());
+    }
+    println!("next: run \"kulman setup --scope repo\" (or local) in a project");
+    Ok(())
+}
+
+/// Under the lock: reads the installed state and picks the manifest, stages every chosen
+/// module not installed and every listed binary missing from `bin/`, and only when all are
+/// ready commits them. With `ask`, asks first; `false` when declined.
+fn place(
+    home: &Home,
+    base: &str,
+    wanted: Option<Vec<String>>,
+    version: Option<&str>,
+    target: &str,
+    ask: bool,
+) -> Result<bool> {
+    home.clean_tmp()?;
+    let state = State::load(&home.path)?;
+    // Installed at V with no --version: V's manifest, so a newer release does not block adding
+    // modules; that one, or a failed check for it, is only said.
+    let mut note = None;
+    let (manifest, raw) = match (version, &state) {
+        (None, Some(state)) => match release::manifest(base, None, release::WAIT) {
+            // Not newer: used as it is (an older one is refused below).
+            Ok((m, raw))
+                if release::version_key(&m.version) <= release::version_key(&state.version) =>
+            {
+                (m, raw)
             }
             latest => {
-                let newer = latest.ok().map(|(m, _)| m.version);
-                let (manifest, raw) = release::manifest(&base, Some(&v), release::WAIT)?;
-                (manifest, raw, newer)
+                note = Some(match latest {
+                    Ok((m, _)) => format!("newer release {}: kulman update", m.version),
+                    Err(e) => format!(
+                        "could not check for a newer release ({base}: {})",
+                        e.root_cause()
+                    ),
+                });
+                release::manifest(base, Some(&state.version), release::WAIT)?
             }
         },
+        _ => release::manifest(base, version, release::WAIT)?,
     };
     let wanted = match wanted {
         None if ask => {
@@ -283,41 +314,7 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
         wanted => wanted,
     };
     let chosen = choose(&manifest, wanted)?;
-    let home = Home::open(home_path)?;
-    match place(&home, &base, &manifest, &raw, target, chosen, ask) {
-        Ok(true) => {}
-        // Declined: as if never run.
-        done => {
-            home.abandon();
-            return done.map(|_| ());
-        }
-    }
-    if let Some(newer) = newer {
-        println!("newer release {newer}: kulman update");
-    }
-    let bin = home.path.join("bin");
-    if !on_path(&bin) {
-        println!("add to PATH: {}", bin.display());
-    }
-    println!("next: run \"kulman setup --scope repo\" (or local) in a project");
-    Ok(())
-}
-
-/// Under the lock: checks the installed state, stages every chosen module not installed and
-/// every listed binary missing from `bin/`, and only when all are ready commits them. With
-/// `ask`, asks first; `false` when declined.
-fn place(
-    home: &Home,
-    base: &str,
-    manifest: &Manifest,
-    raw: &[u8],
-    target: &str,
-    chosen: BTreeSet<String>,
-    ask: bool,
-) -> Result<bool> {
-    home.clean_tmp()?;
     let mut modules = BTreeSet::new();
-    let state = State::load(&home.path)?;
     // At the same version, an installed kulman is the release's already.
     let kulman_too = state.is_none() || !home.path.join("bin/kulman").is_file();
     if let Some(state) = state {
@@ -352,15 +349,18 @@ fn place(
     if kulman_too {
         names.push("kulman".to_string());
     }
-    let staged = store::stage(home, base, manifest, target, &names)?;
+    let staged = store::stage(home, base, &manifest, target, &names)?;
     modules.extend(chosen);
     let state = State {
         version: manifest.version.clone(),
         modules: modules.into_iter().collect(),
     };
-    store::commit(home, &staged, raw, &state)?;
+    store::commit(home, &staged, &raw, &state)?;
     for s in &staged {
         println!("installed {} {}", s.name, manifest.version);
+    }
+    if let Some(note) = note {
+        println!("{note}");
     }
     Ok(true)
 }

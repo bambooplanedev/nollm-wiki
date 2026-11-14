@@ -437,11 +437,21 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     assert!(stderr(&out).contains("kulman: version 0.7.0 is installed; run kulman update"));
     assert_eq!(snapshot(t.path()), before);
 
-    // The latest manifest unreadable: install works, and says nothing of a newer release.
+    // The latest manifest unreadable: install works, and says the check failed, in one line.
     fs::write(rel.join("latest/download/manifest.json"), "broken").unwrap();
     let out = kulman(&home, &base).arg("install").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("newer release"), "{}", stdout(&out));
+    let text = stdout(&out);
+    let said: Vec<&str> = text
+        .lines()
+        .filter(|l| l.contains("newer release"))
+        .collect();
+    assert_eq!(said.len(), 1, "{text}");
+    let prefix = format!("could not check for a newer release ({base}: ");
+    assert!(
+        said[0].starts_with(&prefix) && said[0].ends_with(')'),
+        "{text}"
+    );
 
     // The installed version's manifest unreadable: said, with where, and nothing changes.
     let newer = release(&t.path().join("newer"), "0.8.0", &[("kalka", KALKA)]);
@@ -452,6 +462,54 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
         format!("kulman: manifest.json: download failed: {newer}/download/v0.7.0/manifest.json: ");
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
+}
+
+/// Publishes 0.8.0 (kalka and plaz, other bytes) as the latest release in `rel`.
+fn publish_newer(rel: &Path) {
+    release(
+        rel,
+        "0.8.0",
+        &[("kalka", b"kalka 0.8"), ("plaz", b"plaz 0.8")],
+    );
+}
+
+#[test]
+fn install_reads_the_installed_version_once_it_holds_the_lock() {
+    // While this install waits, an update to 0.8.0 lands (done here by hand, under the lock):
+    // the install must add plaz at 0.8.0, not refuse 0.8.0 as newer than what it saw before.
+    let (t, base) = setup();
+    let rel = t.path().join("release");
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    publish_newer(&rel);
+    let lock = fs::File::options()
+        .write(true)
+        .open(home.join(".lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    let (child, rest) = common::started_waiting(&home, &base, &["install", "--modules", "plaz"]);
+    fs::write(
+        home.join("state.json"),
+        r#"{"version":"0.8.0","modules":["kalka"]}"#,
+    )
+    .unwrap();
+    fs::copy(
+        version_dir(&rel, "0.8.0").join("manifest.json"),
+        home.join("manifest.json"),
+    )
+    .unwrap();
+    drop(lock);
+    let out = child.wait_with_output().unwrap();
+    let rest = rest.join().unwrap();
+    assert!(out.status.success(), "{rest}");
+    assert_binary(&home, "plaz", b"plaz 0.8");
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+    );
 }
 
 #[test]
