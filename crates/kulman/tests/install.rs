@@ -754,3 +754,27 @@ fn install_leaves_an_installed_kulman_alone() {
     }
     assert_binary(&home, "plaz", PLAZ);
 }
+
+#[test]
+fn a_failed_install_with_no_state_leaves_no_lock() {
+    // What install.sh leaves: bin/kulman and nothing else. With no tar the install fails.
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
+    let before = snapshot(&home);
+    let empty = t.path().join("empty-path");
+    fs::create_dir(&empty).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", &empty)
+        .arg("install")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("kulman: tar is required"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(snapshot(&home), before);
+}

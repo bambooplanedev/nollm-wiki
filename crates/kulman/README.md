@@ -37,7 +37,8 @@ Everything is in `~/.kulman` (`KULMAN_HOME` if set):
 - `bin/kulman` and `bin/<module>` for each installed module;
 - `manifest.json`, the manifest of the installed release;
 - `state.json`, the installed version and modules, written last;
-- `.lock`, held by the running command.
+- `.lock`, held by the running command; an install that fails where nothing is installed removes
+  it again, and the directory too if it made it.
 
 The parent of that directory must exist; only the directory itself is created. A `bin` that is a
 symlink or not a directory is refused. No shell profile is edited.

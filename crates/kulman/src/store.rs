@@ -119,11 +119,17 @@ impl Home {
         self.path.join(format!(".tmp-{}", std::process::id()))
     }
 
-    /// After a failed run: removes the temp dir, and the home directory too if this run
-    /// created it and nothing but the lock file is in it.
+    /// After a failed run: removes the temp dir; with no state, the lock file too (still held,
+    /// so a run waiting for it starts again); and the home directory if this run created it
+    /// and it is now empty.
     pub fn abandon(self) {
         let _ = remove_any(&self.tmp());
-        undo_home(&self.path, self.created);
+        if !self.path.join("state.json").try_exists().unwrap_or(true) {
+            let _ = fs::remove_file(self.path.join(".lock"));
+        }
+        if self.created {
+            let _ = fs::remove_dir(&self.path);
+        }
     }
 }
 
