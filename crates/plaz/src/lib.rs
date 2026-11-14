@@ -9,6 +9,7 @@ pub mod model;
 pub mod names;
 pub mod render;
 pub mod resolve;
+pub mod setup;
 pub mod source;
 mod uses;
 pub mod write;

@@ -2475,7 +2475,7 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
 
 #[test]
 fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
-    let usage = "usage: plaz build [--source DIR] [--vault DIR]\n";
+    let usage = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup [--source DIR] --scope repo|local [--remove]\n";
     for flag in ["--help", "-h"] {
         assert_cmd::cargo_bin_cmd!()
             .arg(flag)
