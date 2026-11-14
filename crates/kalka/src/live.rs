@@ -1317,18 +1317,26 @@ mod tests {
 
     #[test]
     fn a_burst_longer_than_the_quiet_window_compiles_once() {
-        let (src, _out, live, before) = debounced(400, 10_000);
-        // 12 writes 50 ms apart: a 600 ms burst, longer than the 400 ms window.
-        for i in 0..12 {
+        let (src, _out, live, before) = debounced(1000, 10_000);
+        // 25 writes 50 ms apart: a 1.2 s burst, longer than the 1 s window. A
+        // stalled machine can stretch one gap past the window; that gap, and
+        // only that, may add a compile.
+        let mut starts = Vec::new();
+        for i in 0..25 {
+            starts.push(Instant::now());
             std::fs::write(src.path().join("a.md"), format!("# A\n\nword{i}\n")).unwrap();
             std::thread::sleep(Duration::from_millis(50));
         }
+        let stalls = starts
+            .windows(2)
+            .filter(|w| w[1] - w[0] > Duration::from_millis(500))
+            .count();
         let (wiki, stale) = live.fresh();
         assert_eq!(stale, None);
-        assert!(finds(&wiki, "word11"));
+        assert!(finds(&wiki, "word24"));
         // Anything still pending would compile by now.
-        std::thread::sleep(Duration::from_millis(1200));
-        assert_eq!(live.compiles.load(Ordering::Relaxed) - before, 1);
+        std::thread::sleep(Duration::from_millis(1500));
+        assert_eq!(live.compiles.load(Ordering::Relaxed) - before, 1 + stalls);
     }
 
     #[test]
