@@ -23,7 +23,7 @@ It is the second tool of the kulman set, beside [kalka](../../README.md). It dep
 - `--scope repo` adds the line `.kulman/` to `<source>/.gitignore`, shared with the team.
 - `--scope local` adds it to the repository's `info/exclude`, for this clone only. Outside a git repository it builds the map, says `not a git repository: nothing to exclude` and changes no file.
 - A line in either file counts: nothing is added twice.
-- `--remove` deletes only the map's own pages and the folders left empty under `.kulman/map/`; the ignore line stays, and kalka's files in `.kulman/` are not touched.
+- `--remove` deletes only the map's own pages and the folders left empty under `.kulman/map/`, `map/` itself included once it is empty; the ignore line stays, and kalka's files in `.kulman/` are not touched.
 
 `plaz setup` and kalka's `kalka setup` can both run in one project: each keeps to its own pages.
 

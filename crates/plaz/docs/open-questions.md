@@ -123,7 +123,7 @@ First measurement gate, 2026-11-14. It is an early check that the call targets a
 ## Measurement gate, later rounds
 
 - **Projects not used in design.** Design used nine projects of the owner's, seen during development.
-  - Rust: this repository's own crate is now a fair candidate (it was not a design input).
+  - Rust: kalka's own crate (the Rust code of this repository besides plaz) is now a fair candidate (it was not a design input).
   - C++: the owner allows the C++ trading system, read only, compiled into a scratch output outside it (also the check of its order state machine).
   - Go: no project is known locally.
   - Python and shell: four small unused samples are tiny, so a pass there is a smoke check, not a GO.
@@ -132,7 +132,7 @@ First measurement gate, 2026-11-14. It is an early check that the call targets a
 
 ## Walking the tree and writing the vault
 
-- **What the walk reads.** `.gitignore` files and the user's global gitignore are honoured; hidden directories and `vendor`, `node_modules`, `third_party`, `superpowers` are skipped; symlinks are not followed. Skipped files are not counted on output.
+- **What the walk reads.** `.gitignore` files and the user's global gitignore are honoured; hidden directories and `superpowers`, `third_party`, `third-party`, `vendor`, `vendored`, `node_modules` are skipped; symlinks are not followed. Skipped files are not counted on output.
 - **One vault holds the map of one source tree.** Building tree B into tree A's vault removes A's pages. A build that finds no code file warns (`warning: no code file found in <source>, the map is left as it is`) and removes nothing.
 - **A file at a page path that is not a map page is left alone** and counted: `map: 1 written, 0 unchanged, 0 removed, 1 left alone`. A page cut inside its front matter by a crash before this version cannot be told from a user's file; delete it by hand. Pages are now written through a temporary file and renamed, and an empty file at a page path is rewritten.
 - **`--source=DIR` needs a UTF-8 `DIR`;** `--source DIR` takes any path.

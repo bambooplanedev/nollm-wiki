@@ -14,7 +14,7 @@
 </div>
 
 **kulman** is a set of tools for coding agents, named after the drawing board of an aircraft design bureau.
-**kalka**, the tool in this repository, is a tracing: an exact copy of your project that agents can read.
+**kalka**, the first tool in this repository, is a tracing: an exact copy of your project that agents can read.
 **plaz**, a second tool here (a preview), draws the real decisions of each function; a plaz is the full-size loft floor where a design bureau draws the real lines of the airframe. See [plaz](#plaz-preview).
 
 `kalka` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
@@ -902,6 +902,7 @@ Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHI
 
     cargo run -p plaz -- build           # pages go to .kulman/map/
     cargo run -p plaz -- setup --scope repo    # builds the map and adds .kulman/ to .gitignore
+    cargo run -p plaz -- setup --source ../my-project --scope repo    # the same, for another project
 
 `--scope local` writes the ignore line to `.git/info/exclude` instead; `--remove` deletes the map's pages. Details: [crates/plaz/README.md](crates/plaz/README.md).
 
