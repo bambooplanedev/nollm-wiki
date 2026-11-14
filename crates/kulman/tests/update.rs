@@ -689,6 +689,23 @@ fn remove_without_a_terminal_needs_yes() {
 }
 
 #[test]
+fn remove_says_when_it_waits_for_another_run() {
+    let (_t, base, home) = installed();
+    let lock = fs::File::options()
+        .write(true)
+        .open(home.join(".lock"))
+        .unwrap();
+    lock.lock().unwrap();
+    let (child, rest) = common::started_waiting(&home, &base, &["remove", "--yes"]);
+    drop(lock);
+    let out = child.wait_with_output().unwrap();
+    let rest = rest.join().unwrap();
+    assert!(out.status.success(), "{rest}");
+    assert_eq!(rest, "");
+    assert!(!home.exists());
+}
+
+#[test]
 fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);

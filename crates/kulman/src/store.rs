@@ -1,7 +1,7 @@
 //! `~/.kulman-home`: where it is, one run at a time, the state, and placing binaries.
 
 use std::env;
-use std::fs::{self, File};
+use std::fs::{self, File, TryLockError};
 use std::io::{self, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -17,6 +17,8 @@ pub struct Home {
     pub path: PathBuf,
     /// This run made the directory: a failed first install removes it again.
     pub created: bool,
+    /// This run made `.lock`: a failed run with no state removes it again.
+    created_lock: bool,
     /// Holds the exclusive lock on `<home>/.lock` until dropped.
     _lock: File,
 }
@@ -33,14 +35,16 @@ pub fn home_path() -> Result<PathBuf> {
 }
 
 impl Home {
-    /// Creates the directory if needed (its parent must exist) and waits for the lock. On
-    /// failure, removes what it created. Stale temp entries are the caller's to clean.
+    /// Creates the directory if needed (its parent must exist) and waits for the lock, saying
+    /// so once when another run holds it. On failure, removes what it created. Stale temp
+    /// entries are the caller's to clean.
     pub fn open(path: PathBuf) -> Result<Home> {
         let parent = path.parent().unwrap_or(Path::new("/"));
         if !parent.is_dir() {
             bail!("{} does not exist", parent.display());
         }
         let lock_path = path.join(".lock");
+        let mut said = false;
         // Twice at most: a failed first install or a `kulman remove` may remove home and its
         // lock file while this run waits for that lock.
         for _ in 0..2 {
@@ -49,20 +53,32 @@ impl Home {
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
                 Err(e) => bail!("cannot create {}: {e}", path.display()),
             };
-            let lock = match File::options()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .open(&lock_path)
-            {
+            // The lock file, and whether this run made it.
+            let open = |new| File::options().write(true).create_new(new).open(&lock_path);
+            let opened = open(true).map(|f| (f, true)).or_else(|e| match e.kind() {
+                io::ErrorKind::AlreadyExists => open(false).map(|f| (f, false)),
+                _ => Err(e),
+            });
+            let lock = match opened {
                 // Home was removed since create_dir, by a run that held the lock: start again.
                 // What is there now is not this run's to undo.
                 Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-                open => open
-                    .and_then(|f| f.lock().map(|()| f))
-                    .with_context(|| format!("cannot lock {}", lock_path.display())),
+                Err(e) => Err(e),
+                Ok((f, new)) => match f.try_lock() {
+                    Ok(()) => Ok((f, new)),
+                    Err(TryLockError::WouldBlock) => {
+                        if !said {
+                            let at = lock_path.display();
+                            eprintln!("kulman: waiting for another kulman run ({at})");
+                            said = true;
+                        }
+                        f.lock().map(|()| (f, new))
+                    }
+                    Err(TryLockError::Error(e)) => Err(e),
+                },
             };
-            let lock = match lock {
+            let lock = lock.with_context(|| format!("cannot lock {}", lock_path.display()));
+            let (lock, created_lock) = match lock {
                 Ok(lock) => lock,
                 Err(e) => {
                     undo_home(&path, created);
@@ -75,6 +91,7 @@ impl Home {
             let home = Home {
                 path,
                 created,
+                created_lock,
                 _lock: lock,
             };
             if let Err(e) = home.check_bin() {
@@ -120,12 +137,12 @@ impl Home {
         self.path.join(format!(".tmp-{}", std::process::id()))
     }
 
-    /// After a failed run: removes the temp dir; with no state, the lock file too (still held,
-    /// so a run waiting for it starts again); and the home directory if this run created it
-    /// and it is now empty.
+    /// After a failed run: removes the temp dir; with no state, the lock file if this run
+    /// created it (still held, so a run waiting for it starts again); and the home directory if
+    /// this run created it and it is now empty. A home found without state is left as found.
     pub fn abandon(self) {
         let _ = remove_any(&self.tmp());
-        if !self.path.join("state.json").try_exists().unwrap_or(true) {
+        if self.created_lock && !self.path.join("state.json").try_exists().unwrap_or(true) {
             let _ = fs::remove_file(self.path.join(".lock"));
         }
         if self.created {

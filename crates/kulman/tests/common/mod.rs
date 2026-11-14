@@ -144,6 +144,50 @@ pub fn kulman(home: &Path, release: &str) -> Command {
     cmd
 }
 
+/// Starts `kulman <args>` (set up as [`kulman`] does, stdin null) while the caller holds
+/// `<home>/.lock`; asserts that its first stderr line says it waits for that lock (within 10 s,
+/// so a run that waits silently fails the test instead of hanging it) and that it is still
+/// running. Returns it, and the rest of its stderr once it ends.
+pub fn started_waiting(
+    home: &Path,
+    release: &str,
+    args: &[&str],
+) -> (std::process::Child, std::thread::JoinHandle<String>) {
+    use std::io::{BufRead, Read};
+    let user = home.with_file_name("user-home");
+    fs::create_dir_all(&user).unwrap();
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("kulman"))
+        .env("KULMAN_HOME", home)
+        .env("KULMAN_RELEASE_URL", release)
+        .env("HOME", &user)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut err = std::io::BufReader::new(child.stderr.take().unwrap());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rest = std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = err.read_line(&mut line);
+        let _ = tx.send(line);
+        let mut rest = String::new();
+        let _ = err.read_to_string(&mut rest);
+        rest
+    });
+    let line = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("no line on stderr while the lock is held");
+    let expect = format!(
+        "kulman: waiting for another kulman run ({})\n",
+        home.join(".lock").display()
+    );
+    assert_eq!(line, expect);
+    assert!(child.try_wait().unwrap().is_none(), "it did not wait");
+    (child, rest)
+}
+
 pub fn stderr(out: &std::process::Output) -> String {
     String::from_utf8_lossy(&out.stderr).into_owned()
 }

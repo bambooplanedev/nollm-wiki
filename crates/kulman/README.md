@@ -41,7 +41,7 @@ Everything is in `~/.kulman-home` (`KULMAN_HOME` if set):
 - `state.json`, the installed version and modules, written last (one kulman cannot read stops every
   command, which names it: fix it, or delete it and run `kulman install`);
 - `.lock`, held by the running command; an install that fails where nothing is installed removes
-  it again, and the directory too if it made it.
+  it again if it made it, and the directory too if it made it: a home it found is left as it was.
 
 The parent of that directory must exist; only the directory itself is created. A `bin` that is a
 symlink or not a directory is refused. No shell profile is edited.
@@ -135,9 +135,11 @@ by a signal).
 
 ## One run at a time, and interruptions
 
-A command that changes `~/.kulman-home` holds `.lock`; a second one waits for it. Downloads are checked
-and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in `bin/` changes; then the
-binaries are renamed into `bin/` (kulman last), then `manifest.json`, then `state.json`.
+A command that changes `~/.kulman-home` holds `.lock`, questions included; a second one waits for
+it and says so once on stderr: `kulman: waiting for another kulman run (<home>/.lock)`.
+Downloads are checked and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in
+`bin/` changes; then the binaries are renamed into `bin/` (kulman last), then `manifest.json`, then
+`state.json`.
 
 - Interrupted before that point, an install or update leaves only its temp dir, which the next run
   deletes.

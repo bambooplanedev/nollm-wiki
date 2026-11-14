@@ -817,21 +817,27 @@ fn a_failed_install_with_no_state_leaves_no_lock() {
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
-    let before = snapshot(&home);
     let empty = t.path().join("empty-path");
     fs::create_dir(&empty).unwrap();
-    let out = kulman(&home, &base)
-        .env("PATH", &empty)
-        .arg("install")
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(
-        stderr(&out).contains("kulman: tar is required"),
-        "{}",
-        stderr(&out)
-    );
-    assert_eq!(snapshot(&home), before);
+    // Then with a `.lock` it did not create: that one stays too, as it was found.
+    for lock in [false, true] {
+        if lock {
+            fs::write(home.join(".lock"), "").unwrap();
+        }
+        let before = snapshot(&home);
+        let out = kulman(&home, &base)
+            .env("PATH", &empty)
+            .arg("install")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(
+            stderr(&out).contains("kulman: tar is required"),
+            "{}",
+            stderr(&out)
+        );
+        assert_eq!(snapshot(&home), before, "lock {lock}");
+    }
 }
 
 #[test]
