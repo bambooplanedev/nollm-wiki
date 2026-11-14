@@ -1,0 +1,21 @@
+[package]
+name = "plaz"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Per-function decision charts and call targets of a codebase, drawn deterministically from its syntax trees"
+license.workspace = true
+publish = false
+
+[dependencies]
+wiki-code = { path = "../wiki-code" }
+thiserror = "2.0.21"
+serde_json = "1.0.154"
+
+[dev-dependencies]
+assert_cmd = "2.2.2"
+insta = "1.49.0"
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

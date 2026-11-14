@@ -1,0 +1,65 @@
+---
+source: tests/build.rs
+expression: "common::fn_block(&common::map_page(&vault, \"map/src/a_rs\"), \"f\")"
+---
+## f
+`fn f(x: u8, cb: impl Fn()) -> u8` · `src/a.rs:1-21`
+
+**Called from**
+- none found
+
+```mermaid
+flowchart TD
+    n0(["f"])
+    n1{"x #lt; 3"}
+    n0 --> n1
+    n2[/"REQ-417. Small inputs skip the cache.<br/>The cache is cold at start."\]
+    n1 -.- n2
+    n3>"cb()"]:::hidden
+    n1 -->|yes| n3
+    n4(["return 0"])
+    n3 --> n4
+    n5[/"g(x)"/]
+    n1 -->|no| n5
+    n6{"let Some(y) = g(x)"}
+    n5 --> n6
+    n7[/"h(y)"/]
+    n6 -->|yes| n7
+    n8[/"k()"/]
+    n6 -->|no| n8
+    n9{"for i in 0..x"}
+    n7 --> n9
+    n8 --> n9
+    n10{"i == 2"}
+    n9 -->|loop| n10
+    n11["break"]
+    n10 -->|yes| n11
+    n10 -->|no| n9
+    n12["match x"]
+    n11 --> n12
+    n9 -->|done| n12
+    n13{"1 #124; 2"}
+    n12 --> n13
+    n14[/"m()"/]
+    n13 -->|yes| n14
+    n15{"n if n #gt; 9"}
+    n13 -->|no| n15
+    n16(["panic!(#quot;big#quot;)"])
+    n15 -->|yes| n16
+    n17{"_"}
+    n15 -->|no| n17
+    n18(["end"])
+    n14 --> n18
+    n17 -->|yes| n18
+    classDef oneof stroke-dasharray: 5 5
+    classDef hidden stroke-dasharray: 2 2
+```
+
+Coverage: 5 calls: 0 resolved, 0 one of, 4 outside, 1 hidden. Not drawn: 1 ?.
+
+**Calls**
+- `cb()` L5 → target not visible
+- `g(x)` L7 → outside the project
+- `h(y)` L8 → outside the project
+- `k()` L10 → outside the project
+- `m()` L16 → outside the project
