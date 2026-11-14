@@ -286,7 +286,10 @@ fn place(
 ) -> Result<()> {
     home.clean_tmp()?;
     let mut modules = BTreeSet::new();
-    if let Some(state) = State::load(&home.path)? {
+    let state = State::load(&home.path)?;
+    // At the same version, an installed kulman is the release's already.
+    let kulman_too = state.is_none() || !home.path.join("bin/kulman").is_file();
+    if let Some(state) = state {
         let (have, want) = (&state.version, &manifest.version);
         let order = release::version_key(have).cmp(&release::version_key(want));
         if order.is_lt() {
@@ -308,7 +311,9 @@ fn place(
         .filter(|n| missing(n))
         .cloned()
         .collect();
-    names.push("kulman".to_string());
+    if kulman_too {
+        names.push("kulman".to_string());
+    }
     let staged = store::stage(home, base, manifest, target, &names)?;
     modules.extend(chosen);
     let state = State {

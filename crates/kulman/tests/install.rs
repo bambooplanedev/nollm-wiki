@@ -731,3 +731,26 @@ fn install_refuses_a_directory_in_place_of_the_manifest() {
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
 }
+
+#[test]
+fn install_leaves_an_installed_kulman_alone() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    // Marked, to see it is not replaced; its archive gone, to see it is not fetched.
+    fs::write(home.join("bin/kulman"), "mine").unwrap();
+    fs::remove_file(archive_path(&t.path().join("release"), "0.7.0", "kulman")).unwrap();
+    for _ in 0..2 {
+        let out = kulman(&home, &base)
+            .args(["install", "--modules", "plaz"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        assert!(!stdout(&out).contains("kulman 0.7.0"), "{}", stdout(&out));
+        assert_eq!(fs::read(home.join("bin/kulman")).unwrap(), b"mine");
+    }
+    assert_binary(&home, "plaz", PLAZ);
+}

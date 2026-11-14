@@ -55,7 +55,8 @@ created.
 Installs kulman and the named modules (comma separated), with the modules they require. Without
 `--modules` it installs the modules the release marks as default; to leave one out, name the others.
 `--version` installs that release instead of the latest. Run again with other modules, it adds them
-at the installed version, and puts back any listed binary missing from `bin/`. When a newer release
+at the installed version, and puts back any listed binary missing from `bin/`; an installed
+`bin/kulman` is then left as it is (`kulman update` always replaces it). When a newer release
 exists, it still installs at the installed version and says so (`newer release X.Y.Z: kulman
 update`). If the installed version differs from `--version`, or is newer than the latest release,
 it changes nothing and exits 1: an older one gets the advice to run `kulman update`; a newer one,
