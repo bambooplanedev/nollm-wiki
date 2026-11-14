@@ -111,9 +111,10 @@ pub fn replace_archive(dir: &Path, version: &str, name: &str, bytes: &[u8]) {
     set_sha256(dir, version, name, &sha256(&path));
 }
 
-/// `tar -czf out -C dir members…` with the system tar.
+/// `tar -czf out -C dir members…` with the system tar (on macOS without `._` members).
 pub fn pack(dir: &Path, members: &[&str], out: &Path) {
     let status = std::process::Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
         .arg("-czf")
         .arg(out)
         .arg("-C")

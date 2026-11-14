@@ -107,6 +107,13 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 (`kalka lint`). See the repo root
 [`README.md`](../README.md#self-hosting).
 
+`release-assemble.sh <version> <dir> [--tree <out>]` — checks that `<dir>` holds the six release
+archives (`kalka`, `plaz`, `kulman` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`, each
+with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.json` (modules from
+[`release/modules.json`](../release/modules.json)) and a copy of `install.sh` into it; `--tree` also
+lays out the `latest/download/` and `download/v<version>/` paths a `file://` `KULMAN_RELEASE_URL`
+reads. Needs `jq`, `tar` and `sha256sum` or `shasum`; tested in `crates/kulman/tests/release_assemble.rs`.
+
 Search-quality measurement now lives in `crates/kalka/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI
 (`.github/workflows/rust.yml`: fmt, clippy, test, the strip-chrome test, docs). See the
