@@ -208,3 +208,26 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, (&'static str, u32,
         }
     }
 }
+
+/// Packs `bytes` as `kulman-v<version>-<target>.tar.gz` for every target, points the manifest's
+/// `kulman` entry at them and lists them in `SHA256SUMS`, which it also copies to
+/// `latest/download/`: the layout `install.sh` reads.
+pub fn per_target_kulman(dir: &Path, version: &str, bytes: &[u8]) {
+    let vdir = version_dir(dir, version);
+    let stage = tempfile::tempdir().unwrap();
+    fs::write(stage.path().join("kulman"), bytes).unwrap();
+    let mut sums = fs::read_to_string(vdir.join("SHA256SUMS")).unwrap();
+    let mut archives = serde_json::Map::new();
+    for target in TARGETS {
+        let file = format!("kulman-v{version}-{target}.tar.gz");
+        pack(stage.path(), &["kulman"], &vdir.join(&file));
+        let sum = sha256(&vdir.join(&file));
+        sums.push_str(&format!("{sum}  {file}\n"));
+        archives.insert(target.to_string(), json!({ "file": file, "sha256": sum }));
+    }
+    fs::write(vdir.join("SHA256SUMS"), &sums).unwrap();
+    fs::write(dir.join("latest/download/SHA256SUMS"), &sums).unwrap();
+    edit_manifest(dir, version, |m| {
+        m["kulman"]["archives"] = Value::Object(archives);
+    });
+}

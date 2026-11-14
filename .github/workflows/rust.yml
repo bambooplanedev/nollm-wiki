@@ -25,6 +25,8 @@ jobs:
       run: cargo test --verbose
     - name: Test strip-chrome.awk
       run: bash scripts/test-strip-chrome.sh
+    - name: Check install.sh syntax
+      run: sh -n install.sh
     - name: Docs
       run: cargo doc --no-deps
       env:
