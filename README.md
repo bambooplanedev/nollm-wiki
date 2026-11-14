@@ -15,6 +15,7 @@
 
 **kulman** is a set of tools for coding agents, named after the drawing board of an aircraft design bureau.
 **kalka**, the tool in this repository, is a tracing: an exact copy of your project that agents can read.
+**plaz**, a second tool here (a preview), draws the real decisions of each function; a plaz is the full-size loft floor where a design bureau draws the real lines of the airframe. See [plaz](#plaz-preview).
 
 `kalka` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
 with line ranges, then serves it to agents over MCP. An agent asks `search` where something is and
@@ -49,6 +50,7 @@ crates/kalka/src/lib.rs
   [Obsidian and Quartz](#obsidian-and-quartz) · [page ids](#page-ids)
 - [Measured](#measured)
 - [Limitations](#limitations)
+- [plaz (preview)](#plaz-preview)
 - [Development](#development)
 - [License](#license)
 
@@ -893,6 +895,15 @@ prompts showed a note before, 5 after), short questions unchanged.
 
 Measured shortfalls and agent behaviour: [crates/kalka/docs/KNOWN_GAPS.md](crates/kalka/docs/KNOWN_GAPS.md).
 Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHITECTURE.md](crates/kalka/docs/ARCHITECTURE.md).
+
+## plaz (preview)
+
+`plaz` draws the real decisions of each function as a Markdown page with a decision flowchart, the literal conditions, who calls the function and what each call reaches. Rust and Python are charted. It is a preview, built from source until the next release:
+
+    cargo run -p plaz -- build           # pages go to .kulman/map/
+    cargo run -p plaz -- setup --scope repo    # builds the map and adds .kulman/ to .gitignore
+
+`--scope local` writes the ignore line to `.git/info/exclude` instead; `--remove` deletes the map's pages. Details: [crates/plaz/README.md](crates/plaz/README.md).
 
 ## Development
 

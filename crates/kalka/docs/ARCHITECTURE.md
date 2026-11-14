@@ -162,7 +162,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 ## Module map
 
-The workspace holds three crates. `kalka` (`crates/kalka`) owns
+The workspace holds four crates. `kalka` (`crates/kalka`) owns
 everything about a wiki: the pipeline, pages and their ids, the graph,
 rendering, the manifest, queries, the CLI, `serve` and `setup`. `wiki-code`
 (`crates/wiki-code`, lib `wiki_code`) owns the code layer a sibling tool can use
@@ -174,7 +174,9 @@ doc lists that contract; its `support` module is shared text helpers and not
 part of it. It pins tree-sitter and every grammar to an exact version, since a
 consumer that depends on it by git does not use this lock file. `techlog`
 (`crates/techlog`) holds where agent memory lives, and the `Origin` of a
-memory note. Paths below that start with `src/` or `tests/` are in
+memory note. `plaz` (`crates/plaz`) is the second tool of the set: it draws per-function decision charts and call
+targets from the code layer in `wiki-code`, depends on nothing of `kalka`, and writes its pages to `.kulman/map/`, which
+`compile` leaves alone. Paths below that start with `src/` or `tests/` are in
 `crates/kalka`.
 
 | Module | Responsibility |
