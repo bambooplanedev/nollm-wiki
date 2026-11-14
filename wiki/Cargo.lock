@@ -1650,6 +1650,18 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "wiki-code",
+]
+
+[[package]]
+name = "wiki-code"
+version = "0.1.0"
+dependencies = [
+ "ignore",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-cpp",

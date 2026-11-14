@@ -31,6 +31,7 @@ use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+pub(crate) use wiki_code::support::is_under;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WikiError {
@@ -326,7 +327,7 @@ fn compile_inner(
     let mut entities = remap_reserved_names(entities);
     resolve_supersedes(&mut entities);
     // Needs the final ids and `source_path`s, so it follows the remap.
-    formats::extract_cpp::pair_declarations(&mut entities);
+    wiki_code::pair_declarations(&mut entities);
 
     // 3. Graph.
     let graph = graph::build_graph(&entities);
@@ -510,18 +511,6 @@ fn stale_page_files(
         .filter(|id| output.join(format!("{id}.md")).exists())
         .map(|id| format!("{id}.md"))
         .collect()
-}
-
-/// True if `path` lies within `dir`, compared on lexically-absolute components
-/// (`std::path::absolute` — no filesystem access, no symlink resolution). This
-/// is a predicate only: it never reaches output bytes, so it stays
-/// deterministic across machines. Falls back to a raw component compare if
-/// absolute-normalization errors (degrade, never panic).
-pub(crate) fn is_under(path: &Path, dir: &Path) -> bool {
-    match (std::path::absolute(path), std::path::absolute(dir)) {
-        (Ok(p), Ok(d)) => p.starts_with(d),
-        _ => path.starts_with(dir),
-    }
 }
 
 /// Base names (case-insensitive) reserved for manifest artifacts written

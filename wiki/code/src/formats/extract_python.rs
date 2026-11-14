@@ -94,7 +94,7 @@ pub(crate) fn python_shape(def: Node) -> Shape {
 // `from .models import X` and `from . import X` need separate
 // patterns. In the second, `relative_import` is just an
 // `import_prefix`, so its text is a lone `.` and
-// `graph::ImportResolver` — which resolves every non-empty segment
+// `imports::Imports` — which resolves every non-empty segment
 // of a split on `.` — finds no segment to resolve. The anchor `.`
 // after `(import_prefix)` constrains it to be the last named
 // child, which is exactly what separates the two families; without
@@ -158,11 +158,16 @@ fn python_lead(node: Node, text: &str) -> Lead {
                 && !(node.start_position().row <= 1
                     && (body.contains("coding:") || body.contains("coding="))) =>
         {
-            // A Sphinx attribute doc is `#:`.
-            Lead::Plain(body.strip_prefix(':').unwrap_or(body).trim().to_string())
+            Lead::Plain(comment_body(body).to_string())
         }
         _ => Lead::Stop,
     }
+}
+
+/// A `#` comment's text after its `#`, as a plain lead takes it: a Sphinx
+/// attribute doc is `#:`.
+pub(crate) fn comment_body(after_hash: &str) -> &str {
+    after_hash.strip_prefix(':').unwrap_or(after_hash).trim()
 }
 
 /// Python's module-level guard and owner chain, resolved in one upward walk.
@@ -346,13 +351,11 @@ pub(crate) fn docstring_paragraph(block: Node, text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
-    use crate::formats::code::CodeExtractor;
-    use crate::formats::Extractor;
 
     #[test]
     fn a_unicode_framed_comment_title_is_no_doc() {
         let src = "x = 1\n# ─── indexing helpers ───\ndef build():\n    pass\n";
-        let e = CodeExtractor.extract("b.py", src);
+        let e = crate::extract("b.py", src);
         let item = e.items.iter().find(|i| i.name == "build").unwrap();
         assert_eq!((item.doc.clone(), item.start_line), (None, 3));
     }
@@ -360,7 +363,7 @@ mod tests {
     #[test]
     fn defined_excludes_dataclass_fields_and_keeps_class_def_constant() {
         let src = "from dataclasses import dataclass\n\n@dataclass\nclass Invoice:\n    total: float\n\ndef render():\n    pass\n\nDEFAULT = 3\n";
-        let e = CodeExtractor.extract("billing.py", src);
+        let e = crate::extract("billing.py", src);
         assert_eq!(
             e.defined,
             vec!["DEFAULT", "Invoice", "render"],
@@ -372,7 +375,7 @@ mod tests {
     #[test]
     fn python_signatures_gated_docstring_and_imports() {
         let src = "\"\"\"\nTop docstring.\n\"\"\"\nimport os\nfrom graph import build\ndef extract_all(d):\n    pass\ndef _private():\n    pass\n";
-        let e = CodeExtractor.extract("extractor.py", src);
+        let e = crate::extract("extractor.py", src);
         assert_has(&e.symbols, "def extract_all(d)");
         assert_lacks(&e.symbols, "_private");
         assert!(e.imports.iter().any(|i| i.contains("graph")));
@@ -383,7 +386,7 @@ mod tests {
     #[test]
     fn a_docstring_sentence_wrapped_across_lines_summarizes_whole() {
         let src = "\"\"\"\nFetch feeds over HTTP with retries and a\nbounded cache. Second sentence.\n\nMore.\n\"\"\"\n";
-        let e = CodeExtractor.extract("fetch.py", src);
+        let e = crate::extract("fetch.py", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("Fetch feeds over HTTP with retries and a bounded cache.")
@@ -393,7 +396,7 @@ mod tests {
     #[test]
     fn summary_fallback_prefers_a_definition_over_a_constant() {
         let src = "USER_AGENT = \"Mozilla/5.0\"\n\ndef fetch_feed(url: str) -> bytes:\n    return b\"\"\n";
-        let e = CodeExtractor.extract("fetch.py", src);
+        let e = crate::extract("fetch.py", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("def fetch_feed(url: str) -> bytes"),
@@ -405,7 +408,7 @@ mod tests {
     #[test]
     fn summary_fallback_prefers_a_class_over_its_own_fields() {
         let src = "@dataclass(frozen=True)\nclass Article:\n    id: str\n    title: str\n";
-        let e = CodeExtractor.extract("models.py", src);
+        let e = crate::extract("models.py", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("@dataclass(frozen=True) class Article"),
@@ -417,7 +420,7 @@ mod tests {
     #[test]
     fn python_relative_and_aliased_imports_are_captured() {
         let src = "import os\nimport aggregator.main as m\nfrom graph import build\nfrom .models import Article, FeedSource\nfrom . import state\nfrom . import helpers as h\nfrom ..pkg.sub import thing\n";
-        let e = CodeExtractor.extract("main.py", src);
+        let e = crate::extract("main.py", src);
         assert_eq!(
             e.imports,
             vec![
@@ -437,7 +440,7 @@ mod tests {
     #[test]
     fn python_from_import_does_not_capture_symbol_names() {
         let src = "from .models import Article, FeedSource\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_eq!(
             e.imports,
             vec![".models".to_string()],
@@ -449,7 +452,7 @@ mod tests {
     #[test]
     fn python_methods_are_qualified_by_their_class() {
         let src = "class Wiki:\n    def search(self, q: str) -> list:\n        return []\n    async def fetch(self) -> bytes:\n        return b\"\"\n\ndef free_function() -> int:\n    return 1\n";
-        let e = CodeExtractor.extract("q.py", src);
+        let e = crate::extract("q.py", src);
         assert_has(&e.symbols, "def Wiki.search(self, q: str) -> list");
         assert_has(&e.symbols, "async def Wiki.fetch(self) -> bytes");
         assert_has(&e.symbols, "def free_function() -> int");
@@ -459,7 +462,7 @@ mod tests {
     fn python_nested_class_chain_is_outermost_first() {
         let src =
             "class Article:\n    class Inner:\n        def deep(self) -> None:\n            pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "class Article.Inner");
         assert!(
             e.symbols
@@ -478,7 +481,7 @@ mod tests {
         // `_TextExtractor` are known to have been gated, not simply never
         // extracted.
         let src = "class _TextExtractor:\n    def handle_data(self, data: str) -> None:\n        pass\n    def text(self) -> str:\n        return \"\"\n\nclass Public:\n    def run(self) -> None:\n        pass\n";
-        let e = CodeExtractor.extract("parse.py", src);
+        let e = crate::extract("parse.py", src);
         assert!(
             !e.symbols.iter().any(|s| s.contains("_TextExtractor")
                 || s.contains("handle_data")
@@ -494,7 +497,7 @@ mod tests {
     #[test]
     fn python_two_classes_with_the_same_method_stay_distinct() {
         let src = "class A2:\n    def run(self) -> None:\n        pass\n\nclass B2:\n    def run(self) -> None:\n        pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def A2.run(self) -> None");
         assert_has(&e.symbols, "def B2.run(self) -> None");
     }
@@ -503,7 +506,7 @@ mod tests {
     fn exports_group_a_class_with_its_own_members() {
         let src =
             "@dataclass\nclass Article:\n    title: str\n\nclass Verdict:\n    decision: str\n";
-        let e = CodeExtractor.extract("models.py", src);
+        let e = crate::extract("models.py", src);
         assert_eq!(
             e.symbols,
             vec![
@@ -520,7 +523,7 @@ mod tests {
     #[test]
     fn python_function_local_definitions_are_not_module_exports() {
         let src = "def outer():\n    def nested():\n        pass\n    class LocalClass:\n        def m(self):\n            pass\n";
-        let e = CodeExtractor.extract("t.py", src);
+        let e = crate::extract("t.py", src);
         assert_eq!(
             e.symbols,
             vec!["def outer()".to_string()],
@@ -532,7 +535,7 @@ mod tests {
     #[test]
     fn python_functions_in_function_bodies_are_nested_items() {
         let src = "def outer():\n    @wraps(f)\n    def deco():\n        def deep():\n            pass\n    class Local:\n        def m(self):\n            pass\n\nclass A:\n    def meth(self):\n        def inner():\n            pass\n";
-        let e = CodeExtractor.extract("t.py", src);
+        let e = crate::extract("t.py", src);
         let nested: Vec<(&str, usize, usize, bool)> = e
             .items
             .iter()
@@ -559,7 +562,7 @@ mod tests {
     #[test]
     fn python_all_is_the_authoritative_export_gate() {
         let src = "__all__ = [\"Public\", \"shown\"]\n\nclass Public:\n    field: str\n    def m(self) -> None:\n        pass\n    def _hidden(self) -> None:\n        pass\n\nclass NotListed:\n    field: int\n\ndef shown() -> int:\n    return 1\n\ndef not_listed() -> int:\n    return 2\n\nHIDDEN_CONST = 5\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "class Public");
         assert_has(&e.symbols, "def Public.m(self) -> None");
         assert_has(&e.symbols, "def shown() -> int");
@@ -578,7 +581,7 @@ mod tests {
         // `name_filter` to the item's own name would silently override
         // `__all__` here instead of being replaced by it.
         let src = "__all__ = [\"_private_api\", \"__version__\", \"Public\"]\n\n__version__ = \"1.0\"\n\ndef _private_api() -> int:\n    return 1\n\nclass Public:\n    def _hidden(self) -> None:\n        pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         // __all__ must be able to export a free underscore-prefixed name
         assert_has(&e.symbols, "def _private_api() -> int");
         assert_has(&e.symbols, "__version__ = \"1.0\"");
@@ -597,7 +600,7 @@ mod tests {
         // is `None` and the convention must still apply to a free item's own name.
         let src =
             "def _private_api() -> int:\n    return 1\n\ndef public_api() -> int:\n    return 2\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_lacks(&e.symbols, "_private_api");
         assert_has(&e.symbols, "def public_api() -> int");
     }
@@ -605,7 +608,7 @@ mod tests {
     #[test]
     fn a_computed_all_falls_back_to_the_underscore_convention() {
         let src = "__all__ = [\"a\"] + other.__all__\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def a()");
         // a non-literal __all__ must not gate anything
         assert_has(&e.symbols, "def b()");
@@ -615,7 +618,7 @@ mod tests {
     fn an_all_containing_an_fstring_element_falls_back_to_the_underscore_convention() {
         let src =
             "x = 1\n__all__ = [f\"a{x}\", \"b\"]\n\ndef b():\n    pass\n\ndef c():\n    pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         // an f-string element must invalidate __all__, falling back to the convention
         assert_has(&e.symbols, "def c()");
     }
@@ -623,7 +626,7 @@ mod tests {
     #[test]
     fn a_second_module_level_all_assignment_wins() {
         let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = [\"b\"]\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def b()");
         assert!(
             !e.symbols.iter().any(|s| s == "def a()"),
@@ -642,7 +645,7 @@ mod tests {
         // `+=` as the LAST statement touching `__all__` and fall back to the
         // convention for the whole module, exporting both names.
         let src = "__all__ = [\"base_name\"]\n__all__ += [\"added_name\"]\n\ndef base_name() -> int:\n    return 1\n\ndef added_name() -> int:\n    return 2\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def base_name() -> int");
         // `__all__ +=` must fall back to the convention, not keep the stale literal
         assert_has(&e.symbols, "def added_name() -> int");
@@ -657,7 +660,7 @@ mod tests {
         // convention.
         let src =
             "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = compute()\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def a()");
         // a non-literal reassignment must fall back to the convention
         assert_has(&e.symbols, "def b()");
@@ -666,7 +669,7 @@ mod tests {
     #[test]
     fn an_all_dot_extend_after_a_literal_falls_back_to_the_underscore_convention() {
         let src = "__all__ = [\"a\"]\n__all__.extend([\"b\"])\n\ndef a():\n    pass\n\ndef b():\n    pass\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "def a()");
         // __all__.extend(...) must fall back to the convention
         assert_has(&e.symbols, "def b()");
@@ -675,7 +678,7 @@ mod tests {
     #[test]
     fn python_assignments_keep_their_values_annotated_or_not() {
         let src = "MAX_IDS = 2000\nSUMMARY_LIMIT: int = 300\nPRISM_FILES: list[tuple[str, str]] = [(\"a\", \"b\")]\nAlias = list[int]\n_PRIVATE = 1\n";
-        let e = CodeExtractor.extract("state.py", src);
+        let e = crate::extract("state.py", src);
         assert_has(&e.symbols, "MAX_IDS = 2000");
         assert_has(&e.symbols, "SUMMARY_LIMIT: int = 300");
         assert_has(
@@ -689,7 +692,7 @@ mod tests {
     #[test]
     fn python_class_fields_are_qualified_and_gated() {
         let src = "class Article:\n    title: str\n    url: str = \"\"\n    published: datetime | None = None\n    _hidden: int = 0\n";
-        let e = CodeExtractor.extract("models.py", src);
+        let e = crate::extract("models.py", src);
         assert_has(&e.symbols, "Article.title: str");
         assert_has(&e.symbols, "Article.url: str = \"\"");
         assert_has(&e.symbols, "Article.published: datetime | None = None");
@@ -699,7 +702,7 @@ mod tests {
     #[test]
     fn python_class_fields_are_emitted_once_not_twice() {
         let src = "class Article:\n    title: str\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         let hits = e
             .symbols
             .iter()
@@ -712,7 +715,7 @@ mod tests {
     fn python_long_values_are_truncated_on_a_character_boundary() {
         // Multibyte characters: a byte-indexed cut panics here.
         let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
-        let e = CodeExtractor.extract("judge.py", &src);
+        let e = crate::extract("judge.py", &src);
         let sig = e
             .symbols
             .iter()
@@ -725,7 +728,7 @@ mod tests {
     #[test]
     fn python_line_continuations_do_not_strand_the_strip_loop() {
         let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "Z: int = 5");
         assert_has(&e.symbols, "X = compute()");
     }
@@ -737,7 +740,7 @@ mod tests {
         // survives unfixed on a CRLF file, exactly the defect the join was
         // added to prevent. The CRLF form must be replaced first.
         let src = "Z: int = \\\r\n    5\r\nX = \\\r\n    compute()\r\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "Z: int = 5");
         assert_has(&e.symbols, "X = compute()");
     }
@@ -751,7 +754,7 @@ mod tests {
         // instead). `A`'s value is kept whole, per the unannotated rule, and
         // that whole value happens to be the literal text `B = 2`.
         let src = "A = B = 2\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_eq!(e.symbols, vec!["A = B = 2".to_string()], "{:?}", e.symbols);
     }
 
@@ -760,7 +763,7 @@ mod tests {
         // The decorator span reaches the definition, so the comment sits
         // inside it and must be dropped by `render_span`.
         let src = "@dataclass  # noqa: D101\nclass Article:\n    title: str\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "@dataclass class Article");
         assert_lacks(&e.symbols, "noqa");
     }
@@ -770,7 +773,7 @@ mod tests {
         // The value is rendered through the same path as the head, so a
         // comment inside it must be dropped the same way.
         let src = "CONFIG = {  # inline\n    \"a\": 1,\n}\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
         assert_lacks(&e.symbols, "inline");
     }
@@ -778,14 +781,14 @@ mod tests {
     #[test]
     fn a_python_string_value_keeps_its_own_punctuation() {
         let src = "SEP = \" , \"\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "SEP = \" , \"");
     }
 
     #[test]
     fn python_decorators_are_kept_with_their_arguments() {
         let src = "@dataclass(frozen=True)\nclass Article:\n    title: str\n";
-        let e = CodeExtractor.extract("models.py", src);
+        let e = crate::extract("models.py", src);
         assert_has(&e.symbols, "@dataclass(frozen=True) class Article");
         assert_has(&e.symbols, "Article.title: str");
     }
@@ -794,21 +797,21 @@ mod tests {
     fn python_method_decorators_render_before_the_qualified_name() {
         let src =
             "class Article:\n    @property\n    def slug(self) -> str:\n        return \"\"\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "@property def Article.slug(self) -> str");
     }
 
     #[test]
     fn python_stacked_decorators_all_survive() {
         let src = "@a\n@b(1)\n@c.d.e\ndef stacked() -> int:\n    return 0\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "@a @b(1) @c.d.e def stacked() -> int");
     }
 
     #[test]
     fn python_conditionally_defined_module_functions_are_kept() {
         let src = "if TYPE_CHECKING:\n    def type_only():\n        pass\n\ntry:\n    def optional_dep():\n        pass\nexcept ImportError:\n    pass\n";
-        let e = CodeExtractor.extract("t.py", src);
+        let e = crate::extract("t.py", src);
         assert_has(&e.symbols, "def type_only()");
         assert_has(&e.symbols, "def optional_dep()");
     }
@@ -818,7 +821,7 @@ mod tests {
         // `signature_cut` leaves an unannotated value to the join, so the
         // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
         let src = "MAX_IDS = 2000\n";
-        let e = CodeExtractor.extract("state.py", src);
+        let e = crate::extract("state.py", src);
         assert_has(&e.symbols, "MAX_IDS = 2000");
         assert!(
             !e.symbols.iter().any(|s| s.matches(" = ").count() > 1),
@@ -834,7 +837,7 @@ mod tests {
         // applies however long the value is.
         let long = "y".repeat(200);
         let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
-        let e = CodeExtractor.extract("state.py", &src);
+        let e = crate::extract("state.py", &src);
         assert_has(&e.symbols, "CACHE_DIR = \"/var/cache/store\"");
         let big = e
             .symbols
@@ -851,7 +854,7 @@ mod tests {
         // truncate — the same rule Rust follows, for the same reason.
         let long = "z".repeat(200);
         let src = format!("BIG: str = \"{long}\"\n");
-        let e = CodeExtractor.extract("state.py", &src);
+        let e = crate::extract("state.py", &src);
         assert_has(&e.symbols, "BIG: str");
         // annotated must omit, not truncate
         assert_lacks(&e.symbols, "…");
@@ -863,14 +866,14 @@ mod tests {
         // `right` field — it is inside the value, not between `=` and the
         // value. Without the shared pipeline this renders `X = 1 + \ 2`.
         let src = "X = 1 + \\\n    2\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "X = 1 + 2");
     }
 
     #[test]
     fn a_crlf_continuation_inside_the_value_is_joined() {
         let src = "X = 1 + \\\r\n    2\r\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "X = 1 + 2");
     }
 
@@ -878,7 +881,7 @@ mod tests {
     fn a_wrapped_call_value_keeps_its_punctuation_tidied() {
         // Without the shared pipeline this renders `Y = compute( 1, 2, )`.
         let src = "Y = compute(\n    1,\n    2,\n)\n";
-        let e = CodeExtractor.extract("m.py", src);
+        let e = crate::extract("m.py", src);
         assert_has(&e.symbols, "Y = compute(1, 2)");
     }
 
@@ -890,7 +893,7 @@ mod tests {
         // land there.
         let long = "q".repeat(200);
         let src = format!("TOPICS: list[str] = [\"{long}\"]\n");
-        let e = CodeExtractor.extract("settings.py", &src);
+        let e = crate::extract("settings.py", &src);
         let summary = e.summary.unwrap_or_default();
         assert!(
             !summary.contains('…'),
@@ -901,7 +904,7 @@ mod tests {
     #[test]
     fn python_items_cover_classes_private_methods_functions_and_constants() {
         let src = "@dataclass\nclass Article:\n    \"\"\"A news article.\n\n    More.\"\"\"\n    title: str = \"\"\n\n    def _slug(self):\n        \"\"\"Slug for the url.\"\"\"\n        return 1\n\n\ndef _helper():\n    pass\n\nLIMIT = 5\n";
-        let e = CodeExtractor.extract("a.py", src);
+        let e = crate::extract("a.py", src);
         assert_eq!(
             item_lines(&e.items),
             vec![

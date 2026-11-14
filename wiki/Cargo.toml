@@ -7,6 +7,13 @@ description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license = "MIT"
 publish = false
 
+[workspace]
+members = [".", "code"]
+default-members = [".", "code"]
+
+[lints]
+workspace = true
+
 [[bin]]
 name = "wiki"
 path = "src/main.rs"
@@ -16,6 +23,7 @@ name = "wiki"
 path = "src/lib.rs"
 
 [dependencies]
+wiki-code = { path = "code" }
 aho-corasick = "1"
 anyhow = "1"
 thiserror = "2"
@@ -27,14 +35,6 @@ blake3 = "1"
 ignore = "0.4"
 regex = "1"
 notify = "8"
-tree-sitter = "0.27"
-tree-sitter-rust = "0.24"
-tree-sitter-python = "0.25"
-tree-sitter-javascript = "0.25"
-tree-sitter-typescript = "0.23"
-tree-sitter-go = "0.25"
-tree-sitter-bash = "0.25"
-tree-sitter-cpp = "0.23"
 rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemars"] }
 tokio = { version = "1", features = ["rt"] }
 frostem = { version = "=2.20261016.1", default-features = false, features = ["english", "ukrainian"] }
@@ -53,7 +53,7 @@ harness = false
 [profile.release]
 strip = true
 
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "forbid"
 
 # Pedantic on, with the lints that would fight this codebase switched off:
@@ -67,7 +67,7 @@ unsafe_code = "forbid"
 #   `push_str(&format!(..))` and needs a `Result` nobody checks.
 # - module_name_repetitions: `WikiError`, `WikiState` are the clear names.
 # - unused_async_trait_impl: rmcp's trait signatures are async whether we await or not.
-[lints.clippy]
+[workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 must_use_candidate = "allow"
 cast_precision_loss = "allow"

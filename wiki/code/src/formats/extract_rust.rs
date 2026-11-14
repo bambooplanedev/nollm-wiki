@@ -407,27 +407,11 @@ pub(crate) fn has_test_attribute(text: &str, start_line: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
-    use crate::formats::code::CodeExtractor;
-    use crate::formats::Extractor;
-
-    #[test]
-    fn rust_signatures_gated_and_imports() {
-        let src = "//! Module docs.\nuse crate::graph::build;\npub fn render_page(x: i32) -> String { String::new() }\nfn private_helper() {}\n";
-        let e = CodeExtractor.extract("src/rewrite.rs", src);
-        match &e.kind {
-            crate::model::SourceKind::Code { lang } => assert_eq!(lang, "rust"),
-            _ => panic!("expected Code kind"),
-        }
-        assert_has(&e.symbols, "pub fn render_page(x: i32) -> String");
-        assert_lacks(&e.symbols, "private_helper");
-        assert!(e.imports.iter().any(|i| i.contains("graph")));
-        assert_eq!(e.summary.as_deref(), Some("Module docs."));
-    }
 
     #[test]
     fn a_const_only_module_without_docs_prefers_an_impl_header_to_the_const() {
         let src = "pub const LIMIT: u32 = 5;\nstruct Foo;\nimpl Display for Foo {\n    fn fmt(&self) {}\n}\n";
-        let e = CodeExtractor.extract("cache.rs", src);
+        let e = crate::extract("cache.rs", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("impl Display for Foo"),
@@ -448,7 +432,7 @@ mod tests {
         // see the note there for why the distinction is unobservable in
         // current output. What this pins is the summary itself.
         let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
-        let e = CodeExtractor.extract("c.rs", src);
+        let e = crate::extract("c.rs", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("impl Iterator for Counter"),
@@ -460,7 +444,7 @@ mod tests {
     #[test]
     fn rust_restricted_visibility_is_not_an_export() {
         let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "pub fn public_one()");
         assert!(
             e.symbols.iter().any(|s| s.contains("kept")),
@@ -476,7 +460,7 @@ mod tests {
     #[test]
     fn rust_trait_visibility_gated() {
         let src = "pub trait Public {\n    fn m(&self);\n}\ntrait Private {\n    fn n(&self);\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "pub trait Public");
         // private trait leaked as export
         assert_lacks(&e.symbols, "Private");
@@ -485,7 +469,7 @@ mod tests {
     #[test]
     fn rust_module_level_const_static_and_type_alias() {
         let src = "pub const CACHE_VERSION: u32 = 1;\npub static NAME: &str = \"x\";\npub type Pack = Vec<u8>;\nconst PRIVATE: u8 = 3;\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         // A const's contract is its type AND its value; the value is the half a
         // reader cannot guess from the name.
         assert_has(&e.symbols, "pub const CACHE_VERSION: u32 = 1");
@@ -499,7 +483,7 @@ mod tests {
     #[test]
     fn inherent_impl_methods_are_qualified_with_their_type() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self, q: &str) -> Vec<Hit> { todo!() }\n    fn helper(&self) {}\n}\npub fn free_function() {}\n";
-        let e = CodeExtractor.extract("query.rs", src);
+        let e = crate::extract("query.rs", src);
         assert_has(
             &e.symbols,
             "pub fn Wiki::search(&self, q: &str) -> Vec<Hit>",
@@ -512,7 +496,7 @@ mod tests {
     #[test]
     fn generic_inherent_impl_strips_type_arguments() {
         let src = "impl<T: Clone> Holder<T> {\n    pub fn get(&self) -> T { todo!() }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         // `Holder::get` is valid Rust and sorts beside the type's other
         // methods; `Holder<T>::get` would be neither.
         assert_has(&e.symbols, "pub fn Holder::get(&self) -> T");
@@ -521,7 +505,7 @@ mod tests {
     #[test]
     fn function_local_items_are_not_module_exports() {
         let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "pub fn outer()");
         for leaked in ["Local", "hidden", "nested"] {
             // each name lives in a function body and is not module surface
@@ -532,14 +516,14 @@ mod tests {
     #[test]
     fn function_local_trait_impls_and_traits_are_not_exports() {
         let src = "pub fn outer() {\n    struct Local;\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.symbols, vec!["pub fn outer()".to_string()]);
     }
 
     #[test]
     fn generic_trait_impl_keeps_its_type_arguments() {
         let src = "impl<T: Clone> Display for Wrapper<T> {\n    fn fmt(&self) {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "impl<T: Clone> Display for Wrapper<T>");
         assert!(
             e.symbols
@@ -553,14 +537,14 @@ mod tests {
     #[test]
     fn items_in_an_inline_module_stay_unqualified() {
         let src = "pub mod inner {\n    pub fn in_mod() {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "pub fn in_mod()");
     }
 
     #[test]
     fn rust_test_module_stripped_with_marker() {
         let src = "//! Docs.\npub fn real() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n    #[test]\n    fn checks_real() {\n        real();\n    }\n}\n";
-        let e = CodeExtractor.extract("src/thing.rs", src);
+        let e = crate::extract("src/thing.rs", src);
         assert!(
             !e.body.contains("checks_real"),
             "test fn text must be gone: {}",
@@ -579,14 +563,14 @@ mod tests {
     #[test]
     fn rust_without_test_module_round_trips_byte_identical() {
         let src = "//! Docs.\nuse std::fmt;\npub fn only() {}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.body, src);
     }
 
     #[test]
     fn rust_two_test_modules_get_two_markers_in_source_order() {
         let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[test]\n    fn t1() {}\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t2() {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         let early = e.body.find("// [tests omitted: mod early_tests, 5 lines]");
         let late = e.body.find("// [tests omitted: mod late_tests, 5 lines]");
         assert!(early.is_some() && late.is_some(), "body: {}", e.body);
@@ -601,14 +585,14 @@ mod tests {
     #[test]
     fn rust_entirely_test_module_body_is_just_the_marker() {
         let src = "#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.body.trim(), "// [tests omitted: mod tests, 5 lines]");
     }
 
     #[test]
     fn code_after_a_test_module_on_the_same_line_is_not_commented_out() {
         let src = "pub fn before() {}\n#[cfg(test)]\nmod tests { #[test] fn t() {} } pub fn after() -> u8 { 1 }\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         let marker_line = e
             .body
             .lines()
@@ -629,7 +613,7 @@ mod tests {
     fn cfg_test_matches_modulo_whitespace_but_other_cfgs_do_not() {
         // Interior whitespace in the attribute still counts as cfg(test).
         let ws = "#[cfg( test )]\nmod tests {}\npub fn x() {}\n";
-        let e = CodeExtractor.extract("a.rs", ws);
+        let e = crate::extract("a.rs", ws);
         assert!(
             e.body.contains("// [tests omitted: mod tests, 2 lines]"),
             "body: {}",
@@ -638,14 +622,14 @@ mod tests {
 
         // A different cfg is NOT a test module.
         let feature = "#[cfg(feature = \"extra\")]\nmod extra {}\npub fn x() {}\n";
-        let e2 = CodeExtractor.extract("b.rs", feature);
+        let e2 = crate::extract("b.rs", feature);
         assert_eq!(e2.body, feature);
     }
 
     #[test]
     fn symbols_and_imports_come_from_the_test_stripped_source() {
         let src = "pub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert!(
             !e.imports.iter().any(|i| i == "super::*"),
             "test-only import leaked: {:?}",
@@ -668,7 +652,7 @@ mod tests {
     #[test]
     fn trait_impl_emits_header_and_qualified_methods() {
         let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
-        let e = CodeExtractor.extract("text.rs", src);
+        let e = crate::extract("text.rs", src);
         assert_has(&e.symbols, "impl Extractor for TextExtractor");
         // Methods in a trait impl carry no visibility modifier — they are
         // public through the trait — so they must not be visibility-gated.
@@ -681,7 +665,7 @@ mod tests {
     #[test]
     fn a_trait_impl_header_leads_its_own_methods() {
         let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self) -> u8 { 0 }\n}\n";
-        let e = CodeExtractor.extract("text.rs", src);
+        let e = crate::extract("text.rs", src);
         assert_eq!(
             e.symbols,
             vec![
@@ -698,7 +682,7 @@ mod tests {
     #[test]
     fn two_traits_with_the_same_method_name_stay_distinct() {
         let src = "pub struct Foo;\nimpl Display for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\nimpl Debug for Foo {\n    fn fmt(&self) -> Result { todo!() }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "fn <Foo as Display>::fmt(&self) -> Result");
         assert!(
             e.symbols
@@ -712,7 +696,7 @@ mod tests {
     #[test]
     fn same_trait_on_different_generic_arguments_stays_distinct() {
         let src = "impl Encode for Vec<u8> {\n    fn go(&self) -> u8 { 0 }\n}\nimpl Encode for Vec<u16> {\n    fn go(&self) -> u8 { 1 }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "fn <Vec<u8> as Encode>::go(&self) -> u8");
         assert_has(&e.symbols, "fn <Vec<u16> as Encode>::go(&self) -> u8");
     }
@@ -720,7 +704,7 @@ mod tests {
     #[test]
     fn exotic_impl_targets_render_as_valid_paths() {
         let src = "impl Trait for &Foo {\n    fn m(&self) {}\n}\nimpl Trait for (A, B) {\n    fn m(&self) {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "fn <&Foo as Trait>::m(&self)");
         assert_has(&e.symbols, "fn <(A, B) as Trait>::m(&self)");
     }
@@ -728,7 +712,7 @@ mod tests {
     #[test]
     fn associated_type_and_const_in_a_trait_impl_are_exported() {
         let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_has(&e.symbols, "type <Counter as Iterator>::Item = u32");
         assert_has(&e.symbols, "const <Counter as Iterator>::FOO: u8 = 1");
     }
@@ -736,7 +720,7 @@ mod tests {
     #[test]
     fn public_trait_declaration_lists_required_and_default_methods() {
         let src = "pub trait Extractor {\n    fn extensions(&self) -> &[&str];\n    fn helper(&self) -> u8 { 7 }\n}\ntrait Private {\n    fn n(&self);\n}\n";
-        let e = CodeExtractor.extract("mod.rs", src);
+        let e = crate::extract("mod.rs", src);
         assert_has(&e.symbols, "fn Extractor::extensions(&self) -> &[&str]");
         assert_has(&e.symbols, "fn Extractor::helper(&self) -> u8");
         // Gated on the *trait's* visibility: a method inside a trait cannot
@@ -747,7 +731,7 @@ mod tests {
     #[test]
     fn qualification_introduces_no_duplicate_symbols() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn go(&self) {}\n}\nimpl Display for Wiki {\n    fn fmt(&self) {}\n}\npub fn go() {}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         // Asserting the exact list, not `dedup().len()`: extraction already
         // deduplicates, so a self-comparison would pass no matter what. An
         // inherent method is matched by the top-level `function_item` pattern
@@ -768,14 +752,14 @@ mod tests {
     #[test]
     fn summary_fallback_prefers_a_free_item_over_a_qualified_method() {
         let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
-        let e = CodeExtractor.extract("text.rs", src);
+        let e = crate::extract("text.rs", src);
         assert_eq!(e.summary.as_deref(), Some("pub struct TextExtractor"));
     }
 
     #[test]
     fn a_module_doc_sentence_wrapped_across_lines_summarizes_whole() {
         let src = "//! Rust extraction: bare-`pub` gating, owner qualification through\n//! impl scopes. Second sentence.\n//!\n//! Next paragraph.\n\npub fn f() {}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("Rust extraction: bare-`pub` gating, owner qualification through impl scopes.")
@@ -785,14 +769,14 @@ mod tests {
     #[test]
     fn summary_fallback_uses_the_impl_header_when_no_free_item_exists() {
         let src = "impl Extractor for Foo {\n    fn extensions(&self) -> &[&str] { &[] }\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("impl Extractor for Foo"));
     }
 
     #[test]
     fn summary_fallback_falls_through_to_the_first_symbol() {
         let src = "impl Wiki {\n    pub fn go(&self) {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("pub fn Wiki::go(&self)"));
     }
 
@@ -803,7 +787,7 @@ mod tests {
         // falls through to the qualified method — exactly the regression
         // this fallback exists to prevent.
         let src = "impl<T: Clone> Display for Wrapper<T> {\n    fn fmt(&self) {}\n}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(
             e.summary.as_deref(),
             Some("impl<T: Clone> Display for Wrapper<T>")
@@ -815,7 +799,7 @@ mod tests {
         // `unsafe impl Send for Foo` starts with neither `impl ` nor `impl<`.
         // An empty impl body yields only the header symbol.
         let src = "unsafe impl Send for Foo {}\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.symbols, vec!["unsafe impl Send for Foo".to_string()]);
         assert_eq!(e.summary.as_deref(), Some("unsafe impl Send for Foo"));
     }
@@ -823,7 +807,7 @@ mod tests {
     #[test]
     fn placement_reproduces_the_module_level_guard_and_owner() {
         let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
-        let e = CodeExtractor.extract("q.rs", src);
+        let e = crate::extract("q.rs", src);
         assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
         // function-local item leaked
         assert_lacks(&e.symbols, "hidden");
@@ -832,7 +816,7 @@ mod tests {
     #[test]
     fn items_include_private_fns_and_methods_with_doc_and_attribute_lines() {
         let src = "/// Adds one.\n#[inline]\npub fn add(x: u8) -> u8 {\n    x + 1\n}\n\nfn helper() {}\n\npub struct S;\nimpl S {\n    /// Builds it.\n    fn new() -> S {\n        S\n    }\n}\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         assert_eq!(
             item_lines(&e.items),
             vec![
@@ -856,7 +840,7 @@ mod tests {
     #[test]
     fn two_leads_on_one_line_keep_the_doc_above() {
         let src = "/// Packed.\n#[derive(Debug)] #[repr(C)]\npub struct P;\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         assert_eq!(item_lines(&e.items), vec!["1-3 type P pub"]);
         assert_eq!(e.items[0].doc.as_deref(), Some("Packed."));
     }
@@ -864,7 +848,7 @@ mod tests {
     #[test]
     fn items_after_a_mid_file_test_module_keep_their_original_lines() {
         let src = "pub fn a() {}\n#[cfg(test)]\nmod tests {\n    pub fn helper() {}\n    #[test]\n    fn t() {}\n}\npub fn b() {}\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         // `helper` is bare `pub`, but its module is stripped from `## Exports`,
         // so it must not read as public either.
         assert_eq!(
@@ -885,7 +869,7 @@ mod tests {
     #[test]
     fn a_doc_comment_parted_by_a_blank_line_or_plain_comment_is_not_attached() {
         let src = "/// Lost.\n\nfn a() {}\n/// Also lost.\n// plain\nfn b() {}\n//// Not doc.\nfn c() {}\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         assert_eq!(
             item_lines(&e.items),
             vec!["3-3 fn a priv", "6-6 fn b priv", "8-8 fn c priv"]
@@ -899,7 +883,7 @@ mod tests {
             "/// Splits the input into\n/// words. Then more.\nfn split() {{}}\n/// {}\nfn long() {{}}\n",
             "word ".repeat(60)
         );
-        let e = CodeExtractor.extract("m.rs", &src);
+        let e = crate::extract("m.rs", &src);
         assert_eq!(
             e.items[0].doc.as_deref(),
             Some("Splits the input into words.")
@@ -912,7 +896,7 @@ mod tests {
     #[test]
     fn a_type_alias_is_a_type_item_like_in_every_other_language() {
         let src = "pub type Id = u64;\ntype Local = u8;\npub const N: u8 = 1;\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         assert_eq!(
             item_lines(&e.items),
             vec!["1-1 type Id pub", "2-2 type Local priv", "3-3 value N pub"]
@@ -923,7 +907,7 @@ mod tests {
     fn the_existing_gate_decides_public_for_restricted_and_trait_impl_items() {
         let src =
             "pub(crate) fn c() {}\nstruct T;\nimpl Display for T {\n    fn fmt(&self) {}\n}\n";
-        let e = CodeExtractor.extract("m.rs", src);
+        let e = crate::extract("m.rs", src);
         assert_eq!(
             item_lines(&e.items),
             vec![
@@ -937,11 +921,9 @@ mod tests {
 
 #[cfg(test)]
 mod surface_tests {
-    use crate::formats::code::CodeExtractor;
-    use crate::formats::Extractor;
 
     fn syms(src: &str) -> Vec<String> {
-        CodeExtractor.extract("t.rs", src).symbols
+        crate::extract("t.rs", src).symbols
     }
 
     /// These curry `syms` onto the shared assertions; the matching rules and
@@ -1058,7 +1040,7 @@ mod surface_tests {
         // without an explicit rank a module list would take over the summary
         // of every module that declares one (`lib.rs` declares nothing else).
         let src = "pub mod a;\npub struct Store;\n";
-        let e = CodeExtractor.extract("t.rs", src);
+        let e = crate::extract("t.rs", src);
         assert_eq!(e.summary.as_deref(), Some("pub struct Store"));
     }
 

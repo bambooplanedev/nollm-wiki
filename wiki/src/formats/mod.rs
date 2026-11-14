@@ -1,23 +1,14 @@
 //! Extractor registry: routes a file by extension to its extractor and fills in `source_path` and `content_hash`.
 
 pub mod code;
-pub mod extract_cpp;
-pub mod extract_jsx;
-pub mod extract_python;
-pub mod extract_rust;
-pub mod extract_shell;
-pub mod extract_simple;
-pub mod extract_svelte;
-pub mod extract_vue;
 pub mod markdown;
-pub mod summary;
 pub mod text;
 
 pub use code::CodeExtractor;
 pub use markdown::MarkdownExtractor;
-pub(crate) use summary::first_real_sentence;
-pub use summary::summarize;
 pub use text::TextExtractor;
+pub(crate) use wiki_code::support::first_real_sentence;
+pub use wiki_code::support::summarize;
 
 use crate::hash::hash_bytes;
 use crate::model::Entity;

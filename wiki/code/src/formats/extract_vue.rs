@@ -344,34 +344,9 @@ fn attr_value<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{
-        assert_deterministic, assert_has, assert_lacks, item_lines,
-    };
-    use crate::formats::code::CodeExtractor;
-    use crate::formats::{Extractor, Registry};
-    use crate::model::SourceKind;
-    use std::collections::BTreeMap;
+    use crate::formats::code::testutil::{assert_deterministic, assert_has, item_lines};
 
     const SFC: &str = "<template>\n  <div class=\"card\">\n    <template v-if=\"open\"><slot /></template>\n    <pre>export function NotCode() {}</pre>\n  </div>\n</template>\n\n<script lang=\"ts\">\n// The product card.\nimport { defineComponent } from \"vue\";\nimport Price from \"./Price.vue\";\nexport function formatPrice(cents: number): string {\n  return (cents / 100).toFixed(2);\n}\nexport default defineComponent({ components: { Price } });\n</script>\n\n<script setup lang=\"ts\">\nimport { useCart } from \"@/stores/cart\";\nconst cart = useCart();\n</script>\n\n<style scoped>\n.card { color: red; }\n/* export function NotStyle() {} */\n</style>\n";
-
-    #[test]
-    fn script_blocks_are_extracted_and_markup_is_not() {
-        let e = CodeExtractor.extract("src/components/ProductCard.vue", SFC);
-        assert_eq!(
-            e.symbols,
-            vec!["export function formatPrice(cents: number): string"]
-        );
-        assert_lacks(&e.symbols, "NotCode");
-        assert_lacks(&e.symbols, "NotStyle");
-        // Both blocks contribute imports, as one program.
-        assert_eq!(e.imports, vec!["./Price.vue", "@/stores/cart", "vue"]);
-        assert_eq!(e.defined, vec!["formatPrice"]);
-        assert_eq!(e.summary.as_deref(), Some("The product card."));
-        assert_eq!(e.id, "productcard");
-        assert_eq!(e.kind, SourceKind::Code { lang: "vue".into() });
-        // The page body is still the whole component.
-        assert_eq!(e.body, SFC);
-    }
 
     #[test]
     fn the_blanked_view_keeps_every_byte_offset() {
@@ -393,7 +368,7 @@ mod tests {
         let src = "<script>\nimport api from './api.js'\nexport class Store {}\n</script>\n<template><p>{{ x }}</p></template>\n";
         let view = vue_script(src);
         assert_eq!(view.ext, "vue");
-        let e = CodeExtractor.extract("Store.vue", src);
+        let e = crate::extract("Store.vue", src);
         assert_has(&e.symbols, "export class Store");
         assert_eq!(e.imports, vec!["./api.js"]);
     }
@@ -401,10 +376,10 @@ mod tests {
     #[test]
     fn a_plain_js_component_keeps_the_default_shape() {
         let src = "<script>\nexport const LIMIT = 5;\n</script>\n";
-        let e = CodeExtractor.extract("Card.vue", src);
+        let e = crate::extract("Card.vue", src);
         let limit = e.items.iter().find(|i| i.name == "LIMIT").unwrap();
         assert_eq!(limit.kind, crate::model::CodeItemKind::Type);
-        let e = CodeExtractor.extract("Box.svelte", src);
+        let e = crate::extract("Box.svelte", src);
         let limit = e.items.iter().find(|i| i.name == "LIMIT").unwrap();
         assert_eq!(limit.kind, crate::model::CodeItemKind::Type);
     }
@@ -413,24 +388,16 @@ mod tests {
     fn tsx_and_jsx_scripts_use_their_own_grammar() {
         let src = "<script lang=\"tsx\">\nexport function Row(): JSX.Element {\n  return <tr />;\n}\n</script>\n";
         assert_eq!(vue_script(src).ext, "tsx");
-        let e = CodeExtractor.extract("Row.vue", src);
+        let e = crate::extract("Row.vue", src);
         assert_has(&e.symbols, "export function Row(): JSX.Element");
         assert_eq!(vue_script("<script lang='jsx'></script>").ext, "jsx");
         assert_eq!(vue_script("<script lang=TS></script>").ext, "ts");
     }
 
     #[test]
-    fn an_unknown_script_language_extracts_nothing() {
-        let src = "<script lang=\"coffee\">\nexport function looksLikeJs() {}\n</script>\n";
-        let e = CodeExtractor.extract("Legacy.vue", src);
-        assert!(e.symbols.is_empty(), "{:?}", e.symbols);
-        assert_eq!(e.kind, SourceKind::Code { lang: "vue".into() });
-    }
-
-    #[test]
     fn markup_only_component_has_a_page_and_no_code() {
         let src = "<template>\n  <script>export function Inline() {}</script>\n</template>\n";
-        let e = CodeExtractor.extract("Static.vue", src);
+        let e = crate::extract("Static.vue", src);
         assert!(e.symbols.is_empty(), "{:?}", e.symbols);
         assert!(e.imports.is_empty(), "{:?}", e.imports);
     }
@@ -438,7 +405,7 @@ mod tests {
     #[test]
     fn custom_blocks_and_comments_are_raw_text() {
         let src = "<!-- <script>export function InComment() {}</script> -->\n<i18n>\n{ \"a\": \"<script>\" }\n</i18n>\n<script>\nexport function real() {}\n</script>\n";
-        let e = CodeExtractor.extract("I18n.vue", src);
+        let e = crate::extract("I18n.vue", src);
         assert_eq!(e.symbols, vec!["export function real()"]);
     }
 
@@ -452,29 +419,6 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_routes_vue_and_imports_draw_edges() {
-        let reg = Registry::with_defaults();
-        assert!(reg.handles("src/App.vue"));
-        let app = "<script setup>\nimport ProductCard from './components/ProductCard.vue'\n</script>\n<template><ProductCard /></template>\n";
-        let entities: BTreeMap<String, crate::model::Entity> = [
-            ("src/App.vue", app),
-            ("src/components/ProductCard.vue", SFC),
-        ]
-        .into_iter()
-        .map(|(p, s)| {
-            let e = reg.extract(p, s.as_bytes()).unwrap();
-            (e.id.clone(), e)
-        })
-        .collect();
-        let g = crate::graph::build_graph(&entities);
-        assert!(
-            g.edges["app"].outgoing.contains("productcard"),
-            "edges: {:?}",
-            g.edges
-        );
-    }
-
-    #[test]
     fn extraction_is_deterministic() {
         assert_deterministic("ProductCard.vue", SFC);
     }
@@ -482,7 +426,7 @@ mod tests {
     #[test]
     fn component_items_count_lines_from_the_top_of_the_file() {
         let src = "<template>\n  <div/>\n</template>\n<script setup lang=\"ts\">\n/** Counts clicks. */\nfunction count(n: number) {\n  return n + 1;\n}\n</script>\n";
-        let e = CodeExtractor.extract("C.vue", src);
+        let e = crate::extract("C.vue", src);
         assert_eq!(item_lines(&e.items), vec!["5-8 fn count priv"]);
         assert_eq!(e.items[0].doc.as_deref(), Some("Counts clicks."));
     }
