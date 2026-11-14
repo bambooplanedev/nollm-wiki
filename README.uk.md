@@ -86,9 +86,8 @@ crates/kalka/src/lib.rs
 
 ## Вимоги
 
-- macOS (Apple silicon чи Intel) або Linux x86_64 для релізного бінарника. Бінарник для Linux
-  зібрано на `ubuntu-latest` від GitHub, тож на старішому дистрибутиві через glibc може знадобитися
-  збірка з коду.
+- macOS на Apple silicon (`aarch64-apple-darwin`) або Linux x86_64 (`x86_64-unknown-linux-musl`) для
+  релізного бінарника. Збірка для Linux статична й працює однаково на системах із glibc і з musl.
 - Або Rust 1.90 чи новіший, щоб зібрати з коду. Windows не перевірявся.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `kalka setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.

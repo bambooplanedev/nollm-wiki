@@ -81,8 +81,8 @@ crates/kalka/src/lib.rs
 
 ## Requirements
 
-- macOS (Apple silicon or Intel) or Linux x86_64 for the release binary. The Linux one is built on
-  GitHub's `ubuntu-latest`, so an older distribution's glibc may need a build from source.
+- macOS on Apple silicon (`aarch64-apple-darwin`) or Linux x86_64 (`x86_64-unknown-linux-musl`) for
+  the release binary. The Linux build is static and runs on glibc and musl systems alike.
 - Or Rust 1.90 or later to build from source. Windows is not tested.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `kalka setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.

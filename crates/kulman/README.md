@@ -11,12 +11,10 @@ then, build the tools from source (see the [repository README](../../README.md))
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
 `install.sh` reads `SHA256SUMS` of the latest release, downloads the `kulman` archive for this
-machine (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`), checks it
-against that file and puts the binary at `~/.kulman-home/bin/kulman`. It needs `curl`, `tar`,
-`mktemp` and `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the check.
-On Linux it also needs glibc at the standard paths (`/lib64/ld-linux-x86-64.so.2`,
-`/lib/x86_64-linux-gnu/libc.so.6` or `/lib64/libc.so.6`): the Linux build links against it. It
-writes nothing else and edits no shell profile. On any failure it exits non-zero and leaves no temp
+machine (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`; any other system gets "no build"),
+checks it against that file and puts the binary at `~/.kulman-home/bin/kulman`. It needs `curl`,
+`tar`, `mktemp` and `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the
+check. The Linux build is static and runs on glibc and musl systems alike. It writes nothing else and edits no shell profile. On any failure it exits non-zero and leaves no temp
 dir; a first install also leaves no `kulman` in `bin/` (over an installation the old one stays),
 and a home directory it created is removed again if empty. Over an
 installation (`state.json` present) it ends by saying to run `kulman update`, which brings the
