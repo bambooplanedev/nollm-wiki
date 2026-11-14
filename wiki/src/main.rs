@@ -241,6 +241,18 @@ fn no_memory_mix(memory: &[String]) {
 }
 
 fn main() -> Result<()> {
+    // Opt-in: with SENTRY_DSN unset the SDK is disabled and sends nothing.
+    let mut opts = sentry::ClientOptions::new();
+    opts.release = sentry::release_name!();
+    let _sentry = sentry::init(opts);
+    let result = run();
+    if let Err(e) = &result {
+        sentry::integrations::anyhow::capture_anyhow(e);
+    }
+    result
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Compile {
