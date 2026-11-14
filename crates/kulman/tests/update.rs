@@ -361,9 +361,19 @@ fn remove_kulman_by_name_is_usage() {
         .args(["remove", "--modules", "../x", "--yes"])
         .output()
         .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: bad name in --modules: ../x"));
+    assert_eq!(out.status.code(), Some(2));
+    assert!(stderr(&out).contains("kulman: --modules: bad name \"../x\""));
     assert_eq!(snapshot(t.path()), before);
+
+    // Spaces around a name are not part of it.
+    kulman(&home, &base)
+        .args(["remove", "--modules", " plaz", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka"]})
+    );
 }
 
 #[test]

@@ -116,10 +116,13 @@ fn main() -> ExitCode {
             modules,
             version,
             yes,
-        }) => install(modules, version.as_deref(), asks(yes)),
+        }) => module_names(modules).and_then(|m| install(m, version.as_deref(), asks(yes))),
         Some(Cmd::Update { yes }) => update(asks(yes)),
-        Some(Cmd::Remove { modules, yes }) => remove(modules, yes),
-        Some(Cmd::Setup(args)) => setup(args),
+        Some(Cmd::Remove { modules, yes }) => module_names(modules).and_then(|m| remove(m, yes)),
+        Some(Cmd::Setup(mut args)) => module_names(args.modules.take()).and_then(|m| {
+            args.modules = m;
+            setup(args)
+        }),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -128,6 +131,22 @@ fn main() -> ExitCode {
             ExitCode::from(if e.is::<Usage>() { 2 } else { 1 })
         }
     }
+}
+
+/// `--modules`, each name trimmed: a usage error for one that is not a module name, checked
+/// before any path or URL is built.
+fn module_names(names: Option<Vec<String>>) -> Result<Option<Vec<String>>> {
+    let check = |name: String| {
+        let name = name.trim();
+        if release::is_name(name) {
+            Ok(name.to_string())
+        } else {
+            Err(Usage(format!("--modules: bad name {name:?}")).into())
+        }
+    };
+    names
+        .map(|names| names.into_iter().map(check).collect())
+        .transpose()
 }
 
 /// Questions are asked only when stdin and stdout are terminals and `--yes` is absent.
@@ -178,14 +197,22 @@ fn target() -> Result<&'static str> {
     })
 }
 
+/// The usage error for a `--modules` name the release does not have.
+fn unknown_module(manifest: &Manifest, name: &str) -> anyhow::Error {
+    let known: Vec<&str> = manifest.modules.iter().map(|m| m.name.as_str()).collect();
+    let known = known.join(", ");
+    Usage(format!(
+        "--modules: unknown module {name:?} (known: {known})"
+    ))
+    .into()
+}
+
 /// `wanted`, or the manifest's defaults, plus everything they require.
 fn choose(manifest: &Manifest, wanted: Option<Vec<String>>) -> Result<BTreeSet<String>> {
-    let known: Vec<&str> = manifest.modules.iter().map(|m| m.name.as_str()).collect();
     let mut todo = match wanted {
         Some(names) => {
-            if let Some(name) = names.iter().find(|n| !known.contains(&n.as_str())) {
-                let known = known.join(", ");
-                return Err(Usage(format!("unknown module {name}; known modules: {known}")).into());
+            if let Some(name) = names.iter().find(|n| manifest.module(n).is_none()) {
+                return Err(unknown_module(manifest, name));
             }
             names
         }
@@ -198,7 +225,7 @@ fn choose(manifest: &Manifest, wanted: Option<Vec<String>>) -> Result<BTreeSet<S
     };
     let mut chosen = BTreeSet::new();
     while let Some(name) = todo.pop() {
-        let Some(module) = manifest.modules.iter().find(|m| m.name == name) else {
+        let Some(module) = manifest.module(&name) else {
             bail!("a module requires {name}, which is not in the release");
         };
         if chosen.insert(name) {
@@ -212,9 +239,6 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     let base = release_base()?;
     let home_path = store::home_path()?;
     let target = target()?;
-    for name in wanted.iter().flatten() {
-        release::check_name(name, "--modules")?;
-    }
     // Installed at V with no --version: V's manifest, so a newer release does not block adding
     // modules; that one is only announced. The lock re-checks the version.
     let installed = match version {
@@ -434,7 +458,6 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
 
 fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     for name in names.iter().flatten() {
-        release::check_name(name, "--modules")?;
         if name == "kulman" {
             let why = "kulman is not a module; kulman remove without --modules removes everything";
             return Err(Usage(why.to_string()).into());
@@ -518,7 +541,6 @@ fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
 /// in the current directory, and stops at the first failure with its exit status.
 fn setup(a: SetupArgs) -> Result<()> {
     for name in a.modules.iter().flatten() {
-        release::check_name(name, "--modules")?;
         if name == "kulman" {
             return Err(Usage("kulman is not a module".to_string()).into());
         }
@@ -530,16 +552,16 @@ fn setup(a: SetupArgs) -> Result<()> {
     let manifest = std::fs::read(home.join("manifest.json"))
         .context("cannot read manifest.json")
         .and_then(|bytes| Manifest::parse(&bytes))?;
-    if let Some(name) = a
-        .modules
-        .iter()
-        .flatten()
-        .find(|n| !state.modules.contains(n))
-    {
-        bail!("{name} is not installed; run kulman install --modules {name}");
+    let module = |name: &str| manifest.module(name);
+    for name in a.modules.iter().flatten() {
+        if module(name).is_none() {
+            return Err(unknown_module(&manifest, name));
+        }
+        if !state.modules.contains(name) {
+            bail!("{name} is not installed; run kulman install --modules {name}");
+        }
     }
     let ask = asks(a.yes);
-    let module = |name: &str| manifest.modules.iter().find(|m| m.name == name);
     let mut installed = state.modules.clone();
     // Manifest order; any the manifest lacks last.
     installed.sort_by_key(|n| {

@@ -178,9 +178,7 @@ impl State {
         let valid = |s: &State| {
             release::is_version(&s.version)
                 && s.modules.iter().enumerate().all(|(i, name)| {
-                    release::check_name(name, "state.json").is_ok()
-                        && name != "kulman"
-                        && !s.modules[..i].contains(name)
+                    release::is_name(name) && name != "kulman" && !s.modules[..i].contains(name)
                 })
         };
         match state {

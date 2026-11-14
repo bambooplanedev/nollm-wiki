@@ -54,8 +54,9 @@ created.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
-Installs kulman and the named modules (comma separated), with the modules they require. Without
-`--modules` it installs the modules the release marks as default; to leave one out, name the others.
+Installs kulman and the named modules (comma separated; spaces around a name are ignored), with
+the modules they require. Without `--modules` it installs the modules the release marks as
+default; to leave one out, name the others.
 `--version` installs that release instead of the latest. Run again with other modules, it adds them
 at the installed version, and puts back any listed binary missing from `bin/`; an installed
 `bin/kulman` is then left as it is (`kulman update` always replaces it). When a newer release
@@ -98,8 +99,8 @@ defaults to no, does nothing without a terminal unless `--yes` is given.
 
 - `0` — done, or nothing to do.
 - `1` — failed; the message says why.
-- `2` — usage error (an unknown flag, a module the release does not have, a missing `--scope`, a
-  bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
+- `2` — usage error (an unknown flag, an empty or malformed name in `--modules` or one the release
+  does not have, a missing `--scope`, a bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
 
 `kulman setup` exits with a module's own status when that module's setup fails.
 

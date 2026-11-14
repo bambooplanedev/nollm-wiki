@@ -191,7 +191,21 @@ fn setup_of_a_module_not_installed_says_how() {
         &f.setup(&["--modules", "kulman", "--scope", "repo"]),
         "kulman: kulman is not a module",
     );
+    // Not in the release either: no install hint, which would fail.
+    let out = f.setup(&["--modules", "nope", "--scope", "repo"]);
+    usage(
+        &out,
+        "kulman: --modules: unknown module \"nope\" (known: kalka, plaz)",
+    );
+    assert!(!stderr(&out).contains("install"), "{}", stderr(&out));
+    usage(
+        &f.setup(&["--modules", "plaz,", "--scope", "repo"]),
+        "kulman: --modules: bad name \"\"",
+    );
     assert_eq!(f.logged(), NONE);
+    let out = f.setup(&["--modules", " plaz ", "--scope", "repo"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(f.logged(), ["plaz setup --scope repo"]);
 }
 
 #[test]

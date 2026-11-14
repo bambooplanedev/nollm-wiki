@@ -330,13 +330,40 @@ fn install_refuses_a_path_like_name() {
     );
     let (t, base) = setup();
     let home = t.path().join("home");
-    let out = kulman(&home, &base)
-        .args(["install", "--modules", "../x"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: bad name in --modules: ../x"));
+    for (given, name) in [("../x", "../x"), ("", ""), (",", ""), ("kalka,,plaz", "")] {
+        let out = kulman(&home, &base)
+            .args(["install", "--modules", given])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{given:?}");
+        let expect = format!("kulman: --modules: bad name \"{name}\"");
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    }
     assert!(!home.exists());
+}
+
+#[test]
+fn install_modules_takes_spaces_after_commas_and_names_the_unknown() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    for name in ["kalkaa", "kulman"] {
+        let out = kulman(&home, &base)
+            .args(["install", "--modules", &format!("kalka,{name}")])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+        let expect = format!("kulman: --modules: unknown module \"{name}\" (known: kalka, plaz)");
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    }
+    assert!(!home.exists());
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka, plaz "])
+        .assert()
+        .success();
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
 }
 
 #[test]

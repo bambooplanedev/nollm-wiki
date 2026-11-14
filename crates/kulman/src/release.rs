@@ -84,15 +84,18 @@ impl Manifest {
         Ok(m)
     }
 
+    /// The module named `name`.
+    pub fn module(&self, name: &str) -> Option<&Module> {
+        self.modules.iter().find(|m| m.name == name)
+    }
+
     /// The archive of `name` (a module, or `kulman`) for `target`.
     pub fn archive(&self, name: &str, target: &str) -> Result<&Archive> {
         let archives = if name == "kulman" {
             &self.kulman.archives
         } else {
             &self
-                .modules
-                .iter()
-                .find(|m| m.name == name)
+                .module(name)
                 .ok_or_else(|| anyhow!("{name}: not in the release"))?
                 .archives
         };
@@ -119,12 +122,16 @@ pub fn version_key(v: &str) -> Vec<u64> {
 }
 
 /// A module name: `^[a-z][a-z0-9-]*$`.
-pub fn check_name(name: &str, place: &str) -> Result<()> {
-    let ok = name.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
+pub fn is_name(name: &str) -> bool {
+    name.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
         && name
             .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
-    if ok {
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+}
+
+/// `is_name`, or an error naming `place`.
+pub fn check_name(name: &str, place: &str) -> Result<()> {
+    if is_name(name) {
         Ok(())
     } else {
         bail!("bad name in {place}: {name}")
