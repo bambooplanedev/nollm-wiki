@@ -203,7 +203,7 @@ pub fn manifest(base: &str, version: Option<&str>) -> Result<(Manifest, Vec<u8>)
     };
     let mut bytes = Vec::new();
     download(&url, &mut bytes, MANIFEST_LIMIT, Some(MANIFEST_TIME))
-        .map_err(|e| anyhow!("manifest.json: download failed: {e}"))?;
+        .map_err(|e| anyhow!("manifest.json: download failed: {url}: {e}"))?;
     let m = Manifest::parse(&bytes)?;
     if let Some(v) = version {
         if m.version != v {

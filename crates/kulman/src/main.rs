@@ -215,7 +215,29 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     for name in wanted.iter().flatten() {
         release::check_name(name, "--modules")?;
     }
-    let (manifest, raw) = release::manifest(&base, version)?;
+    // Installed at V with no --version: V's manifest, so a newer release does not block adding
+    // modules; that one is only announced. The lock re-checks the version.
+    let installed = match version {
+        None => State::load(&home_path)?.map(|s| s.version),
+        Some(_) => None,
+    };
+    let (manifest, raw, newer) = match installed {
+        None => {
+            let (manifest, raw) = release::manifest(&base, version)?;
+            (manifest, raw, None)
+        }
+        Some(v) => match release::manifest(&base, None) {
+            // Not newer: used as it is (an older one is refused under the lock).
+            Ok((m, raw)) if release::version_key(&m.version) <= release::version_key(&v) => {
+                (m, raw, None)
+            }
+            latest => {
+                let newer = latest.ok().map(|(m, _)| m.version);
+                let (manifest, raw) = release::manifest(&base, Some(&v))?;
+                (manifest, raw, newer)
+            }
+        },
+    };
     let wanted = match wanted {
         None if ask => {
             let items: Vec<_> = (manifest.modules.iter())
@@ -238,12 +260,22 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     let result = place(&home, &base, &manifest, &raw, target, chosen);
     if result.is_err() {
         home.abandon();
+        return result;
     }
-    result
+    if let Some(newer) = newer {
+        println!("newer release {newer}: kulman update");
+    }
+    let bin = home.path.join("bin");
+    let on_path =
+        std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == bin));
+    if !on_path {
+        println!("add to PATH: {}", bin.display());
+    }
+    Ok(())
 }
 
-/// Under the lock: checks the installed state, stages every binary, and only when all are
-/// ready commits them.
+/// Under the lock: checks the installed state, stages every chosen module not installed and
+/// every listed binary missing from `bin/`, and only when all are ready commits them.
 fn place(
     home: &Home,
     base: &str,
@@ -268,8 +300,14 @@ fn place(
         }
         modules.extend(state.modules);
     }
+    let bin = home.path.join("bin");
+    let missing = |name: &String| !bin.join(name).is_file();
     // kulman last, so it is renamed into bin/ last.
-    let mut names: Vec<String> = chosen.difference(&modules).cloned().collect();
+    let mut names: Vec<String> = chosen
+        .union(&modules)
+        .filter(|n| missing(n))
+        .cloned()
+        .collect();
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
     modules.extend(chosen);
@@ -280,12 +318,6 @@ fn place(
     store::commit(home, &staged, raw, &state)?;
     for s in &staged {
         println!("installed {} {}", s.name, manifest.version);
-    }
-    let bin = home.path.join("bin");
-    let on_path =
-        std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == bin));
-    if !on_path {
-        println!("add to PATH: {}", bin.display());
     }
     Ok(())
 }
@@ -299,7 +331,11 @@ fn status() -> Result<()> {
     };
     println!("kulman {} in {}", state.version, home.display());
     for name in &state.modules {
-        println!("{name}");
+        if home.join("bin").join(name).is_file() {
+            println!("{name}");
+        } else {
+            println!("{name}  (missing: run kulman update)");
+        }
     }
     match release_base().and_then(|base| release::manifest(&base, None)) {
         Ok((latest, _)) => {
@@ -363,7 +399,10 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
             println!("installed {have} is newer than the latest release {latest}; nothing changed");
             return Ok(());
         }
-        std::cmp::Ordering::Equal if listed.clone().all(|n| bin.join(n).is_file()) => {
+        std::cmp::Ordering::Equal
+            if listed.clone().all(|n| bin.join(n).is_file())
+                && home.path.join("manifest.json").is_file() =>
+        {
             println!("up to date");
             return Ok(());
         }

@@ -287,7 +287,14 @@ fn install_bounds_what_it_downloads() {
                 m["padding"] = json!(" ".repeat(1 << 20));
             });
         },
-        "kulman: manifest.json: download failed: larger than 1 MiB",
+        "kulman: manifest.json: download failed: file://",
+    );
+    assert!(
+        err.lines()
+            .next()
+            .unwrap()
+            .ends_with("/manifest.json: larger than 1 MiB"),
+        "{err}"
     );
     assert_eq!(err.lines().count(), 1, "{err}");
 }
@@ -355,16 +362,80 @@ fn install_refuses_a_malformed_state() {
 }
 
 #[test]
-fn install_at_an_older_version_says_update() {
+fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
+    let (t, base) = setup();
+    let rel = t.path().join("release");
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    release(
+        &rel,
+        "0.8.0",
+        &[("kalka", b"kalka 0.8"), ("plaz", b"plaz 0.8")],
+    );
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "plaz", PLAZ);
+    assert_binary(&home, "kalka", KALKA);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+    let text = stdout(&out);
+    assert!(text.lines().any(|l| l == "installed plaz 0.7.0"), "{text}");
+    assert!(
+        text.lines()
+            .any(|l| l == "newer release 0.8.0: kulman update"),
+        "{text}"
+    );
+
+    // --version other than the installed one: today's advice.
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--version", "0.8.0"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("kulman: version 0.7.0 is installed; run kulman update"));
+    assert_eq!(snapshot(t.path()), before);
+
+    // The latest manifest unreadable: install works, and says nothing of a newer release.
+    fs::write(rel.join("latest/download/manifest.json"), "broken").unwrap();
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("newer release"), "{}", stdout(&out));
+
+    // The installed version's manifest unreadable: said, with where, and nothing changes.
+    let newer = release(&t.path().join("newer"), "0.8.0", &[("kalka", KALKA)]);
+    let before = snapshot(t.path());
+    let out = kulman(&home, &newer).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let expect =
+        format!("kulman: manifest.json: download failed: {newer}/download/v0.7.0/manifest.json: ");
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn install_puts_back_a_listed_binary_that_is_missing() {
     let (t, base) = setup();
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
-    let newer = release(&t.path().join("newer"), "0.8.0", &[("kalka", KALKA)]);
-    let before = snapshot(&home);
-    let out = kulman(&home, &newer).arg("install").output().unwrap();
-    assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: version 0.7.0 is installed; run kulman update"));
-    assert_eq!(snapshot(&home), before);
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    fs::remove_file(home.join("bin/kulman")).unwrap();
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "plaz", PLAZ);
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
 }
 
 #[test]

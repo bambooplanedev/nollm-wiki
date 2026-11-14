@@ -65,6 +65,18 @@ fn status_lists_what_is_installed() {
 }
 
 #[test]
+fn status_marks_a_listed_binary_that_is_missing() {
+    let (_t, base, home) = installed();
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    let out = kulman(&home, &base).output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        lines(&out)[1..],
+        ["kalka", "plaz  (missing: run kulman update)"]
+    );
+}
+
+#[test]
 fn status_announces_a_newer_release() {
     let (t, base, home) = installed();
     // 0.10.0 is newer than 0.7.0 only when the three parts are compared as integers.
@@ -186,6 +198,13 @@ fn update_when_current_says_up_to_date() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
+    assert_eq!(snapshot(t.path()), before);
+
+    // So is manifest.json.
+    fs::remove_file(home.join("manifest.json")).unwrap();
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_ne!(lines(&out), ["up to date"]);
     assert_eq!(snapshot(t.path()), before);
 }
 

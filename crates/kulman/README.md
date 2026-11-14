@@ -46,17 +46,20 @@ symlink or not a directory is refused. No shell profile is edited.
 
     kulman
 
-With no command: the installed version and modules, and whether a newer release exists. It only
-reads: nothing is created.
+With no command: the installed version and modules (a module whose binary is missing is marked
+`(missing: run kulman update)`), and whether a newer release exists. It only reads: nothing is
+created.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
 Installs kulman and the named modules (comma separated), with the modules they require. Without
 `--modules` it installs the modules the release marks as default; to leave one out, name the others.
 `--version` installs that release instead of the latest. Run again with other modules, it adds them
-at the installed version. If the installed version differs from the release, it changes nothing
-and exits 1: an older one gets the advice to run `kulman update`; a newer one, to run
-`kulman remove`, then `kulman install --version <X.Y.Z>`.
+at the installed version, and puts back any listed binary missing from `bin/`. When a newer release
+exists, it still installs at the installed version and says so (`newer release X.Y.Z: kulman
+update`). If the installed version differs from `--version`, or is newer than the latest release,
+it changes nothing and exits 1: an older one gets the advice to run `kulman update`; a newer one,
+to run `kulman remove`, then `kulman install --version <X.Y.Z>`.
 
     kulman update [--yes]
 
@@ -111,7 +114,8 @@ binaries are renamed into `bin/` (kulman last), then `manifest.json`, then `stat
 - Interrupted while renaming, some binaries are at the new version and `state.json` still names the
   old one. `kulman update` installs the whole release again.
 - A binary that `state.json` lists but `bin/` lacks (a `remove` interrupted, or a file deleted by
-  hand) is put back by `kulman update`; `kulman setup` says so instead of running.
+  hand) is put back by `kulman update` or `kulman install`, and a missing `manifest.json` by
+  `kulman update`; `kulman setup` says so instead of running.
 
 ## A release
 
@@ -124,7 +128,8 @@ A release holds, under `<base>/download/v<version>/`:
 - `install.sh`.
 
 `<base>/latest/download/` serves the same files of the latest release. kulman reads the manifest
-from there (or from `download/v<version>/` with `--version`) and every archive from
+from there (or from `download/v<version>/` with `--version`, and for `install` over an installed
+version the latest release is not) and every archive from
 `download/v<version>/`; `install.sh` reads `SHA256SUMS` from there.
 
 `manifest.json`:
