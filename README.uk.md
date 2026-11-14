@@ -105,7 +105,7 @@ wiki/src/lib.rs
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
     cd llm-wiki-nollm
-    cargo install --path wiki      # у ~/.cargo/bin
+    cargo install --path crates/kalka      # у ~/.cargo/bin
 
 ## Швидкий старт
 
@@ -900,7 +900,7 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 ## Розробка
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm/wiki
+    cd llm-wiki-nollm
 
     cargo test             # модульні, інтеграційні, snapshot-тести й оцінка пошуку
     cargo clippy --all-targets -- -D warnings

@@ -99,7 +99,7 @@ From source:
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
     cd llm-wiki-nollm
-    cargo install --path wiki      # into ~/.cargo/bin
+    cargo install --path crates/kalka      # into ~/.cargo/bin
 
 ## Quick start
 
@@ -894,7 +894,7 @@ Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHI
 ## Development
 
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
-    cd llm-wiki-nollm/wiki
+    cd llm-wiki-nollm
 
     cargo test             # unit, integration, snapshot and retrieval-eval tests
     cargo clippy --all-targets -- -D warnings
