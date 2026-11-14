@@ -60,8 +60,32 @@ fn status_lists_what_is_installed() {
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let first = format!("kulman 0.7.0 in {}", home.display());
-    assert_eq!(lines(&out), [first.as_str(), "kalka", "plaz"]);
+    let path = format!(
+        "PATH: {} is not on PATH (add it)",
+        home.join("bin").display()
+    );
+    assert_eq!(
+        lines(&out),
+        [first.as_str(), "kalka", "plaz", path.as_str()]
+    );
     assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn status_says_when_bin_is_not_on_path() {
+    let (_t, base, home) = installed();
+    let bin = home.join("bin");
+    let line = format!("PATH: {} is not on PATH (add it)", bin.display());
+    let out = kulman(&home, &base).output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(lines(&out)[3], line);
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let path =
+        std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own)))
+            .unwrap();
+    let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("PATH:"), "{}", stdout(&out));
 }
 
 #[test]
@@ -71,7 +95,7 @@ fn status_marks_a_listed_binary_that_is_missing() {
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
-        lines(&out)[1..],
+        lines(&out)[1..3],
         ["kalka", "plaz  (missing: run kulman update)"]
     );
 }
@@ -107,10 +131,10 @@ fn status_survives_an_unreachable_release() {
         let out = kulman(&home, base).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let text = lines(&out);
-        assert_eq!(text.len(), 4, "{text:?}");
-        assert!(text[3].starts_with(&start), "{text:?}");
-        assert!(text[3].ends_with(')'), "{text:?}");
-        assert!(!text[3].contains("download failed"), "{text:?}");
+        assert_eq!(text.len(), 5, "{text:?}");
+        assert!(text[4].starts_with(&start), "{text:?}");
+        assert!(text[4].ends_with(')'), "{text:?}");
+        assert!(!text[4].contains("download failed"), "{text:?}");
     }
     assert_eq!(snapshot(t.path()), before);
 }
@@ -299,7 +323,13 @@ fn remove_everything_leaves_foreign_files() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out),
-        ["removed kalka", "removed plaz", "removed kulman"]
+        [
+            "removed kalka",
+            "removed plaz",
+            "removed kulman",
+            "projects set up with kulman still name \"kalka\" in their agent configs: run kulman \
+             setup --remove in each first"
+        ]
     );
     let left: Vec<_> = snapshot(&home).into_keys().collect();
     assert_eq!(
@@ -311,6 +341,21 @@ fn remove_everything_leaves_foreign_files() {
         ]
     );
     assert!(t.path().join("release").exists());
+}
+
+#[test]
+fn remove_without_kalka_says_nothing_of_projects() {
+    let (_t, base, home) = installed();
+    kulman(&home, &base)
+        .args(["remove", "--modules", "kalka", "--yes"])
+        .assert()
+        .success();
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(lines(&out), ["removed plaz", "removed kulman"]);
 }
 
 #[test]

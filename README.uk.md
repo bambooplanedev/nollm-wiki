@@ -127,7 +127,8 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
 `kulman-v<version>-<target>.tar.gz` і `SHA256SUMS` зі сторінки релізу, перевірте їх, як описано вище,
 і перенесіть бінарник `kulman` з архіву в `~/.kulman-home/bin/`.
 
-Додайте `~/.kulman-home/bin` у свій `PATH`, далі:
+Додайте `~/.kulman-home/bin` у свій `PATH` (агенти запускають `kalka` за назвою; `kulman` і
+`kulman setup` кажуть, коли його там немає), далі:
 
     kulman install                     # модулі релізу за замовчуванням, у ~/.kulman-home/bin
     cd your-project
@@ -135,8 +136,10 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
     kulman update                      # згодом: усе до останнього релізу
 
 За замовчуванням усе ввімкнено; вимикайте прапорцями (`kulman install --modules kalka`,
-`kulman setup --no-memory`). `kulman remove` видаляє те, що встановив kulman (без термінала
-потрібен `--yes`). Команди, коди виходу й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
+`kulman setup --no-memory`). `kulman setup` запускає кожен вибраний модуль, навіть коли якийсь
+завершився з помилкою, і наприкінці називає ті, що не вдалися. `kulman remove` видаляє те, що
+встановив kulman (без термінала потрібен `--yes`); проєкти, налаштовані через kulman, лишають
+`kalka` у конфігах агентів, тож спершу запустіть у них `kulman setup --remove`. Команди, коди виходу й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
 
 ## Швидкий старт
 

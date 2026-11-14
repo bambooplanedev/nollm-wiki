@@ -181,6 +181,11 @@ fn ask_choose(title: &str, items: &[(&str, &str, bool)], one: bool) -> Result<Ve
     )?)
 }
 
+/// `dir` is on this process's `PATH`.
+fn on_path(dir: &Path) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == dir))
+}
+
 /// The release base, checked: a usage error when it is neither https:// nor file://.
 fn release_base() -> Result<String> {
     let base = std::env::var("KULMAN_RELEASE_URL")
@@ -291,9 +296,7 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
         println!("newer release {newer}: kulman update");
     }
     let bin = home.path.join("bin");
-    let on_path =
-        std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == bin));
-    if !on_path {
+    if !on_path(&bin) {
         println!("add to PATH: {}", bin.display());
     }
     println!("next: run \"kulman setup --scope repo\" (or local) in a project");
@@ -376,6 +379,10 @@ fn status() -> Result<()> {
         } else {
             println!("{name}  (missing: run kulman update)");
         }
+    }
+    let bin = home.join("bin");
+    if !on_path(&bin) {
+        println!("PATH: {} is not on PATH (add it)", bin.display());
     }
     // Said with the base and the first cause: the URL under the base adds nothing.
     let latest = release_base().and_then(|base| {
@@ -535,7 +542,15 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
             bail!("{name} is not installed");
         }
     }
+    // Removing everything leaves kalka's name in the agent configs of set-up projects.
+    let projects = (names.is_none() && state.modules.iter().any(|m| m == "kalka")).then_some(
+        "projects set up with kulman still name \"kalka\" in their agent configs: \
+         run kulman setup --remove in each first",
+    );
     if ask {
+        if let Some(line) = projects {
+            println!("{line}");
+        }
         let what = match &names {
             Some(names) => names.join(", "),
             None => (state.modules.iter().map(String::as_str))
@@ -555,6 +570,9 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
         store::remove_all(home, &state.modules)?;
         for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
             println!("removed {name}");
+        }
+        if let (false, Some(line)) = (ask, projects) {
+            println!("{line}");
         }
         return Ok(());
     };
@@ -680,6 +698,23 @@ fn setup(a: SetupArgs) -> Result<()> {
             Some(_) => {}
         }
     }
+    // The modules find each other (kalka its own name) on PATH: `bin/` first when it is not on
+    // it, in their environment only.
+    let modules_path = (!on_path(&bin)).then(|| {
+        let own = std::env::var_os("PATH").unwrap_or_default();
+        std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own)))
+    });
+    let modules_path =
+        (modules_path.transpose()).context("cannot put bin/ on the modules' PATH")?;
+    if modules_path.is_some() && kalka && !a.remove {
+        let bin = bin.display();
+        eprintln!("kulman: {bin} is not on PATH");
+        eprintln!(
+            "kulman: the agent configs written now start \"kalka\"; an agent started without it \
+             on PATH will not find it"
+        );
+        eprintln!("kulman: add to PATH: {bin}");
+    }
     // Names of the modules that failed, and the first failure's status.
     let mut failures: Vec<&str> = Vec::new();
     let mut first_code = None;
@@ -702,10 +737,14 @@ fn setup(a: SetupArgs) -> Result<()> {
             args.push("--remove");
         }
         let path = bin.join(name);
-        // Its own exit status; a module ended by a signal has none: 1.
         // Not asking: a module's own questions get no input either.
         let input = if ask { Stdio::inherit() } else { Stdio::null() };
-        let (how, code) = match Command::new(&path).args(&args).stdin(input).status() {
+        let mut command = Command::new(&path);
+        if let Some(p) = &modules_path {
+            command.env("PATH", p);
+        }
+        // Its own exit status; a module ended by a signal has none: 1.
+        let (how, code) = match command.args(&args).stdin(input).status() {
             Ok(status) if status.success() => continue,
             Ok(status) => match (status.code(), status.signal()) {
                 (Some(code), _) => (format!("exit {code}"), code),

@@ -122,7 +122,8 @@ The script downloads the `kulman` archive for your platform, checks it against t
 download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release page, check them as
 above, and move the `kulman` binary from the archive to `~/.kulman-home/bin/`.
 
-Add `~/.kulman-home/bin` to your `PATH`, then:
+Add `~/.kulman-home/bin` to your `PATH` (agents start `kalka` by its name; `kulman` and
+`kulman setup` say when it is missing), then:
 
     kulman install                     # the release's default modules, into ~/.kulman-home/bin
     cd your-project
@@ -130,8 +131,10 @@ Add `~/.kulman-home/bin` to your `PATH`, then:
     kulman update                      # later: everything to the latest release
 
 Everything is on by default; turn things off with flags (`kulman install --modules kalka`,
-`kulman setup --no-memory`). `kulman remove` deletes what kulman installed (without a terminal it
-needs `--yes`). Commands, exit codes and the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
+`kulman setup --no-memory`). `kulman setup` runs every chosen module even when one fails, and
+names the ones that failed at the end. `kulman remove` deletes what kulman installed (without a
+terminal it needs `--yes`); projects set up with kulman keep `kalka` in their agent configs, so run
+`kulman setup --remove` in them first. Commands, exit codes and the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
 
 ## Quick start
 

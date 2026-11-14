@@ -415,6 +415,20 @@ fn setup_with_the_real_kalka_and_plaz() {
     assert!(mcp()["mcpServers"]["kalka"].is_object(), "{}", mcp());
     setup(&["--remove"]);
     assert!(mcp()["mcpServers"].get("kalka").is_none(), "{}", mcp());
+
+    // No agent in the project and none named: the wiki and the map all the same.
+    assert!(!project.join(".cursor").exists());
+    fs::remove_dir_all(project.join(".kulman")).unwrap();
+    let out = kulman(&home, &base)
+        .current_dir(&project)
+        .env("PATH", &path)
+        .args(["setup", "--scope", "repo", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}\n{}", stdout(&out), stderr(&out));
+    assert!(project.join(".kulman/index.md").is_file());
+    assert!(project.join(".kulman/map").is_dir());
+    assert!(stderr(&out).contains("no agent set up"), "{}", stderr(&out));
 }
 
 #[test]

@@ -283,6 +283,52 @@ fn setup_memory_without_kalka_is_usage() {
     assert_eq!(f.logged(), NONE);
 }
 
+/// `PATH` with `dir` first, then the test's own.
+fn path_with(dir: &std::path::Path) -> std::ffi::OsString {
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let dirs = std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&own));
+    std::env::join_paths(dirs).unwrap()
+}
+
+#[test]
+fn setup_warns_when_bin_is_not_on_path_and_still_runs() {
+    let f = installed(LOGS, "kalka,plaz");
+    let bin = f.home.join("bin");
+    let out = f.setup(&["--scope", "repo"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let warning = [
+        format!("kulman: {} is not on PATH", bin.display()),
+        "kulman: the agent configs written now start \"kalka\"; an agent started without it on \
+         PATH will not find it"
+            .to_string(),
+        format!("kulman: add to PATH: {}", bin.display()),
+    ];
+    assert_eq!(stderr(&out).lines().collect::<Vec<_>>(), warning);
+    assert_eq!(f.logged().len(), 2);
+    // On PATH: nothing said.
+    let out = kulman(&f.home, &f.base)
+        .args(["setup", "--scope", "repo"])
+        .current_dir(f.t.path().join("project"))
+        .env("KULMAN_TEST_LOG", f.log())
+        .env("PATH", path_with(&bin))
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    assert_eq!(f.logged().len(), 4);
+}
+
+#[test]
+fn setup_gives_the_modules_bin_on_their_path() {
+    let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$KULMAN_TEST_LOG\"\n";
+    let f = installed(logs_path, "kalka");
+    let out = f.setup(&["--scope", "repo"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let own = std::env::var("PATH").unwrap();
+    let bin = f.home.join("bin");
+    assert_eq!(f.logged(), [format!("{}:{own}", bin.display())]);
+}
+
 #[test]
 fn setup_without_asking_gives_the_modules_no_input() {
     let reads: &[u8] = b"#!/bin/sh\nread -r line; echo \"read [$line]\" >> \"$KULMAN_TEST_LOG\"\n";

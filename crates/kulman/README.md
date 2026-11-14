@@ -51,7 +51,8 @@ symlink or not a directory is refused. No shell profile is edited.
     kulman
 
 With no command: the installed version and modules (a module whose binary is missing is marked
-`(missing: run kulman update)`), and whether a newer release exists. It only reads: nothing is
+`(missing: run kulman update)`), the line `PATH: <home>/bin is not on PATH (add it)` when it is
+not, and whether a newer release exists. It only reads: nothing is
 created. The release host gets 5 s to connect and 8 s in all; past that, or on any error, the
 last line says what could not be reached, and why.
 
@@ -82,7 +83,9 @@ deleted; any other file stays (with no `state.json`, nothing at all is, and a `b
 `install.sh` put there is named for you to delete). `kulman` is not a module: `--modules kulman`
 is a usage error.
 At a terminal it asks first (default: no); without one it needs `--yes`, and otherwise changes
-nothing and exits 2.
+nothing and exits 2. Removing everything while kalka is installed also says that projects set up
+with kulman still name `kalka` in their agent configs and need `kulman setup --remove` first:
+before the question at a terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
@@ -95,7 +98,10 @@ module is set up. `--scope` goes to every module; `--agent`, `--no-hook` and `--
 Before the first module runs, every chosen module's binary must be in `bin/` and executable; with
 no module installed there is nothing to set up (exit 1). The modules write into the project's
 `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that folder is kulman's home
-(`KULMAN_HOME` set to `<project>/.kulman`).
+(`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`, the modules run with it
+put first on their own `PATH` (kulman's own environment and your shell are not changed), and a
+setup of kalka first says on stderr that `bin/` is not on `PATH`, that the agent configs it writes
+start `kalka` by name, and what to add to `PATH`.
 
 ## Asking and not asking
 
