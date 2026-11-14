@@ -168,25 +168,28 @@ impl State {
     /// The state in home directory `home`, read without the lock or creating anything.
     /// `None` when nothing is installed; malformed or unreadable is an error.
     pub fn load(home: &Path) -> Result<Option<State>> {
-        let bytes = match fs::read(home.join("state.json")) {
-            Ok(b) => b,
+        let path = home.join("state.json");
+        let state = match fs::read(&path) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => bail!("cannot read state.json: {e}"),
+            read => read
+                .ok()
+                .and_then(|b| serde_json::from_slice::<State>(&b).ok()),
         };
-        let state: State = serde_json::from_slice(&bytes).context("state.json is malformed")?;
-        if !release::is_version(&state.version) {
-            bail!("state.json is malformed: bad version {:?}", state.version);
+        let valid = |s: &State| {
+            release::is_version(&s.version)
+                && s.modules.iter().enumerate().all(|(i, name)| {
+                    release::check_name(name, "state.json").is_ok()
+                        && name != "kulman"
+                        && !s.modules[..i].contains(name)
+                })
+        };
+        match state {
+            Some(state) if valid(&state) => Ok(Some(state)),
+            _ => bail!(
+                "{} is not a state file kulman wrote; fix it, or delete it and run kulman install",
+                path.display()
+            ),
         }
-        for (i, name) in state.modules.iter().enumerate() {
-            release::check_name(name, "state.json")?;
-            if name == "kulman" {
-                bail!("bad name in state.json: kulman");
-            }
-            if state.modules[..i].contains(name) {
-                bail!("state.json is malformed: {name} is listed twice");
-            }
-        }
-        Ok(Some(state))
     }
 }
 

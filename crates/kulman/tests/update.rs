@@ -384,11 +384,8 @@ fn remove_refuses_a_path_like_name_in_the_state() {
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
-        assert!(
-            stderr(&out).contains("kulman: bad name in state.json: ../../victim"),
-            "{}",
-            stderr(&out)
-        );
+        let expect = common::not_a_state(&home);
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
         assert_eq!(snapshot(t.path()), before, "{args:?}");
     }
 }
@@ -479,22 +476,23 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
 }
 
 #[test]
-fn a_state_naming_kulman_or_a_module_twice_is_malformed() {
-    for (modules, expect) in [
-        (
-            json!(["kalka", "kulman"]),
-            "kulman: bad name in state.json: kulman",
-        ),
-        (
-            json!(["kalka", "plaz", "kalka"]),
-            "kulman: state.json is malformed: kalka is listed twice",
-        ),
+fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
+    for bad in [
+        r#"{"version":"0.7.0","modules":["kalka","kulman"]}"#,
+        r#"{"version":"0.7.0","modules":["kalka","plaz","kalka"]}"#,
+        r#"{"version":"#,
     ] {
         let (t, base, home) = installed();
-        let bad = json!({"version": "0.7.0", "modules": modules});
-        fs::write(home.join("state.json"), bad.to_string()).unwrap();
+        let expect = &common::not_a_state(&home);
+        fs::write(home.join("state.json"), bad).unwrap();
         let before = snapshot(t.path());
-        for args in [&[][..], &["update"], &["remove", "--yes"]] {
+        for args in [
+            &[][..],
+            &["install"],
+            &["update"],
+            &["remove", "--yes"],
+            &["setup", "--scope", "repo"],
+        ] {
             let out = kulman(&home, &base).args(args).output().unwrap();
             assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
             assert!(stderr(&out).contains(expect), "{}", stderr(&out));

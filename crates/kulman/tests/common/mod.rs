@@ -156,6 +156,14 @@ pub fn state(home: &Path) -> Value {
     serde_json::from_slice(&fs::read(home.join("state.json")).unwrap()).unwrap()
 }
 
+/// What every command says of a `state.json` it cannot read.
+pub fn not_a_state(home: &Path) -> String {
+    format!(
+        "kulman: {} is not a state file kulman wrote; fix it, or delete it and run kulman install",
+        home.join("state.json").display()
+    )
+}
+
 pub fn assert_binary(home: &Path, name: &str, bytes: &[u8]) {
     let path = home.join("bin").join(name);
     let meta = fs::symlink_metadata(&path).unwrap();

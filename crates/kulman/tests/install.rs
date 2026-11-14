@@ -341,12 +341,9 @@ fn install_refuses_a_path_like_name() {
 
 #[test]
 fn install_refuses_a_malformed_state() {
-    for (bad, expect) in [
-        (&b"{not json"[..], "state.json"),
-        (
-            &br#"{"version":"0.7.0","modules":["../../victim"]}"#[..],
-            "kulman: bad name in state.json: ../../victim",
-        ),
+    for bad in [
+        &b"{not json"[..],
+        &br#"{"version":"0.7.0","modules":["../../victim"]}"#[..],
     ] {
         let (t, base) = setup();
         let home = t.path().join("home");
@@ -361,7 +358,8 @@ fn install_refuses_a_malformed_state() {
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-        assert!(stderr(&out).contains(expect), "{}", stderr(&out));
+        let expect = common::not_a_state(&home);
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
         assert_eq!(snapshot(t.path()), before);
     }
 }

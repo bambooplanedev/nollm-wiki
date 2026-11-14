@@ -36,7 +36,8 @@ Everything is in `~/.kulman` (`KULMAN_HOME` if set):
 
 - `bin/kulman` and `bin/<module>` for each installed module;
 - `manifest.json`, the manifest of the installed release;
-- `state.json`, the installed version and modules, written last;
+- `state.json`, the installed version and modules, written last (one kulman cannot read stops every
+  command, which names it: fix it, or delete it and run `kulman install`);
 - `.lock`, held by the running command; an install that fails where nothing is installed removes
   it again, and the directory too if it made it.
 
