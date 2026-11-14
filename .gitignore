@@ -1,3 +1,6 @@
+/target
+/crates/kalka/demo_raw/
+/crates/kalka/demo_wiki/
 .quartz-build/
 docs/superpowers/
 docs/dogfood/

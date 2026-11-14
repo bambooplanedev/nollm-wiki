@@ -1,7 +1,7 @@
 # wiki
 
 The Rust crate behind nollm-wiki: the `wiki` binary and the library it wraps. What it does, how to
-install it, the CLI and the MCP server are in the [repository README](../README.md).
+install it, the CLI and the MCP server are in the [repository README](../../README.md).
 
 ## Build
 

@@ -1,10 +1,10 @@
 [package]
 name = "wiki-code"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.89"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 description = "Code layer shared by the wiki compiler and its sibling tools: the item model, source tree walk, tree-sitter extraction, call-site index and import resolution"
-license = "MIT"
+license.workspace = true
 publish = false
 
 [dependencies]

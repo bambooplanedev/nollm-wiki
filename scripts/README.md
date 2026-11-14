@@ -107,7 +107,7 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 (`wiki lint`). See the repo root
 [`README.md`](../README.md#self-hosting).
 
-Search-quality measurement now lives in `wiki/tests/eval.rs`, which scores a
+Search-quality measurement now lives in `crates/kalka/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI
 (`.github/workflows/rust.yml`: fmt, clippy, test, the strip-chrome test, docs). See the
-Testing section of [`wiki/docs/ARCHITECTURE.md`](../wiki/docs/ARCHITECTURE.md).
+Testing section of [`crates/kalka/docs/ARCHITECTURE.md`](../crates/kalka/docs/ARCHITECTURE.md).

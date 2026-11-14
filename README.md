@@ -794,7 +794,7 @@ whitespace folded to `_`, Latin diacritics to their base letter, and Cyrillic tr
 directory (`tests/common/mod.rs` → `common`). Two names that fold to the same id — `Fetch (v2)` and
 `Fetch v2`, two files with one stem in different directories, `orderbook.h` and `orderbook.cpp` —
 are told apart by a directory segment, then a file-name discriminator, then a free id; no source
-is ever dropped for a collision ([details](wiki/docs/ARCHITECTURE.md#disambiguation-ladder)). A name
+is ever dropped for a collision ([details](crates/kalka/docs/ARCHITECTURE.md#disambiguation-ladder)). A name
 with no letter or digit left after folding becomes `page_<hash>`. An id that would be `index`,
 `llms`, `agents` or `graph` becomes `<id>_page`, since those names are the wiki's own files;
 `compile` warns.
@@ -830,7 +830,7 @@ tokens are means per run; Grep/Glob calls are totals over the runs.
 | `+ macros` | callers in macros or behind aliases | 6/6 | 4.00 | 96K | 5 |
 
 On the same project, Haiku read the line range `search` gave in 57 of 58 file reads. More, with
-the cases where agents still fall back to grep: [wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md).
+the cases where agents still fall back to grep: [crates/kalka/docs/KNOWN_GAPS.md](crates/kalka/docs/KNOWN_GAPS.md).
 
 The prompt hook and large files, 2026-10-28. These runs use two hosted models through OpenRouter
 (qwen3.8-27b and deepseek-v4.1-flash, reasoning effort low) in
@@ -888,8 +888,8 @@ prompts showed a note before, 5 after), short questions unchanged.
 - **The MCP server is query-only**, over stdio; it recompiles on file edits, not on request.
 - **The graph export is JSON only.**
 
-Measured shortfalls and agent behaviour: [wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md).
-Internals, determinism rules and how to add a language: [wiki/docs/ARCHITECTURE.md](wiki/docs/ARCHITECTURE.md).
+Measured shortfalls and agent behaviour: [crates/kalka/docs/KNOWN_GAPS.md](crates/kalka/docs/KNOWN_GAPS.md).
+Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHITECTURE.md](crates/kalka/docs/ARCHITECTURE.md).
 
 ## Development
 
@@ -901,7 +901,7 @@ Internals, determinism rules and how to add a language: [wiki/docs/ARCHITECTURE.
     cargo fmt --check
 
 `wiki` is also a library; the CLI is a thin wrapper over the same API — see
-[wiki/README.md](wiki/README.md). Pushing a `v*` tag builds the Linux and macOS binaries and attaches
+[crates/kalka/README.md](crates/kalka/README.md). Pushing a `v*` tag builds the Linux and macOS binaries and attaches
 them to a GitHub Release, with their `SHA256SUMS`.
 
 ### Self-hosting

@@ -796,7 +796,7 @@ _(add your own notes here — preserved on recompile)_
 ідентифікатор — `Fetch (v2)` і `Fetch v2`, два файли з однаковою основою в різних теках,
 `orderbook.h` і `orderbook.cpp`, — розрізняються сегментом теки, потім розрізнювачем з назви файлу,
 потім вільним ідентифікатором; жодне джерело не губиться через збіг
-([докладніше](wiki/docs/ARCHITECTURE.md#disambiguation-ladder)). Назва, у якій після згортання не
+([докладніше](crates/kalka/docs/ARCHITECTURE.md#disambiguation-ladder)). Назва, у якій після згортання не
 лишилося жодної літери чи цифри, стає `page_<hash>`. Ідентифікатор, що мав би бути `index`, `llms`,
 `agents` чи `graph`, стає `<id>_page`, бо це імена власних файлів вікі; `compile` про це попереджає.
 
@@ -832,7 +832,7 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 
 На тому самому проєкті Haiku прочитав діапазон рядків, який дав `search`, у 57 з 58 читань файлів.
 Більше, разом із випадками, коли агенти все ж повертаються до grep:
-[wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md) (англійською).
+[crates/kalka/docs/KNOWN_GAPS.md](crates/kalka/docs/KNOWN_GAPS.md) (англійською).
 
 Хук запиту і великі файли, 2026-10-28. Ці прогони — дві хмарні моделі через OpenRouter
 (qwen3.8-27b і deepseek-v4.1-flash, рівень роздумів low) у
@@ -893,8 +893,8 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
 - **MCP-сервер лише для запитів**, через stdio; перекомпільовує після правок файлів, а не на запит.
 - **Граф експортується лише в JSON.**
 
-Виміряні недоліки й поведінка агентів: [wiki/docs/KNOWN_GAPS.md](wiki/docs/KNOWN_GAPS.md).
-Внутрішня будова, правила детермінізму й як додати мову: [wiki/docs/ARCHITECTURE.md](wiki/docs/ARCHITECTURE.md).
+Виміряні недоліки й поведінка агентів: [crates/kalka/docs/KNOWN_GAPS.md](crates/kalka/docs/KNOWN_GAPS.md).
+Внутрішня будова, правила детермінізму й як додати мову: [crates/kalka/docs/ARCHITECTURE.md](crates/kalka/docs/ARCHITECTURE.md).
 Обидва документи англійською.
 
 ## Розробка
@@ -907,7 +907,7 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
     cargo fmt --check
 
 `wiki` — ще й бібліотека; CLI — тонка обгортка над тим самим API, див.
-[wiki/README.md](wiki/README.md). Пуш тегу `v*` збирає бінарники для Linux і macOS і прикріплює їх
+[crates/kalka/README.md](crates/kalka/README.md). Пуш тегу `v*` збирає бінарники для Linux і macOS і прикріплює їх
 до GitHub Release разом із `SHA256SUMS`.
 
 ### Самохостинг

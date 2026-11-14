@@ -6,11 +6,11 @@ name: Audit
 on:
   push:
     paths:
-      - wiki/Cargo.lock
+      - Cargo.lock
       - .github/workflows/audit.yml
   pull_request:
     paths:
-      - wiki/Cargo.lock
+      - Cargo.lock
   schedule:
     - cron: "0 6 * * 1"
 
@@ -27,4 +27,3 @@ jobs:
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: wiki

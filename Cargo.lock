@@ -3070,7 +3070,7 @@ dependencies = [
 
 [[package]]
 name = "wiki-code"
-version = "0.1.0"
+version = "0.6.13"
 dependencies = [
  "ignore",
  "regex",
