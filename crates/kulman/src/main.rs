@@ -265,25 +265,26 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
         bail!("nothing installed; run kulman install");
     };
     let (have, latest) = (&state.version, &manifest.version);
-    // The installed modules, plus what they require in the latest release.
-    for name in &state.modules {
-        manifest.archive(name, target)?;
-    }
-    let modules = choose(manifest, Some(state.modules.clone()))?;
     let bin = home.path.join("bin");
-    let mut names: Vec<String> = modules.iter().cloned().collect();
-    names.push("kulman".to_string());
+    let listed = state.modules.iter().map(String::as_str).chain(["kulman"]);
     match release::version_key(have).cmp(&release::version_key(latest)) {
         std::cmp::Ordering::Greater => {
             println!("installed {have} is newer than the latest release {latest}; nothing changed");
             return Ok(());
         }
-        std::cmp::Ordering::Equal if names.iter().all(|n| bin.join(n).is_file()) => {
+        std::cmp::Ordering::Equal if listed.clone().all(|n| bin.join(n).is_file()) => {
             println!("up to date");
             return Ok(());
         }
         _ => {}
     }
+    // The installed modules, plus what they require in the latest release.
+    for name in &state.modules {
+        manifest.archive(name, target)?;
+    }
+    let modules = choose(manifest, Some(state.modules.clone()))?;
+    let mut names: Vec<String> = modules.iter().cloned().collect();
+    names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
     let state = State {
         version: latest.clone(),
@@ -305,8 +306,8 @@ fn remove(names: Option<Vec<String>>) -> Result<()> {
         }
     }
     let home_path = store::home_path()?;
-    // Without state.json, a home with kulman's `.lock` is left by a remove killed before its
-    // last step: it is finished below. Anything else is not opened, so nothing is created.
+    // Without state.json, a home with a `.lock` may be left by a remove killed before its last
+    // step: only that lock is removed below. Anything else is not opened, so nothing is created.
     if !is_installed(&home_path)? && !home_path.join(".lock").try_exists()? {
         println!("nothing installed");
         return Ok(());
@@ -324,8 +325,13 @@ fn remove(names: Option<Vec<String>>) -> Result<()> {
 /// first file is deleted.
 fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
     let Some(mut state) = State::load(&home.path)? else {
-        store::remove_all(home, &[])?;
+        // No record of owning anything: no binary and no manifest is deleted.
+        let holds = store::remove_lock(home)?;
         println!("nothing installed");
+        if holds {
+            let home = home.path.display();
+            println!("{home} holds files kulman has no record of; left as they are");
+        }
         return Ok(());
     };
     let Some(mut names) = names else {

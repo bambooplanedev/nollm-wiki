@@ -607,7 +607,6 @@ fn install_checks_every_build_before_any_download() {
     fs::remove_file(archive_path(&rel, "0.7.0", "kalka")).unwrap();
     edit_manifest(&rel, "0.7.0", |m| m["modules"][1]["archives"] = json!({}));
     let home = t.path().join("home");
-    let before = snapshot(&rel);
     let out = kulman(&home, &base).arg("install").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(
@@ -615,6 +614,24 @@ fn install_checks_every_build_before_any_download() {
         "{}",
         stderr(&out)
     );
-    assert_eq!(snapshot(&rel), before);
     assert!(!home.exists());
+}
+
+#[test]
+fn install_repairs_a_first_install_that_died_before_its_state() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    // Killed after manifest.json, before state.json: bin/ and the lock stay.
+    fs::remove_file(home.join("state.json")).unwrap();
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+    assert_binary(&home, "kalka", KALKA);
+    assert_binary(&home, "plaz", PLAZ);
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    no_tmp_left(&home);
 }

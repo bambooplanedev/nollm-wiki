@@ -493,3 +493,57 @@ fn update_adds_what_an_installed_module_now_requires() {
     assert_binary(&home, "kalka", KALKA_8);
     assert_binary(&home, "plaz", PLAZ_8);
 }
+
+#[test]
+fn remove_on_a_home_with_no_state_deletes_no_file() {
+    for args in [&["remove"][..], &["remove", "--modules", "kalka"]] {
+        let (t, base, home) = installed();
+        // Not kulman's by any record: no state.json.
+        fs::remove_file(home.join("state.json")).unwrap();
+        fs::remove_file(home.join("bin/kalka")).unwrap();
+        fs::remove_file(home.join("bin/plaz")).unwrap();
+        fs::write(home.join("notes.txt"), "mine").unwrap();
+        let mut before = snapshot(&home);
+        before.remove(Path::new(".lock"));
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let second = format!(
+            "{} holds files kulman has no record of; left as they are",
+            home.display()
+        );
+        assert_eq!(lines(&out), ["nothing installed", second.as_str()]);
+        assert_eq!(snapshot(&home), before, "{args:?}");
+        assert!(t.path().join("release").exists());
+    }
+}
+
+#[test]
+fn update_refuses_a_directory_in_place_of_a_binary() {
+    let (t, base, home) = installed();
+    publish_0_8(t.path());
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    fs::create_dir(home.join("bin/plaz")).unwrap();
+    fs::write(home.join("bin/plaz/inner"), "x").unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn update_when_current_does_not_need_every_module_in_the_release() {
+    let (t, base, home) = installed();
+    common::edit_manifest(&t.path().join("release"), "0.7.0", |m| {
+        m["modules"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|x| x["name"] != "plaz");
+    });
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(lines(&out), ["up to date"]);
+    assert_eq!(snapshot(t.path()), before);
+}

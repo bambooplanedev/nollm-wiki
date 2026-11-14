@@ -100,10 +100,14 @@ impl Home {
 
     /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run.
     pub fn clean_tmp(&self) -> Result<()> {
-        for entry in fs::read_dir(&self.path)? {
-            let entry = entry?;
-            if entry.file_name().to_string_lossy().starts_with(".tmp-") {
-                remove_any(&entry.path())?;
+        let named = |p: &Path| p.display().to_string();
+        for entry in fs::read_dir(&self.path).with_context(|| named(&self.path))? {
+            let path = entry.with_context(|| named(&self.path))?.path();
+            if path
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(".tmp-"))
+            {
+                remove_any(&path).with_context(|| named(&path))?;
             }
         }
         Ok(())
@@ -199,7 +203,7 @@ pub fn stage(
         manifest.archive(name, target)?;
     }
     let tmp = home.tmp();
-    fs::create_dir(&tmp)?;
+    fs::create_dir(&tmp).with_context(|| tmp.display().to_string())?;
     let mut staged = Vec::new();
     for name in names {
         let archive = manifest.archive(name, target)?;
@@ -210,7 +214,7 @@ pub fn stage(
             bail!("{name}: checksum mismatch");
         }
         let into = tmp.join(format!("{name}.unpack"));
-        fs::create_dir(&into)?;
+        fs::create_dir(&into).with_context(|| into.display().to_string())?;
         let path = release::unpack_one(&file, name, &into)?;
         staged.push(Staged {
             name: name.clone(),
@@ -225,9 +229,11 @@ pub fn stage(
 /// temp file. Removing the temp dir afterwards is best effort: the install is done.
 pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) -> Result<()> {
     let bin = home.path.join("bin");
-    fs::create_dir_all(&bin)?;
-    for s in staged {
-        fs::rename(&s.path, bin.join(&s.name))?;
+    let dests: Vec<PathBuf> = staged.iter().map(|s| bin.join(&s.name)).collect();
+    check_files(&dests)?;
+    fs::create_dir_all(&bin).with_context(|| bin.display().to_string())?;
+    for (s, dest) in staged.iter().zip(&dests) {
+        fs::rename(&s.path, dest).with_context(|| dest.display().to_string())?;
     }
     write(home, "manifest.json", manifest)?;
     write(home, "state.json", &serde_json::to_vec(state)?)?;
@@ -237,13 +243,22 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
 
 /// Replaces `<home>/<name>` by `bytes` through a synced file in the temp dir.
 fn write(home: &Home, name: &str, bytes: &[u8]) -> Result<()> {
-    fs::create_dir_all(home.tmp())?;
     let tmp = home.tmp().join(name);
-    let mut file = File::create(&tmp)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    fs::rename(&tmp, home.path.join(name))?;
-    Ok(())
+    let dest = home.path.join(name);
+    fs::create_dir_all(home.tmp())
+        .and_then(|()| File::create(&tmp))
+        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .with_context(|| tmp.display().to_string())?;
+    fs::rename(&tmp, &dest).with_context(|| dest.display().to_string())
+}
+
+/// With no state, kulman has no record of owning anything: deletes `.lock` only, then `bin/`
+/// and home if empty. Returns whether home still holds anything.
+pub fn remove_lock(home: &Home) -> Result<bool> {
+    delete(&home.path.join(".lock"))?;
+    let _ = fs::remove_dir(home.path.join("bin"));
+    let _ = fs::remove_dir(&home.path);
+    Ok(fs::read_dir(&home.path).is_ok_and(|mut d| d.next().is_some()))
 }
 
 /// Deletes `bin/<name>` for each of `names`, then writes `state` (a crash in between leaves a

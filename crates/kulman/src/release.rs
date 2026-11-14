@@ -215,11 +215,12 @@ pub fn fetch_to(base: &str, version: &str, file: &str, dest: &Path) -> Result<()
 
 /// The SHA-256 of a file, as lowercase hex.
 pub fn sha256(path: &Path) -> Result<String> {
-    let mut file = File::open(path)?;
+    let named = || path.display().to_string();
+    let mut file = File::open(path).with_context(named)?;
     let mut hasher = Sha256::new();
     let mut buf = vec![0; 64 * 1024];
     loop {
-        let n = file.read(&mut buf)?;
+        let n = file.read(&mut buf).with_context(named)?;
         if n == 0 {
             return Ok(hex::encode(hasher.finalize()));
         }
@@ -257,8 +258,9 @@ pub fn unpack_one(archive: &Path, name: &str, into: &Path) -> Result<PathBuf> {
     if !fs::symlink_metadata(&path).is_ok_and(|m| is_lone_file(&m)) {
         bail!("{name}: archive holds no regular file {name}");
     }
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
-    File::open(&path)?.sync_all()?;
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+        .and_then(|()| File::open(&path)?.sync_all())
+        .with_context(|| path.display().to_string())?;
     Ok(path)
 }
 
