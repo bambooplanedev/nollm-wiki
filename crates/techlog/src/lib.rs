@@ -450,8 +450,8 @@ mod tests {
     #[test]
     fn claude_slug_matches_the_cli() {
         assert_eq!(
-            claude_slug("/Users/Shared/llm-wiki(nollm)"),
-            "-Users-Shared-llm-wiki-nollm-"
+            claude_slug("/srv/shared/my-app(v2)"),
+            "-srv-shared-my-app-v2-"
         );
         assert_eq!(claude_slug("/home/u/проєкт"), "-home-u-------");
         assert_eq!(claude_slug("/srv/é"), "-srv--");

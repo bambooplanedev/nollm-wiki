@@ -194,7 +194,7 @@ per question is noise-level: treat single results as anecdotes.
   handled: `using namespace X;` (a bare call resolves by name anyway), a call
   written through an inline namespace (`fmt::v12::f()`), an alias declared in
   another file, and a namespace opened by a macro (`FMT_BEGIN_NAMESPACE`) or
-  lost to a parse error. On a private C++ project and fmt the first three cost no
+  lost to a parse error. On a C++ trading system and fmt the first three cost no
   call site; the last costs fmt about 60 `fmt::` and `detail::` calls.
 - **No calls across languages.** A Python binding calling C++, or FFI, is
   not an edge, by design.

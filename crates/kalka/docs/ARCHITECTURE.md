@@ -932,7 +932,7 @@ out): an item with `nested` set, never public, owner-less, found by
 (`same_name`) and the call graph skip it: it is no call target and owns no
 call sites (`attach_call_sites`), so calls in its body stay its enclosing
 function's. As targets, same-named helpers nested in different test
-functions cross-wired (a private C++ project, 2026-11-11: 68 edges lost, 145
+functions cross-wired (a C++ trading system, 2026-11-11: 68 edges lost, 145
 wrong); without, the graph equals the one with no nested items. An item's range climbs from its
 signature node over the contiguous leads directly above it
 (`LangSpec::item_lead`: Rust attributes and `///` lines, Doxygen comments,
