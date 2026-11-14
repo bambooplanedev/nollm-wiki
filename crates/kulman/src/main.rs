@@ -269,7 +269,7 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
 
 /// Under the lock: reads the installed state and picks the manifest, stages every chosen
 /// module not installed and every listed binary missing from `bin/`, and only when all are
-/// ready commits them. With `ask`, asks first; `false` when declined.
+/// ready commits them. With `ask`, asks first; `false` when declined or nothing was needed.
 fn place(
     home: &Home,
     base: &str,
@@ -352,6 +352,19 @@ fn place(
     }
     if kulman_too {
         names.push("kulman".to_string());
+    }
+    // Every chosen module is listed and in bin/ (so the state stays as it is): nothing to write.
+    if names.is_empty() && home.path.join("manifest.json").is_file() {
+        let chosen: Vec<_> = chosen.into_iter().collect();
+        println!(
+            "already installed: {} ({})",
+            chosen.join(", "),
+            manifest.version
+        );
+        if let Some(note) = note {
+            println!("{note}");
+        }
+        return Ok(false);
     }
     let staged = store::stage(home, base, &manifest, target, &names)?;
     modules.extend(chosen);

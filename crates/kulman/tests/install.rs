@@ -589,6 +589,27 @@ fn install_puts_back_a_listed_binary_that_is_missing() {
 }
 
 #[test]
+fn install_with_nothing_to_do_says_so_and_changes_nothing() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    let before = snapshot(t.path());
+    for (args, names) in [
+        (&["install"][..], "kalka, plaz"),
+        (&["install", "--modules", "plaz"], "plaz"),
+    ] {
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(
+            stdout(&out),
+            format!("already installed: {names} (0.7.0)\n"),
+            "{args:?}"
+        );
+        assert_eq!(snapshot(t.path()), before, "{args:?}");
+    }
+}
+
+#[test]
 fn install_at_a_newer_version_says_remove() {
     let (t, base) = setup();
     let home = t.path().join("home");
@@ -741,8 +762,10 @@ fn install_says_how_to_add_to_path() {
         "{text}"
     );
 
+    // Another home, whose bin/ is on PATH.
+    let home = t.path().join("home2");
     let path = std::env::join_paths(
-        std::iter::once(bin.clone())
+        std::iter::once(home.join("bin"))
             .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
     )
     .unwrap();
