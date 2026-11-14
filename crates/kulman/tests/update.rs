@@ -706,6 +706,31 @@ fn remove_says_when_it_waits_for_another_run() {
 }
 
 #[test]
+fn an_unreadable_state_is_named_with_its_cause_by_every_command() {
+    let (t, base, home) = installed();
+    // Read fails (EISDIR), for root too: the file is not judged, and not to be deleted.
+    let path = home.join("state.json");
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    let before = snapshot(t.path());
+    for args in [
+        &[][..],
+        &["install"],
+        &["update"],
+        &["remove", "--yes"],
+        &["setup", "--scope", "repo"],
+    ] {
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+        let err = stderr(&out);
+        let expect = format!("kulman: {}: ", path.display());
+        assert!(err.lines().next().unwrap().starts_with(&expect), "{err}");
+        assert!(!err.contains("delete it"), "{err}");
+        assert_eq!(snapshot(t.path()), before, "{args:?}");
+    }
+}
+
+#[test]
 fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);

@@ -184,14 +184,14 @@ pub struct State {
 
 impl State {
     /// The state in home directory `home`, read without the lock or creating anything.
-    /// `None` when nothing is installed; malformed or unreadable is an error.
+    /// `None` when nothing is installed; malformed or unreadable is an error, each its own.
     pub fn load(home: &Path) -> Result<Option<State>> {
         let path = home.join("state.json");
+        // Unreadable: the cause, never advice to delete a file that may be fine.
         let state = match fs::read(&path) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-            read => read
-                .ok()
-                .and_then(|b| serde_json::from_slice::<State>(&b).ok()),
+            Err(e) => bail!("{}: {e}", path.display()),
+            Ok(b) => serde_json::from_slice::<State>(&b).ok(),
         };
         let valid = |s: &State| {
             release::is_version(&s.version)
