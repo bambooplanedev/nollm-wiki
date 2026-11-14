@@ -336,6 +336,16 @@ fn place(
     }
     let bin = home.path.join("bin");
     let missing = |name: &String| !bin.join(name).is_file();
+    for name in chosen
+        .iter()
+        .filter(|n| !modules.contains(*n) && !missing(n))
+    {
+        let path = bin.join(name);
+        eprintln!(
+            "kulman: replacing {}: kulman has no record of installing it",
+            path.display()
+        );
+    }
     // Only a module the state lists counts as installed when its file is there: any other file
     // at bin/<name> is replaced by the fetched, checked release. kulman last, renamed last.
     let mut names: Vec<String> = chosen
