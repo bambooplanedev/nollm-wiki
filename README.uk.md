@@ -2,7 +2,7 @@
 
 <div align="center">
 
-# nollm-wiki
+# kalka
 
 **Карта вашого проєкту для агентів, що пишуть код: де лежить кожна функція, хто її викликає і які рядки читати. Без жодної LLM під час компіляції.**
 
@@ -13,7 +13,10 @@
 
 </div>
 
-`wiki` компілює проєкт — код, нотатки, документацію — у вікі з перехресними посиланнями в Markdown
+**kulman** — набір інструментів для агентів, що пишуть код; назву взято від креслярської дошки (кульмана) авіаційного конструкторського бюро.
+**kalka**, інструмент у цьому репозиторії, — калька: точна копія вашого проєкту, яку можуть читати агенти.
+
+`kalka` компілює проєкт — код, нотатки, документацію — у вікі з перехресними посиланнями в Markdown
 і карту символів з діапазонами рядків, а потім віддає її агентам через MCP. Агент питає `search`,
 де щось лежить, і отримує рядки `path:start-end`, питає `callers`, хто викликає функцію, і читає
 здебільшого саме ці рядки, а не шукає через grep і не відкриває файли цілком. Під час компіляції жодна модель
@@ -26,9 +29,9 @@
 рядка над ним; це не вивід команди.
 
 ```
-$ wiki callers calls.rs resolve_calls --dir .wiki
-callers of resolve_calls  wiki/src/calls.rs:197-264 — 1 functions in 1 files
-wiki/src/lib.rs
+$ kalka callers calls.rs resolve_calls --dir .kulman
+callers of resolve_calls  crates/kalka/src/calls.rs:197-264 — 1 functions in 1 files
+crates/kalka/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
   └ рядки функції             └ рядок виклику
 ```
@@ -39,7 +42,7 @@ wiki/src/lib.rs
 - [Вимоги](#вимоги)
 - [Встановлення](#встановлення)
 - [Швидкий старт](#швидкий-старт)
-- [Використання](#використання) — [агенти](#агенти): [`wiki setup`](#wiki-setup) ·
+- [Використання](#використання) — [агенти](#агенти): [`kalka setup`](#kalka-setup) ·
   [Cursor](#cursor) · [Codex](#codex) · [інші](#інші-mcp-клієнти) — [MCP-сервер](#mcp-сервер) ·
   [памʼять агента](#памʼять-агента) · [CLI](#cli)
 - [Що створюється](#що-створюється) — [сторінка](#сторінка) · [файли](#файли) ·
@@ -61,11 +64,11 @@ wiki/src/lib.rs
 - **Виклики в обидва боки.** `callers` показує функції, які викликають функцію, з рядками кожного
   виклику; `neighbors --symbol` (CLI; MCP з `--tools`) — усе, що функція
   викликає, рівень за рівнем.
-- **MCP-сервер.** `wiki serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
+- **MCP-сервер.** `kalka serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
   `search`, `page` і `callers` (`neighbors` і `lint` з `--tools`) у Claude Code, pi, Cursor, Codex
   чи будь-який MCP-клієнт.
-  Кілька серверів на одному `.wiki` — це нормально: один компілює, решта віддають те, що він записав.
-- **Налаштування однією командою.** `wiki setup` встановлює сервер і те, що каже агентові ним
+  Кілька серверів на одному `.kulman` — це нормально: один компілює, решта віддають те, що він записав.
+- **Налаштування однією командою.** `kalka setup` встановлює сервер і те, що каже агентові ним
   користуватися, для Claude Code, pi, Cursor і Codex, і хук, що додає до кожного запиту відповідні
   рядки коду.
 - **Памʼять агента.** Нотатки з `.agents/memory/` і з тек, у які агенти вже пишуть самі (поки що
@@ -85,18 +88,20 @@ wiki/src/lib.rs
   зібрано на `ubuntu-latest` від GitHub, тож на старішому дистрибутиві через glibc може знадобитися
   збірка з коду.
 - Або Rust 1.89 чи новіший, щоб зібрати з коду. Windows не перевірявся.
-- Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `wiki setup --scope local`
+- Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `kalka setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 
 ## Встановлення
 
 З [релізу](https://github.com/bambooplanedev/llm-wiki-nollm/releases): завантажте архів для своєї
 платформи (`aarch64-apple-darwin`, `x86_64-apple-darwin` або `x86_64-unknown-linux-gnu`) і покладіть
-бінарник `wiki` у теку, що є в `PATH`, бо агенти запускають його просто як `wiki`:
+бінарник у теку, що є в `PATH`, бо агенти запускають його за назвою:
 
     curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     tar -xzf wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
+
+v0.6.13 — останній реліз із назвою `wiki`: його бінарник і команди називаються `wiki`, а тека проєкту — `.wiki`. Реліз із бінарником `kalka` буде далі; до того збирайте з вихідного коду.
 
 Релізи після v0.6.1 також містять `SHA256SUMS`. Коли архів і цей файл лежать в одній теці, виконайте
 `sha256sum -c --ignore-missing SHA256SUMS` (на macOS `shasum -a 256 -c --ignore-missing SHA256SUMS`).
@@ -112,27 +117,27 @@ wiki/src/lib.rs
 У проєкті, в якому мають орієнтуватися агенти:
 
     cd your-project
-    wiki setup --scope local      # компілює .wiki, встановлює MCP-сервер, хук запиту і (для pi) скіл
+    kalka setup --scope local      # компілює .kulman, встановлює MCP-сервер, хук запиту і (для pi) скіл
 
-Далі запустіть у цій теці Claude Code або pi: інструменти `wiki` вже там, а сервер тримає `.wiki/`
+Далі запустіть у цій теці Claude Code або pi: інструменти `kalka` вже там, а сервер тримає `.kulman/`
 в актуальному стані після ваших правок. `--scope repo` натомість пише закомічені файли для всієї
-команди, а `wiki setup --remove` з тим самим `--scope` це скасовує. Cursor і Codex:
-`wiki setup --agent cursor,codex`; інші клієнти — див. [Агенти](#агенти).
+команди, а `kalka setup --remove` з тим самим `--scope` це скасовує. Cursor і Codex:
+`kalka setup --agent cursor,codex`; інші клієнти — див. [Агенти](#агенти).
 
 Щоб спробувати сам компілятор на згенерованому корпусі:
 
-    wiki generate demo_raw --files 12 --seed 42
-    wiki compile demo_raw demo_wiki
-    wiki search gradient --dir demo_wiki --limit 2
-    wiki neighbors gradient_descent --max-tokens 800 --dir demo_wiki
+    kalka generate demo_raw --files 12 --seed 42
+    kalka compile demo_raw demo_wiki
+    kalka search gradient --dir demo_wiki --limit 2
+    kalka neighbors gradient_descent --max-tokens 800 --dir demo_wiki
 
 ```
-$ wiki compile demo_raw demo_wiki
+$ kalka compile demo_raw demo_wiki
 Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans, 0 large
                       └ сторінка, на яку ніщо не посилається
 
-$ wiki search gradient --dir demo_wiki --limit 2
+$ kalka search gradient --dir demo_wiki --limit 2
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with…
 └ id              └ шлях                └ назва — опис
     Gradient Descent is often paired with Learning Rate Schedule in prod…
@@ -144,13 +149,13 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 На коді той самий пошук називає символи з діапазонами рядків. На цьому репозиторії:
 
 ```
-$ wiki search "call edges" --dir .wiki --limit 1
-calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
+$ kalka search "call edges" --dir .kulman --limit 1
+calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ шлях             └ назва — опис
-  wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  crates/kalka/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ шлях:рядки               └ імʼя         └ сигнатура                                        └ документація
-  wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
+  crates/kalka/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  crates/kalka/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Використання
@@ -162,7 +167,7 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 для файлів. `callers` відповідає на «що зламається, якщо це змінити». Отримавши план,
 специфікацію чи журнал, агент передає їхні шляхи в параметр `docs`
 інструмента `search` і отримує діапазон рядків кроку за його міткою (`T5k`) або словами назви
-(`wiki search T5k --docs plan.md` у командному рядку). Кожен шлях друкується один раз, далі
+(`kalka search T5k --docs plan.md` у командному рядку). Кожен шлях друкується один раз, далі
 `  start-end  label` на збіг; `load-profile` і `load profile` збігаються однаково, але після точних
 збігів. Якщо `limit` відсікає мітку, що повторюється в одному документі з тим самим початком
 (`N11: …` у журналі), видно і її перший, і останній запис. План, специфікацію й журнал варто
@@ -176,53 +181,53 @@ calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by na
 починаються з ID на початку запиту (`11.4`, `T3a`), інакше мітки з усіма словами запиту, крім службових, у будь-якому порядку; перший
 рядок називає цей запасний пошук. Порожня відповідь каже, що мітки не знайдено, і радить інші слова або grep.
 
-| агент | що записує `wiki setup` | що каже йому користуватися вікі |
+| агент | що записує `kalka setup` | що каже йому користуватися вікі |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local) | інструкції сервера; інструменти завантажуються одразу |
-| pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл (інструкцій сервера pi не показує) |
+| pi | `.pi/mcp.json`, скіл `kalka-navigation` | скіл (інструкцій сервера pi не показує) |
 | Cursor | `.cursor/mcp.json` | описи інструментів (у наших прогонах їх вистачило) |
 | Codex | `codex mcp add` (глобально), [правила навігації](#правила-навігації) в `AGENTS.md` | `AGENTS.md` |
 | будь-який інший MCP-клієнт | — ([вручну](#інші-mcp-клієнти)) | правила навігації в його файлі інструкцій |
 
-#### `wiki setup`
+#### `kalka setup`
 
-`wiki setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
+`kalka setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
 
-Команда компілює `.` у `.wiki`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
-каже кожному агентові ним користуватися. pi отримує скіл `wiki-navigation` (як шукати код і правила
+Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`kalka serve --source .`) і те, що
+каже кожному агентові ним користуватися. pi отримує скіл `kalka-navigation` (як шукати код і правила
 памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він показує й так,
 а сервер позначає свої інструменти для завантаження одразу, а не через `ToolSearch`; власну памʼять
 Claude Code вікі читає сама. Codex не читає ні того, ні того, тож отримує правила
-навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. Агенти визначаються автоматично
+навігації в `AGENTS.md`, між маркерами `<!-- kalka:navigation -->`. Агенти визначаються автоматично
 (`.claude/`, `CLAUDE.md` чи `claude` у `PATH`; `.pi/` чи `pi` у `PATH`; тека `.cursor/`), якщо
 `--agent` їх не називає. Codex налаштовується лише тоді, коли його названо: його MCP-конфіг
 глобальний.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,
-  `.agents/skills/wiki-navigation/SKILL.md` і `.wiki/` у `.gitignore`.
+  `.agents/skills/kalka-navigation/SKILL.md` і `.kulman/` у `.gitignore`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
-  `claude mcp add-json wiki … --scope local`, інші файли записуються, а ті, що setup створив,
+  `claude mcp add-json kalka … --scope local`, інші файли записуються, а ті, що setup створив,
   вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`. Файл, який git уже відстежує, пропускається; для нього беріть
   `--scope repo`.
 - Обидва варіанти створюють `.agents/memory/`. Коли налаштовується Claude Code, скіли
-  `.claude/skills/wiki-navigation` і `.claude/skills/wiki-memory`, записані попереднім випуском,
+  `.claude/skills/kalka-navigation` і `.claude/skills/wiki-memory`, записані попереднім випуском,
   видаляються, якщо їх не змінювали (у локальному варіанті — лише якщо git їх не відстежує).
-- Обидва варіанти додають сервер для Codex командою `codex mcp add wiki -- wiki serve --source .`,
+- Обидва варіанти додають сервер для Codex командою `codex mcp add kalka -- kalka serve --source .`,
   яка пише в `~/.codex/config.toml`: MCP-конфігу на рівні проєкту Codex не має, а сервер запускає в
   теці, де запущений сам, тож один запис працює для всіх проєктів.
 - Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою.
 - Хук запиту додає рядки коду з вікі до кожного запиту, перш ніж його побачить модель. Claude
-  Code отримує запис `UserPromptSubmit` (`wiki hint --claude-hook`) у `.claude/settings.json`
-  (`settings.local.json` з `--scope local`); pi — `.pi/extensions/wiki-hint/index.ts`. Хук мовчить,
+  Code отримує запис `UserPromptSubmit` (`kalka hint --claude-hook`) у `.claude/settings.json`
+  (`settings.local.json` з `--scope local`); pi — `.pi/extensions/kalka-hint/index.ts`. Хук мовчить,
   коли вікі немає, її не прочитати або нічого не збіглося, і ніколи не блокує запит. `--no-hook` його
   не ставить; хук, поставлений раніше, лишається до `--remove`. До 0.4 включно хук ставився лише
   з `--hook`, якого більше немає: повторний setup після оновлення додає хук (з `--scope repo` — у
   закомічений `.claude/settings.json`), якщо не передати `--no-hook`.
 - `--remove` видаляє рівно те, що записав setup, разом із хуками, а сервер Codex — лише якщо це
-  той, що додав setup. Рядки в ignore-файлах, `.wiki/` і нотатки памʼяті лишаються.
+  той, що додав setup. Рядки в ignore-файлах, `.kulman/` і нотатки памʼяті лишаються.
 
 У проєкті з `CLAUDE.md` і без `AGENTS.md` `--agent codex` додає сервер Codex, але пропускає правила
 навігації (код виходу 1) і не створює `AGENTS.md`: коли є обидва файли, pi читає лише `AGENTS.md`,
@@ -233,18 +238,18 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 це змінює спільні файли команди: запускайте setup з `--scope repo`, бо локальний варіант пропускає
 відстежуваний `AGENTS.md`.
 
-Кожен агент запускає сервер просто як `wiki`, тож `wiki` має бути в `PATH`; setup попереджає, якщо
+Кожен агент запускає сервер просто як `kalka`, тож `kalka` має бути в `PATH`; setup попереджає, якщо
 його там немає. Запускати двічі безпечно. Запис, файл чи блок на тому самому місці з іншим вмістом
 лишається як є, і setup про нього повідомляє, робить решту й виходить з кодом 1. JSON-конфіг, який
 редагує setup, переписується з відступом у 2 пробіли, ключі та їхній порядок зберігаються.
 
 Після setup: pi завантажує файли проєкту лише після того, як ви довірите проєкт (`/trust` або
 `--approve` у режимі print), а Cursor завантажує новий сервер лише після вашого схвалення (у
-налаштуваннях MCP або командою `cursor-agent mcp enable wiki`).
+налаштуваннях MCP або командою `cursor-agent mcp enable kalka`).
 
 #### Claude Code вручну
 
-    claude mcp add-json wiki '{"command":"wiki","args":["serve","--source","."]}' --scope local
+    claude mcp add-json kalka '{"command":"kalka","args":["serve","--source","."]}' --scope local
 
 або запис `mcpServers` з розділу [MCP-сервер](#mcp-сервер) у `.mcp.json` проєкту. Claude Code
 показує інструкції сервера з кроками навігації, тож для пошуку коду скіл не потрібен; вікі читає
@@ -252,7 +257,7 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 
 #### pi
 
-`wiki setup --agent pi` записує `.pi/mcp.json` і скіл `wiki-navigation`; pi завантажує і те, і те
+`kalka setup --agent pi` записує `.pi/mcp.json` і скіл `kalka-navigation`; pi завантажує і те, і те
 після `/trust` (`--approve` з `pi -p`). Без скілу pi не обійдеться: інструкцій MCP-сервера для
 серверів `direct` він не показує, тож про вікі знає лише з описів інструментів і скілу. Без нього в
 наших прогонах модель шукала через grep, а коли встановлене користувачем розширення змушувало pi
@@ -262,19 +267,19 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 Вручну — `.pi/mcp.json` у проєкті:
 
 ```json
-{ "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
+{ "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-і [правила навігації](#правила-навігації) в `.agents/skills/wiki-navigation/SKILL.md`, під front
-matter з `name: wiki-navigation` і `description:`, що каже, коли скіл потрібен (`wiki setup` пише
+і [правила навігації](#правила-навігації) в `.agents/skills/kalka-navigation/SKILL.md`, під front
+matter з `name: kalka-navigation` і `description:`, що каже, коли скіл потрібен (`kalka setup` пише
 «Find where something is or how it works in this project's code. Use before grep, find or reading
 whole files, whenever the task needs a function, type, handler or module location.»); за ними pi
 скіл і знаходить.
 
 Залиште лише сервер проєкту: якщо в `~/.pi/agent/mcp.json` теж є сервер вікі, під будь-якою назвою,
 видаліть його. З обома модель бачить кожен інструмент вікі двічі під двома назвами (pi називає їх
-за сервером: `mcp__wiki__search` для цього), а скіл, який пише `wiki setup`, називає лише
-`mcp__wiki__*`. Щоб перевірити, не даючи pi змінювати файли:
+за сервером: `mcp__kalka__search` для цього), а скіл, який пише `kalka setup`, називає лише
+`mcp__kalka__*`. Щоб перевірити, не даючи pi змінювати файли:
 `pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
 
 Виміряно по одному разу на питання з Mellum2.1 12B-A2.5B на llama-server, на трьох питаннях про
@@ -289,7 +294,7 @@ whole files, whenever the task needs a function, type, handler or module locatio
 `.cursor/mcp.json` у проєкті (або `~/.cursor/mcp.json` для всіх проєктів) приймає той самий запис:
 
 ```json
-{ "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."] } } }
+{ "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
 Cursor запускає сервер у теці проєкту, тож `--source .` працює. Новий сервер вимкнений, доки ви
@@ -303,11 +308,11 @@ Cursor запускає сервер у теці проєкту, тож `--sourc
 
 #### Codex
 
-Вручну `codex mcp add wiki -- wiki serve --source .` записує таке в `~/.codex/config.toml`:
+Вручну `codex mcp add kalka -- kalka serve --source .` записує таке в `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.wiki]
-command = "wiki"
+[mcp_servers.kalka]
+command = "kalka"
 args = ["serve", "--source", "."]
 ```
 
@@ -325,7 +330,7 @@ args = ["serve", "--source", "."]
 
 #### Правила навігації
 
-Те, що `wiki setup` кладе в `AGENTS.md` для Codex, — для будь-якого агента, якому вони потрібні у
+Те, що `kalka setup` кладе в `AGENTS.md` для Codex, — для будь-якого агента, якому вони потрібні у
 файлі інструкцій. Англійською, бо їх читає агент:
 
 ```
@@ -347,13 +352,13 @@ args = ["serve", "--source", "."]
 
 ### MCP-сервер
 
-`wiki serve` віддає скомпільовану вікі MCP-клієнтам через stdio. `wiki setup` пише цю конфігурацію
+`kalka serve` віддає скомпільовану вікі MCP-клієнтам через stdio. `kalka setup` пише цю конфігурацію
 за вас; вручну вона така:
 
 ```json
 {
   "mcpServers": {
-    "wiki": { "command": "wiki", "args": ["serve", "--source", "."] }
+    "kalka": { "command":"kalka", "args": ["serve", "--source", "."] }
   }
 }
 ```
@@ -361,10 +366,10 @@ args = ["serve", "--source", "."]
 `--source .` працює для клієнтів, що стартують у теці проєкту, як Claude Code і pi; для решти,
 наприклад Claude Desktop, вкажіть абсолютний шлях до проєкту.
 
-    wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
+    kalka serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
-- `--dir <out>` (`<project>/.wiki` з `--source`, інакше `.wiki`, якщо така тека існує, інакше
+- `--dir <out>` (`<project>/.kulman` з `--source`, інакше `.kulman`, якщо така тека існує, інакше
   `out`) — скомпільована вікі, яку віддавати.
 - `--tools <list>` (`search,page,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
@@ -392,8 +397,8 @@ CLI не обмежує, а `search` повертає 5 результатів �
 в кожному запиті. `neighbors` теж вмикається лише явно: агенти майже ніколи його не викликали (16 з
 11 056 викликів у вимірюваннях, 0 з 37 на тестовій машині), а його схема займала близько чверті
 токенів інструментів на кожному ході. `--tools search,page,neighbors,callers` повертає його. Після
-оновлення запустіть `wiki setup` ще раз, щоб закомічений блок AGENTS.md чи skill перестав його
-називати; копію, яку ви редагували вручну, `wiki setup` не змінює, тож речення про `neighbors` у ній
+оновлення запустіть `kalka setup` ще раз, щоб закомічений блок AGENTS.md чи skill перестав його
+називати; копію, яку ви редагували вручну, `kalka setup` не змінює, тож речення про `neighbors` у ній
 видаліть самі.
 
 **Ресурси:** кожна сторінка — `wiki://page/<id>` (Markdown), плюс `wiki://index` (`index.json`) і
@@ -411,22 +416,22 @@ CLI не обмежує, а `search` повертає 5 результатів �
 вікі: перед кожним запитом він звіряє відбиток `index.json` і перечитує вікі після перекомпіляції;
 якщо перечитати не вдалося, лишається попередній знімок, а спроба повторюється на наступному запиті.
 
-**Замінений бінарник.** Сервер, який бачить, що його виконуваний файл `wiki` замінили чи видалили
+**Замінений бінарник.** Сервер, який бачить, що його виконуваний файл `kalka` замінили чи видалили
 (нове встановлення, перезбірка, симлінк на іншу збірку), до кінця життя перестає компілювати й писати
 в `<dir>`, щоб старий компілятор не переписав новішу вікі. Він не завершується і далі відповідає з
 `<dir>`, перечитуючи її, як описано вище. Про це один раз сказано в stderr, а кожен результат отримує
-рядок `wiki may be stale: the wiki server is out of date, ...`: перезапустіть сесію агента або
+рядок `wiki may be stale: the kalka server is out of date, ...`: перезапустіть сесію агента або
 перепідключіть MCP-сервер.
 
 ### Памʼять агента
 
 Агенти тримають нотатки як Markdown-файли. Вікі компілює теки, у які вони пишуть, а `search` і
-`wiki hint` показують відповідні нотатки після коду. Джерела:
+`kalka hint` показують відповідні нотатки після коду. Джерела:
 
-- **`.agents/memory/`** у проєкті. `wiki setup` створює її в обох режимах; з `--scope local` ще й
-  вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `wiki compile`
+- **`.agents/memory/`** у проєкті. `kalka setup` створює її в обох режимах; з `--scope local` ще й
+  вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `kalka compile`
   включає її, якщо не передано `--memory none`.
-- **Власні теки агентів.** Їх шукають `serve --source` і `wiki setup`. Поки що це
+- **Власні теки агентів.** Їх шукають `serve --source` і `kalka setup`. Поки що це
   `<config dir>/projects/<slug>/memory/` Claude Code, де config dir — це `CLAUDE_CONFIG_DIR` або
   `~/.claude`, а `<slug>` — шлях основної робочої копії репозиторію, у якому кожну одиницю UTF-16, що
   не є ASCII-літерою чи цифрою, замінено на `-` (тож кирилична чи акцентована літера дає один `-`, а
@@ -437,10 +442,10 @@ CLI не обмежує, а `search` повертає 5 результатів �
   теки замість пошуку. У `compile` і `serve` `--memory none` вимикає всю памʼять, зокрема
   `.agents/memory` (зміна поведінки: раніше `.agents/memory` лишалася).
 
-Звичайний `wiki compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
+Звичайний `kalka compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
 агентів, тож опублікований сайт ніколи не несе приватних нотаток. Тому звичайний
-`wiki compile . .wiki` прибирає нотатки агентів з `.wiki` до наступної перекомпіляції сервером, а
-`wiki hint` читає саме `.wiki`.
+`kalka compile . .kulman` прибирає нотатки агентів з `.kulman` до наступної перекомпіляції сервером, а
+`kalka hint` читає саме `.kulman`.
 
 Міграція: `compile --memory local` більше не існує, а нотатки з теки користувача попередніх
 випусків більше не компілюються. Перенесіть їх у `.agents/memory` або передайте
@@ -451,7 +456,7 @@ CLI не обмежує, а `search` повертає 5 результатів �
 окремому рядку з відступом. Нотатка показується, коли слово запиту з чотирьох чи більше символів є в
 її назві, псевдонімах чи описі, або запит називає день її `updated`, або вона набирає щонайменше
 вдвічі більше за найкращий збіг у коді (нотатка оцінюється за сторінками проєкту разом із нотатками,
-збіг у коді — лише за сторінками проєкту). Нотатки проходять фільтри `code` і `docs`, а `wiki hint`
+збіг у коді — лише за сторінками проєкту). Нотатки проходять фільтри `code` і `docs`, а `kalka hint`
 додає один рядок памʼяті за тим самим правилом (див. [hint](#hint)). Нотатки ніколи не зсувають ранг
 сторінки коду: PageRank і медіана для `llms.txt` рахуються лише за сторінками проєкту.
 
@@ -464,7 +469,7 @@ email автора того коміту збігається з вашим `git
 його ніде не зберігають і не показують), і `, edited`, коли робоча копія відрізняється від того
 коміту. У JSON збіги мають `"memory": true`, `"origin": "local"` чи `"repo"`, `"author"`, коли він
 відомий, `"mine": true` для ваших нотаток і `"edited": true`, коли файл змінено. Походження
-визначається під час компіляції — `wiki compile` і кожної перекомпіляції `serve --source`; відповідь
+визначається під час компіляції — `kalka compile` і кожної перекомпіляції `serve --source`; відповідь
 на `search` чи хук git не викликає. Нотатки впорядковано за довірою, а серед рівних зберігається
 порядок за оцінкою: спершу локальні, далі ваші власні чи змінені закомічені, далі решта; `search`
 показує дві найдовіреніші нотатки, що пройшли відбір, а рядок памʼяті в хуку — найдовіренішу.
@@ -474,7 +479,7 @@ email автора того коміту збігається з вашим `git
 місяця; без року підходить будь-який рік). Сторінки проєкту за датою не знаходяться ніколи.
 
 Нотатка може замінити старішу через `supersedes:` у front matter (назви, псевдоніми чи
-ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка ніколи не зʼявляється після рядків коду, а `wiki hint` її не показує; список за тегом
+ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка ніколи не зʼявляється після рядків коду, а `kalka hint` її не показує; список за тегом
 дописує ` (superseded by <id>)` після її рядка (`"superseded_by"` у JSON).
 Зіставляються лише нотатки памʼяті, імʼя, що ні з чим не збіглося, ігнорується, а коли таких нотаток
 кілька, показується найменший ідентифікатор.
@@ -489,7 +494,7 @@ YAML-список; теги переводяться в нижній регіс�
 збіг (`provisioning` знаходить `brew_provision`, `сторінок` знаходить `Сторінка`): слова запиту й
 полів порівнюються за основою Snowball, англійською чи українською за письмом, нижче за точний і
 префіксний збіг у ранжуванні. Текстову сторінку понад приблизно 16 000 символів (4000 токенів)
-`wiki lint` позначає як `large` (див. [lint](#lint)).
+`kalka lint` позначає як `large` (див. [lint](#lint)).
 
 Ці правила містить скіл pi (`<memory-dir>` — це `.agents/memory`); якщо в агента скілів немає,
 скопіюйте їх у його файл інструкцій. Правила англійською, бо їх читає агент:
@@ -508,7 +513,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 ### CLI
 
-    wiki [--jobs N] <command>
+    kalka [--jobs N] <command>
 
 | команда | що робить |
 |---|---|
@@ -525,13 +530,13 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 `--jobs N` задає кількість потоків для `compile` (за замовчуванням як у Rayon, зазвичай за числом
 ядер); результат від цього не залежить. Команди-запити читають `--dir <out>` (за замовчуванням
-`.wiki`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
+`.kulman`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
 
 #### compile
 
-    wiki compile [OPTIONS] <INPUT> <OUTPUT>
+    kalka compile [OPTIONS] <INPUT> <OUTPUT>
 
-- `--incremental` — брати відбитки рендерингу з `.wiki/cache.json` і пропускати незмінені сторінки.
+- `--incremental` — брати відбитки рендерингу з `<OUTPUT>/.wiki/cache.json` і пропускати незмінені сторінки.
 - `--no-ignore` — не застосовувати правила `.gitignore`/`.ignore`/прихованих файлів під час обходу
   `<INPUT>` і обходити також теки процесу та сторонній код.
 
@@ -556,7 +561,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    kalka search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
@@ -584,7 +589,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 #### page
 
-    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
+    kalka page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` — ідентифікатор сторінки або будь-що, що однозначно називає одну сторінку: її назва (у
 будь-якому регістрі), slug назви, шлях до джерела чи унікальний кінець шляху (`query.rs`) або
@@ -594,10 +599,10 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 і `callers` розвʼязують `<ID>` так само.
 
 ```
-$ wiki page calls.rs --dir .wiki
+$ kalka page calls.rs --dir .kulman
 # Calls (calls)
   └ назва (id)
-wiki/src/calls.rs  code:rust
+crates/kalka/src/calls.rs  code:rust
 └ джерело          └ вид
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
@@ -625,7 +630,7 @@ Index:
 
 #### callers
 
-    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
+    kalka callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 Функції, що викликають функцію `<SYMBOL>` (`name` або `Owner::name`) на сторінці `<ID>`, по рядку
 `start-end  kind  Owner::name` на кожну, згруповані за файлами; рядок закінчується на
@@ -634,7 +639,7 @@ Index:
 
 #### neighbors
 
-    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
+    kalka neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 Пакет контексту для агента в межах бюджету: обхід у ширину від `<ID>` на `--depth` кроків (1).
 `--max-tokens` — жорстка межа оціненого розміру пакета (знаки/4), `--max-nodes` обмежує кількість
@@ -650,7 +655,7 @@ Index:
 
 #### lint
 
-    wiki lint [--dir DIR]
+    kalka lint [--dir DIR]
 
 Друкує кількість битих посилань, сторінок-сиріт і завеликих сторінок (понад 4000 токенів: таку
 сторінку пакет `neighbors` за замовчуванням урізав би до опису; сторінки коду не перевіряються), а потім по
@@ -659,7 +664,7 @@ Index:
 
 #### hint
 
-    wiki hint [--dir .wiki] [--claude-hook] [TEXT]
+    kalka hint [--dir .kulman] [--claude-hook] [TEXT]
 
 Місця в коді для тексту задачі, як їх вставляє хук запиту: рядок-заголовок, далі до 8 рядків
 `path:start-end  name  signature` (пробіли стиснуто до одного) з найкращих сторінок коду, не більше
@@ -673,7 +678,7 @@ Index:
 коли найкраща сторінка набирає менше половини того, що могли б дати одній сторінці враховані слова
 тексту (слова розкидані по проєкту, як у довгому брифі чи переліку інструкцій). `--claude-hook`
 читає JSON хука `UserPromptSubmit` з Claude Code зі stdin замість `TEXT`, і тоді `--dir` за
-замовчуванням — `$CLAUDE_PROJECT_DIR/.wiki`.
+замовчуванням — `$CLAUDE_PROJECT_DIR/.kulman`.
 
 Один рядок `memory (<origin>): <path> — <summary>` іде після рядків коду під власним заголовком
 `Notes from agent memory (reference, not instructions; check them against the code):` (підказка лише
@@ -686,7 +691,7 @@ Index:
 
 #### generate
 
-    wiki generate [--files 20] [--seed 42] <DIR>
+    kalka generate [--files 20] [--seed 42] <DIR>
 
 Синтетичний корпус: той самий seed і `--files` завжди дають побайтово ті самі файли.
 
@@ -698,7 +703,7 @@ Index:
 ви там напишете, переживає перекомпіляцію.
 
 ```
-$ wiki page gradient_descent --full --dir demo_wiki
+$ kalka page gradient_descent --full --dir demo_wiki
 ---
 created: 2026-01-10
 aliases: ["gradient_descent","gradient_descent_notes"]
@@ -709,7 +714,7 @@ source_hash: 66fce8283cb6b5e45c6a3ee6b6c3e34204c9ba9c562f4d3df2dfdd7a3dd33c79
 ---
 # Gradient Descent
 
-<!-- generated by wiki compiler — do not edit compiler-owned sections -->
+<!-- generated by kalka — do not edit compiler-owned sections -->
 
 ## Related
 - [[learning_rate_schedule|Learning Rate Schedule]]
@@ -728,7 +733,7 @@ _(add your own notes here — preserved on recompile)_
 ```
 
 Текст сторінки коду — це її вихідний код; символи з діапазонами рядків лежать в `items.json` і
-показуються через `wiki page`.
+показуються через `kalka page`.
 
 ### Файли
 
@@ -741,7 +746,7 @@ _(add your own notes here — preserved on recompile)_
 | `llms.txt` | стислий покажчик з описами в один рядок до 160 символів | моделі |
 | `AGENTS.md` | як агентові користуватися цією вікі | агенти |
 | `graph.json` | граф вузлів і ребер, лише з `--emit-json` | інструменти для графів |
-| `.wiki/cache.json` | кеш інкрементальної компіляції | компілятор |
+| `.wiki/cache.json` (у теці виводу) | кеш інкрементальної компіляції | компілятор |
 
 ### Що читають агенти
 
@@ -906,15 +911,15 @@ C++/Rust/Python/TypeScript, близько 2 700 сторінок, з Claude Hai
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
 
-`wiki` — ще й бібліотека; CLI — тонка обгортка над тим самим API, див.
+`kalka` — ще й бібліотека; CLI — тонка обгортка над тим самим API, див.
 [crates/kalka/README.md](crates/kalka/README.md). Пуш тегу `v*` збирає бінарники для Linux і macOS і прикріплює їх
 до GitHub Release разом із `SHA256SUMS`.
 
 ### Самохостинг
 
 Цей репозиторій компілює сам себе. `scripts/selfhost.sh` збирає релізний бінарник, компілює
-репозиторій у `.wiki/` (у gitignore, інкрементально) і запускає на ньому `wiki lint`; на битому
-посиланні скрипт завершується з помилкою. Закомічений `.mcp.json` реєструє `wiki serve --source .` як сервер `nollm-wiki`, тож
+репозиторій у `.kulman/` (у gitignore, інкрементально) і запускає на ньому `kalka lint`; на битому
+посиланні скрипт завершується з помилкою. Закомічений `.mcp.json` реєструє `kalka serve --source .` як сервер `kalka`, тож
 агент, запущений тут, може шукати в проєкті; у свіжому клоні запустіть `scripts/selfhost.sh` один
 раз, щоб бінарник зʼявився.
 

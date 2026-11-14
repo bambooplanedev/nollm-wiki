@@ -1,11 +1,11 @@
-# wiki
+# kalka
 
-The Rust crate behind nollm-wiki: the `wiki` binary and the library it wraps. What it does, how to
+The Rust crate behind kalka, the compiler of the kulman set: the `kalka` binary and the library it wraps. What it does, how to
 install it, the CLI and the MCP server are in the [repository README](../../README.md).
 
 ## Build
 
-    cargo build --release      # target/release/wiki
+    cargo build --release      # target/release/kalka
     cargo test
 
 ## Library
@@ -14,8 +14,8 @@ The CLI is a thin wrapper over the same API:
 
 ```rust
 use std::path::Path;
-use wiki::{compile, CompileOptions};
-use wiki::query::{Wiki, PackBudget};
+use kalka::{compile, CompileOptions};
+use kalka::query::{Wiki, PackBudget};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = CompileOptions { incremental: true, ..Default::default() };

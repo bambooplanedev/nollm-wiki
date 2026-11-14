@@ -2,7 +2,7 @@
 
 <div align="center">
 
-# nollm-wiki
+# kalka
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
@@ -13,7 +13,10 @@
 
 </div>
 
-`wiki` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
+**kulman** is a set of tools for coding agents, named after the drawing board of an aircraft design bureau.
+**kalka**, the tool in this repository, is a tracing: an exact copy of your project that agents can read.
+
+`kalka` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
 with line ranges, then serves it to agents over MCP. An agent asks `search` where something is and
 gets `path:start-end` lines back, asks `callers` who calls a function, and reads mostly those lines
 instead of grepping and opening whole files. No model is called at compile time: the same input
@@ -26,9 +29,9 @@ In the examples, long lines are shortened with `…`, and a `└` line names the
 above it; it is not output.
 
 ```
-$ wiki callers calls.rs resolve_calls --dir .wiki
-callers of resolve_calls  wiki/src/calls.rs:197-264 — 1 functions in 1 files
-wiki/src/lib.rs
+$ kalka callers calls.rs resolve_calls --dir .kulman
+callers of resolve_calls  crates/kalka/src/calls.rs:197-264 — 1 functions in 1 files
+crates/kalka/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
   └ the caller's lines        └ the line of the call
 ```
@@ -39,7 +42,7 @@ wiki/src/lib.rs
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Usage](#usage) — [agents](#agents): [`wiki setup`](#wiki-setup) ·
+- [Usage](#usage) — [agents](#agents): [`kalka setup`](#kalka-setup) ·
   [Cursor](#cursor) · [Codex](#codex) · [others](#other-mcp-clients) — [MCP server](#mcp-server) ·
   [agent memory](#agent-memory) · [CLI](#cli)
 - [Output](#output) — [a page](#a-page) · [artifacts](#artifacts) · [what agents read](#what-agents-read) ·
@@ -59,11 +62,11 @@ wiki/src/lib.rs
 - **Calls both ways.** `callers` lists the functions that call a function, with the lines of each
   call; `neighbors --symbol` (CLI; MCP with `--tools`) lists everything a function
   calls, level by level.
-- **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
+- **MCP server.** `kalka serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page` and `callers` (`neighbors` and `lint` with `--tools`) to Claude Code, pi, Cursor,
   Codex or any MCP client.
-  Several servers on one `.wiki` are fine: one compiles, the others serve what it wrote.
-- **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
+  Several servers on one `.kulman` are fine: one compiles, the others serve what it wrote.
+- **One-command setup.** `kalka setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
   Code's) become searchable pages, listed after the code hits, with dates, aliases and `supersedes:`.
@@ -79,18 +82,21 @@ wiki/src/lib.rs
 - macOS (Apple silicon or Intel) or Linux x86_64 for the release binary. The Linux one is built on
   GitHub's `ubuntu-latest`, so an older distribution's glibc may need a build from source.
 - Or Rust 1.89 or later to build from source. Windows is not tested.
-- For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `wiki setup --scope local`
+- For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `kalka setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
 
 ## Installation
 
 From a [release](https://github.com/bambooplanedev/llm-wiki-nollm/releases): download the tarball
 for your platform (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`) and
-put the `wiki` binary in a directory on your `PATH`, since agents start it as plain `wiki`:
+put the binary in a directory on your `PATH`, since agents start it by its name:
 
     curl -LO https://github.com/bambooplanedev/llm-wiki-nollm/releases/download/v0.6.13/wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     tar -xzf wiki-v0.6.13-aarch64-apple-darwin.tar.gz
     sudo mkdir -p /usr/local/bin && sudo mv wiki /usr/local/bin/
+
+v0.6.13 is the last release named `wiki`: its binary and commands are `wiki`, and its project folder
+is `.wiki`. A release with the `kalka` binary follows; until then, build from source.
 
 Releases after v0.6.1 also carry `SHA256SUMS`. With the tarball and that file in one folder, run
 `sha256sum -c --ignore-missing SHA256SUMS` (on macOS `shasum -a 256 -c --ignore-missing SHA256SUMS`).
@@ -106,27 +112,27 @@ From source:
 In the project you want agents to navigate:
 
     cd your-project
-    wiki setup --scope local      # compiles .wiki, installs the MCP server, the prompt hook and (for pi) a skill
+    kalka setup --scope local      # compiles .kulman, installs the MCP server, the prompt hook and (for pi) a skill
 
-Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
-`.wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex:
-`wiki setup --agent cursor,codex`; other clients: see [Agents](#agents).
+Then start Claude Code or pi in that directory: the `kalka` tools are there, and the server keeps
+`.kulman/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
+and `kalka setup --remove` with the same `--scope` undoes it. Cursor and Codex:
+`kalka setup --agent cursor,codex`; other clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
 
-    wiki generate demo_raw --files 12 --seed 42
-    wiki compile demo_raw demo_wiki
-    wiki search gradient --dir demo_wiki --limit 2
-    wiki neighbors gradient_descent --max-tokens 800 --dir demo_wiki
+    kalka generate demo_raw --files 12 --seed 42
+    kalka compile demo_raw demo_wiki
+    kalka search gradient --dir demo_wiki --limit 2
+    kalka neighbors gradient_descent --max-tokens 800 --dir demo_wiki
 
 ```
-$ wiki compile demo_raw demo_wiki
+$ kalka compile demo_raw demo_wiki
 Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans, 0 large
                       └ a page no other page links to
 
-$ wiki search gradient --dir demo_wiki --limit 2
+$ kalka search gradient --dir demo_wiki --limit 2
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with…
 └ id              └ path                └ title — summary
     Gradient Descent is often paired with Learning Rate Schedule in prod…
@@ -138,13 +144,13 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 On code the same search names symbols with line ranges. Against this repository:
 
 ```
-$ wiki search "call edges" --dir .wiki --limit 1
-calls  wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
+$ kalka search "call edges" --dir .kulman --limit 1
+calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ path             └ title — summary
-  wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  crates/kalka/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ path:lines               └ name         └ signature                                        └ doc
-  wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
+  crates/kalka/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  crates/kalka/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Usage
@@ -155,7 +161,7 @@ The workflow an agent follows is search → page → read lines: `search` finds 
 symbols, `page` lists a file's symbols with line ranges, and the agent reads just those lines with
 its own file tool. `callers` answers "what breaks if this changes". Handed a plan, spec or ledger,
 the agent passes its paths in `search`'s
-`docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
+`docs` to get a step's line range by its label (`T5k`) or title words (`kalka search T5k --docs plan.md`
 on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
 `load profile` match alike, after the exact matches. When the limit cuts a label repeated in one
 doc under the same head (`N11: …` in a ledger), both its first and last entries show. Pass the
@@ -169,52 +175,52 @@ label, and the first line names the words that open none. Otherwise labels opene
 leading ID (`11.4`, `T3a`) answer, else labels holding all its words except stop words in any order;
 a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
 
-| agent | `wiki setup` writes | what tells it to use the wiki |
+| agent | `kalka setup` writes | what tells it to use the wiki |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
-| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
+| pi | `.pi/mcp.json`, the `kalka-navigation` skill | the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `codex mcp add` (global), the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
 
-#### `wiki setup`
+#### `kalka setup`
 
-`wiki setup` makes the agents use the wiki on their own. Run it in the project root:
+`kalka setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
 
-It compiles `.` into `.wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
-each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory rules).
+It compiles `.` into `.kulman`, then installs the MCP server (`kalka serve --source .`) and what tells
+each agent to use it. pi gets the `kalka-navigation` skill (how to find code, and the memory rules).
 Claude Code gets no skill: it shows the server's instructions, which carry the same navigation
 steps, and the server marks its tools to load up front instead of behind a `ToolSearch` call; its
 own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
-in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
+in `AGENTS.md`, between `<!-- kalka:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
 names them. Codex is set up only when named: its MCP config is global.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,
-  `.agents/skills/wiki-navigation/SKILL.md`, and `.wiki/` in `.gitignore`.
+  `.agents/skills/kalka-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
-  `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
+  `claude mcp add-json kalka … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
   `--scope repo` for it.
 - Either scope creates `.agents/memory/`. When Claude Code is set up, the
-  `.claude/skills/wiki-navigation` and `.claude/skills/wiki-memory` skills an earlier release wrote
+  `.claude/skills/kalka-navigation` and `.claude/skills/wiki-memory` skills an earlier release wrote
   are removed if untouched (in local scope, only if git does not track them).
-- Either scope adds Codex's server with `codex mcp add wiki -- wiki serve --source .`, which writes
+- Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
 - Without `--scope`, setup asks on a terminal and fails without one.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
-  a `UserPromptSubmit` entry (`wiki hint --claude-hook`) in `.claude/settings.json`
-  (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/wiki-hint/index.ts`. The
+  a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
+  (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
   prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`. Up to 0.4 the hook
   was opt-in with `--hook`, which is gone: rerunning setup after an upgrade adds the hook (in a
   committed `.claude/settings.json` with `--scope repo`), unless `--no-hook` is given.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's server only when it is
-  the one setup added. Ignore lines, `.wiki/` and memory notes stay.
+  the one setup added. Ignore lines, `.kulman/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
@@ -224,18 +230,18 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-Every agent runs the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is
+Every agent runs the server as plain `kalka`, so `kalka` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
 pretty JSON with its keys and their order kept.
 
 After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
 print mode), and Cursor loads a new server only after you approve it (its MCP settings, or
-`cursor-agent mcp enable wiki`).
+`cursor-agent mcp enable kalka`).
 
 #### Claude Code by hand
 
-    claude mcp add-json wiki '{"command":"wiki","args":["serve","--source","."]}' --scope local
+    claude mcp add-json kalka '{"command":"kalka","args":["serve","--source","."]}' --scope local
 
 or the `mcpServers` entry of [MCP server](#mcp-server) in the project's `.mcp.json`. Claude Code
 shows the server's instructions, which carry the navigation steps, so no skill is needed for
@@ -243,7 +249,7 @@ finding code; the wiki reads Claude Code's own memory, see [Agent memory](#agent
 
 #### pi
 
-`wiki setup --agent pi` writes `.pi/mcp.json` and the `wiki-navigation` skill; pi loads both after
+`kalka setup --agent pi` writes `.pi/mcp.json` and the `kalka-navigation` skill; pi loads both after
 `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server instructions
 for `direct` servers, so all it learns about the wiki is the tool descriptions and the skill.
 Without it, in our runs the model grepped, and when a user-installed extension made pi load a skill
@@ -253,19 +259,19 @@ before it answered (we ran one called skill-first), it picked an unrelated one
 By hand, `.pi/mcp.json` in the project:
 
 ```json
-{ "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
+{ "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-and the [navigation rules](#navigation-rules) in `.agents/skills/wiki-navigation/SKILL.md`, under a
-front matter with `name: wiki-navigation` and a `description:` that says when to use it
-(`wiki setup` writes "Find where something is or how it works in this project's code. Use before
+and the [navigation rules](#navigation-rules) in `.agents/skills/kalka-navigation/SKILL.md`, under a
+front matter with `name: kalka-navigation` and a `description:` that says when to use it
+(`kalka setup` writes "Find where something is or how it works in this project's code. Use before
 grep, find or reading whole files, whenever the task needs a function, type, handler or module
 location."); pi finds a skill by them.
 
-Use only the project's server: if `~/.pi/agent/mcp.json` also has a wiki server, under any name,
+Use only the project's server: if `~/.pi/agent/mcp.json` also has a kalka server, under any name,
 remove it. With both, the model sees every wiki tool twice under two names (pi names them after the
-server: `mcp__wiki__search` for this one), and the skill `wiki setup` writes names only
-`mcp__wiki__*`. To try it without letting pi edit files:
+server: `mcp__kalka__search` for this one), and the skill `kalka setup` writes names only
+`mcp__kalka__*`. To try it without letting pi edit files:
 `pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
 
 Measured once per question with Mellum2.1 12B-A2.5B on llama-server, on three questions about the
@@ -280,7 +286,7 @@ grep.
 `.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` for every project) takes the same entry:
 
 ```json
-{ "mcpServers": { "wiki": { "command": "wiki", "args": ["serve", "--source", "."] } } }
+{ "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
 Cursor starts the server in the project directory, so `--source .` works. A new server stays off
@@ -294,11 +300,11 @@ extra instructions.
 
 #### Codex
 
-By hand, `codex mcp add wiki -- wiki serve --source .` writes this to `~/.codex/config.toml`:
+By hand, `codex mcp add kalka -- kalka serve --source .` writes this to `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.wiki]
-command = "wiki"
+[mcp_servers.kalka]
+command = "kalka"
 args = ["serve", "--source", "."]
 ```
 
@@ -316,7 +322,7 @@ not start in the project directory, such as Claude Desktop, needs the project's 
 
 #### Navigation rules
 
-What `wiki setup` puts in `AGENTS.md` for Codex, for any agent that needs them in its instructions
+What `kalka setup` puts in `AGENTS.md` for Codex, for any agent that needs them in its instructions
 file:
 
 ```
@@ -338,13 +344,13 @@ file:
 
 ### MCP server
 
-`wiki serve` exposes a compiled wiki to MCP clients over stdio. `wiki setup` writes this
+`kalka serve` exposes a compiled wiki to MCP clients over stdio. `kalka setup` writes this
 configuration for you; by hand it is:
 
 ```json
 {
   "mcpServers": {
-    "wiki": { "command": "wiki", "args": ["serve", "--source", "."] }
+    "kalka": { "command":"kalka", "args": ["serve", "--source", "."] }
   }
 }
 ```
@@ -352,10 +358,10 @@ configuration for you; by hand it is:
 `--source .` works for clients that start in the project directory, as Claude Code and pi do; for one
 that does not, such as Claude Desktop, give the project's absolute path.
 
-    wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
+    kalka serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — also compile this project and keep the wiki in step with it.
-- `--dir <out>` (`<project>/.wiki` with `--source`, else `.wiki` if that directory exists, else
+- `--dir <out>` (`<project>/.kulman` with `--source`, else `.kulman` if that directory exists, else
   `out`) — the compiled wiki to serve.
 - `--tools <list>` (`search,page,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
@@ -382,8 +388,8 @@ turn. `lint` is exposed only when `--tools` names it: it serves the person keepi
 each exposed tool costs schema tokens on every request. `neighbors` is opt-in too: agents almost
 never called it (16 of 11,056 calls in the measurement rig, 0 of 37 on the bench) and its schema
 took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors,callers` brings it
-back. After upgrading, rerun `wiki setup` so that a committed AGENTS.md block or skill stops naming
-it; `wiki setup` leaves a copy you edited by hand alone, so delete its `neighbors` sentence yourself.
+back. After upgrading, rerun `kalka setup` so that a committed AGENTS.md block or skill stops naming
+it; `kalka setup` leaves a copy you edited by hand alone, so delete its `neighbors` sentence yourself.
 
 **Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
 `wiki://llms.txt`.
@@ -402,22 +408,22 @@ the server only reads the wiki: it checks `index.json`'s fingerprint before each
 reloads after a recompile; a failed reload keeps the previous snapshot and is retried on the next
 request.
 
-**Replaced binary.** A server that sees its `wiki` executable replaced or removed (a new install, a
+**Replaced binary.** A server that sees its `kalka` executable replaced or removed (a new install, a
 rebuild, a retargeted symlink) stops compiling and writing to `<dir>` for the rest of its life, so
 an old compiler cannot overwrite a newer wiki. It stays up and keeps answering from `<dir>`,
 reloading it as above. It says so once on stderr, and every result gains a line
-`wiki may be stale: the wiki server is out of date, ...`: restart the agent session or reconnect the
+`wiki may be stale: the kalka server is out of date, ...`: restart the agent session or reconnect the
 MCP server.
 
 ### Agent memory
 
-Agents keep notes as Markdown files. The wiki compiles the folders they write to, and `search` and
-`wiki hint` show the matching notes after the code. The sources:
+Agents keep notes as Markdown files. kalka compiles the folders they write to, and `search` and
+`kalka hint` show the matching notes after the code. The sources:
 
-- **`.agents/memory/`** in the project. `wiki setup` creates it in both scopes; in `--scope local`
-  it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `wiki compile`
+- **`.agents/memory/`** in the project. `kalka setup` creates it in both scopes; in `--scope local`
+  it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `kalka compile`
   includes it unless `--memory none` is given.
-- **The agents' own folders.** `serve --source` and `wiki setup` look for them. Today that is Claude
+- **The agents' own folders.** `serve --source` and `kalka setup` look for them. Today that is Claude
   Code's `<config dir>/projects/<slug>/memory/`, where the config dir is `CLAUDE_CONFIG_DIR` or
   `~/.claude` and `<slug>` is the path of the repo's main checkout with every UTF-16 unit that is not
   an ASCII letter or digit written as `-` (so a Cyrillic or accented letter is one `-`, a character
@@ -428,9 +434,9 @@ Agents keep notes as Markdown files. The wiki compiles the folders they write to
   discovery. On `compile` and `serve`, `--memory none` turns off all memory, `.agents/memory`
   included (a behaviour change: it used to keep `.agents/memory`).
 
-A plain `wiki compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
-agents' folders, so a published site never carries private notes. So a plain `wiki compile . .wiki`
-drops the agents' notes from `.wiki` until the server recompiles, and `wiki hint` reads `.wiki`.
+A plain `kalka compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
+agents' folders, so a published site never carries private notes. So a plain `kalka compile . .kulman`
+drops the agents' notes from `.kulman` until the server recompiles, and `kalka hint` reads `.kulman`.
 
 Migration: `compile --memory local` is gone, and notes in the per-user folder of earlier releases
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
@@ -440,7 +446,7 @@ as `memory (<origin>): <path> — <summary>`, each followed, when its body match
 an indented line. A note is listed when a query word of four or more characters is in its title,
 aliases or summary, or the query writes the note's `updated` day, or the note scores at least twice
 the best code hit (the note is scored over project pages plus notes, the code hit over project pages
-only). Notes pass the `code` and `docs` filters, and `wiki hint` adds one memory line by the same
+only). Notes pass the `code` and `docs` filters, and `kalka hint` adds one memory line by the same
 rule (see [hint](#hint)). Notes never move a code page's rank: PageRank and the `llms.txt` median
 count project pages only.
 
@@ -453,7 +459,7 @@ commit's author email is your `git config user.email`, ignoring case
 never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
 `"memory": true`, `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your
 notes and `"edited": true` when edited. The origin is read when the wiki is compiled, by
-`wiki compile` and by each recompile of `serve --source`; answering a `search` or a hook never calls
+`kalka compile` and by each recompile of `serve --source`; answering a `search` or a hook never calls
 git. Notes are ordered by trust, the score order kept among equals: local notes first, then your own
 or edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
 the hook's one memory line is the most trusted.
@@ -463,7 +469,7 @@ A date in a query finds the memory notes dated that day: `12 жовтня`, `Oct
 without a year every year matches). Project pages are never matched by date.
 
 A note can retire an older one with `supersedes:` in its front matter (titles, aliases or ids, in
-`aliases:` syntax). The older note then never appears after the code hits and `wiki hint` never shows it; a tag listing prints ` (superseded by <id>)` after
+`aliases:` syntax). The older note then never appears after the code hits and `kalka hint` never shows it; a tag listing prints ` (superseded by <id>)` after
 its line (`"superseded_by"` in JSON). Only memory notes are matched,
 a name that matches nothing is ignored, and with several superseders the smallest id is shown.
 A committed note never retires an uncommitted one.
@@ -476,7 +482,7 @@ block list; tags are lowercased with any `#` stripped. The page's date is read f
 starting `YYYY-MM-DD`. Another grammatical form of a word still matches (`provisioning` finds
 `brew_provision`, `сторінок` finds `Сторінка`): query and field words are compared by their Snowball
 stem, English or Ukrainian by script, below an exact or prefix match in rank. A text page over about
-16,000 characters (4000 tokens) is reported by `wiki lint` as `large` (see [lint](#lint)).
+16,000 characters (4000 tokens) is reported by `kalka lint` as `large` (see [lint](#lint)).
 
 pi's skill carries these rules (`<memory-dir>` is `.agents/memory`); copy them into the agent's
 instructions file if it has no skill:
@@ -495,7 +501,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 ### CLI
 
-    wiki [--jobs N] <command>
+    kalka [--jobs N] <command>
 
 | command | what it does |
 |---|---|
@@ -511,14 +517,14 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 | `generate` | a synthetic corpus for demos and bug reports |
 
 `--jobs N` sets the worker threads of `compile` (Rayon's default, usually the number of CPUs); the
-output is the same for any value. The query commands read `--dir <out>` (by default `.wiki` if that directory exists, else `out`)
+output is the same for any value. The query commands read `--dir <out>` (by default `.kulman` if that directory exists, else `out`)
 and never recompile.
 
 #### compile
 
-    wiki compile [OPTIONS] <INPUT> <OUTPUT>
+    kalka compile [OPTIONS] <INPUT> <OUTPUT>
 
-- `--incremental` — reuse `.wiki/cache.json` render fingerprints and skip unchanged pages.
+- `--incremental` — reuse `<OUTPUT>/.wiki/cache.json` render fingerprints and skip unchanged pages.
 - `--no-ignore` — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`,
   and walk the process folders and vendored code too.
 
@@ -537,7 +543,7 @@ for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermo
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
 - `WIKI_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
-  per-stage milliseconds, files read, pages written. `wiki serve --source` and `wiki setup` honour
+  per-stage milliseconds, files read, pages written. `kalka serve --source` and `kalka setup` honour
   it too; it never changes the output.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an earlier version, or sources
@@ -546,7 +552,7 @@ clean directory.
 
 #### search
 
-    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    kalka search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
   `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
@@ -586,7 +592,7 @@ and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 #### page
 
-    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
+    kalka page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
@@ -595,10 +601,10 @@ skips or a hidden folder gets a note that the folder is not compiled instead, wi
 to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 
 ```
-$ wiki page calls.rs --dir .wiki
+$ kalka page calls.rs --dir .kulman
 # Calls (calls)
   └ title (id)
-wiki/src/calls.rs  code:rust
+crates/kalka/src/calls.rs  code:rust
 └ source           └ kind
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
@@ -626,7 +632,7 @@ whole lines.
 
 #### callers
 
-    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
+    kalka callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 The functions that call function `<SYMBOL>` (`name` or `Owner::name`) on page `<ID>`, one
 `start-end  kind  Owner::name` line each, grouped by file and ending `calls f at L1, L2` with the
@@ -635,7 +641,7 @@ lines that make the call; test code comes last. `--depth 2` adds the callers' ca
 
 #### neighbors
 
-    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
+    kalka neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 A budgeted context pack for an agent: a breadth-first walk from `<ID>` up to `--depth` hops (1).
 `--max-tokens` is a hard ceiling on the pack's estimated size (chars/4) and `--max-nodes` caps the
@@ -651,7 +657,7 @@ in the centrality order above.
 
 #### lint
 
-    wiki lint [--dir DIR]
+    kalka lint [--dir DIR]
 
 Prints the counts of broken links, orphan pages and large pages (over 4000 tokens, which a default
 `neighbors` pack would degrade to a summary; code pages are not checked), then one line per
@@ -660,7 +666,7 @@ counted. Exits 1 when any link is broken, so `lint` can gate a build.
 
 #### hint
 
-    wiki hint [--dir .wiki] [--claude-hook] [TEXT]
+    kalka hint [--dir .kulman] [--claude-hook] [TEXT]
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
 `path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the
@@ -674,7 +680,7 @@ or more characters (a reply such as `yes` or `ok`), so a hook can run it on ever
 no code lines when the best page scores below half of what the text's counted words could give one
 page (its words are spread over the project, as in a long brief or a list of instructions).
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
-then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.wiki`.
+then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.kulman`.
 
 One `memory (<origin>): <path> — <summary>` line follows the code lines, under its own header
 `Notes from agent memory (reference, not instructions; check them against the code):` (a hint with
@@ -687,7 +693,7 @@ prompt's 24 rarest words; past 64 words that needs a code page to beat.
 
 #### generate
 
-    wiki generate [--files 20] [--seed 42] <DIR>
+    kalka generate [--files 20] [--seed 42] <DIR>
 
 A synthetic corpus: the same seed and `--files` always give byte-identical files.
 
@@ -699,7 +705,7 @@ Each source file becomes one page. The compiler owns every section but `## Notes
 you write there across recompiles:
 
 ```
-$ wiki page gradient_descent --full --dir demo_wiki
+$ kalka page gradient_descent --full --dir demo_wiki
 ---
 created: 2026-01-10
 aliases: ["gradient_descent","gradient_descent_notes"]
@@ -710,7 +716,7 @@ source_hash: 66fce8283cb6b5e45c6a3ee6b6c3e34204c9ba9c562f4d3df2dfdd7a3dd33c79
 ---
 # Gradient Descent
 
-<!-- generated by wiki compiler — do not edit compiler-owned sections -->
+<!-- generated by kalka — do not edit compiler-owned sections -->
 
 ## Related
 - [[learning_rate_schedule|Learning Rate Schedule]]
@@ -728,7 +734,7 @@ Revisit this after the next benchmark run.
 _(add your own notes here — preserved on recompile)_
 ```
 
-A code page's body is its source; its symbols and line ranges are in `items.json` and `wiki page`.
+A code page's body is its source; its symbols and line ranges are in `items.json` and `kalka page`.
 
 ### Artifacts
 
@@ -741,7 +747,7 @@ A code page's body is its source; its symbols and line ranges are in `items.json
 | `llms.txt` | a compact index with one-line summaries, each cut to 160 characters | models |
 | `AGENTS.md` | how an agent should use this wiki | agents |
 | `graph.json` | node/edge graph, only with `--emit-json` | graph tools |
-| `.wiki/cache.json` | the incremental render cache | the compiler |
+| `.wiki/cache.json` (inside the output folder) | the incremental render cache | the compiler |
 
 ### What agents read
 
@@ -900,15 +906,15 @@ Internals, determinism rules and how to add a language: [crates/kalka/docs/ARCHI
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
 
-`wiki` is also a library; the CLI is a thin wrapper over the same API — see
+`kalka` is also a library; the CLI is a thin wrapper over the same API — see
 [crates/kalka/README.md](crates/kalka/README.md). Pushing a `v*` tag builds the Linux and macOS binaries and attaches
 them to a GitHub Release, with their `SHA256SUMS`.
 
 ### Self-hosting
 
 This repository compiles itself. `scripts/selfhost.sh` builds the release binary, compiles the
-repository into `.wiki/` (gitignored, incremental) and runs `wiki lint` on it; a broken link fails
-the script. The checked-in `.mcp.json` registers `wiki serve --source .` as the `nollm-wiki` server,
+repository into `.kulman/` (gitignored, incremental) and runs `kalka lint` on it; a broken link fails
+the script. The checked-in `.mcp.json` registers `kalka serve --source .` as the `kalka` server,
 so an agent session started here can search the project; in a fresh clone, run
 `scripts/selfhost.sh` once so the binary exists.
 

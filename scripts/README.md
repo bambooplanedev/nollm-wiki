@@ -4,7 +4,7 @@ This directory contains the tooling to turn a compiled wiki directory into a loc
 
 ## What It Does
 
-`quartz-publish.sh` takes a compiled wiki directory (from the `wiki` compiler) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
+`quartz-publish.sh` takes a compiled wiki directory (from `kalka`) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
 1. Clones Quartz (pinned to `v4.5.2`) into `.quartz-build/` (reused across runs)
 2. Runs `npm install` once (then cached; retried if it did not finish)
 3. Copies wiki pages through `strip-chrome.awk` to remove compiler chrome, leaving out agent memory notes
@@ -53,8 +53,8 @@ Press Ctrl-C to stop the server.
 **Excluded:**
 - `AGENTS.md` — agent navigation notes are not published
 - Agent memory notes — pages flagged `"memory": true` in `index.json`, and the compiler's link lines to
-  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `wiki serve`,
-  `wiki setup` and `wiki compile --memory DIR` make such pages, and so does a plain `wiki compile` when the
+  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `kalka serve`,
+  `kalka setup` and `kalka compile --memory DIR` make such pages, and so does a plain `kalka compile` when the
   source has `.agents/memory/`. The page count and link degrees in `index.md` still include them.
 - Non-markdown files: `index.json`, `items.json`, `llms.txt`, `.wiki/`
 
@@ -104,7 +104,7 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 `selfhost.sh` — compiles this repository into its own wiki at `.kulman/`
 (always rebuilds the release binary first) and fails on a broken wikilink
-(`wiki lint`). See the repo root
+(`kalka lint`). See the repo root
 [`README.md`](../README.md#self-hosting).
 
 Search-quality measurement now lives in `crates/kalka/tests/eval.rs`, which scores a

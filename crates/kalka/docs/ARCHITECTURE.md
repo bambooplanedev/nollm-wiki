@@ -1,6 +1,6 @@
 # Architecture
 
-Internals of the `wiki` compiler, for contributors. For install/usage see
+Internals of the `kalka` compiler, for contributors. For install/usage see
 [`../../../README.md`](../../../README.md).
 
 ## Pipeline overview
@@ -13,7 +13,7 @@ written: every parallel step collects into an order-preserving `Vec` or a
 
 ```
 walk               →  extract            →  qualify + remap      →  graph + PageRank  →  render               →  manifest             →  lint
-code/src/walk.rs      src/formats/            src/lib.rs             src/graph.rs         src/rewrite.rs          src/manifest.rs         src/lint.rs
+wiki-code/src/walk.rs src/formats/            src/lib.rs             src/graph.rs         src/rewrite.rs          src/manifest.rs         src/lint.rs
                        (Registry)
 
 SourceFile     →      Entity        →         BTreeMap<id,        →  Graph             →  pages (String)     →   Manifest            →  LintReport
@@ -162,37 +162,40 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 ## Module map
 
-The workspace in `wiki/` holds two crates. `wiki` (the root package) owns
+The workspace holds three crates. `kalka` (`crates/kalka`) owns
 everything about a wiki: the pipeline, pages and their ids, the graph,
 rendering, the manifest, queries, the CLI, `serve` and `setup`. `wiki-code`
-(`wiki/code`, lib `wiki_code`) owns the code layer a sibling tool can use
+(`crates/wiki-code`, lib `wiki_code`) owns the code layer a sibling tool can use
 without the wiki: the item model, the source tree walk, tree-sitter extraction
 (`extract`, and `analyze`, which also hands back the parse trees, each item's
 node, the calls under a node with their literal text, and comment text), the
 candidate index call sites resolve against, and import resolution. Its crate
 doc lists that contract; its `support` module is shared text helpers and not
 part of it. It pins tree-sitter and every grammar to an exact version, since a
-consumer that depends on it by git does not use this lock file.
+consumer that depends on it by git does not use this lock file. `techlog`
+(`crates/techlog`) holds where agent memory lives, and the `Origin` of a
+memory note. Paths below that start with `src/` or `tests/` are in
+`crates/kalka`.
 
 | Module | Responsibility |
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
-| `crates/techlog/src/lib.rs` (crate `techlog`, re-exported as `memory`) | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `data_dir_for`, `data_dir`, `repo_key` and `local_dir` (the old per-user folder under the root commit) stay only to render the `wiki-memory` skill earlier releases wrote, so `setup` can remove it; they go one release after 0.6. |
-| `code/src/walk.rs` (re-exported by `src/walk.rs`) | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
+| `crates/techlog/src/lib.rs` (crate `techlog`, re-exported as `memory`) | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `Origin` (a note's origin: `local`, or `repo` with its last author and whether it was edited; `trust` ranks them) and `repo_origins`, which reads it from git, live here too; kalka reaches them as `memory::Origin`. |
+| `crates/wiki-code/src/walk.rs` (re-exported by `src/walk.rs`) | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`; front matter `aliases:` and `tags:` as `a, b`, `[a, b]` or a YAML block list (tags normalized: lowercase, `#` stripped); front-matter scalars are unquoted; the page date comes from `updated`/`modified`/`date`, then the same keys under a one-level `metadata:` block, then a `YYYY-MM-DD` file-name prefix. |
 | `src/formats/code.rs` | `CodeExtractor`, a thin wrapper turning `wiki_code::extract`'s `CodeFile` into an `Entity`. |
-| `code/src/formats/code.rs` | Shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
-| `code/src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
-| `code/src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
-| `code/src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, taking only body-less header declarations and guarded definitions with out-of-line `= default` as a definition, then project-unique keys guarded by `pair_role`). |
-| `code/src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
-| `code/src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
-| `code/src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
-| `code/src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
-| `code/src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`): functions, listed as `name()`, and the first top-level `NAME=` of each UPPERCASE name as a nested `value` item that only `search` finds by exact name; doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
-| `code/src/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
+| `crates/wiki-code/src/formats/code.rs` | Shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
+| `crates/wiki-code/src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
+| `crates/wiki-code/src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
+| `crates/wiki-code/src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, taking only body-less header declarations and guarded definitions with out-of-line `= default` as a definition, then project-unique keys guarded by `pair_role`). |
+| `crates/wiki-code/src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
+| `crates/wiki-code/src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
+| `crates/wiki-code/src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
+| `crates/wiki-code/src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
+| `crates/wiki-code/src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`): functions, listed as `name()`, and the first top-level `NAME=` of each UPPERCASE name as a nested `value` item that only `search` finds by exact name; doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
+| `crates/wiki-code/src/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
 | `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), re-exported from `wiki_code`: `CodeItem` (with the `test` flag) and `is_test_path()` (`wiki_code::model`), `title_case()` — the one casing rule every name-deriving path shares — and `normalize_path()` (`wiki_code::support`); `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold. |
 | `src/calls.rs` | `resolve_calls()` — call edges between code items, matched by name and argument count after the graph is built; `Wiki::calls` — what `neighbors --symbol` prints; `Wiki::callers` — what `callers` prints. |
 | `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`wiki_code::imports::Imports`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank. |
@@ -202,14 +205,14 @@ consumer that depends on it by git does not use this lock file.
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (summaries in `index.md` and `llms.txt` clipped to `LINE_CHARS`; pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link, orphan-page and too-large-page checks over rendered pages. |
 | `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (page hits with symbol lines; one Aho-Corasick automaton over the query's tokens, built once per search, counts every token in a page body in one pass) and `neighbors()` (context-pack) queries, with `resolve_id()` mapping an id, title or path to a page (on a miss, pages of the same file name are suggested first), plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. See [Query internals](#query-internals). |
-| `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
+| `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `kalka page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/labels.rs` | `labels()` — a Markdown file's ATX headings and bold step lines with the line range each covers; `doc_search()`/`doc_lines()` — `search` with `docs` (CLI `--docs`): labels holding the query's words in a row, else (named on a first line) labels opened by its leading ID, else labels holding all its words but `STOP_WORDS` in any order (an empty answer is `DOC_NO_MATCH`), read from the named files at call time, 10 hits by default (`DOC_LIMIT`), an empty query listing the first 200 (`DOC_LIST_LIMIT`); a label repeated under one head keeps its first and last entries when the limit cuts it. |
-| `src/serve.rs` | `wiki serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`; `limit` 5 by default; `docs` goes to `labels::doc_search`)/`page`/`callers` tools, plus `neighbors` and `lint` when `--tools` names them (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot, and so does one that would wait past the call's 5 s (`WAIT`) for a compile's `compile.lock`, adding `recompile still running` (`lint` then lints the snapshot, `wiki://index`/`wiki://llms.txt` return an error); stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
+| `src/serve.rs` | `kalka serve` — MCP server over stdio (`rmcp`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`; `limit` 5 by default; `docs` goes to `labels::doc_search`)/`page`/`callers` tools, plus `neighbors` and `lint` when `--tools` names them (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot, and so does one that would wait past the call's 5 s (`WAIT`) for a compile's `compile.lock`, adding `recompile still running` (`lint` then lints the snapshot, `wiki://index`/`wiki://llms.txt` return an error); stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation (the worker compiles once events have paused for 150 ms (`watch::DEBOUNCE`), at most 2 s after it first sees an edit, which is after any running compile ends), and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound); while the start-up compile of an existing wiki runs, a call waits at most 1 s for it and then answers from the old wiki. Several servers may share one `--dir`: only the one holding `.serve/writer.lock` compiles; the others are readers that wait for the writer's `ack-*` file and reload (bounded by the call's deadline: a compile still holding `compile.lock` then leaves the old snapshot with `recompile still running`), and take the lock over when the writer exits. Once its binary is replaced, a server stops compiling and gives the lock up. |
-| `src/dirlock.rs` | Advisory locks under `<dir>/.serve/` (`SERVE_DIR`): `try_writer` for `writer.lock` (one writer per `--dir`), and `compile.lock`, held `exclusive` while a compile writes (`serve`, `wiki compile` and `wiki setup` alike) and `shared`/`try_shared`/`shared_until` (polls until a deadline, so a call's wait stays bounded) while a load reads, so a load never sees half a wiki. |
-| `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search plus, when the prompt passes the shared memory gate (`Wiki::passes_gate`, the one `search`'s tail uses), `MEMORY_HEADER` and one `memory (<origin>): <path> — <summary>` line (`serve::memory_prefix`) for the most trusted passing note (`Origin::trust`; the best scored of equals), the code `HEADER` only when there are code lines; pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `LINE_CHARS`; no code lines when the best page scores below `HINT_MIN_SHARE` (0.5) of the prompt's available score (`PassStats::available`, the summed idf of its counted words); empty when nothing matches, on a harness-written turn (text opening with a tag) and on a prompt with fewer than `HINT_MIN_TOKENS` (2) words of two or more characters (`Wiki::prompt_tokens` drops one-character words from every prompt search). `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
-| `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `kalka setup`: compiles `.` into `.wiki` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config), Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `kalka-navigation` skill (its Memory section names `.agents/memory`) and the ignore lines; Claude Code gets no skill; `--remove` undoes only what it wrote, and entries under the old `wiki` names are foreign. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
+| `src/dirlock.rs` | Advisory locks under `<dir>/.serve/` (`SERVE_DIR`): `try_writer` for `writer.lock` (one writer per `--dir`), and `compile.lock`, held `exclusive` while a compile writes (`serve`, `kalka compile` and `kalka setup` alike) and `shared`/`try_shared`/`shared_until` (polls until a deadline, so a call's wait stays bounded) while a load reads, so a load never sees half a wiki. |
+| `src/hint.rs` | `hint_lines()` — `kalka hint`: code-only search plus, when the prompt passes the shared memory gate (`Wiki::passes_gate`, the one `search`'s tail uses), `MEMORY_HEADER` and one `memory (<origin>): <path> — <summary>` line (`serve::memory_prefix`) for the most trusted passing note (`Origin::trust`; the best scored of equals), the code `HEADER` only when there are code lines; pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `LINE_CHARS`; no code lines when the best page scores below `HINT_MIN_SHARE` (0.5) of the prompt's available score (`PassStats::available`, the summed idf of its counted words); empty when nothing matches, on a harness-written turn (text opening with a tag) and on a prompt with fewer than `HINT_MIN_TOKENS` (2) words of two or more characters (`Wiki::prompt_tokens` drops one-character words from every prompt search). `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
+| `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `kalka generate` and tests. |
+| `src/setup/mod.rs` | `run()` — `kalka setup`: compiles `.` into `.kulman` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config), Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `kalka-navigation` skill (its Memory section names `.agents/memory`) and the ignore lines; Claude Code gets no skill; `--remove` undoes only what it wrote, and entries under the old `wiki` names are foreign. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files, marked text blocks and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/setup/navigation.md` | The navigation steps `setup` writes into `AGENTS.md` for Codex. |
@@ -612,7 +615,7 @@ matching:
   `<day> <month name>`, `<month name> <day>`) acts as one more token: a memory
   note whose `updated` is that day (any year when none is given) scores
   `W_TITLE` for it, with its own `df`/IDF; the words of the date still match
-  as usual. `wiki hint` lets such a hit through its gate (`dated_on`).
+  as usual. `kalka hint` lets such a hit through its gate (`dated_on`).
 - Hits sort descending by score (`total_cmp`), then by PageRank descending,
   then ascending by id. PageRank is computed over project pages only: a
   note's links still render but never move a code page.
@@ -620,9 +623,9 @@ matching:
   existed (`MemoryScope::Without`: `search_terms` drops notes before `N`,
   `df` and `avglen` are counted), then `memory_tail` appends up to
   `MEMORY_TAIL` (2) live notes from `MemoryScope::Only`, most trusted first
-  (`Origin::trust`), then best score (newer `updated` first on a tie), after
+  (`memory::Origin::trust`), then best score (newer `updated` first on a tie), after
   the hits and outside `limit`, whatever `kind`; with `tag` set a note must carry it. A note enters the tail
-  through `passes_gate`, which `wiki hint` applies with two changes for a
+  through `passes_gate`, which `kalka hint` applies with two changes for a
   prompt (the name branch only up to `HINT_SHORT_WORDS` distinct words, the
   ratio branch of a longer prompt only against a code hit, and its note
   scored by `search_prompt` on the same `HINT_TERMS` words as its code): it
@@ -899,7 +902,7 @@ cleaned up. This is deliberate; the pass and its limits are documented on
 `tidy_punctuation`.
 
 **Rust test-module stripping:** before body assembly,
-`strip_rust_test_modules` (`code/src/formats/extract_rust.rs`) removes each
+`strip_rust_test_modules` (`crates/wiki-code/src/formats/extract_rust.rs`) removes each
 `#[cfg(test)]`-annotated `mod` item — including the contiguous attribute
 run above it — from the Rust source shown in `## Body`, replacing it with
 a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. Stripping runs
@@ -973,8 +976,8 @@ unknown; and the names of one multi-declarator statement share its range.
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
   the source file they test (e.g. `src/cache.rs`, `src/hash.rs`,
-  `src/lib.rs`, `code/src/formats/code.rs`, `code/src/formats/extract_rust.rs`,
-  `code/src/formats/extract_python.rs`) — colocated with the code, not in a
+  `src/lib.rs`, `crates/wiki-code/src/formats/code.rs`, `crates/wiki-code/src/formats/extract_rust.rs`,
+  `crates/wiki-code/src/formats/extract_python.rs`) — colocated with the code, not in a
   separate tree. Language-specific extraction tests moved with their
   language when `code.rs` was split (§ Module map).
 - **Integration tests** live in `tests/`:
@@ -988,8 +991,8 @@ unknown; and the names of one multi-declarator statement share its range.
     above.
   - `tests/query.rs` — `Wiki::load`, `search`, and `neighbors` against a
     compiled output directory.
-  - `tests/cli.rs` — the `wiki` binary's subcommands via `assert_cmd`.
-  - `tests/hint.rs` — `wiki hint` end to end: code lines for a task text,
+  - `tests/cli.rs` — the `kalka` binary's subcommands via `assert_cmd`.
+  - `tests/hint.rs` — `kalka hint` end to end: code lines for a task text,
     silence when there is nothing to say.
   - `tests/labels.rs` — Markdown headings and bold step lines with their
     line ranges, behind `search --docs`.
@@ -997,7 +1000,7 @@ unknown; and the names of one multi-declarator statement share its range.
     compiled fixture.
   - `tests/query_defined.rs` — item names in search: an older `index.json`
     without `defined`, and the whole-term match rule.
-  - `tests/setup.rs` — `wiki setup` end to end, with stub agent binaries.
+  - `tests/setup.rs` — `kalka setup` end to end, with stub agent binaries.
   - `tests/shell_extraction.rs` — shell scripts through `compile()`:
     functions, docs, the parse-error fallback, page ids.
   - `tests/python_extraction.rs` — Python extraction through `compile()`
@@ -1019,7 +1022,7 @@ unknown; and the names of one multi-declarator statement share its range.
     heading field, and IDF-over-volume cases.
   - `tests/query_list_pages.rs` — `Wiki::list_pages` id/title ordering
     (backs the MCP server's `resources/list`).
-  - `tests/mcp_serve.rs` — end-to-end MCP: spawns `wiki serve` and speaks
+  - `tests/mcp_serve.rs` — end-to-end MCP: spawns `kalka serve` and speaks
     raw newline-delimited JSON-RPC over stdio, covering tools and
     resources.
   - `tests/eval.rs` — the retrieval eval harness. Compiles the frozen

@@ -42,7 +42,7 @@ per question is noise-level: treat single results as anecdotes.
     Neither a doc on each hint line nor a header that says "read the one
     that fits" stopped it from reading a same-named twin.
 - **The hook cost grew with the prompt, and few subagents use the wiki.**
-  On the bench project (3,304 pages) `wiki hint` took about 5 ms per
+  On the bench project (3,304 pages) `kalka hint` took about 5 ms per
   prompt word, 4.7 s on a 1,246-word subagent hand-back, because it
   scanned every page body once per word; it now takes 0.16-0.45 s flat,
   and harness turns and one-word replies are silent. On that project 5 of
@@ -57,12 +57,12 @@ per question is noise-level: treat single results as anecdotes.
   longer installs that skill for Claude Code.
 - **pi does not show MCP server instructions** for `direct` servers (pi
   1.3.0); only tool names, descriptions and parameter docs reach the model.
-  Without the `wiki-navigation` skill, a user-installed extension that makes
+  Without the `kalka-navigation` skill, a user-installed extension that makes
   pi load a skill first (skill-first) led it in our runs to an unrelated
   skill (`systematic-debugging`). Numbers: README, pi section.
-- **Two wiki servers in pi** (a global `~/.pi/agent/mcp.json` entry and the
+- **Two kalka servers in pi** (a global `~/.pi/agent/mcp.json` entry and the
   project's `.pi/mcp.json`) give the model every tool twice, under two
-  names; the skill `wiki setup` writes names only `mcp__wiki__*`.
+  names; the skill `kalka setup` writes names only `mcp__kalka__*`.
 - **pi loads project files only after trust**: `.pi/mcp.json` and project
   skills need `/trust`, or `--approve` in print mode.
 - **Agents edit despite "do not edit".** Seen twice in field runs, once
@@ -131,9 +131,9 @@ per question is noise-level: treat single results as anecdotes.
   (`test_`) or heredoc Python (`to_dec`).
 - **A decision split across a function and an enum's docs is not found.**
   "Where does it refuse to start" lands on the file, not on `decide`.
-- **`wiki hint` shows at most 2 lines per page**, so a third relevant
+- **`kalka hint` shows at most 2 lines per page**, so a third relevant
   symbol in one file is not shown.
-- **`wiki hint` is silent only on text whose words scatter.** Below half
+- **`kalka hint` is silent only on text whose words scatter.** Below half
   the prompt's available score it prints no code lines (2026-11-01: 80 of
   80 bench task prompts and code questions kept; 162 of 251 bench subagent
   briefs whose hint named no file the agent opened silenced, 26 of 75 that
@@ -342,7 +342,7 @@ per question is noise-level: treat single results as anecdotes.
 ## `serve --source`
 
 - Files written only through `mmap` are not seen as changed.
-- Barrier files left by a crashed server stay in `.wiki/.serve/` until a
+- Barrier files left by a crashed server stay in `.kulman/.serve/` until a
   writer's rescan removes them, 10 s on.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
@@ -379,7 +379,7 @@ per question is noise-level: treat single results as anecdotes.
   writer keeps its lock on the deleted `writer.lock`, so a newly started
   server can become a second writer until the old one restarts.
 
-## `wiki setup`
+## `kalka setup`
 
 - Agents: Claude Code, pi, Cursor and Codex. Cursor is detected only by a `.cursor/` folder and
   needs its approval after setup; Codex is set up only with `--agent codex`, and its server entry is
@@ -390,13 +390,13 @@ per question is noise-level: treat single results as anecdotes.
   with pi 1.4.0: with both files present, each naming a different codeword, it saw only the
   `AGENTS.md` one.
 - Local scope skips (exit 1) a file git already tracks.
-- `--remove` leaves `.wiki/` and the ignore lines in place.
+- `--remove` leaves `.kulman/` and the ignore lines in place.
 
 ## Agent memory
 
-- A plain `wiki compile . .wiki` drops the agents' notes until the server
-  recompiles, so `wiki hint` loses the memory line meanwhile.
-- `--no-ignore` walks `.wiki/`, whose pages can hold memory text.
+- A plain `kalka compile . .kulman` drops the agents' notes until the server
+  recompiles, so `kalka hint` loses the memory line meanwhile.
+- `--no-ignore` walks `.kulman/`, whose pages can hold memory text.
 - `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
 - Claude Code normalises the project path to NFC before slugging; the wiki
   slugs the path as the OS gives it, so a path with decomposed characters may
@@ -420,7 +420,7 @@ per question is noise-level: treat single results as anecdotes.
   short code-shaped queries; at 4 most code queries carry one or two tail rows
   (about 540 bytes more per `search` answer on this repo) that a model writing
   longer queries would not need. The code list is unchanged either way.
-  `wiki hint` turns the name branch off past 64 distinct words: a long prompt
+  `kalka hint` turns the name branch off past 64 distinct words: a long prompt
   nearly always carries a four-letter word naming some note (a note under 44
   of 48 long prompts, about 1 in 50 relevant). The number is a measured gap
   (questions and bench prompts up to 48 words, long task prompts from 116),

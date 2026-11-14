@@ -298,7 +298,7 @@ fn longest_backtick_run(s: &str) -> usize {
 }
 
 /// Obsidian fix-ups of prose, never of fenced or inline code, so a reader that
-/// resolves links by file name sees what `wiki lint` sees:
+/// resolves links by file name sees what `kalka lint` sees:
 /// - `[[x]]` whose `slugify(x)` is a page becomes `[[id]]` (anchor and
 ///   `|display` kept); unresolvable links stay as written;
 /// - a relative markdown link to an indexed page becomes `[text](id.md)`
