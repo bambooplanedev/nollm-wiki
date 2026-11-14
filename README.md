@@ -109,6 +109,30 @@ From source:
     cd llm-wiki-nollm
     cargo install --path crates/kalka      # into ~/.cargo/bin
 
+### With kulman (available from the first release of the set, 0.7.0)
+
+No release of the set exists yet; until it does, use the steps above. From that release on,
+`kulman` installs, updates and sets up `kalka` and `plaz`. One line fetches `kulman` itself:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+
+The script downloads the `kulman` archive for your platform, checks it against the release's
+`SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
+`~/.kulman/bin/kulman`. It writes nothing else and edits no shell profile. To do the same by hand,
+download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release page, check them as
+above, and move the `kulman` binary from the archive to `~/.kulman/bin/`.
+
+Add `~/.kulman/bin` to your `PATH`, then:
+
+    kulman install                     # the release's default modules, into ~/.kulman/bin
+    cd your-project
+    kulman setup --scope local         # runs kalka setup and plaz setup here
+    kulman update                      # later: everything to the latest release
+
+Everything is on by default; turn things off with flags (`kulman install --modules kalka`,
+`kulman setup --no-memory`). `kulman remove` deletes what kulman installed. Commands, exit codes and
+the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
+
 ## Quick start
 
 In the project you want agents to navigate:
@@ -189,7 +213,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 
 `kalka setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
 
 It compiles `.` into `.kulman`, then installs the MCP server (`kalka serve --source .`) and what tells
 each agent to use it. pi gets the `kalka-navigation` skill (how to find code, and the memory rules).
@@ -205,9 +229,13 @@ names them. Codex is set up only when named: its MCP config is global.
   `.agents/skills/kalka-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json kalka … --scope local`, the other files are written and the ones setup
-  created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
+  created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on. A file git already tracks is skipped; use
   `--scope repo` for it.
-- Either scope creates `.agents/memory/`.
+- Agent memory is on by default: either scope creates `.agents/memory/`. `--no-memory` creates no
+  `.agents/memory/`, compiles without memory and registers the server as
+  `kalka serve --source . --memory none`. Running setup again with the other choice switches the
+  registered server; a server added through the `codex` or `claude` CLI that carries settings of
+  your own is left alone and reported, for you to remove and set up again.
 - Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
@@ -419,7 +447,7 @@ MCP server.
 Agents keep notes as Markdown files. kalka compiles the folders they write to, and `search` and
 `kalka hint` show the matching notes after the code. The sources:
 
-- **`.agents/memory/`** in the project. `kalka setup` creates it in both scopes; in `--scope local`
+- **`.agents/memory/`** in the project. `kalka setup` creates it in both scopes unless given `--no-memory`; in `--scope local`
   it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `kalka compile`
   includes it unless `--memory none` is given.
 - **The agents' own folders.** `serve --source` and `kalka setup` look for them. Today that is Claude

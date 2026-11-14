@@ -114,6 +114,30 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
     cd llm-wiki-nollm
     cargo install --path crates/kalka      # у ~/.cargo/bin
 
+### Через kulman (буде доступно з першого релізу набору, 0.7.0)
+
+Релізу набору ще немає; доки його немає, користуйтеся кроками вище. Починаючи з цього релізу,
+`kulman` встановлює, оновлює й налаштовує `kalka` і `plaz`. Сам `kulman` завантажує один рядок:
+
+    curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+
+Скрипт завантажує архів `kulman` для вашої платформи, перевіряє його за `SHA256SUMS` релізу
+(і зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman/bin/kulman`.
+Більше він нічого не записує і не змінює профілів оболонки. Те саме вручну: завантажте
+`kulman-v<version>-<target>.tar.gz` і `SHA256SUMS` зі сторінки релізу, перевірте їх, як описано вище,
+і перенесіть бінарник `kulman` з архіву в `~/.kulman/bin/`.
+
+Додайте `~/.kulman/bin` у свій `PATH`, далі:
+
+    kulman install                     # модулі релізу за замовчуванням, у ~/.kulman/bin
+    cd your-project
+    kulman setup --scope local         # запускає тут kalka setup і plaz setup
+    kulman update                      # згодом: усе до останнього релізу
+
+За замовчуванням усе ввімкнено; вимикайте прапорцями (`kulman install --modules kalka`,
+`kulman setup --no-memory`). `kulman remove` видаляє те, що встановив kulman. Команди, коди виходу
+й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
+
 ## Швидкий старт
 
 У проєкті, в якому мають орієнтуватися агенти:
@@ -195,7 +219,7 @@ calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: match
 
 `kalka setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
 
 Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`kalka serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `kalka-navigation` (як шукати код і правила
@@ -212,9 +236,13 @@ Claude Code вікі читає сама. Codex не читає ні того, �
   `.agents/skills/kalka-navigation/SKILL.md` і `.kulman/` у `.gitignore`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
   `claude mcp add-json kalka … --scope local`, інші файли записуються, а ті, що setup створив,
-  вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`. Файл, який git уже відстежує, пропускається; для нього беріть
+  вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`, коли памʼять увімкнена. Файл, який git уже відстежує, пропускається; для нього беріть
   `--scope repo`.
-- Обидва варіанти створюють `.agents/memory/`.
+- Памʼять агента ввімкнена за замовчуванням: обидва варіанти створюють `.agents/memory/`.
+  З `--no-memory` тека `.agents/memory/` не створюється, компіляція йде без памʼяті, а сервер
+  реєструється як `kalka serve --source . --memory none`. Повторний запуск з іншим вибором перемикає
+  зареєстрований сервер; сервер, доданий через CLI `codex` чи `claude` з вашими власними
+  налаштуваннями, лишається як є, і setup про це повідомляє: видаліть його й запустіть setup знову.
 - Обидва варіанти додають сервер для Codex командою `codex mcp add kalka -- kalka serve --source .`,
   яка пише в `~/.codex/config.toml`: MCP-конфігу на рівні проєкту Codex не має, а сервер запускає в
   теці, де запущений сам, тож один запис працює для всіх проєктів.
@@ -425,7 +453,7 @@ CLI не обмежує, а `search` повертає 5 результатів �
 Агенти тримають нотатки як Markdown-файли. Вікі компілює теки, у які вони пишуть, а `search` і
 `kalka hint` показують відповідні нотатки після коду. Джерела:
 
-- **`.agents/memory/`** у проєкті. `kalka setup` створює її в обох режимах; з `--scope local` ще й
+- **`.agents/memory/`** у проєкті. `kalka setup` створює її в обох режимах, якщо не передано `--no-memory`; з `--scope local` ще й
   вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `kalka compile`
   включає її, якщо не передано `--memory none`.
 - **Власні теки агентів.** Їх шукають `serve --source` і `kalka setup`. Поки що це
