@@ -321,6 +321,15 @@ pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
     let mut paths: Vec<PathBuf> = modules.iter().map(|n| bin.join(n)).collect();
     paths.push(bin.join("kulman"));
     check_files(&paths)?;
+    // The records too, each a regular file or absent, before the first deletion.
+    for name in ["manifest.json", "state.json"] {
+        let path = home.path.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(m) if m.is_file() => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            _ => bail!("{} is not a file kulman wrote", path.display()),
+        }
+    }
     for path in &paths {
         delete(path)?;
     }

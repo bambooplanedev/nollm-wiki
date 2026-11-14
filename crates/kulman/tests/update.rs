@@ -540,6 +540,24 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
 }
 
 #[test]
+fn remove_refuses_a_manifest_that_is_not_a_file_before_deleting_any_binary() {
+    let (t, base, home) = installed();
+    let manifest = home.join("manifest.json");
+    fs::remove_file(&manifest).unwrap();
+    fs::create_dir(&manifest).unwrap();
+    fs::write(manifest.join("inner"), "x").unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!("kulman: {} is not a file kulman wrote", manifest.display());
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
 fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
     for bad in [
         r#"{"version":"0.7.0","modules":["kalka","kulman"]}"#,
