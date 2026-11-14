@@ -104,8 +104,8 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 `selfhost.sh` — compiles this repository into its own wiki at `.kulman/`
 (always rebuilds the release binary first) and fails on a broken wikilink
-(`kalka lint`). See the repo root
-[`README.md`](../README.md#self-hosting).
+(`kalka lint`). See Self-hosting in
+[kalka's README](../crates/kalka/README.md#self-hosting).
 
 `release-assemble.sh <version> <dir> [--tree <out>]` — checks that `<dir>` holds the six release
 archives (`kalka`, `plaz`, `kulman` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`, each
