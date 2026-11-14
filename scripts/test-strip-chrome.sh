@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test for strip-chrome.awk on pages the current compiler writes (no network).
-# Uses $WIKI_BIN when set, else `cargo run` on this repo's wiki crate.
+# Uses $WIKI_BIN when set, else `cargo run` on this repo's kalka crate.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AWK="$SCRIPT_DIR/strip-chrome.awk"
@@ -26,7 +26,7 @@ printf '# Other\n\nSee [guide](guide.md).\n' > "$tmp/src/other.md"
 if [ -n "${WIKI_BIN:-}" ]; then
     "$WIKI_BIN" compile "$tmp/src" "$tmp/out" > /dev/null
 else
-    cargo run --quiet --manifest-path "$SCRIPT_DIR/../wiki/Cargo.toml" -- compile "$tmp/src" "$tmp/out" > /dev/null
+    cargo run --quiet --manifest-path "$SCRIPT_DIR/../Cargo.toml" -p kalka -- compile "$tmp/src" "$tmp/out" > /dev/null
 fi
 grep -Fxq '## Imported by' "$tmp/out/b.md" && grep -Fxq '## Mentioned in' "$tmp/out/b.md" \
     || { echo "fixture: b.md lacks the backlink sections; update this test"; exit 1; }

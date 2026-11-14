@@ -14,15 +14,9 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: wiki
-
     steps:
     - uses: actions/checkout@v7
     - uses: Swatinem/rust-cache@v2
-      with:
-        workspaces: wiki
     - name: Check formatting
       run: cargo fmt --check
     - name: Clippy
@@ -30,7 +24,7 @@ jobs:
     - name: Run tests
       run: cargo test --verbose
     - name: Test strip-chrome.awk
-      run: bash ../scripts/test-strip-chrome.sh
+      run: bash scripts/test-strip-chrome.sh
     - name: Docs
       run: cargo doc --no-deps
       env:

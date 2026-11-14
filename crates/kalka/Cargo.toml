@@ -1,0 +1,49 @@
+[package]
+name = "kalka"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Deterministic wiki compiler for agent-navigable knowledge bases"
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "kalka"
+path = "src/main.rs"
+
+[lib]
+name = "kalka"
+path = "src/lib.rs"
+
+[dependencies]
+wiki-code = { path = "../wiki-code" }
+techlog = { path = "../techlog" }
+aho-corasick = "1"
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+blake3 = "1"
+ignore = "0.4"
+regex = "1"
+notify = "8"
+rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemars"] }
+tokio = { version = "1", features = ["rt"] }
+frostem = { version = "=2.20261016.1", default-features = false, features = ["english", "ukrainian"] }
+sentry = { version = "0.49.5", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "ureq", "rustls"] }
+
+[dev-dependencies]
+insta = "1"
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"
+criterion = "0.8"
+
+[[bench]]
+name = "pipeline"
+harness = false
