@@ -71,6 +71,10 @@ pub struct Index<'a, U: CodeUnit> {
 }
 
 impl<'a, U: CodeUnit> Index<'a, U> {
+    /// The index over `units`, a page per map entry in key order. Run
+    /// `pair_declarations` on `units` first if a header declaration should
+    /// fold onto its definition by `twin`; without it a declaration folds only
+    /// onto the one same-named function of its owner in a file of its stem.
     pub fn new(units: &'a BTreeMap<String, U>) -> Self {
         let keys: Vec<&str> = units.keys().map(String::as_str).collect();
         let pages: Vec<&U> = units.values().collect();
@@ -151,6 +155,7 @@ impl<'a, U: CodeUnit> Index<'a, U> {
         self.keys.binary_search(&key).ok()
     }
 
+    /// The family of page `page`'s code language (`Family::of` its `lang`).
     pub fn family(&self, page: usize) -> Family {
         Family::of(self.pages[page].lang())
     }

@@ -3,7 +3,7 @@ name = "wiki-code"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.89"
-description = "Code layer shared by the wiki compiler: the item model and source tree walk"
+description = "Code layer shared by the wiki compiler and its sibling tools: the item model, source tree walk, tree-sitter extraction, call-site index and import resolution"
 license = "MIT"
 publish = false
 

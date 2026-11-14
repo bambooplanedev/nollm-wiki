@@ -7,9 +7,16 @@
 //!   files;
 //! - [`analyze()`] with [`Analyzed`], [`Source`], [`Def`] and [`Call`]: the same
 //!   items with the trees they came from, each item's node, the calls under a
-//!   node with their literal text, and comment text;
+//!   node with their literal text, and comment text. `analyze` is `None` for
+//!   a file with no grammar or one the parser fails on. Items' `call_sites`
+//!   come from the last source only, by line: a C/C++ file with
+//!   preprocessor-split braces has two sources and can list a function once
+//!   per tree, the first-tree item with empty `call_sites`. Give
+//!   [`Source::calls_at`] only nodes of that same source;
 //! - [`model`]: the item types;
-//! - [`walk`]: the source tree walk;
+//! - [`walk`]: the source tree walk ([`walk::walk`], [`walk::Walked`],
+//!   [`walk::SourceFile`], [`walk::SKIPPED_DIRS`], [`walk::pruned_dir`];
+//!   `walk::skipped` and `walk::walk_memory` are wiki-only);
 //! - [`index`]: the candidate index a call site resolves against
 //!   ([`index::Index`], [`index::Scope`], [`index::Family`], [`index::FnRef`],
 //!   [`index::sees`], [`index::owner_key`]);

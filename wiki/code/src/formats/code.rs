@@ -43,13 +43,19 @@ pub struct CodeFile {
     pub items: Vec<CodeItem>,
 }
 
-/// A source file as the cross-file passes (`pair_declarations`) see it.
+/// A source file as the cross-file passes (`pair_declarations`, `Index`,
+/// `Imports`) see it.
 pub trait CodeUnit {
+    /// The file's path relative to the project root: module stems, source
+    /// ranks and `#include` suffixes are read from it.
     fn path(&self) -> &str;
-    /// `None` for a unit that is not code.
+    /// The code language (`CodeFile::lang`); `None` for a unit that is not code.
     fn lang(&self) -> Option<&str>;
+    /// The file's items, in line order.
     fn items(&self) -> &[CodeItem];
+    /// The items, for `pair_declarations` to set pairing fields on.
     fn items_mut(&mut self) -> &mut Vec<CodeItem>;
+    /// The bare names of top-level definitions (`CodeFile::defined`).
     fn defined(&self) -> &[String];
 }
 
@@ -981,10 +987,10 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // (group, kind, name, signature). The sort key groups a definition with
     // its own members: `class Article` and `Article.title: str` share the
     // group `Article`, so a class does not scatter across the section
-    // because `@` < `A` < `d`. Only the ORDER changes — `Entity::symbols`
+    // because `@` < `A` < `d`. Only the ORDER changes — `CodeFile::symbols`
     // stays a plain `Vec<String>`.
     let mut collected: Vec<Collected> = Vec::new();
-    // Method names for `Entity::methods`. Gathered here, not as a second
+    // Method names for `CodeFile::methods`. Gathered here, not as a second
     // projection over `collected`: that tuple carries no node kind, and a
     // `fn`, a field and an associated `const` of one impl are all `Member`,
     // told apart only by signature text, which is never parsed.
@@ -2442,7 +2448,7 @@ pub fn module_stem(rel_path: &str) -> &str {
 /// import resolution could link it. With several such files present they also
 /// collided on the id `mod` and were qualified to `common_mod` / `formats_mod`,
 /// which matched nothing either. Naming it "Common" lets a `mod common;`
-/// declaration or a `common::` path link it, and `graph::ImportResolver`
+/// declaration or a `common::` path link it, and `imports::Imports`
 /// reaches it through the same stem.
 fn derive_code_name(rel_path: &str) -> String {
     title_from_slug(module_stem(rel_path))

@@ -13,7 +13,7 @@ written: every parallel step collects into an order-preserving `Vec` or a
 
 ```
 walk               →  extract            →  qualify + remap      →  graph + PageRank  →  render               →  manifest             →  lint
-src/walk.rs           src/formats/            src/lib.rs             src/graph.rs         src/rewrite.rs          src/manifest.rs         src/lint.rs
+code/src/walk.rs      src/formats/            src/lib.rs             src/graph.rs         src/rewrite.rs          src/manifest.rs         src/lint.rs
                        (Registry)
 
 SourceFile     →      Entity        →         BTreeMap<id,        →  Graph             →  pages (String)     →   Manifest            →  LintReport
@@ -54,7 +54,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    then runs, after disambiguation has produced final, already-unique ids: any
    id that happens to equal a reserved manifest base name (`index`, `llms`,
    `agents`, `graph`) is rewritten to `<id>_page`, `<id>_page_2`, ..., with a
-   warning on stderr. Finally `extract_cpp::pair_declarations` pairs each C++
+   warning on stderr. Finally `wiki_code::pair_declarations` pairs each C++
    header's declarations with the definitions in its same-stem implementation
    file (only its body-less declarations and guarded definitions; an
    out-of-line `= default` counts as a definition), else, for a body-less
@@ -75,11 +75,11 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    match every English use of the word. Import edges: every segment of an
    import string that equals a code page's module stem
    (`formats::code::module_stem`, the same rule that names the page) or a
-   name in its `defined` list (`ImportResolver`); a `::` path is followed
+   name in its `defined` list (`wiki_code::imports::Imports`); a `::` path is followed
    only under `crate`, `super`, `self`, or a local crate root, the
    directory holding a `src/lib.rs`/`src/main.rs`, so an import of
    `rmcp::model` never reaches `model`. A C/C++ `#include` is resolved
-   differently (`ImportResolver::resolve_include`): it names a path, not a
+   differently (`wiki_code::imports::Imports::resolve_include`): it names a path, not a
    sequence of module segments, so segment-wise resolution would draw a
    spurious edge for every path component (`#include "core/book/orderbook.h"`
    hitting pages named `core` and `book` as well as the intended one). The
@@ -178,23 +178,24 @@ consumer that depends on it by git does not use this lock file.
 |---|---|
 | `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
 | `src/memory.rs` | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `data_dir_for`, `data_dir`, `repo_key` and `local_dir` (the old per-user folder under the root commit) stay only to render the `wiki-memory` skill earlier releases wrote, so `setup` can remove it; they go one release after 0.6. |
-| `src/walk.rs` | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
+| `code/src/walk.rs` (re-exported by `src/walk.rs`) | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
 | `src/formats/text.rs` | `TextExtractor` — plain `.txt`, with optional `created:`/`aliases:` front-matter-style lines; a `# Heading` or an ALL-CAPS first line becomes the title. |
 | `src/formats/markdown.rs` | `MarkdownExtractor` — `.md`/`.markdown`; front matter `aliases:` and `tags:` as `a, b`, `[a, b]` or a YAML block list (tags normalized: lowercase, `#` stripped); front-matter scalars are unquoted; the page date comes from `updated`/`modified`/`date`, then the same keys under a one-level `metadata:` block, then a `YYYY-MM-DD` file-name prefix. |
-| `src/formats/code.rs` | `CodeExtractor`, shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
-| `src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
-| `src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
-| `src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, taking only body-less header declarations and guarded definitions with out-of-line `= default` as a definition, then project-unique keys guarded by `pair_role`). |
-| `src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
-| `src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
-| `src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
-| `src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
-| `src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`): functions, listed as `name()`, and the first top-level `NAME=` of each UPPERCASE name as a nested `value` item that only `search` finds by exact name; doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
-| `src/formats/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
-| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), `CodeItem` (with the `test` flag) and `is_test_path()`; `title_case()` — the one casing rule every name-deriving path shares; `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold; `normalize_path()`. |
+| `src/formats/code.rs` | `CodeExtractor`, a thin wrapper turning `wiki_code::extract`'s `CodeFile` into an `Entity`. |
+| `code/src/formats/code.rs` | Shared extraction core: `LangSpec`, `QUERIES`, `extract_code`, `build_signature`, `render_span`, `default_cut`, `tidy_punctuation`, `collapse_runs`, `Placement`, `Shape`, `Rank`, `ItemKind`. Holds the language-neutral core; grammar node kinds live behind the `Shape` hook in each language's module, except the parameter-list reading for argument counts (`arity_of`). |
+| `code/src/formats/extract_rust.rs` | The Rust `LangSpec` and `rust_shape`: bare-`pub` visibility gating, owner qualification through `impl`/`trait` scopes and through struct/union/enum bodies, `#[macro_export]` gating for `macro_rules!`, `#[cfg(test)]` module stripping, and the `enum_variant`/`macro_definition`/`const`/`static`/`type`/`mod` signature shapes. |
+| `code/src/formats/extract_python.rs` | The Python `LangSpec` and `python_shape`: class-chain owner qualification, `__all__` handling, module docstring extraction, and the `assignment` signature shape. |
+| `code/src/formats/extract_cpp.rs` | The C++ `LangSpec` and `cpp_shape`: owner qualification through class/namespace scopes via `::` (replacing, not prepending to, a qualifier an out-of-line definition already wrote), template-head retention, no visibility gate (a header's declared surface is extracted regardless of `public`/`private`), and declaration ↔ definition pairing (`pair_declarations`: same stem via `source_rank`/`module_stem`, taking only body-less header declarations and guarded definitions with out-of-line `= default` as a definition, then project-unique keys guarded by `pair_role`). |
+| `code/src/formats/extract_simple.rs` | JS, TS, and Go — three specs with no owner resolution, gated by `export_statement` or (Go) a leading-capital naming convention. |
+| `code/src/formats/extract_jsx.rs` | JSX and TSX — the JS and TS specs reused unchanged, TSX on the grammar that accepts JSX in expressions; `index.jsx`/`index.tsx` are directory modules. |
+| `code/src/formats/extract_vue.rs` | Vue SFCs — top-level `<script>`/`<script setup>` blocks go to the JS/TS/JSX/TSX spec their `lang` names; `<template>`, `<style>` and custom blocks are blanked in place so every byte offset still points into the file. Holds the block scanner `extract_svelte` reuses. |
+| `code/src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
+| `code/src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`): functions, listed as `name()`, and the first top-level `NAME=` of each UPPERCASE name as a nested `value` item that only `search` finds by exact name; doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
+| `code/src/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
+| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), re-exported from `wiki_code`: `CodeItem` (with the `test` flag) and `is_test_path()` (`wiki_code::model`), `title_case()` — the one casing rule every name-deriving path shares — and `normalize_path()` (`wiki_code::support`); `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold. |
 | `src/calls.rs` | `resolve_calls()` — call edges between code items, matched by name and argument count after the graph is built; `Wiki::calls` — what `neighbors --symbol` prints; `Wiki::callers` — what `callers` prints. |
-| `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`ImportResolver`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank. |
+| `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`wiki_code::imports::Imports`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
 | `src/rewrite.rs` | Page rendering (`render_page`), fingerprinting (`render_fingerprint`), `## Notes` section preservation, atomic file writes (`write_atomic`); code-block masking, byte-offset preserving: `mask_fenced_code` backs `parse_sections` (so a `##` heading quoted in a fence never becomes a section, for rendering and search alike), and `mask_code` adds `mask_inline_code` on top for lint's link scan. |
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
@@ -382,7 +383,7 @@ breaking any of them reintroduces nondeterminism.
   OS/thread-seeded RNG — the same `--seed` must produce the same corpus on
   any platform or Rust version, which an OS-entropy-seeded generator cannot
   guarantee.
-- **Path containment (`is_under`, in `src/lib.rs`) compares lexically
+- **Path containment (`is_under`, in `wiki_code::support`) compares lexically
   absolute paths** (`std::path::absolute`, no filesystem access or symlink
   resolution) rather than canonicalizing — canonicalization depends on the
   filesystem's current state (symlinks, mounts), which varies by machine;
@@ -390,9 +391,10 @@ breaking any of them reintroduces nondeterminism.
 - **Grammar shape is part of the output contract.** Extraction depends on
   tree-sitter field names (`trait:`, `type:`, `value:`, `body:`) and node kinds
   (`declaration_list`, `const_item`, `static_item`, `type_item`,
-  `function_signature_item`). `Cargo.toml` carets
-  `tree-sitter-rust = "0.24"`, so `Cargo.lock` is what guarantees byte-identical
-  output across machines; a grammar bump is an output-affecting change and must
+  `function_signature_item`). `code/Cargo.toml` pins
+  `tree-sitter-rust = "=0.24.2"` (tree-sitter and every grammar with `=`), so
+  that, not `Cargo.lock`, is what guarantees byte-identical output across
+  machines; a grammar bump is an output-affecting change and must
   be reviewed as one.
 - **Rust and Python guard module level with opposite conventions, on
   purpose.** `rust_placement` (`extract_rust.rs`) is an allow-list of item
@@ -434,7 +436,7 @@ breaking any of them reintroduces nondeterminism.
   grouping-order commit.
 - **Import resolution tie-breaks on the lexicographically smallest
   `source_path`.** When two code pages share a module stem
-  (`src/query.rs`, `tests/query.rs`), `ImportResolver` keeps the smaller
+  (`src/query.rs`, `tests/query.rs`), `wiki_code::imports::Imports` keeps the smaller
   path; when two pages define the same name, neither resolves. Both are
   pure functions of the source-path and defined-name sets, so the edge set
   is the same in any extraction order.
@@ -864,7 +866,7 @@ class. **A header and its implementation file are two separate pages that
 share one identity for linking purposes**: `module_stem` gives
 `orderbook.h` and `orderbook.cpp` the same stem, `source_rank` ranks a
 `.h`/`.hpp`/`.hh`/`.hxx` header below its `.cpp`/`.cc`/`.cxx` implementation,
-and `ImportResolver` uses that rank so a bare `#include "orderbook.h"` or a
+and `wiki_code::imports::Imports` uses that rank so a bare `#include "orderbook.h"` or a
 `::`-free reference to `OrderBook` resolves to the header — the file that
 actually *declares* the public surface — even where the two files' own
 disambiguated ids differ (see [Disambiguation ladder](#disambiguation-ladder)).
@@ -897,7 +899,7 @@ cleaned up. This is deliberate; the pass and its limits are documented on
 `tidy_punctuation`.
 
 **Rust test-module stripping:** before body assembly,
-`strip_rust_test_modules` (`src/formats/extract_rust.rs`) removes each
+`strip_rust_test_modules` (`code/src/formats/extract_rust.rs`) removes each
 `#[cfg(test)]`-annotated `mod` item — including the contiguous attribute
 run above it — from the Rust source shown in `## Body`, replacing it with
 a one-line marker: `// [tests omitted: mod <name>, <N> lines]`. Stripping runs
@@ -971,8 +973,8 @@ unknown; and the names of one multi-declarator statement share its range.
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
   the source file they test (e.g. `src/cache.rs`, `src/hash.rs`,
-  `src/lib.rs`, `src/formats/code.rs`, `src/formats/extract_rust.rs`,
-  `src/formats/extract_python.rs`) — colocated with the code, not in a
+  `src/lib.rs`, `code/src/formats/code.rs`, `code/src/formats/extract_rust.rs`,
+  `code/src/formats/extract_python.rs`) — colocated with the code, not in a
   separate tree. Language-specific extraction tests moved with their
   language when `code.rs` was split (§ Module map).
 - **Integration tests** live in `tests/`:

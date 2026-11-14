@@ -1,4 +1,8 @@
-//! Source tree walk: gitignore-aware, sorted, deterministic file discovery for the compiler.
+//! Source tree walk: gitignore-aware, sorted, deterministic file discovery.
+//!
+//! The contract is [`walk`], [`Walked`], [`SourceFile`], [`SKIPPED_DIRS`] and
+//! [`pruned_dir`]; [`skipped`] and [`walk_memory`] serve the wiki compiler
+//! only and may change with it.
 
 use crate::support::{is_under, normalize_path};
 use ignore::{DirEntry, WalkBuilder};
@@ -165,7 +169,7 @@ fn walk_with(
         // Decide from the path BEFORE opening the file. `fs::read` allocates
         // the entire file, and every `SourceFile` stays resident until the
         // caller is done, so peak memory is the sum of everything read here.
-        // Deciding afterwards (in `Registry::extract`, on the extension) is
+        // Deciding afterwards (when the caller extracts, on the extension) is
         // too late: one stray 20GB video sitting in the input tree costs 20GB
         // of RSS before anything ever looks at its name.
         if !keep(&rel_path) {

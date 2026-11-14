@@ -1,6 +1,11 @@
 //! One pass over a source file for a consumer that needs more than the
 //! items: the parse trees the items came from, the node each item was built
 //! from, the calls under any node with their literal text, and comment text.
+//!
+//! Items' `call_sites` are attributed from the last source only, by line.
+//! A C/C++ file whose braces the preprocessor splits has two sources and
+//! can list one function twice, once per tree; the first tree's item then
+//! has empty `call_sites`, though `calls_at` under its node yields calls.
 
 use crate::formats::code::{self, CodeFile};
 use crate::index::Family;
@@ -9,6 +14,11 @@ use std::collections::BTreeMap;
 use tree_sitter::{Node, Tree};
 
 /// A file's items together with the trees they were built from.
+///
+/// Each item's `call_sites` come from the last of `sources`, attributed by
+/// line. With two sources (C/C++ with preprocessor-split braces) one
+/// function can be listed twice, once per tree; the first-tree item then
+/// has empty `call_sites` even though `calls_at` under its node yields calls.
 #[derive(Clone, Debug)]
 pub struct Analyzed {
     /// What `extract` returns for the same file.
@@ -44,6 +54,7 @@ pub struct Call {
 /// tree re-parsed from a blanked copy and a C/C++ tree of the first
 /// preprocessor branch index the file's own text: those copies have its
 /// length and lines, and the extraction reads the original bytes with them.
+/// Items' `call_sites` are read from the last source only.
 #[derive(Clone, Debug)]
 pub struct Source {
     tree: Tree,
@@ -90,6 +101,9 @@ impl Source {
 
     /// The calls `node` itself makes, as its items' call sites record them
     /// (import aliases resolved); empty for a node that is not a call.
+    /// `node` must belong to this source's tree: its byte offsets are read
+    /// against this source's text and aliases. Under a first-tree node of a
+    /// two-source file this yields calls its item's `call_sites` lack.
     pub fn calls_at(&self, node: Node) -> Vec<Call> {
         code::calls_at(
             node,
@@ -125,8 +139,10 @@ impl Source {
     }
 }
 
-/// `None` when the file's extension has no grammar; otherwise its items
-/// (exactly `extract`'s), the trees they came from and each item's node.
+/// `None` when the file's extension has no grammar or the parser fails on
+/// it; otherwise its items (exactly `extract`'s), the trees they came from
+/// and each item's node. Items' `call_sites` come from the last source only
+/// (see [`Analyzed`]).
 pub fn analyze(rel_path: &str, text: &str) -> Option<Analyzed> {
     let (file, found) = code::extract_file(rel_path, text);
     let (sources, defs) = found?;

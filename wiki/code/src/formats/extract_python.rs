@@ -94,7 +94,7 @@ pub(crate) fn python_shape(def: Node) -> Shape {
 // `from .models import X` and `from . import X` need separate
 // patterns. In the second, `relative_import` is just an
 // `import_prefix`, so its text is a lone `.` and
-// `graph::ImportResolver` — which resolves every non-empty segment
+// `imports::Imports` — which resolves every non-empty segment
 // of a split on `.` — finds no segment to resolve. The anchor `.`
 // after `(import_prefix)` constrains it to be the last named
 // child, which is exactly what separates the two families; without
