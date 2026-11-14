@@ -1,5 +1,5 @@
 [package]
-name = "wiki"
+name = "kalka"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,11 +11,11 @@ publish = false
 workspace = true
 
 [[bin]]
-name = "wiki"
+name = "kalka"
 path = "src/main.rs"
 
 [lib]
-name = "wiki"
+name = "kalka"
 path = "src/lib.rs"
 
 [dependencies]

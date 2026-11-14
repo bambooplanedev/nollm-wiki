@@ -3,10 +3,10 @@
 use std::fs;
 
 mod common;
+use kalka::model::{KindFilter, SourceKind};
+use kalka::query::{tag_filter, PackBudget, Wiki, OVER_BUDGET_NOTE};
+use kalka::{compile, CompileOptions};
 use tempfile::tempdir;
-use wiki::model::{KindFilter, SourceKind};
-use wiki::query::{tag_filter, PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::{compile, CompileOptions};
 
 fn build() -> tempfile::TempDir {
     common::compiled(&[
@@ -273,7 +273,7 @@ fn max_tokens_is_a_hard_ceiling_on_pack_size() {
         };
         let pack = w.neighbors("hub", 1, &budget).unwrap();
         let is_floor =
-            pack.included.len() == 1 && pack.text.contains(wiki::query::OVER_BUDGET_NOTE);
+            pack.included.len() == 1 && pack.text.contains(kalka::query::OVER_BUDGET_NOTE);
         assert!(
             tok(&pack.text) <= b || is_floor,
             "budget {b}: pack is {} tokens, included {:?}",
@@ -310,7 +310,7 @@ fn oversized_target_degrades_to_summary_and_keeps_neighborhood() {
         )
         .unwrap();
     assert!(
-        pack.text.contains(wiki::query::OVER_BUDGET_NOTE),
+        pack.text.contains(kalka::query::OVER_BUDGET_NOTE),
         "pack: {}",
         pack.text
     );
@@ -348,7 +348,7 @@ fn tiny_budget_still_returns_the_degraded_target_block() {
         )
         .unwrap();
     assert_eq!(pack.included, vec!["hub".to_string()]);
-    assert!(pack.text.contains(wiki::query::OVER_BUDGET_NOTE));
+    assert!(pack.text.contains(kalka::query::OVER_BUDGET_NOTE));
     assert!(pack.text.contains("# Hub"));
 }
 
@@ -360,7 +360,7 @@ fn no_max_tokens_keeps_full_target_and_all_neighbors() {
     let w = Wiki::load(&dir.path().join("out")).unwrap();
     let pack = w.neighbors("hub", 1, &PackBudget::default()).unwrap();
     assert!(
-        !pack.text.contains(wiki::query::OVER_BUDGET_NOTE),
+        !pack.text.contains(kalka::query::OVER_BUDGET_NOTE),
         "must not degrade without a budget"
     );
     assert!(
@@ -383,7 +383,7 @@ fn search_kind_filter_restricts_to_that_kind() {
     ]);
     let w = Wiki::load(&output).unwrap();
     let ids =
-        |hits: Vec<wiki::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
+        |hits: Vec<kalka::query::Hit>| -> Vec<String> { hits.into_iter().map(|h| h.id).collect() };
 
     assert_eq!(
         ids(w.search("zebra", Some(&KindFilter::Exact(SourceKind::Text)), 10)),
@@ -504,7 +504,7 @@ fn code_fixture(files: &[(&str, &str)]) -> (tempfile::TempDir, Wiki) {
 }
 
 /// Every symbol line of a response in output order: `(path, start, end, name)`.
-fn symbol_lines(hits: &[wiki::query::Hit]) -> Vec<(String, usize, usize, String)> {
+fn symbol_lines(hits: &[kalka::query::Hit]) -> Vec<(String, usize, usize, String)> {
     hits.iter()
         .flat_map(|h| &h.symbols)
         .map(|s| (s.path.clone(), s.start_line, s.end_line, s.name.clone()))
@@ -767,7 +767,7 @@ fn owner_qualified_token_finds_the_method() {
 
 #[test]
 fn search_lines_says_no_matches_when_empty() {
-    assert_eq!(wiki::serve::search_lines(&[]), "no matches\n");
+    assert_eq!(kalka::serve::search_lines(&[]), "no matches\n");
 }
 
 #[test]
@@ -815,7 +815,7 @@ fn snippet_keeps_markers_that_are_content() {
 
 #[test]
 fn search_lines_keeps_one_line_per_hit_and_symbol() {
-    use wiki::query::{Hit, SymbolLine};
+    use kalka::query::{Hit, SymbolLine};
     let hit = Hit {
         id: "a".into(),
         title: "Ti\ntle\tx".into(),
@@ -824,7 +824,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
         updated: None,
         score: 1.0,
         memory: false,
-        origin: wiki::model::Origin::Local,
+        origin: kalka::model::Origin::Local,
         superseded_by: None,
         snippet: None,
         symbols: vec![SymbolLine {
@@ -840,7 +840,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
             called_by: None,
         }],
     };
-    let out = wiki::serve::search_lines(&[hit]);
+    let out = kalka::serve::search_lines(&[hit]);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(
         lines,
@@ -953,7 +953,7 @@ fn resolve_names_a_skipped_or_hidden_folder() {
         r("src/missing/a.rs")
     );
     // The `docs` advice works: it reads the file from disk, not the index.
-    let docs = wiki::labels::doc_search(&raw, &["docs/superpowers/plans/p.md".into()], "", None);
+    let docs = kalka::labels::doc_search(&raw, &["docs/superpowers/plans/p.md".into()], "", None);
     assert!(docs
         .0
         .iter()
@@ -1396,7 +1396,7 @@ fn index_json_without_updated_still_loads() {
 
 #[test]
 fn search_lines_shows_date_after_path() {
-    use wiki::query::Hit;
+    use kalka::query::Hit;
     let hit = |updated: Option<&str>| Hit {
         id: "a".into(),
         title: "Title".into(),
@@ -1407,18 +1407,18 @@ fn search_lines_shows_date_after_path() {
         snippet: None,
         symbols: vec![],
         memory: false,
-        origin: wiki::model::Origin::Local,
+        origin: kalka::model::Origin::Local,
         superseded_by: None,
     };
     assert_eq!(
-        wiki::serve::search_lines(&[hit(Some("2026-10-23"))]),
+        kalka::serve::search_lines(&[hit(Some("2026-10-23"))]),
         "a  a.md  2026-10-23  Title — sum\n"
     );
     assert_eq!(
-        wiki::serve::search_lines(&[hit(None)]),
+        kalka::serve::search_lines(&[hit(None)]),
         "a  a.md  Title — sum\n"
     );
-    let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(vec![
+    let j: serde_json::Value = serde_json::from_str(&kalka::serve::search_json(vec![
         hit(Some("2026-10-23")),
         hit(None),
     ]))
@@ -1528,7 +1528,7 @@ fn a_ukrainian_word_form_finds_the_page() {
 }
 
 /// `(id, score, symbol lines)` of the non-memory hits, for exact comparison.
-fn code_part(hits: &[wiki::query::Hit]) -> Vec<CodeHitKey> {
+fn code_part(hits: &[kalka::query::Hit]) -> Vec<CodeHitKey> {
     hits.iter()
         .filter(|h| !h.memory)
         .map(|h| (h.id.clone(), h.score, symbol_lines(std::slice::from_ref(h))))
@@ -1639,7 +1639,7 @@ fn tail_gate_long_word_in_title_alias_or_summary() {
     // A four-character word passes the default gate (4) and fails under
     // `WIKI_MEMORY_GATE=8`, read once per process, so through the binary.
     let rows = |gate: Option<&str>| {
-        let mut cmd = assert_cmd::Command::cargo_bin("wiki").unwrap();
+        let mut cmd = assert_cmd::Command::cargo_bin("kalka").unwrap();
         cmd.args(["search", "rota zebra", "--dir"]).arg(&out);
         if let Some(g) = gate {
             cmd.env("WIKI_MEMORY_GATE", g);
@@ -1717,7 +1717,7 @@ fn tail_ratio_branch_skips_a_note_the_code_outscores() {
     assert!(hits.iter().all(|h| !h.memory), "{:?}", ids_of(&hits));
 }
 
-fn ids_of(hits: &[wiki::query::Hit]) -> Vec<&str> {
+fn ids_of(hits: &[kalka::query::Hit]) -> Vec<&str> {
     hits.iter().map(|h| h.id.as_str()).collect()
 }
 
@@ -1772,7 +1772,7 @@ fn memory_flag_shows_in_json_only_on_memory_hits() {
         ),
     ]);
     let j: serde_json::Value =
-        serde_json::from_str(&wiki::serve::search_json(w.search("elephant", None, 10))).unwrap();
+        serde_json::from_str(&kalka::serve::search_json(w.search("elephant", None, 10))).unwrap();
     assert!(j[0].get("memory").is_none());
     assert_eq!(j[1]["memory"], true);
 }
@@ -1889,12 +1889,12 @@ fn tag_listing_is_unchanged_by_the_tail() {
         .map(|h| (h.id.as_str(), h.superseded_by.as_deref()))
         .collect();
     assert_eq!(rows, [("old", Some("new")), ("proj", None)]);
-    let lines = wiki::serve::search_lines(&hits);
+    let lines = kalka::serve::search_lines(&hits);
     assert!(
         lines.lines().any(|l| l.ends_with(" (superseded by new)")),
         "{lines}"
     );
-    let j: serde_json::Value = serde_json::from_str(&wiki::serve::search_json(hits)).unwrap();
+    let j: serde_json::Value = serde_json::from_str(&kalka::serve::search_json(hits)).unwrap();
     assert_eq!(j[0]["superseded_by"], "new");
     assert!(j[1].get("superseded_by").is_none());
 }
@@ -2109,7 +2109,7 @@ fn compile_stores_note_origin_in_index() {
 
 #[test]
 fn old_index_guesses_origin_from_path() {
-    use wiki::model::Origin;
+    use kalka::model::Origin;
     let d = tempdir().unwrap();
     let (raw, agent, out) = (
         d.path().join("raw"),
@@ -2216,7 +2216,7 @@ fn tail_orders_notes_by_trust() {
 #[test]
 fn hint_picks_the_most_trusted_note() {
     let (_d, w) = trust_fixture();
-    let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
+    let hint = kalka::hint::hint_lines(&w, "check the rotation schedule before we ship");
     assert!(hint.contains("memory (local):"), "{hint}");
     assert!(hint.contains("ours.md"), "{hint}");
     assert!(!hint.contains("theirs.md"), "{hint}");
@@ -2227,7 +2227,7 @@ fn hint_picks_the_most_trusted_note() {
         &[("theirs", note("Rotation", "", "rotation rotation rotation"))],
         &[],
     );
-    let hint = wiki::hint::hint_lines(&w, "check the rotation schedule before we ship");
+    let hint = kalka::hint::hint_lines(&w, "check the rotation schedule before we ship");
     assert!(hint.contains("theirs.md"), "{hint}");
 }
 
@@ -2235,9 +2235,9 @@ fn hint_picks_the_most_trusted_note() {
 fn search_output_never_shows_the_author_email() {
     let (_d, w) = trust_fixture();
     let search = || w.search("rotation", None, 10);
-    let json = wiki::serve::search_json(search());
+    let json = kalka::serve::search_json(search());
     assert!(json.contains("Mallory Example"), "{json}");
-    for out in [json, wiki::serve::search_lines(&search())] {
+    for out in [json, kalka::serve::search_lines(&search())] {
         assert!(!out.contains(&email_of("Mallory Example")), "{out}");
     }
 }
@@ -2255,7 +2255,7 @@ fn committed_note_cannot_supersede_a_local_note() {
         .map(|h| h.id)
         .collect();
     assert!(ids.contains(&"deploy_key".to_string()), "{ids:?}");
-    let hint = wiki::hint::hint_lines(&w, "rotation of the Deploy key needs checking");
+    let hint = kalka::hint::hint_lines(&w, "rotation of the Deploy key needs checking");
     assert!(hint.contains("deploy"), "{hint}");
 }
 
@@ -2364,13 +2364,13 @@ fn outline_header_and_neighbors_cap_and_clean_the_summary() {
     assert!(clean(&pack.text));
     assert!(pack.text.lines().all(|l| l.chars().count() <= 1000));
 
-    let lines = wiki::serve::search_lines(&w.search("zebrafish", None, 10));
+    let lines = kalka::serve::search_lines(&w.search("zebrafish", None, 10));
     assert!(clean(&lines), "{lines}");
 }
 
 fn twin_note(files: &[(&str, &str)]) -> String {
     let (_d, w) = code_fixture(files);
-    wiki::serve::search_lines(&w.search("slice_cap_for", None, 1))
+    kalka::serve::search_lines(&w.search("slice_cap_for", None, 1))
 }
 
 #[test]
@@ -2405,7 +2405,7 @@ fn search_does_not_note_a_test_copy() {
 }
 
 /// Names of the symbol lines of a response, in output order.
-fn line_names(hits: &[wiki::query::Hit]) -> Vec<String> {
+fn line_names(hits: &[kalka::query::Hit]) -> Vec<String> {
     symbol_lines(hits).into_iter().map(|l| l.3).collect()
 }
 
@@ -2476,7 +2476,7 @@ fn a_query_of_names_gets_one_line_per_name() {
 }
 
 /// Paths of the pages of a response, in output order.
-fn hit_paths(hits: &[wiki::query::Hit]) -> Vec<String> {
+fn hit_paths(hits: &[kalka::query::Hit]) -> Vec<String> {
     hits.iter().map(|h| h.path.clone()).collect()
 }
 
@@ -2618,7 +2618,7 @@ fn a_nested_python_function_stays_out_of_the_hint() {
         "src/rotation.py",
         "def schedule_rotation(keys):\n    def rotation_step(k):\n        return k\n    return [rotation_step(k) for k in keys]\n",
     )]);
-    let hint = wiki::hint::hint_lines(&w, "where is the rotation schedule step for keys");
+    let hint = kalka::hint::hint_lines(&w, "where is the rotation schedule step for keys");
     assert!(hint.contains("src/rotation.py:1-4"), "{hint}");
     assert!(!hint.contains("rotation_step"), "{hint}");
 }
@@ -2669,7 +2669,7 @@ fn a_shell_global_leaves_word_queries_unchanged() {
     let (_b, without) = code_fixture(&[("lib/qx.sh", &lower)]);
     assert!(with.items("qx").iter().any(|i| i.name == "QX_PY_DERIVE"));
     for q in ["derive python step", "py derive", "derive"] {
-        let show = |w: &Wiki| wiki::serve::search_lines(&w.search(q, None, 10));
+        let show = |w: &Wiki| kalka::serve::search_lines(&w.search(q, None, 10));
         assert_eq!(show(&with), show(&without), "{q}");
     }
 }
@@ -2684,7 +2684,7 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     assert!(!callers.contains("QX_PY_DERIVE"), "{callers}");
     let pack = w.neighbors("qx", 1, &PackBudget::default()).unwrap().text;
     assert!(!pack.contains("QX_PY_DERIVE"), "{pack}");
-    let hint = wiki::hint::hint_lines(&w, "where is the zb py derive script run");
+    let hint = kalka::hint::hint_lines(&w, "where is the zb py derive script run");
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
 }
 
@@ -2717,7 +2717,7 @@ fn line_of<'a>(out: &'a str, name: &str) -> &'a str {
 #[test]
 fn a_name_query_notes_how_many_functions_call_a_function() {
     let (_d, w) = code_fixture(&[("src/a.rs", CALLED_RS)]);
-    let out = wiki::serve::search_lines(&w.search("run_step", None, 10));
+    let out = kalka::serve::search_lines(&w.search("run_step", None, 10));
     assert!(
         line_of(&out, "run_step").ends_with("  [called by 2: `callers`]"),
         "{out}"
@@ -2727,7 +2727,7 @@ fn a_name_query_notes_how_many_functions_call_a_function() {
 #[test]
 fn a_function_nothing_calls_gets_no_note() {
     let (_d, w) = code_fixture(&[("src/a.rs", CALLED_RS)]);
-    let out = wiki::serve::search_lines(&w.search("lone_step", None, 10));
+    let out = kalka::serve::search_lines(&w.search("lone_step", None, 10));
     assert!(out.contains("  lone_step  "), "{out}");
     assert!(!out.contains("[called by"), "{out}");
 }
@@ -2743,13 +2743,13 @@ fn values_types_globals_and_nested_defs_get_no_note() {
         (&sh, "QX_PY_DERIVE"),
         (&py, "mk_run"),
     ] {
-        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        let out = kalka::serve::search_lines(&w.search(q, None, 10));
         assert!(out.contains(&format!("  {q}  ")), "{q}: {out}");
         assert!(!out.contains("[called by"), "{q}: {out}");
     }
     // The shell function the global feeds is still noted; the script's top
     // level counts, as `callers` lists it.
-    let out = wiki::serve::search_lines(&sh.search("_qx_py_run", None, 10));
+    let out = kalka::serve::search_lines(&sh.search("_qx_py_run", None, 10));
     assert!(
         line_of(&out, "_qx_py_run").ends_with("  [called by 2: `callers`]"),
         "{out}"
@@ -2760,7 +2760,7 @@ fn values_types_globals_and_nested_defs_get_no_note() {
 fn word_and_mixed_queries_get_no_note() {
     let (_d, w) = code_fixture(&[("src/a.rs", CALLED_RS)]);
     for q in ["run step", "run_step step", "where is run_step called"] {
-        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        let out = kalka::serve::search_lines(&w.search(q, None, 10));
         assert!(out.contains("  run_step  "), "{q}: {out}");
         assert!(!out.contains("[called by"), "{q}: {out}");
     }

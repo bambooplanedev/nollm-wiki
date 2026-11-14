@@ -231,13 +231,13 @@ This folder is a generated, cross-linked wiki of {project}. Do NOT re-read the s
 tree first — start here.\n\n\
 - All pages: `index.md` (human) / `index.json` (machine catalog: id, title, kind, summary, degree, neighbors).\n\
 - Machine map for tools: `llms.txt`.\n\
-- Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
+- Get a page + its N-hop neighborhood: `kalka neighbors <id> --depth N`.\n\
 - Code symbols with their line ranges: `items.json` (keyed by page id).\n\
-- A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
-- What a function calls, through all levels: `wiki neighbors <id> --symbol <fn>`.\n\
+- A module's map: `kalka page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
+- What a function calls, through all levels: `kalka neighbors <id> --symbol <fn>`.\n\
 - Do not call grep, find or ls in the same turn as `search`: read its answer first.\n\
 - Where something is defined or handled: `search`. Who calls a function: `callers`. For every occurrence of a literal string (an env var, a message, a config key), grep.\n\
-- Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `wiki lint`); each has Metadata / Related / Imported by / Mentioned in / Body sections.\n\
+- Pages cross-link with `[[slug|Name]]` wikilinks (resolvable in Obsidian/Quartz and in `kalka lint`); each has Metadata / Related / Imported by / Mentioned in / Body sections.\n\
 - Generated deterministically from source — do not hand-edit compiler-owned sections (the `## Notes` section is preserved).\n"
     )
 }
@@ -304,7 +304,7 @@ mod tests {
         assert!(render_llms_txt(&m).starts_with("# My Project"));
         let agents = render_agents_md("My Project");
         assert!(agents.contains("index.json"));
-        assert!(agents.contains("items.json") && agents.contains("wiki page"));
+        assert!(agents.contains("items.json") && agents.contains("kalka page"));
     }
 
     #[test]

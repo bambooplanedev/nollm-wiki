@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "nollm-wiki": {
-      "command": "./target/release/wiki",
+    "kalka": {
+      "command": "./target/release/kalka",
       "args": ["serve", "--source", "."]
     }
   }

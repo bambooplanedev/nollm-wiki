@@ -1,4 +1,4 @@
-//! `wiki hint`: the code locations an agent hook injects before it reads a task.
+//! `kalka hint`: the code locations an agent hook injects before it reads a task.
 
 use crate::model::{clip, LINE_CHARS};
 use crate::query::{gate_len, MemoryScope, SymbolLine, Wiki, MEMORY_GATE_RATIO};

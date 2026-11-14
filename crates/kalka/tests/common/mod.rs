@@ -12,10 +12,10 @@
 
 #![allow(dead_code)]
 
+use kalka::query::Wiki;
+use kalka::{compile, CompileOptions};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use wiki::query::Wiki;
-use wiki::{compile, CompileOptions};
 
 /// Lines under `## {name}` up to the next `## ` header, with the leading
 /// `- ` list marker stripped. Panics if the section is absent, so a broken
@@ -81,7 +81,7 @@ pub fn compiled_wiki(files: &[(&str, &str)]) -> (TempDir, Wiki) {
 pub fn seed_corpus(n: usize) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let (raw, out) = (dir.path().join("raw"), dir.path().join("out"));
-    wiki::generator::generate_corpus(&raw, n, 42).unwrap();
+    kalka::generator::generate_corpus(&raw, n, 42).unwrap();
     compile(&raw, &out, &CompileOptions::default()).unwrap();
     (dir, out)
 }

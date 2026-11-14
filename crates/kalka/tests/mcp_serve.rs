@@ -1,4 +1,4 @@
-//! End-to-end test: spawn `wiki serve` and speak raw newline-delimited
+//! End-to-end test: spawn `kalka serve` and speak raw newline-delimited
 //! JSON-RPC (the MCP stdio transport) over its stdin/stdout.
 
 use serde_json::{json, Value};
@@ -17,7 +17,7 @@ fn compile_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
     common::seed_corpus(12)
 }
 
-/// Spawn `wiki serve` and hand back its stdin plus a channel of stdout
+/// Spawn `kalka serve` and hand back its stdin plus a channel of stdout
 /// lines. A pipe has no read timeout, so a thread does the blocking read
 /// and `read_response` waits on the channel with a deadline. The channel
 /// closes when the server closes stdout.
@@ -33,7 +33,7 @@ fn spawn_server_with(
     spawn("--dir", dir, extra)
 }
 
-/// Spawn `wiki serve <flag> <path>` plus `extra` args.
+/// Spawn `kalka serve <flag> <path>` plus `extra` args.
 fn spawn(
     flag: &str,
     path: &std::path::Path,
@@ -49,7 +49,7 @@ fn spawn_env(
     extra: &[&str],
     env: &[(&str, &std::path::Path)],
 ) -> (Child, ChildStdin, Receiver<String>) {
-    let mut server = Command::new(env!("CARGO_BIN_EXE_wiki"));
+    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
     server
         .args(["serve", flag])
         .arg(path)
@@ -145,8 +145,8 @@ fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
         }}),
     );
     let resp = read_response(stdout, 1);
-    assert_eq!(resp["result"]["serverInfo"]["name"], "wiki");
-    assert_eq!(resp["result"]["instructions"], wiki::serve::INSTRUCTIONS);
+    assert_eq!(resp["result"]["serverInfo"]["name"], "kalka");
+    assert_eq!(resp["result"]["instructions"], kalka::serve::INSTRUCTIONS);
     send(
         stdin,
         &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
@@ -267,7 +267,7 @@ fn serve_tools_flag_picks_the_tools() {
 #[test]
 fn serve_refuses_an_unknown_tool() {
     let (_tmp, out) = compile_fixture();
-    let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kalka"))
         .args(["serve", "--tools", "search,nope", "--dir"])
         .arg(&out)
         .output()
@@ -394,7 +394,7 @@ fn a_resource_read_does_not_wait_out_a_compile() {
     let (held, release) = (mpsc::channel(), mpsc::channel::<()>());
     let d = out.clone();
     let cli = std::thread::spawn(move || {
-        wiki::dirlock::exclusive(&d, || {
+        kalka::dirlock::exclusive(&d, || {
             held.0.send(()).unwrap();
             let _ = release.1.recv_timeout(Duration::from_secs(15));
         });
@@ -454,7 +454,7 @@ fn serve_refuses_path_traversal_outside_index() {
 #[test]
 fn serve_refuses_non_wiki_dir() {
     let tmp = tempfile::tempdir().unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kalka"))
         .args(["serve", "--dir"])
         .arg(tmp.path())
         .output()
@@ -490,7 +490,7 @@ fn search_hits_include_snippet_field() {
 fn search_text(args: &Value) -> String {
     let src = source_project();
     let out = src.path().join("out");
-    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    kalka::compile(src.path(), &out, &kalka::CompileOptions::default()).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
     let resp = call(&mut stdin, &stdout, 9, "search", args);
@@ -508,7 +508,7 @@ fn mcp_search_tag_only_lists_pages() {
     )
     .unwrap();
     std::fs::write(tmp.path().join("b.md"), "# Plain\n\nzebra\n").unwrap();
-    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    kalka::compile(tmp.path(), &out, &kalka::CompileOptions::default()).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
     let resp = call(
@@ -615,7 +615,10 @@ fn serve_reports_bad_params_and_survives() {
     );
     assert_eq!(resp["result"]["isError"], json!(false), "got: {resp}");
     let text = text_of(&resp);
-    assert!(text.contains(wiki::query::OVER_BUDGET_NOTE), "pack: {text}");
+    assert!(
+        text.contains(kalka::query::OVER_BUDGET_NOTE),
+        "pack: {text}"
+    );
     assert!(text.starts_with("# Gradient Descent"), "pack: {text}");
 
     // (e) Still answering after every error above.
@@ -648,7 +651,7 @@ fn neighbors_defaults_to_a_token_ceiling() {
     let huge = "# Huge\n\nHuge mentions Small. ".to_string() + &"filler text. ".repeat(3000);
     std::fs::write(raw.join("huge.txt"), huge).unwrap();
     std::fs::write(raw.join("small.txt"), "# Small\n\nSmall body.\n").unwrap();
-    wiki::compile(&raw, &out, &wiki::CompileOptions::default()).unwrap();
+    kalka::compile(&raw, &out, &kalka::CompileOptions::default()).unwrap();
 
     let (mut child, mut stdin, stdout) =
         spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
@@ -656,7 +659,7 @@ fn neighbors_defaults_to_a_token_ceiling() {
     let resp = call(&mut stdin, &stdout, 2, "neighbors", &json!({"id": "huge"}));
     let text = text_of(&resp);
     assert!(
-        text.chars().count() / 4 <= wiki::serve::DEFAULT_NEIGHBORS_MAX_TOKENS,
+        text.chars().count() / 4 <= kalka::serve::DEFAULT_NEIGHBORS_MAX_TOKENS,
         "defaults-only pack exceeds the default ceiling: {} chars",
         text.len()
     );
@@ -669,7 +672,7 @@ fn neighbors_defaults_to_a_token_ceiling() {
     let _ = child.wait();
 }
 
-/// Spawn `wiki serve --source <source>` plus `extra` args.
+/// Spawn `kalka serve --source <source>` plus `extra` args.
 fn spawn_server_source(
     source: &std::path::Path,
     extra: &[&str],
@@ -769,11 +772,11 @@ fn serve_source_compiles_missing_wiki_and_answers() {
 #[test]
 fn serve_source_catches_up_an_existing_wiki() {
     let project = source_project();
-    let opts = wiki::CompileOptions {
+    let opts = kalka::CompileOptions {
         incremental: true,
         ..Default::default()
     };
-    wiki::compile(project.path(), &project.path().join(".wiki"), &opts).unwrap();
+    kalka::compile(project.path(), &project.path().join(".wiki"), &opts).unwrap();
     // Edits made while no server ran: the start-up compile must pick them up.
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -1006,7 +1009,7 @@ fn serve_source_fails_when_first_compile_fails_and_no_wiki() {
     let tmp = tempfile::tempdir().unwrap();
     let file = tmp.path().join("not_a_dir.txt");
     std::fs::write(&file, "x").unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_wiki"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kalka"))
         .args(["serve", "--source"])
         .arg(&file)
         .stdin(Stdio::null())
@@ -1021,8 +1024,8 @@ fn serve_source_fails_when_first_compile_fails_and_no_wiki() {
 fn mcp_neighbors_unknown_id_names_candidates() {
     let src = source_project();
     let out = src.path().join("out");
-    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
-    let id = wiki::query::Wiki::load(&out)
+    kalka::compile(src.path(), &out, &kalka::CompileOptions::default()).unwrap();
+    let id = kalka::query::Wiki::load(&out)
         .unwrap()
         .search("add", None, 1)
         .remove(0)
@@ -1067,8 +1070,8 @@ fn big_project() -> (tempfile::TempDir, std::path::PathBuf, String) {
     }
     std::fs::write(src.path().join("src/big.rs"), body).unwrap();
     let out = src.path().join("out");
-    wiki::compile(src.path(), &out, &wiki::CompileOptions::default()).unwrap();
-    let id = wiki::query::Wiki::load(&out)
+    kalka::compile(src.path(), &out, &kalka::CompileOptions::default()).unwrap();
+    let id = kalka::query::Wiki::load(&out)
         .unwrap()
         .resolve_id("src/big.rs")
         .unwrap();
@@ -1296,7 +1299,7 @@ fn external_memory_folder_created_after_start_is_watched() {
 fn agent_folder_created_after_start_is_picked_up() {
     let project = source_project();
     let config = tempfile::tempdir().unwrap();
-    let slug = wiki::memory::claude_slug(&wiki::memory::display_path(
+    let slug = kalka::memory::claude_slug(&kalka::memory::display_path(
         &project.path().canonicalize().unwrap(),
     ));
     let slot = config.path().join("projects").join(slug);
@@ -1333,15 +1336,15 @@ fn agent_folder_created_after_start_is_picked_up() {
 /// The notice a server whose binary is gone adds to every answer.
 const RESTART: &str = "restart the agent session or reconnect the MCP server";
 
-/// Two installed copies of the wiki binary, `a` and `b`, in one directory.
+/// Two installed copies of the kalka binary, `a` and `b`, in one directory.
 fn installed_copies() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let (a, b) = (dir.path().join("a"), dir.path().join("b"));
     std::fs::create_dir_all(&a).unwrap();
     std::fs::create_dir_all(&b).unwrap();
-    let (a, b) = (a.join("wiki"), b.join("wiki"));
-    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &a).unwrap();
-    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &b).unwrap();
+    let (a, b) = (a.join("kalka"), b.join("kalka"));
+    std::fs::copy(env!("CARGO_BIN_EXE_kalka"), &a).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_kalka"), &b).unwrap();
     (dir, a, b)
 }
 
@@ -1400,7 +1403,7 @@ fn a_replaced_binary_stops_recompiling_and_says_so() {
     );
 
     // A compile that still ran would be done after a few debounces.
-    std::thread::sleep(wiki::watch::DEBOUNCE * 4);
+    std::thread::sleep(kalka::watch::DEBOUNCE * 4);
     assert_eq!(std::fs::read(wiki_dir.join("index.json")).unwrap(), index);
     let resp = search(&mut stdin, &stdout, 4, "oldword");
     assert_ne!(hit_ids(&resp), [] as [String; 0], "keeps answering: {resp}");
@@ -1414,11 +1417,11 @@ fn a_replaced_binary_stops_recompiling_and_says_so() {
         .all(|e| e.unwrap().path().extension().is_some_and(|x| x == "lock")));
 
     // The new version's own compile is picked up.
-    let opts = wiki::CompileOptions {
+    let opts = kalka::CompileOptions {
         incremental: true,
         ..Default::default()
     };
-    wiki::compile(project.path(), &wiki_dir, &opts).unwrap();
+    kalka::compile(project.path(), &wiki_dir, &opts).unwrap();
     let resp = search(&mut stdin, &stdout, 5, "zebrafish");
     assert_ne!(hit_ids(&resp), [] as [String; 0], "{resp}");
     assert!(
@@ -1454,7 +1457,7 @@ fn a_removed_binary_is_reported_without_source_too() {
     assert_eq!(notices(&log), 1);
 }
 
-/// Started as a bare `wiki` found on `PATH` through a symlink to a build
+/// Started as a bare `kalka` found on `PATH` through a symlink to a build
 /// output, as on the bench: `/proc/self/exe` names the old build, which stays.
 #[cfg(unix)]
 #[test]
@@ -1463,9 +1466,9 @@ fn a_retargeted_symlink_counts_as_replaced() {
     let (bins, a, b) = installed_copies();
     let path = bins.path().join("bin");
     std::fs::create_dir_all(&path).unwrap();
-    let link = path.join("wiki");
+    let link = path.join("kalka");
     std::os::unix::fs::symlink(&a, &link).unwrap();
-    let mut server = Command::new("wiki");
+    let mut server = Command::new("kalka");
     server
         .args(["serve", "--source"])
         .arg(project.path())
@@ -1497,9 +1500,9 @@ fn spawn_in_plan_dir() -> (tempfile::TempDir, Child, ChildStdin, Receiver<String
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("lib.rs"), "pub fn add() {}\n").unwrap();
     let out = tmp.path().join("out");
-    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    kalka::compile(tmp.path(), &out, &kalka::CompileOptions::default()).unwrap();
     std::fs::write(tmp.path().join("plan.md"), PLAN).unwrap();
-    let mut server = Command::new(env!("CARGO_BIN_EXE_wiki"));
+    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
     server
         .args(["serve", "--dir"])
         .arg(&out)
@@ -1612,7 +1615,7 @@ fn mcp_and_cli_search_carry_the_same_called_by_note() {
     )
     .unwrap();
     let out = tmp.path().join("out");
-    wiki::compile(tmp.path(), &out, &wiki::CompileOptions::default()).unwrap();
+    kalka::compile(tmp.path(), &out, &kalka::CompileOptions::default()).unwrap();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
     let resp = call(
@@ -1624,7 +1627,7 @@ fn mcp_and_cli_search_carry_the_same_called_by_note() {
     );
     child.kill().ok();
     let mcp = text_of(&resp).to_string();
-    let cli = Command::new(env!("CARGO_BIN_EXE_wiki"))
+    let cli = Command::new(env!("CARGO_BIN_EXE_kalka"))
         .args(["search", "add_one", "--dir"])
         .arg(&out)
         .output()

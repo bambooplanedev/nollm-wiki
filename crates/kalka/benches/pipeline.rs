@@ -1,9 +1,9 @@
 //! Criterion benchmark: a full `compile()` of a generated 100- and 1000-file corpus.
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use kalka::generator::generate_corpus;
+use kalka::{compile, CompileOptions};
 use tempfile::tempdir;
-use wiki::generator::generate_corpus;
-use wiki::{compile, CompileOptions};
 
 fn bench_compile(c: &mut Criterion) {
     for &n in &[100usize, 1000] {

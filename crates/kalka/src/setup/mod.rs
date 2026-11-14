@@ -1,4 +1,4 @@
-//! `wiki setup`: writes MCP config, skills and hooks into a project, and undoes exactly what it wrote.
+//! `kalka setup`: writes MCP config, skills and hooks into a project, and undoes exactly what it wrote.
 
 pub mod edit;
 
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
-const SKILL_DIR: &str = "skills/wiki-navigation";
+const SKILL_DIR: &str = "skills/kalka-navigation";
 /// Claude Code's memory-only skill (this head and an earlier `SKILL.md`'s Memory section) that
 /// earlier releases wrote. Claude Code keeps its own memory, which the wiki reads, so setup now
 /// only removes it.
@@ -21,12 +21,12 @@ name: wiki-memory
 description: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.
 ---
 ";
-const PI_HOOK: &str = include_str!("wiki-hint.ts");
-const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
+const PI_HOOK: &str = include_str!("kalka-hint.ts");
+const PI_HOOK_FILE: &str = ".pi/extensions/kalka-hint/index.ts";
 /// Every earlier release's pi hook, so setup can upgrade or remove what an older `wiki` wrote.
 const SHIPPED_PI_HOOKS: &[&str] = &[include_str!("shipped/wiki-hint-1.ts")];
 /// The command the agents run.
-const CMD: &str = "wiki";
+const CMD: &str = "kalka";
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
 /// `--remove` takes out exactly them.
 const NAV_RULES: &str = include_str!("navigation.md");
@@ -46,8 +46,8 @@ const SHIPPED_SKILLS: &[&str] = &[
     include_str!("shipped/skill-7.md"),
     include_str!("shipped/skill-8.md"),
 ];
-const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
-const NAV_END: &str = "<!-- /wiki:navigation -->";
+const NAV_BEGIN: &str = "<!-- kalka:navigation -->";
+const NAV_END: &str = "<!-- /kalka:navigation -->";
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
@@ -212,18 +212,18 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
 /// Codex starts the server in the directory it runs in.
 fn codex_mcp(root: &Path, remove: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
-        let (found, text) = cli("codex", root, &["mcp", "get", "wiki"])?;
+        let (found, text) = cli("codex", root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
             if !(has(&format!("command: {CMD}")) && has("args: serve --source .")) {
                 return Ok(Outcome::Foreign(
-                    "another \"wiki\" server is configured".into(),
+                    "another \"kalka\" server is configured".into(),
                 ));
             }
             if !remove {
                 return Ok(Outcome::AlreadyThere);
             }
-            cli("codex", root, &["mcp", "remove", "wiki"])?;
+            cli("codex", root, &["mcp", "remove", "kalka"])?;
             return Ok(Outcome::Done);
         }
         if remove {
@@ -232,7 +232,7 @@ fn codex_mcp(root: &Path, remove: bool) -> Outcome {
         cli(
             "codex",
             root,
-            &["mcp", "add", "wiki", "--", CMD, "serve", "--source", "."],
+            &["mcp", "add", "kalka", "--", CMD, "serve", "--source", "."],
         )?;
         Ok(Outcome::Done)
     };
@@ -242,7 +242,7 @@ fn codex_mcp(root: &Path, remove: bool) -> Outcome {
 /// Claude Code's own local-scope MCP config, through its CLI.
 fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
-        let (found, text) = claude(root, &["mcp", "get", "wiki"])?;
+        let (found, text) = claude(root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
@@ -250,13 +250,13 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
                 && has("Args: serve --source .");
             if !ours {
                 return Ok(Outcome::Foreign(
-                    "another \"wiki\" server is configured".into(),
+                    "another \"kalka\" server is configured".into(),
                 ));
             }
             if !remove {
                 return Ok(Outcome::AlreadyThere);
             }
-            claude(root, &["mcp", "remove", "wiki", "--scope", "local"])?;
+            claude(root, &["mcp", "remove", "kalka", "--scope", "local"])?;
             return Ok(Outcome::Done);
         }
         if remove {
@@ -265,7 +265,7 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
         let json = entry.to_string();
         claude(
             root,
-            &["mcp", "add-json", "wiki", &json, "--scope", "local"],
+            &["mcp", "add-json", "kalka", &json, "--scope", "local"],
         )?;
         Ok(Outcome::Done)
     };
@@ -382,8 +382,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    if !opts.remove && find_on_path("wiki").is_none() {
-        r.line("warning: wiki is not on PATH; the agents will not find it until it is")?;
+    if !opts.remove && find_on_path("kalka").is_none() {
+        r.line("warning: kalka is not on PATH; the agents will not find it until it is")?;
     }
     let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
     // Local scope only: repo scope puts just `.wiki/` in `.gitignore`.
@@ -399,13 +399,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(file);
                 let res = || {
                     if opts.remove {
-                        edit::remove_entry(root, &path, &["mcpServers"], "wiki", &entry)
+                        edit::remove_entry(root, &path, &["mcpServers"], "kalka", &entry)
                     } else {
-                        edit::upsert_entry(&path, &["mcpServers"], "wiki", &entry)
+                        edit::upsert_entry(&path, &["mcpServers"], "kalka", &entry)
                     }
                 };
                 let before = path.exists();
-                if r.file_item(root, file, &format!("{file} wiki server"), false, res)? {
+                if r.file_item(root, file, &format!("{file} kalka server"), false, res)? {
                     cursor_added |= !opts.remove;
                     if !before {
                         ignore.push(format!("/{file}"));
@@ -415,7 +415,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             }
             Agent::Codex => {
                 let o = codex_mcp(root, opts.remove);
-                r.item("Codex wiki server (~/.codex/config.toml)", false, Ok(o))?;
+                r.item("Codex kalka server (~/.codex/config.toml)", false, Ok(o))?;
                 // The navigation steps, which Codex otherwise never reads.
                 let file = "AGENTS.md";
                 let path = root.join(file);
@@ -427,7 +427,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                         edit::upsert_block(&path, NAV_BEGIN, &block, &old_blocks)
                     }
                 };
-                let what = "AGENTS.md wiki navigation steps";
+                let what = "AGENTS.md kalka navigation steps";
                 // pi reads AGENTS.md instead of CLAUDE.md when both exist, so
                 // beside a CLAUDE.md the steps get no AGENTS.md of their own; one
                 // an earlier setup created holds only them and goes.
@@ -436,7 +436,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 if !opts.remove && root.join("CLAUDE.md").exists() && (lone || !path.exists()) {
                     if lone {
                         edit::remove_block(root, &path, &block, &old_blocks)?;
-                        r.line("removed AGENTS.md: it held only the wiki steps and hid CLAUDE.md from pi")?;
+                        r.line("removed AGENTS.md: it held only the kalka steps and hid CLAUDE.md from pi")?;
                     }
                     r.skip(
                         what,
@@ -465,17 +465,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let path = root.join(file);
             let res = || {
                 if opts.remove {
-                    edit::remove_entry(root, &path, &["mcpServers"], "wiki", &value)
+                    edit::remove_entry(root, &path, &["mcpServers"], "kalka", &value)
                 } else {
-                    edit::upsert_entry(&path, &["mcpServers"], "wiki", &value)
+                    edit::upsert_entry(&path, &["mcpServers"], "kalka", &value)
                 }
             };
-            if r.file_item(root, file, &format!("{file} wiki server"), pi, res)? && pi {
+            if r.file_item(root, file, &format!("{file} kalka server"), pi, res)? && pi {
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
             let o = claude_local_mcp(root, &entry, opts.remove);
-            r.item("Claude Code local wiki server", false, Ok(o))?;
+            r.item("Claude Code local kalka server", false, Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
         // steps (a navigation skill cost a turn per task there), and keeps its own memory.
@@ -542,7 +542,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
                 if r.file_item(root, PI_HOOK_FILE, &what, true, res)? {
-                    ignore.push("/.pi/extensions/wiki-hint/".into());
+                    ignore.push("/.pi/extensions/kalka-hint/".into());
                 }
             } else {
                 let file = if local {
@@ -596,7 +596,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("pi loads project files only after you trust the project (/trust, or --approve in print mode).")?;
     }
     if cursor_added {
-        r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable wiki`.")?;
+        r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
     }
     Ok(r.ok)
 }

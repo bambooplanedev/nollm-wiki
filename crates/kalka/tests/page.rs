@@ -1,8 +1,8 @@
 //! `Wiki::outline`: a page's module map, one line per code symbol, against a compiled fixture.
 
+use kalka::manifest::token_estimate;
+use kalka::query::Wiki;
 use std::fs;
-use wiki::manifest::token_estimate;
-use wiki::query::Wiki;
 
 mod common;
 

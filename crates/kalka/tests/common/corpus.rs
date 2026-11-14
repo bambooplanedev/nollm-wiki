@@ -5,10 +5,10 @@
 
 #![allow(dead_code)]
 
+use kalka::query::Wiki;
+use kalka::{compile, CompileOptions};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use wiki::query::Wiki;
-use wiki::{compile, CompileOptions};
 
 /// Slack on the floor comparisons. Not defensive padding: `mrr@10` is
 /// accumulated as `Σ(1.0/rank) / n`, and that sum can land one ULP away
@@ -25,7 +25,7 @@ pub const FLOOR_EPS: f64 = 1e-9;
 /// checked out with CRLF moves no scoring metric, so it must not move this
 /// hash either, or the check would fail spuriously on a Windows checkout.
 pub fn corpus_hash(corpus: &Path) -> String {
-    let mut files = wiki::walk::walk(corpus, false, &|_| true).files;
+    let mut files = kalka::walk::walk(corpus, false, &|_| true).files;
     // `walk` already sorts by `rel_path`, but the hash's determinism is the
     // point here, not an incidental property of the walker, so make it
     // explicit rather than relying on that guarantee silently.
@@ -37,7 +37,7 @@ pub fn corpus_hash(corpus: &Path) -> String {
         parts.push(normalized.into_bytes());
     }
     let refs: Vec<&[u8]> = parts.iter().map(Vec::as_slice).collect();
-    wiki::hash::to_hex(&wiki::hash::combine(&refs))
+    kalka::hash::to_hex(&kalka::hash::combine(&refs))
 }
 
 /// Check the frozen corpus at `rel` (relative to `CARGO_MANIFEST_DIR`) against

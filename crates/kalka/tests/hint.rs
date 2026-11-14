@@ -1,4 +1,4 @@
-//! `wiki hint` end to end: code locations for a task text, silent when there is nothing to say.
+//! `kalka hint` end to end: code locations for a task text, silent when there is nothing to say.
 
 use assert_cmd::Command;
 use std::path::Path;
@@ -9,9 +9,9 @@ use common::write;
 
 const TASK: &str = "where are member creds loaded";
 
-/// `wiki compile <root> <root>/.wiki` through the CLI.
+/// `kalka compile <root> <root>/.wiki` through the CLI.
 fn compile(root: &Path) {
-    Command::cargo_bin("wiki")
+    Command::cargo_bin("kalka")
         .unwrap()
         .args(["compile"])
         .arg(root)
@@ -41,7 +41,7 @@ fn project() -> TempDir {
 }
 
 fn hint(dir: &Path, text: &str) -> String {
-    let out = Command::cargo_bin("wiki")
+    let out = Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", text, "--dir"])
         .arg(dir)
@@ -125,7 +125,7 @@ fn hint_is_silent_when_nothing_matches() {
 fn hint_reads_claude_hook_json() {
     let tmp = project();
     let expected = hint_in(&tmp, TASK);
-    let out = Command::cargo_bin("wiki")
+    let out = Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", "--claude-hook"])
         .env("CLAUDE_PROJECT_DIR", tmp.path())
@@ -143,7 +143,7 @@ fn hint_reads_claude_hook_json() {
 fn hint_text_may_start_with_a_dash() {
     let tmp = project();
     let dir = tmp.path().join(".wiki");
-    let out = Command::cargo_bin("wiki")
+    let out = Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", "--dir"])
         .arg(&dir)
@@ -156,7 +156,7 @@ fn hint_text_may_start_with_a_dash() {
 
 #[test]
 fn hint_claude_hook_is_silent_on_non_utf8_stdin() {
-    Command::cargo_bin("wiki")
+    Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", "--claude-hook"])
         .write_stdin(vec![0xff, 0xfe, 0xfd])
@@ -230,7 +230,7 @@ fn hint_gate_length_comes_from_the_env() {
     let plain = hint_in(&tmp, prompt);
     assert!(plain.contains("load_member_creds"), "{plain}");
     assert!(memory_line(&plain).is_some(), "{plain}");
-    let gated = Command::cargo_bin("wiki")
+    let gated = Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", prompt, "--dir"])
         .arg(tmp.path().join(".wiki"))
@@ -241,7 +241,7 @@ fn hint_gate_length_comes_from_the_env() {
     assert!(gated.contains("load_member_creds"), "{gated}");
     assert!(memory_line(&gated).is_none(), "{gated}");
     // `0` is rejected: it behaves like the default gate.
-    let zero = Command::cargo_bin("wiki")
+    let zero = Command::cargo_bin("kalka")
         .unwrap()
         .args(["hint", prompt, "--dir"])
         .arg(tmp.path().join(".wiki"))

@@ -2,9 +2,9 @@
 //! the whole-term match rule. The extractor always renders an item's name
 //! into `## Exports`, so a "name-only" hit can only be built by hand.
 
+use kalka::query::Wiki;
 use std::fs;
 use tempfile::tempdir;
-use wiki::query::Wiki;
 
 fn entry(id: &str, title: &str, defined: Option<&[&str]>) -> String {
     let defined = defined.map_or_else(String::new, |d| {

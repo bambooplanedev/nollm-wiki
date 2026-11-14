@@ -1,19 +1,19 @@
-//! CLI entry point for `wiki`: compile, search, neighbors, page, lint, serve, hint, setup, and generate subcommands.
+//! CLI entry point for `kalka`: compile, search, neighbors, page, lint, serve, hint, setup, and generate subcommands.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use kalka::generator::generate_corpus;
+use kalka::model::KindFilter;
+use kalka::query::{PackBudget, Wiki};
+use kalka::setup::{Agent, Scope, SetupOptions};
+use kalka::{compile, CompileOptions};
 use std::path::{Path, PathBuf};
-use wiki::generator::generate_corpus;
-use wiki::model::KindFilter;
-use wiki::query::{PackBudget, Wiki};
-use wiki::setup::{Agent, Scope, SetupOptions};
-use wiki::{compile, CompileOptions};
 
 const DIR_HELP: &str = "Wiki to read (default: `.wiki` if that directory exists, else `out`)";
 
 #[derive(Parser)]
 #[command(
-    name = "wiki",
+    name = "kalka",
     version,
     about = "Deterministic wiki compiler for agent-navigable knowledge bases"
 )]
@@ -273,8 +273,8 @@ fn run() -> Result<()> {
             let repo_memory = memory_arg != ["none"];
             let mut memory = Vec::new();
             for arg in memory_arg.iter().filter(|a| *a != "none") {
-                let d =
-                    wiki::memory::resolve(std::path::Path::new(arg)).context("resolve --memory")?;
+                let d = kalka::memory::resolve(std::path::Path::new(arg))
+                    .context("resolve --memory")?;
                 if !d.is_dir() {
                     eprintln!(
                         "warning: --memory {arg}: no such memory folder; compiling without it"
@@ -291,7 +291,7 @@ fn run() -> Result<()> {
                 memory,
                 repo_memory,
             };
-            let r = wiki::dirlock::exclusive(&output, || compile(&input, &output, &opts))
+            let r = kalka::dirlock::exclusive(&output, || compile(&input, &output, &opts))
                 .context("compile failed")?;
             println!(
                 "Compiled {} pages ({} written) -> {}",
@@ -307,9 +307,9 @@ fn run() -> Result<()> {
             );
             if !no_ignore {
                 let mut compiled = opts.memory.clone();
-                compiled.push(input.join(wiki::memory::REPO_DIR));
+                compiled.push(input.join(kalka::memory::REPO_DIR));
                 compiled.push(output.clone());
-                let skipped = wiki::walk::skipped(&input, &compiled);
+                let skipped = kalka::walk::skipped(&input, &compiled);
                 if !skipped.is_empty() {
                     let rules: Vec<_> = skipped.iter().map(|(r, n)| format!("{r} {n}")).collect();
                     println!("Skipped: {}", rules.join(", "));
@@ -398,7 +398,7 @@ fn run() -> Result<()> {
             dir,
         } => {
             if !docs.is_empty() {
-                let (hits, errors, more, fallback) = wiki::labels::doc_search(
+                let (hits, errors, more, fallback) = kalka::labels::doc_search(
                     Path::new("."),
                     &docs,
                     query.as_deref().unwrap_or(""),
@@ -407,12 +407,12 @@ fn run() -> Result<()> {
                 if format == "json" {
                     println!(
                         "{}",
-                        wiki::serve::doc_json(&hits, &errors, more, fallback.as_deref())
+                        kalka::serve::doc_json(&hits, &errors, more, fallback.as_deref())
                     );
                 } else {
                     print!(
                         "{}",
-                        wiki::labels::doc_lines(&hits, &errors, more, fallback.as_deref())
+                        kalka::labels::doc_lines(&hits, &errors, more, fallback.as_deref())
                     );
                 }
                 return Ok(());
@@ -422,7 +422,7 @@ fn run() -> Result<()> {
             }
             let tag = tag
                 .as_deref()
-                .map(wiki::query::tag_arg)
+                .map(kalka::query::tag_arg)
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             let w = Wiki::load(&wiki_dir(dir)).context("load wiki")?;
@@ -435,16 +435,16 @@ fn run() -> Result<()> {
             let hits = w.search_tagged(q, kind.as_ref(), tag.as_deref(), limit);
 
             if format == "json" {
-                println!("{}", wiki::serve::search_json(hits));
+                println!("{}", kalka::serve::search_json(hits));
             } else {
                 let missing = w.not_found(q, kind.as_ref(), tag.as_deref());
-                print!("{}", wiki::serve::search_lines_missing(&hits, &missing));
+                print!("{}", kalka::serve::search_lines_missing(&hits, &missing));
             }
         }
         Command::Lint { dir } => {
             let pages =
-                wiki::lint::load_compiled_pages(&wiki_dir(dir)).context("read output dir")?;
-            let r = wiki::lint::lint(&pages);
+                kalka::lint::load_compiled_pages(&wiki_dir(dir)).context("read output dir")?;
+            let r = kalka::lint::lint(&pages);
             println!(
                 "Linted {} pages: {} broken links, {} orphans, {} large",
                 r.total_pages,
@@ -481,7 +481,7 @@ fn run() -> Result<()> {
         } => {
             no_memory_mix(&memory);
             let dir = wiki_dir(dir.or_else(|| source.as_ref().map(|s| s.join(".wiki"))));
-            wiki::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
+            kalka::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
         }
         Command::Hint {
             text,
@@ -494,7 +494,7 @@ fn run() -> Result<()> {
                 if std::io::Read::read_to_string(&mut std::io::stdin(), &mut json).is_err() {
                     return Ok(());
                 }
-                let Some(t) = wiki::hint::prompt_from_hook_json(&json) else {
+                let Some(t) = kalka::hint::prompt_from_hook_json(&json) else {
                     return Ok(());
                 };
                 t
@@ -508,7 +508,7 @@ fn run() -> Result<()> {
                 }
             });
             if let Ok(w) = Wiki::load(&dir) {
-                print!("{}", wiki::hint::hint_lines(&w, &text));
+                print!("{}", kalka::hint::hint_lines(&w, &text));
             }
         }
         Command::Setup {
@@ -525,7 +525,7 @@ fn run() -> Result<()> {
                 remove,
             };
             let root = std::env::current_dir()?;
-            if !wiki::setup::run(&root, &opts, &mut std::io::stdout())? {
+            if !kalka::setup::run(&root, &opts, &mut std::io::stdout())? {
                 std::process::exit(1);
             }
         }

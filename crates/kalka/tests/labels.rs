@@ -1,8 +1,8 @@
 //! Markdown labels: ATX headings and bold step lines with their line ranges.
 
+use kalka::labels::{doc_lines, doc_search, labels, DocHit, DOC_LIST_LIMIT, DOC_NO_MATCH};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use wiki::labels::{doc_lines, doc_search, labels, DocHit, DOC_LIST_LIMIT, DOC_NO_MATCH};
 
 const PLAN: &str = "# Plan\n\n## Task 2\n\n**T2d. Remaining matrix.**\n\n**Files:**\n- a.rs\n- **Mutants:** x\n\n**T2e (QA-H T5): next.**\nbody\n```sh\n## not a heading\n**T9. not a label**\n```\n## Task 3\n- **D-d, swap (H1).** ruling\n";
 
@@ -427,10 +427,10 @@ fn the_fallback_is_named_first_in_lines() {
     let d = write_tmp("fbl", SPEC);
     let (h, e, more, fb) = doc_search(&d, &["p.md".to_string()], "11.4 QX", None);
     let json: serde_json::Value =
-        serde_json::from_str(&wiki::serve::doc_json(&h, &e, more, fb.as_deref())).unwrap();
+        serde_json::from_str(&kalka::serve::doc_json(&h, &e, more, fb.as_deref())).unwrap();
     assert_eq!(json["fallback"].as_str(), fb.as_deref());
     let plain: serde_json::Value =
-        serde_json::from_str(&wiki::serve::doc_json(&h, &e, more, None)).unwrap();
+        serde_json::from_str(&kalka::serve::doc_json(&h, &e, more, None)).unwrap();
     assert!(plain.get("fallback").is_none());
     let out = doc_lines(&h, &e, more, fb.as_deref());
     assert_eq!(

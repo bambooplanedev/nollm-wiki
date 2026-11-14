@@ -1,10 +1,10 @@
 //! Full `compile()` runs on small in-memory corpora: artifacts, cross-links, reserved-name remapping, incremental edit and delete, and byte-identical output across `--jobs`.
 
+use kalka::{compile, CompileOptions};
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use tempfile::{tempdir, TempDir};
-use wiki::{compile, CompileOptions};
 
 mod common;
 use common::{exports, imports, index_entries, write};
@@ -787,9 +787,9 @@ fn two_plain_compiles_prune_a_page_whose_source_was_deleted() {
 
 #[test]
 fn items_json_round_trips() {
+    use kalka::formats::{CodeExtractor, Extractor};
+    use kalka::model::CodeItem;
     use std::collections::BTreeMap;
-    use wiki::formats::{CodeExtractor, Extractor};
-    use wiki::model::CodeItem;
     let dir = tempdir().unwrap();
     let input = dir.path().join("in");
     let src = "pub fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n}\n";
@@ -971,7 +971,7 @@ fn external_memory_folder_compiles_with_its_absolute_path() {
     let note = entries.iter().find(|e| e["title"] == "Ext Note").unwrap();
     assert_eq!(
         note["path"],
-        wiki::memory::display_path(&external.join("n.md"))
+        kalka::memory::display_path(&external.join("n.md"))
     );
     assert_eq!(note["memory"], true);
 }
@@ -1025,9 +1025,9 @@ fn memory_note_titled_like_a_project_doc_gets_its_own_id() {
         .unwrap();
     assert_ne!(note["id"], "setup");
     assert!(note["title"].as_str().unwrap().contains("Setup"));
-    let pages = wiki::lint::load_compiled_pages(&output).unwrap();
+    let pages = kalka::lint::load_compiled_pages(&output).unwrap();
     assert_eq!(
-        wiki::lint::lint(&pages).broken_links,
+        kalka::lint::lint(&pages).broken_links,
         [] as [(String, String); 0]
     );
     let linker = fs::read_to_string(output.join("linker.md")).unwrap();
@@ -1132,7 +1132,7 @@ fn logs_folder_inside_a_memory_folder_is_skipped() {
         .map(|e| e["path"].as_str().unwrap().to_string())
         .collect();
     assert!(
-        paths.contains(&wiki::memory::display_path(&ext.join("n.md"))),
+        paths.contains(&kalka::memory::display_path(&ext.join("n.md"))),
         "{paths:?}"
     );
     assert!(!paths.iter().any(|p| p.contains("logs/")), "{paths:?}");

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 
 /// `(signature, kind, start, end, doc)` of a page's items.
 fn items(
-    wiki: &wiki::query::Wiki,
+    wiki: &kalka::query::Wiki,
     id: &str,
 ) -> Vec<(String, String, usize, usize, Option<String>)> {
     wiki.items(id)
@@ -159,7 +159,7 @@ fn a_comment_inside_a_function_body_is_no_summary() {
     assert_ne!(entry(&out, "ship")["summary"], "inner note about things");
 }
 
-fn callers_text(wiki: &wiki::query::Wiki, id: &str, symbol: &str, depth: Option<usize>) -> String {
+fn callers_text(wiki: &kalka::query::Wiki, id: &str, symbol: &str, depth: Option<usize>) -> String {
     wiki.callers(id, symbol, depth, None).unwrap()
 }
 
@@ -210,7 +210,7 @@ fn top_level_item_is_not_a_symbol() {
     let src = "helper() { :; }\ntop_call_marker() { :; }\nhelper\ntop_call_marker\n";
     let (_d, out_wiki) = {
         let (d, _, out) = compiled(&[("s.sh", src)]);
-        let w = wiki::query::Wiki::load(&out).unwrap();
+        let w = kalka::query::Wiki::load(&out).unwrap();
         let idx = index_entries(&out);
         // `defined` and the page's exports never name it.
         let e = idx.iter().find(|e| e["id"] == "s").unwrap();
@@ -400,10 +400,10 @@ fn shellcheck_directive_is_no_summary() {
 }
 
 /// `(signature, start, end)` of a page's top-level variable items.
-fn globals(wiki: &wiki::query::Wiki, id: &str) -> Vec<(String, usize, usize)> {
+fn globals(wiki: &kalka::query::Wiki, id: &str) -> Vec<(String, usize, usize)> {
     wiki.items(id)
         .iter()
-        .filter(|i| i.nested && i.kind == wiki::model::CodeItemKind::Value)
+        .filter(|i| i.nested && i.kind == kalka::model::CodeItemKind::Value)
         .map(|i| (i.signature.clone(), i.start_line, i.end_line))
         .collect()
 }
@@ -418,7 +418,7 @@ fn top_level_uppercase_assignment_is_a_search_only_value() {
     let it = wiki.items("env").iter().find(|i| i.name == "X").unwrap();
     assert_eq!(
         (it.kind, it.public, it.nested),
-        (wiki::model::CodeItemKind::Value, false, true)
+        (kalka::model::CodeItemKind::Value, false, true)
     );
     assert_eq!(globals(&wiki, "env"), [g("X=1", 1, 1)]);
     let page = wiki.page_text("env", false, None).unwrap();

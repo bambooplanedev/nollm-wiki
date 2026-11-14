@@ -32,12 +32,12 @@
 //! still taken at limit 10. A step that changes the default renderer or
 //! limit must swap it here and quote both numbers.
 
+use kalka::manifest::token_estimate;
+use kalka::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
+use kalka::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS, DEFAULT_SEARCH_LIMIT};
 use regex::Regex;
 use std::fmt::Write as _;
 use std::path::Path;
-use wiki::manifest::token_estimate;
-use wiki::query::{PackBudget, Wiki, OVER_BUDGET_NOTE};
-use wiki::serve::{search_json, search_lines, DEFAULT_NEIGHBORS_MAX_TOKENS, DEFAULT_SEARCH_LIMIT};
 
 #[path = "common/corpus.rs"]
 mod corpus;

@@ -237,7 +237,7 @@ pub fn upsert_block(path: &Path, begin: &str, block: &str, shipped: &[&str]) -> 
         return Ok(Outcome::Done);
     }
     if text.lines().any(|l| l == begin) {
-        return Ok(foreign("holds another wiki block"));
+        return Ok(foreign("holds another kalka block"));
     }
     if !text.is_empty() {
         if !text.ends_with('\n') {
@@ -264,7 +264,7 @@ pub fn remove_block(root: &Path, path: &Path, block: &str, shipped: &[&str]) -> 
     else {
         let begin = block.lines().next().unwrap_or_default();
         return Ok(if text.lines().any(|l| l == begin) {
-            foreign("holds another wiki block")
+            foreign("holds another kalka block")
         } else {
             Outcome::AlreadyThere
         });
@@ -317,15 +317,15 @@ mod tests {
     fn upsert_creates_file_and_parents() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join(".mcp.json");
-        let v = json!({"command": "wiki", "args": ["serve"]});
+        let v = json!({"command": "kalka", "args": ["serve"]});
         assert_eq!(
-            upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap(),
+            upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap(),
             Outcome::Done
         );
-        let want = pretty(&json!({"mcpServers": {"wiki": v}}));
+        let want = pretty(&json!({"mcpServers": {"kalka": v}}));
         assert_eq!(fs::read_to_string(&p).unwrap(), want);
         assert_eq!(
-            upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap(),
+            upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap(),
             Outcome::AlreadyThere
         );
         assert_eq!(fs::read_to_string(&p).unwrap(), want);
@@ -337,20 +337,20 @@ mod tests {
         let p = d.path().join("a.json");
         let orig = r#"{"zeta":1,"mcpServers":{"other":{"command":"x"}},"alpha":2}"#;
         fs::write(&p, orig).unwrap();
-        upsert_entry(&p, &["mcpServers"], "wiki", &json!({"command": "wiki"})).unwrap();
+        upsert_entry(&p, &["mcpServers"], "kalka", &json!({"command": "kalka"})).unwrap();
         let v: Value = serde_json::from_str(&fs::read_to_string(&p).unwrap()).unwrap();
         let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
         assert_eq!(keys(&v), ["zeta", "mcpServers", "alpha"]);
-        assert_eq!(keys(&v["mcpServers"]), ["other", "wiki"]);
+        assert_eq!(keys(&v["mcpServers"]), ["other", "kalka"]);
     }
 
     #[test]
     fn upsert_reports_foreign_value() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("a.json");
-        let orig = pretty(&json!({"mcpServers": {"wiki": {"command": "other"}}}));
+        let orig = pretty(&json!({"mcpServers": {"kalka": {"command": "other"}}}));
         fs::write(&p, &orig).unwrap();
-        let o = upsert_entry(&p, &["mcpServers"], "wiki", &json!({"command": "wiki"})).unwrap();
+        let o = upsert_entry(&p, &["mcpServers"], "kalka", &json!({"command": "kalka"})).unwrap();
         assert!(is_foreign(&o));
         assert_eq!(fs::read_to_string(&p).unwrap(), orig);
     }
@@ -360,7 +360,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("a.json");
         fs::write(&p, "{ not json").unwrap();
-        let o = upsert_entry(&p, &["mcpServers"], "wiki", &json!(1)).unwrap();
+        let o = upsert_entry(&p, &["mcpServers"], "kalka", &json!(1)).unwrap();
         assert!(is_foreign(&o));
         assert_eq!(fs::read_to_string(&p).unwrap(), "{ not json");
     }
@@ -369,16 +369,16 @@ mod tests {
     fn remove_deletes_a_file_left_empty() {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join(".pi/a.json");
-        let v = json!({"command": "wiki"});
-        upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap();
+        let v = json!({"command": "kalka"});
+        upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap();
         assert_eq!(
-            remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap(),
+            remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap(),
             Outcome::Done
         );
         assert!(!p.exists());
         assert!(!d.path().join(".pi").exists());
         assert_eq!(
-            remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap(),
+            remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap(),
             Outcome::AlreadyThere
         );
     }
@@ -389,9 +389,9 @@ mod tests {
         let p = d.path().join("a.json");
         let orig = pretty(&json!({"b": 1, "mcpServers": {"other": {"command": "x"}}, "a": [1]}));
         fs::write(&p, &orig).unwrap();
-        let v = json!({"command": "wiki"});
-        upsert_entry(&p, &["mcpServers"], "wiki", &v).unwrap();
-        remove_entry(d.path(), &p, &["mcpServers"], "wiki", &v).unwrap();
+        let v = json!({"command": "kalka"});
+        upsert_entry(&p, &["mcpServers"], "kalka", &v).unwrap();
+        remove_entry(d.path(), &p, &["mcpServers"], "kalka", &v).unwrap();
         assert_eq!(fs::read_to_string(&p).unwrap(), orig);
     }
 
@@ -416,7 +416,7 @@ mod tests {
     fn write_and_remove_file_prune_empty_dirs() {
         let d = tempfile::tempdir().unwrap();
         let root = d.path();
-        let p = root.join(".claude/skills/wiki-navigation/SKILL.md");
+        let p = root.join(".claude/skills/kalka-navigation/SKILL.md");
         fs::create_dir_all(root.join(".claude")).unwrap();
         fs::write(root.join(".claude/settings.json"), "{}").unwrap();
         assert_eq!(write_file(&p, "body", &[]).unwrap(), Outcome::Done);

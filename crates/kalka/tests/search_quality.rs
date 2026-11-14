@@ -5,7 +5,7 @@
 //! authored in-test (modeled on the self-hosted corpus), not a checkout of
 //! this repo.
 
-use wiki::query::Wiki;
+use kalka::query::Wiki;
 
 mod common;
 
@@ -281,7 +281,7 @@ const NAMED_FILE: &[(&str, &str)] = &[
     ("src/risk/orders.h", "struct Orders { int open; };\n"),
 ];
 
-fn ids(hits: &[wiki::query::Hit]) -> Vec<&str> {
+fn ids(hits: &[kalka::query::Hit]) -> Vec<&str> {
     hits.iter().map(|h| h.path.as_str()).collect()
 }
 

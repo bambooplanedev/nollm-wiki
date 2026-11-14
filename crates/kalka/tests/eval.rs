@@ -1,4 +1,4 @@
-//! Retrieval eval harness: one comparable score for `wiki search`.
+//! Retrieval eval harness: one comparable score for `kalka search`.
 //!
 //! Runs labelled queries against the frozen 17-page corpus in
 //! `tests/.eval_corpus/`.
@@ -20,8 +20,8 @@
 //! pages out of the self-hosted wiki), while compiling it *as* the walk root
 //! still yields every file — the walker never filters its own root.
 
+use kalka::query::{PackBudget, Wiki};
 use std::fmt::Write as _;
-use wiki::query::{PackBudget, Wiki};
 
 /// Every page the corpus must compile to, **ascending by id** — the order
 /// `Wiki::list_pages` returns, which is not the source-path order the spec's
@@ -101,7 +101,7 @@ const MIN_TOKEN_CHARS: usize = 4;
 /// The searchable content of a rendered page: every section except the
 /// generated chrome, lowercased.
 fn searchable_content(page: &str) -> String {
-    wiki::rewrite::parse_sections(page)
+    kalka::rewrite::parse_sections(page)
         .into_iter()
         .filter(|(k, _)| !CHROME_SECTIONS.contains(&k.as_str()))
         .map(|(_, v)| v)
@@ -371,13 +371,13 @@ fn pack_ceiling_holds_on_a_real_graph() {
             // for, not the condition itself.
             // A code target's floor is its cut outline's header and `…` line.
             let is_floor = pack.included.len() == 1
-                && (pack.text.contains(wiki::query::OVER_BUDGET_NOTE)
+                && (pack.text.contains(kalka::query::OVER_BUDGET_NOTE)
                     || pack.text.contains("— pass max_tokens:"));
             if is_floor {
                 floor_fires += 1;
             }
             checked += 1;
-            let tokens = wiki::manifest::token_estimate(&pack.text);
+            let tokens = kalka::manifest::token_estimate(&pack.text);
             assert!(
                 tokens <= budget || is_floor,
                 "pack for {id} at budget {budget} is {tokens} tokens, included {:?}",

@@ -1,4 +1,4 @@
-//! MCP server for a compiled wiki (`wiki serve`): exposes
+//! MCP server for a compiled wiki (`kalka serve`): exposes
 //! search/page/callers (and, on request, neighbors and lint) as tools and
 //! pages as resources over stdio.
 
@@ -488,7 +488,7 @@ impl ServerHandler for WikiServer {
             .enable_resources()
             .build();
         ServerConfig::new(capabilities)
-            .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("kalka", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 
@@ -816,7 +816,7 @@ pub fn run(
         }
         None => WikiState::load(dir).map_err(|e| {
             WikiError::Serve(format!(
-                "{} is not a compiled wiki ({e}) — run `wiki compile <input> {}` first",
+                "{} is not a compiled wiki ({e}) — run `kalka compile <input> {}` first",
                 dir.display(),
                 dir.display()
             ))

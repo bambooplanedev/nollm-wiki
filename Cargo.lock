@@ -1265,6 +1265,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "kalka"
+version = "0.6.13"
+dependencies = [
+ "aho-corasick",
+ "anyhow",
+ "assert_cmd",
+ "blake3",
+ "clap",
+ "criterion",
+ "frostem",
+ "ignore",
+ "insta",
+ "notify",
+ "predicates",
+ "rayon",
+ "regex",
+ "rmcp",
+ "sentry",
+ "serde",
+ "serde_json",
+ "techlog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "wiki-code",
+]
+
+[[package]]
 name = "kqueue"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3047,34 +3075,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7265c9301c16a8711c992c2d8da90ee77ef54b1ed51482d6dfeb00dc756b1297"
 dependencies = [
  "rustls-pki-types",
-]
-
-[[package]]
-name = "wiki"
-version = "0.6.13"
-dependencies = [
- "aho-corasick",
- "anyhow",
- "assert_cmd",
- "blake3",
- "clap",
- "criterion",
- "frostem",
- "ignore",
- "insta",
- "notify",
- "predicates",
- "rayon",
- "regex",
- "rmcp",
- "sentry",
- "serde",
- "serde_json",
- "techlog",
- "tempfile",
- "thiserror",
- "tokio",
- "wiki-code",
 ]
 
 [[package]]

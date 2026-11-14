@@ -1,4 +1,4 @@
-//! `wiki setup` end to end, with a stub `claude` and a `PATH` of stub binaries only.
+//! `kalka setup` end to end, with a stub `claude` and a `PATH` of stub binaries only.
 
 use assert_cmd::Command;
 use std::fs;
@@ -17,7 +17,7 @@ fn skill(dir: &str) -> String {
 fn memory_skill(dir: &str) -> String {
     memory_part(&OLD_SKILLS[5].replace("<memory-dir>", dir)).unwrap()
 }
-const ENTRY: &str = "{\n  \"command\": \"wiki\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
+const ENTRY: &str = "{\n  \"command\": \"kalka\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
 
 struct Fixture {
     tmp: TempDir,
@@ -39,7 +39,7 @@ impl Fixture {
         fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default()
     }
     fn setup(&self, args: &[&str]) -> assert_cmd::assert::Assert {
-        Command::cargo_bin("wiki")
+        Command::cargo_bin("kalka")
             .unwrap()
             .arg("setup")
             .args(args)
@@ -64,9 +64,9 @@ impl Fixture {
                 .contains(&k)
                 .then(|| self.home().to_string_lossy().into_owned())
         };
-        let data = wiki::memory::data_dir_for(std::env::consts::OS, &env).unwrap();
+        let data = kalka::memory::data_dir_for(std::env::consts::OS, &env).unwrap();
         data.join("wiki/memory")
-            .join(wiki::memory::repo_key(&self.root()).unwrap())
+            .join(kalka::memory::repo_key(&self.root()).unwrap())
     }
 }
 
@@ -86,16 +86,16 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
         .status()
         .unwrap();
     if with_wiki {
-        symlink(env!("CARGO_BIN_EXE_wiki"), f.bin().join("wiki")).unwrap();
+        symlink(env!("CARGO_BIN_EXE_kalka"), f.bin().join("kalka")).unwrap();
     }
     f.stub("pi", "exit 0");
     if with_claude {
-        claude_stub(&f, "wiki");
+        claude_stub(&f, "kalka");
     }
     f
 }
 
-/// A `claude` that logs its argv and answers `mcp get wiki` as a local server running `cmd`
+/// A `claude` that logs its argv and answers `mcp get kalka` as a local server running `cmd`
 /// once `add-json` has been called (the state file).
 fn claude_stub(f: &Fixture, cmd: &str) {
     let t = f.tmp.path().display();
@@ -104,8 +104,8 @@ fn claude_stub(f: &Fixture, cmd: &str) {
             &format!(
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
-"mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "wiki".'; exit 1; }}
-  printf 'wiki:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n' ;;
+"mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "kalka".'; exit 1; }}
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;
 esac"#
@@ -163,14 +163,14 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
     assert_eq!(
         read(&r.join(".mcp.json")),
         format!(
-            "{{\n  \"mcpServers\": {{\n    \"wiki\": {}\n  }}\n}}\n",
+            "{{\n  \"mcpServers\": {{\n    \"kalka\": {}\n  }}\n}}\n",
             ENTRY.replace('\n', "\n    ")
         )
     );
     assert_eq!(
         read(&r.join(".pi/mcp.json")),
         format!(
-            "{{\n  \"mcpServers\": {{\n    \"wiki\": {}\n  }}\n}}\n",
+            "{{\n  \"mcpServers\": {{\n    \"kalka\": {}\n  }}\n}}\n",
             ENTRY
                 .replace("\n}", ",\n  \"exposure\": \"direct\"\n}")
                 .replace('\n', "\n    ")
@@ -178,7 +178,7 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
     );
     assert!(!r.join(".claude/skills").exists());
     assert_eq!(
-        read(&r.join(".agents/skills/wiki-navigation/SKILL.md")),
+        read(&r.join(".agents/skills/kalka-navigation/SKILL.md")),
         skill(".agents/memory")
     );
     assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".wiki/"));
@@ -188,18 +188,18 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
 #[test]
 fn setup_replaces_an_untouched_claude_navigation_skill() {
     let f = fixture(true, true);
-    let old = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+    let old = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(old.parent().unwrap()).unwrap();
     fs::write(&old, skill(".agents/memory")).unwrap();
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(!old.exists(), "{}", out(&a));
-    assert!(out(&a).contains("removed .claude/skills/wiki-navigation/SKILL.md"));
+    assert!(out(&a).contains("removed .claude/skills/kalka-navigation/SKILL.md"));
 }
 
 #[test]
 fn setup_keeps_an_edited_claude_navigation_skill() {
     let f = fixture(true, true);
-    let old = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+    let old = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(old.parent().unwrap()).unwrap();
     fs::write(&old, "my own notes\n").unwrap();
     f.setup(&["--agent", "claude", "--scope", "repo"]).success();
@@ -225,7 +225,7 @@ fn setup_twice_is_a_no_op() {
 #[test]
 fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     let f = fixture(true, true);
-    let foreign = "{\"mcpServers\":{\"wiki\":{\"command\":\"other\"}}}";
+    let foreign = "{\"mcpServers\":{\"kalka\":{\"command\":\"other\"}}}";
     fs::write(f.root().join(".mcp.json"), foreign).unwrap();
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).code(1);
     assert_eq!(read(&f.root().join(".mcp.json")), foreign);
@@ -238,14 +238,14 @@ fn setup_local_uses_claude_cli_and_git_exclude() {
     f.setup(&["--agent", "claude,pi", "--scope", "local"])
         .success();
     let log = f.claude_log();
-    assert!(log.contains("mcp add-json wiki"), "{log}");
+    assert!(log.contains("mcp add-json kalka"), "{log}");
     assert!(log.contains("--scope local"), "{log}");
     assert!(!f.root().join(".mcp.json").exists());
     let ex = read(&f.root().join(".git/info/exclude"));
     for l in [
         ".wiki/",
         "/.pi/mcp.json",
-        "/.agents/skills/wiki-navigation/",
+        "/.agents/skills/kalka-navigation/",
         "/.agents/memory/",
     ] {
         assert!(ex.lines().any(|x| x == l), "{l} missing in {ex}");
@@ -313,7 +313,7 @@ fn setup_repo_writes_wiki_even_when_not_on_path() {
     let f = fixture(false, true);
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(out(&a).contains("not on PATH"));
-    assert!(read(&f.root().join(".mcp.json")).contains("\"command\": \"wiki\""));
+    assert!(read(&f.root().join(".mcp.json")).contains("\"command\": \"kalka\""));
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn setup_local_writes_wiki_and_warns_when_it_is_not_on_path() {
     let f = fixture(false, false);
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
     assert!(out(&a).contains("not on PATH"));
-    assert!(read(&f.root().join(".pi/mcp.json")).contains("\"command\": \"wiki\""));
+    assert!(read(&f.root().join(".pi/mcp.json")).contains("\"command\": \"kalka\""));
 }
 
 /// Puts the real `git` on the stub PATH.
@@ -364,22 +364,22 @@ fn setup_remove_undoes_the_default_hooks() {
     assert!(!r.join(".pi/extensions").exists());
     // No hooks installed: plain --remove still succeeds and says so.
     let a = f.setup(&[&["--remove"], &args[..]].concat()).success();
-    assert!(out(&a).contains("not present: .pi/extensions/wiki-hint/index.ts hook for pi"));
+    assert!(out(&a).contains("not present: .pi/extensions/kalka-hint/index.ts hook for pi"));
 }
 
 #[test]
 fn setup_upgrades_and_removes_a_pi_hook_from_an_earlier_release() {
     let f = fixture(true, true);
     let r = f.root();
-    let file = r.join(".pi/extensions/wiki-hint/index.ts");
-    let old = include_str!("../src/setup/shipped/wiki-hint-1.ts").replace("<cmd>", "wiki");
+    let file = r.join(".pi/extensions/kalka-hint/index.ts");
+    let old = include_str!("../src/setup/shipped/wiki-hint-1.ts").replace("<cmd>", "kalka");
     let args = ["--agent", "pi", "--scope", "repo"];
     fs::create_dir_all(file.parent().unwrap()).unwrap();
     fs::write(&file, &old).unwrap();
     f.setup(&args).success();
     assert_eq!(
         read(&file),
-        include_str!("../src/setup/wiki-hint.ts").replace("<cmd>", "wiki")
+        include_str!("../src/setup/kalka-hint.ts").replace("<cmd>", "kalka")
     );
     fs::write(&file, &old).unwrap();
     f.setup(&[&["--remove"], &args[..]].concat()).success();
@@ -397,7 +397,7 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
     git(&main, &["worktree", "add", "-q", wt.to_str().unwrap()]);
     let sub = main.join("src");
     for root in [&wt, &sub] {
-        let a = Command::cargo_bin("wiki")
+        let a = Command::cargo_bin("kalka")
             .unwrap()
             .args(["setup", "--agent", "pi", "--scope", "local"])
             .current_dir(root)
@@ -416,7 +416,7 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
         "/.pi/mcp.json",
         "/src/.wiki/",
         "/src/.pi/mcp.json",
-        "/src/.agents/skills/wiki-navigation/",
+        "/src/.agents/skills/kalka-navigation/",
     ] {
         assert!(ex.lines().any(|x| x == l), "{l} missing from {ex}");
     }
@@ -446,7 +446,7 @@ fn setup_local_skips_a_file_git_tracks() {
         out(&a)
     );
     assert_eq!(read(&r.join(".pi/mcp.json")), mcp);
-    assert!(r.join(".agents/skills/wiki-navigation/SKILL.md").exists());
+    assert!(r.join(".agents/skills/kalka-navigation/SKILL.md").exists());
 }
 
 #[test]
@@ -455,13 +455,13 @@ fn setup_local_twice_then_remove_goes_through_claude() {
     let args = ["--agent", "claude", "--scope", "local"];
     f.setup(&args).success();
     let a = f.setup(&args).success();
-    assert!(out(&a).contains("already set up: Claude Code local wiki server"));
+    assert!(out(&a).contains("already set up: Claude Code local kalka server"));
     assert!(!f.claude_log().contains("mcp remove"));
     let a = f
         .setup(&["--remove", "--agent", "claude", "--scope", "local"])
         .success();
-    assert!(out(&a).contains("removed Claude Code local wiki server"));
-    assert!(f.claude_log().contains("mcp remove wiki --scope local"));
+    assert!(out(&a).contains("removed Claude Code local kalka server"));
+    assert!(f.claude_log().contains("mcp remove kalka --scope local"));
 }
 
 #[test]
@@ -471,7 +471,7 @@ fn setup_local_leaves_a_foreign_claude_server_alone() {
     fs::write(f.tmp.path().join("state"), "x").unwrap();
     let args = ["--agent", "claude", "--scope", "local"];
     let a = f.setup(&args).code(1);
-    assert!(out(&a).contains("skipped Claude Code local wiki server"));
+    assert!(out(&a).contains("skipped Claude Code local kalka server"));
     f.setup(&["--remove", "--agent", "claude", "--scope", "local"])
         .code(1);
     let log = f.claude_log();
@@ -494,7 +494,7 @@ fn setup_local_reports_a_failed_claude_add() {
     let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
     let o = out(&a);
     assert!(
-        o.contains("skipped Claude Code local wiki server: `claude mcp add-json` failed: boom"),
+        o.contains("skipped Claude Code local kalka server: `claude mcp add-json` failed: boom"),
         "{o}"
     );
     assert!(!o.contains("wrote Claude Code"));
@@ -504,7 +504,7 @@ fn setup_local_reports_a_failed_claude_add() {
 const ECHO_HOOK: &str = "{\n  \"hooks\": {\n    \"UserPromptSubmit\": [\n      {\n        \"hooks\": [\n          {\n            \"type\": \"command\",\n            \"command\": \"echo hi\"\n          }\n        ]\n      }\n    ]\n  }\n}\n";
 
 fn hook_item() -> serde_json::Value {
-    serde_json::json!({"hooks": [{"type": "command", "command": "wiki hint --claude-hook"}]})
+    serde_json::json!({"hooks": [{"type": "command", "command": "kalka hint --claude-hook"}]})
 }
 
 fn prompt_hooks(p: &Path) -> serde_json::Value {
@@ -525,9 +525,9 @@ fn setup_repo_adds_claude_hook_and_pi_extension_by_default() {
         prompt_hooks(&r.join(".claude/settings.json")),
         serde_json::json!([{"hooks": [echo]}, hook_item()])
     );
-    let ext = read(&r.join(".pi/extensions/wiki-hint/index.ts"));
+    let ext = read(&r.join(".pi/extensions/kalka-hint/index.ts"));
     assert!(ext.contains("\"hint\"") && ext.contains("before_agent_start"));
-    assert!(ext.contains("execFileSync(\"wiki\""));
+    assert!(ext.contains("execFileSync(\"kalka\""));
 }
 
 #[test]
@@ -542,7 +542,10 @@ fn setup_local_hook_uses_settings_local() {
     );
     assert!(!r.join(".claude/settings.json").exists());
     let ex = read(&r.join(".git/info/exclude"));
-    for l in ["/.pi/extensions/wiki-hint/", "/.claude/settings.local.json"] {
+    for l in [
+        "/.pi/extensions/kalka-hint/",
+        "/.claude/settings.local.json",
+    ] {
         assert!(ex.lines().any(|x| x == l), "{l} missing in {ex}");
     }
 }
@@ -586,7 +589,7 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
         "{o}"
     );
     assert!(!f.root().join(".claude/skills/wiki-memory").exists());
-    let text = read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md"));
+    let text = read(&f.root().join(".agents/skills/kalka-navigation/SKILL.md"));
     assert!(text.contains("`.agents/memory`"), "{text}");
     assert!(!text.contains("<memory-dir>"));
     // Re-running recognises its own skill and the folder.
@@ -610,14 +613,14 @@ fn committed() -> Fixture {
 #[test]
 fn setup_and_serve_find_the_claude_memory_folder() {
     let f = committed();
-    let slug = wiki::memory::claude_slug(&wiki::memory::display_path(
+    let slug = kalka::memory::claude_slug(&kalka::memory::display_path(
         &f.root().canonicalize().unwrap(),
     ));
     let mem = f.claude_config().join("projects").join(slug).join("memory");
     fs::create_dir_all(mem.join("logs")).unwrap();
     fs::write(mem.join("n.md"), "# Kelp\n\nKelp forest notes.\n").unwrap();
     fs::write(mem.join("logs/x.md"), "# Log\n\nsession log\n").unwrap();
-    let shown = wiki::memory::display_path(&mem.canonicalize().unwrap());
+    let shown = kalka::memory::display_path(&mem.canonicalize().unwrap());
     let a = f.setup(&["--agent", "pi", "--scope", "repo"]).success();
     assert!(
         out(&a).contains(&format!("agent memory folder {shown} (found)")),
@@ -629,7 +632,7 @@ fn setup_and_serve_find_the_claude_memory_folder() {
     assert!(index.contains("\"memory\": true"), "{index}");
     assert!(!index.contains("logs/x.md"), "{index}");
 
-    Command::cargo_bin("wiki")
+    Command::cargo_bin("kalka")
         .unwrap()
         .args(["compile", ".", "out"])
         .current_dir(f.root())
@@ -657,7 +660,7 @@ fn setup_local_creates_agents_memory_and_excludes_it() {
     let ex = read(&f.root().join(".git/info/exclude"));
     assert!(ex.lines().any(|l| l == "/.agents/memory/"), "{ex}");
     assert_eq!(
-        read(&f.root().join(".agents/skills/wiki-navigation/SKILL.md")),
+        read(&f.root().join(".agents/skills/kalka-navigation/SKILL.md")),
         skill(".agents/memory")
     );
     let note = dir.join("tide.md");
@@ -714,13 +717,13 @@ fn old_memory_skill_goes(f: &Fixture, scope: &str, text: &str) {
 #[test]
 fn setup_local_removes_an_old_local_scope_memory_skill() {
     let f = committed();
-    let old = wiki::memory::display_path(&f.local_memory());
+    let old = kalka::memory::display_path(&f.local_memory());
     old_memory_skill_goes(&f, "local", &memory_skill(&old));
     let ex = read(&f.root().join(".git/info/exclude"));
     assert!(ex.lines().any(|l| l == "/.agents/memory/"), "{ex}");
 
     // pi's skill from then named the per-user folder; setup upgrades it.
-    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(&p, OLD_SKILLS[5].replace("<memory-dir>", &old)).unwrap();
     f.setup(&["--agent", "pi", "--scope", "local"]).success();
@@ -743,7 +746,7 @@ fn setup_local_twice_reports_everything_already_there() {
     assert!(!o.contains("skipped"), "{o}");
 }
 
-/// A `codex` that logs its argv and answers `mcp get wiki` as our server once `mcp add` ran.
+/// A `codex` that logs its argv and answers `mcp get kalka` as our server once `mcp add` ran.
 fn codex_stub(f: &Fixture) {
     let t = f.tmp.path().display();
     f.stub(
@@ -751,8 +754,8 @@ fn codex_stub(f: &Fixture) {
         &format!(
             r#"echo "$@" >> {t}/codex.log
 case "$1 $2" in
-"mcp get") [ -f {t}/codex.state ] || {{ echo "Error: No MCP server named 'wiki' found." >&2; exit 1; }}
-  printf 'wiki\n  enabled: true\n  transport: stdio\n  command: wiki\n  args: serve --source .\n' ;;
+"mcp get") [ -f {t}/codex.state ] || {{ echo "Error: No MCP server named 'kalka' found." >&2; exit 1; }}
+  printf 'kalka\n  enabled: true\n  transport: stdio\n  command: kalka\n  args: serve --source .\n' ;;
 "mcp add") echo x > {t}/codex.state ;;
 "mcp remove") /bin/rm -f {t}/codex.state ;;
 esac"#
@@ -769,12 +772,12 @@ fn setup_cursor_writes_the_project_mcp_json_and_says_to_approve_it() {
     assert_eq!(
         read(&f.root().join(".cursor/mcp.json")),
         format!(
-            "{{\n  \"mcpServers\": {{\n    \"wiki\": {}\n  }}\n}}\n",
+            "{{\n  \"mcpServers\": {{\n    \"kalka\": {}\n  }}\n}}\n",
             ENTRY.replace('\n', "\n    ")
         )
     );
     assert!(
-        out(&a).contains("cursor-agent mcp enable wiki"),
+        out(&a).contains("cursor-agent mcp enable kalka"),
         "{}",
         out(&a)
     );
@@ -802,10 +805,10 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     f.setup(&args).success();
     let log = read(&f.tmp.path().join("codex.log"));
     assert!(
-        log.contains("mcp add wiki -- wiki serve --source ."),
+        log.contains("mcp add kalka -- kalka serve --source ."),
         "{log}"
     );
-    let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
+    let block = format!("<!-- kalka:navigation -->\n{NAV}<!-- /kalka:navigation -->\n");
     assert_eq!(read(&agents), format!("# Team rules\n\n{block}"));
 
     let a = f.setup(&args).success();
@@ -819,7 +822,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     f.setup(&["--remove", "--agent", "codex", "--scope", "repo"])
         .success();
     assert_eq!(read(&agents), "# Team rules\n");
-    assert!(read(&f.tmp.path().join("codex.log")).contains("mcp remove wiki"));
+    assert!(read(&f.tmp.path().join("codex.log")).contains("mcp remove kalka"));
 }
 
 #[test]
@@ -837,12 +840,13 @@ fn setup_codex_leaves_another_wiki_server_alone() {
     let f = fixture(true, false);
     f.stub(
         "codex",
-        "case \"$1 $2\" in \"mcp get\") printf 'wiki\\n  command: other\\n' ;; esac",
+        "case \"$1 $2\" in \"mcp get\") printf 'kalka\\n  command: other\\n' ;; esac",
     );
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert!(
-        out(&a)
-            .contains("skipped Codex wiki server (~/.codex/config.toml): another \"wiki\" server"),
+        out(&a).contains(
+            "skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server"
+        ),
         "{}",
         out(&a)
     );
@@ -858,13 +862,13 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     assert_eq!(read(&f.root().join("CLAUDE.md")), "# Project rules\n");
     let o = out(&a);
     assert!(
-        o.contains("skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
+        o.contains("skipped AGENTS.md kalka navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
         "{o}"
     );
-    assert!(o.contains("wrote Codex wiki server"), "{o}");
+    assert!(o.contains("wrote Codex kalka server"), "{o}");
 
     // An AGENTS.md an earlier setup created beside CLAUDE.md goes.
-    let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
+    let block = format!("<!-- kalka:navigation -->\n{NAV}<!-- /kalka:navigation -->\n");
     fs::write(f.root().join("AGENTS.md"), &block).unwrap();
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
@@ -873,7 +877,7 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     // With the team's own AGENTS.md there, the steps go into it as usual.
     fs::write(f.root().join("AGENTS.md"), "# Agents\n").unwrap();
     f.setup(&["--agent", "codex", "--scope", "repo"]).success();
-    assert!(read(&f.root().join("AGENTS.md")).contains("<!-- wiki:navigation -->"));
+    assert!(read(&f.root().join("AGENTS.md")).contains("<!-- kalka:navigation -->"));
 }
 
 const OLD_NAVS: [&str; 2] = [
@@ -892,7 +896,7 @@ const OLD_SKILLS: [&str; 8] = [
 ];
 
 fn nav_block(nav: &str) -> String {
-    format!("<!-- wiki:navigation -->\n{nav}<!-- /wiki:navigation -->\n")
+    format!("<!-- kalka:navigation -->\n{nav}<!-- /kalka:navigation -->\n")
 }
 
 fn memory_part(skill: &str) -> Option<String> {
@@ -919,11 +923,11 @@ fn setup_upgrades_previous_release() {
             i + 1,
             out(&a)
         );
-        assert_eq!(now.matches("<!-- wiki:navigation -->").count(), 1);
+        assert_eq!(now.matches("<!-- kalka:navigation -->").count(), 1);
     }
 
     // pi, repo scope: every earlier skill, with the memory folder filled in.
-    let skill_file = ".agents/skills/wiki-navigation/SKILL.md";
+    let skill_file = ".agents/skills/kalka-navigation/SKILL.md";
     // Claude Code: the memory-only skill cut from every earlier skill that has a Memory section,
     // which setup now removes.
     let mem_file = ".claude/skills/wiki-memory/SKILL.md";
@@ -972,14 +976,14 @@ fn setup_keeps_hand_edited_block() {
     fs::write(&agents, &edited).unwrap();
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert_eq!(read(&agents), edited);
-    assert!(out(&a).contains("holds another wiki block"), "{}", out(&a));
+    assert!(out(&a).contains("holds another kalka block"), "{}", out(&a));
     let a = f
         .setup(&["--remove", "--agent", "codex", "--scope", "repo"])
         .code(1);
     assert_eq!(read(&agents), edited);
-    assert!(out(&a).contains("holds another wiki block"), "{}", out(&a));
+    assert!(out(&a).contains("holds another kalka block"), "{}", out(&a));
 
-    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     let mine = OLD_SKILLS[4].replace("<memory-dir>", ".agents/memory") + "my line\n";
     fs::write(&p, &mine).unwrap();
@@ -1007,7 +1011,7 @@ fn remove_takes_out_old_block() {
     }
 
     let f = fixture(true, false);
-    let p = f.root().join(".agents/skills/wiki-navigation/SKILL.md");
+    let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
     fs::write(&p, OLD_SKILLS[3].replace("<memory-dir>", ".agents/memory")).unwrap();
     f.setup(&["--remove", "--agent", "pi", "--scope", "repo"])
@@ -1017,11 +1021,11 @@ fn remove_takes_out_old_block() {
 
 #[test]
 fn the_search_first_rules_are_in_every_copy() {
-    let agents = wiki::manifest::render_agents_md("proj");
+    let agents = kalka::manifest::render_agents_md("proj");
     for (name, text) in [
         ("navigation.md", NAV),
         ("SKILL.md", SKILL),
-        ("INSTRUCTIONS", wiki::serve::INSTRUCTIONS),
+        ("INSTRUCTIONS", kalka::serve::INSTRUCTIONS),
         ("render_agents_md", agents.as_str()),
     ] {
         assert!(text.contains("same turn as `search`"), "{name}");
@@ -1032,12 +1036,12 @@ fn the_search_first_rules_are_in_every_copy() {
 
 #[test]
 fn default_texts_name_only_default_tools() {
-    for name in wiki::serve::TOOLS {
-        if wiki::serve::DEFAULT_TOOLS.contains(&name) {
+    for name in kalka::serve::TOOLS {
+        if kalka::serve::DEFAULT_TOOLS.contains(&name) {
             continue;
         }
         for (text_name, text) in [
-            ("INSTRUCTIONS", wiki::serve::INSTRUCTIONS),
+            ("INSTRUCTIONS", kalka::serve::INSTRUCTIONS),
             ("navigation.md", NAV),
             ("SKILL.md", SKILL),
         ] {
@@ -1054,7 +1058,7 @@ fn setup_and_remove_clear_every_shipped_claude_navigation_skill() {
     for (i, old) in OLD_SKILLS.iter().enumerate() {
         for remove in [false, true] {
             let f = fixture(true, true);
-            let p = f.root().join(".claude/skills/wiki-navigation/SKILL.md");
+            let p = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(&p, old.replace("<memory-dir>", ".agents/memory")).unwrap();
             let mut args = vec!["--agent", "claude", "--scope", "repo"];
@@ -1082,7 +1086,7 @@ fn setup_removes_a_lone_old_agents_md_beside_claude_md() {
 
 #[test]
 fn instructions_have_no_dangling_callers_clause() {
-    let text = wiki::serve::INSTRUCTIONS;
+    let text = kalka::serve::INSTRUCTIONS;
     assert!(!text.contains("lists the functions that call it"), "{text}");
     assert!(
         text.contains("symbols with their lines. Do not call grep"),
@@ -1102,7 +1106,7 @@ fn setup_waits_for_a_compile_holding_the_lock() {
     std::thread::scope(|s| {
         let root_ref = &root;
         s.spawn(move || {
-            wiki::dirlock::exclusive(&root_ref.join(".wiki"), || {
+            kalka::dirlock::exclusive(&root_ref.join(".wiki"), || {
                 held_tx.send(()).unwrap();
                 let _ = release_rx.recv_timeout(Duration::from_secs(20));
             });
@@ -1125,4 +1129,61 @@ fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(f.root().join(".wiki/index.json").exists());
     assert!(!f.root().join(".wiki/.serve").exists());
+}
+
+/// A project that `wiki setup` set up in an earlier life: its `wiki` server, skill and block.
+fn old_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
+    let f = fixture(true, true);
+    codex_stub(&f);
+    let r = f.root();
+    let mcp = "{\n  \"mcpServers\": {\n    \"wiki\": {\n      \"command\": \"wiki\",\n      \"args\": [\n        \"serve\",\n        \"--source\",\n        \".\"\n      ]\n    }\n  }\n}\n";
+    let skill = "---\nname: wiki-navigation\n---\nold skill\n";
+    let agents = "# Team\n\n<!-- wiki:navigation -->\nold steps\n<!-- /wiki:navigation -->\n";
+    let old = [
+        (r.join(".mcp.json"), mcp.to_string()),
+        (
+            r.join(".claude/skills/wiki-navigation/SKILL.md"),
+            skill.into(),
+        ),
+        (r.join("AGENTS.md"), agents.into()),
+    ];
+    for (p, text) in &old {
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(p, text).unwrap();
+    }
+    (f, old)
+}
+
+const ALL_AGENTS: [&str; 4] = ["--agent", "claude,pi,cursor,codex", "--scope", "repo"];
+
+#[test]
+fn setup_leaves_the_old_wiki_entries_alone() {
+    let (f, old) = old_wiki_project();
+    let a = f.setup(&ALL_AGENTS).success();
+    let r = f.root();
+    assert_eq!(read(&old[1].0), old[1].1, "{}", out(&a));
+    let mcp: serde_json::Value = serde_json::from_str(&read(&old[0].0)).unwrap();
+    let old_mcp: serde_json::Value = serde_json::from_str(&old[0].1).unwrap();
+    assert_eq!(mcp["mcpServers"]["wiki"], old_mcp["mcpServers"]["wiki"]);
+    assert_eq!(mcp["mcpServers"]["kalka"]["command"], "kalka");
+    let agents = read(&old[2].0);
+    assert!(agents.starts_with(&old[2].1), "{agents}");
+    assert!(agents.contains("<!-- kalka:navigation -->"), "{agents}");
+    assert!(r.join(".agents/skills/kalka-navigation/SKILL.md").exists());
+    assert!(r.join(".cursor/mcp.json").exists());
+}
+
+#[test]
+fn remove_takes_only_kalkas_entries() {
+    let (f, old) = old_wiki_project();
+    f.setup(&ALL_AGENTS).success();
+    let a = f
+        .setup(&[&["--remove"], &ALL_AGENTS[..]].concat())
+        .success();
+    let r = f.root();
+    for (p, text) in &old {
+        assert_eq!(&read(p), text, "{}", out(&a));
+    }
+    assert!(!r.join(".agents/skills/kalka-navigation").exists());
+    assert!(!r.join(".cursor/mcp.json").exists());
 }

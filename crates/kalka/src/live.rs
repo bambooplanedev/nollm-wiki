@@ -134,14 +134,14 @@ impl Exe {
             return false;
         }
         if !self.replaced.swap(true, Ordering::Relaxed) {
-            eprintln!("wiki serve: {OUTDATED}");
+            eprintln!("kalka serve: {OUTDATED}");
         }
         true
     }
 }
 
 /// Why a replaced binary's answers may be stale, and what to do about it.
-pub(crate) const OUTDATED: &str = "the wiki server is out of date, its binary was replaced or \
+pub(crate) const OUTDATED: &str = "the kalka server is out of date, its binary was replaced or \
 removed; restart the agent session or reconnect the MCP server";
 
 /// The path this process was started as, which unlike `current_exe` on Linux
@@ -875,9 +875,9 @@ mod tests {
         assert!(gens(&live).1 > before.1);
     }
 
-    /// `<dir>/wiki` with `body`, and an `Exe` tracking it.
+    /// `<dir>/kalka` with `body`, and an `Exe` tracking it.
     fn tracked(dir: &Path, body: &str) -> (PathBuf, Exe) {
-        let bin = dir.join("wiki");
+        let bin = dir.join("kalka");
         std::fs::write(&bin, body).unwrap();
         let exe = Exe::of([bin.clone()]);
         (bin, exe)

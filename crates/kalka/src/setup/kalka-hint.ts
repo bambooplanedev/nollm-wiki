@@ -1,4 +1,4 @@
-// Adds the project wiki's code lines for the prompt before the model runs (installed by wiki setup unless --no-hook).
+// Adds the project wiki's code lines for the prompt before the model runs (installed by kalka setup unless --no-hook).
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -16,6 +16,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     if (!text.trim()) return;
-    return { message: { customType: "wiki-hint", content: text, display: false } };
+    return { message: { customType: "kalka-hint", content: text, display: false } };
   });
 }
