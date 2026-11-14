@@ -921,6 +921,15 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
     );
 
     std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::write(wiki_dir.join("probe"), "").is_ok() {
+        // root: permissions do not stop it, so there is no failed compile to see here.
+        std::fs::remove_file(wiki_dir.join("probe")).unwrap();
+        std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        eprintln!("skipped: .kulman/ stays writable for this user");
+        drop(stdin);
+        let _ = child.wait();
+        return;
+    }
     std::fs::write(
         project.path().join("notes/alpha.md"),
         "# Alpha\n\nzebrafish here\n",
