@@ -64,7 +64,9 @@ the modules they require. Without `--modules` it installs the modules the releas
 default; to leave one out, name the others.
 `--version` installs that release instead of the latest. Run again with other modules, it adds them
 at the installed version, and puts back any listed binary missing from `bin/`; an installed
-`bin/kulman` is then left as it is (`kulman update` always replaces it). When a newer release
+`bin/kulman` is then left as it is (`kulman update` always replaces it). A file at
+`bin/<module>` that `state.json` does not list is never taken as installed: it is replaced by the
+downloaded, checked module. When a newer release
 exists, it still installs at the installed version and says so (`newer release X.Y.Z: kulman
 update`); when the latest release cannot be read, it says that instead (`could not check for a
 newer release (<base>: <reason>)`). The installed version is read once `.lock` is held. If the
@@ -146,7 +148,7 @@ Downloads are checked and unpacked into a temp dir under home (`.tmp-<pid>`) bef
 `state.json`.
 
 - Interrupted before that point, an install or update leaves only its temp dir, which the next run
-  deletes.
+  that finds `state.json` deletes (a home without one is never cleaned).
 - Interrupted while renaming, some binaries are at the new version and `state.json` still names the
   old one. `kulman update` installs the whole release again.
 - A binary that `state.json` lists but `bin/` lacks (a `remove` interrupted, or a file deleted by

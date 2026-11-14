@@ -877,6 +877,61 @@ fn install_repairs_a_first_install_that_died_before_its_state() {
 }
 
 #[test]
+fn install_fetches_a_module_whose_file_it_finds_unlisted() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::write(home.join("bin/kalka"), "FOREIGN").unwrap();
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).lines().any(|l| l == "installed kalka 0.7.0"),
+        "{}",
+        stdout(&out)
+    );
+    assert_binary(&home, "kalka", KALKA);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+}
+
+#[test]
+fn install_with_no_state_over_an_older_installation_fetches_every_module() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    fs::remove_file(home.join("state.json")).unwrap();
+    publish_newer(&t.path().join("release"));
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kalka", b"kalka 0.8");
+    assert_binary(&home, "plaz", b"plaz 0.8");
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+    );
+}
+
+#[test]
+fn a_failed_install_into_a_directory_with_no_state_deletes_nothing_there() {
+    let (t, base) = setup();
+    set_sha256(&t.path().join("release"), "0.7.0", "plaz", &"0".repeat(64));
+    let home = t.path().join("home");
+    fs::create_dir_all(home.join(".tmp-mine")).unwrap();
+    fs::write(home.join(".tmp-mine/notes"), "mine").unwrap();
+    let before = snapshot(&home);
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("plaz: checksum mismatch"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(snapshot(&home), before);
+}
+
+#[test]
 fn install_refuses_a_directory_in_place_of_the_manifest() {
     let (t, base) = setup();
     let home = t.path().join("home");

@@ -117,7 +117,7 @@ impl Home {
     }
 
     /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run. Only
-    /// when a state records home as kulman's, or this run is about to write one.
+    /// when a state records home as kulman's.
     pub fn clean_tmp(&self) -> Result<()> {
         let named = |p: &Path| p.display().to_string();
         for entry in fs::read_dir(&self.path).with_context(|| named(&self.path))? {

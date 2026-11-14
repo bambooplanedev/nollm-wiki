@@ -278,8 +278,11 @@ fn place(
     target: &str,
     ask: bool,
 ) -> Result<bool> {
-    home.clean_tmp()?;
     let state = State::load(&home.path)?;
+    // Stale temp entries are cleaned only in a home a state records as kulman's.
+    if state.is_some() {
+        home.clean_tmp()?;
+    }
     // Installed at V with no --version: V's manifest, so a newer release does not block adding
     // modules; that one, or a failed check for it, is only said.
     let mut note = None;
@@ -333,10 +336,11 @@ fn place(
     }
     let bin = home.path.join("bin");
     let missing = |name: &String| !bin.join(name).is_file();
-    // kulman last, so it is renamed into bin/ last.
+    // Only a module the state lists counts as installed when its file is there: any other file
+    // at bin/<name> is replaced by the fetched, checked release. kulman last, renamed last.
     let mut names: Vec<String> = chosen
         .union(&modules)
-        .filter(|n| missing(n))
+        .filter(|n| !modules.contains(*n) || missing(n))
         .cloned()
         .collect();
     if ask && !names.is_empty() {
@@ -434,10 +438,10 @@ fn renew(
     target: &str,
     ask: bool,
 ) -> Result<()> {
-    home.clean_tmp()?;
     let Some(state) = State::load(&home.path)? else {
         bail!("nothing installed; run kulman install");
     };
+    home.clean_tmp()?;
     let (have, latest) = (&state.version, &manifest.version);
     let bin = home.path.join("bin");
     let listed = state.modules.iter().map(String::as_str).chain(["kulman"]);
