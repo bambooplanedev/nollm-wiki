@@ -9,7 +9,7 @@ use std::io::{self, IsTerminal};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use anyhow::{bail, Context, Result};
 use clap::{Args, ColorChoice, Parser, Subcommand};
@@ -703,7 +703,9 @@ fn setup(a: SetupArgs) -> Result<()> {
         }
         let path = bin.join(name);
         // Its own exit status; a module ended by a signal has none: 1.
-        let (how, code) = match Command::new(&path).args(&args).status() {
+        // Not asking: a module's own questions get no input either.
+        let input = if ask { Stdio::inherit() } else { Stdio::null() };
+        let (how, code) = match Command::new(&path).args(&args).stdin(input).status() {
             Ok(status) if status.success() => continue,
             Ok(status) => match (status.code(), status.signal()) {
                 (Some(code), _) => (format!("exit {code}"), code),

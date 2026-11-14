@@ -269,12 +269,72 @@ fn setup_without_scope_and_terminal_fails() {
     assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
 }
 
-#[test]
-fn setup_without_agents_fails() {
+/// A fixture with no agent to detect: no agent folder, no `claude` or `pi` on `PATH`.
+fn no_agent() -> Fixture {
     let f = fixture(true, false);
     fs::remove_file(f.bin().join("pi")).unwrap();
-    let a = f.setup(&["--scope", "repo"]).failure();
-    assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--agent"));
+    f
+}
+
+const NO_AGENT: &str = "no agent set up: the wiki is in .kulman/; run kalka setup --agent … later";
+
+#[test]
+fn setup_with_no_agent_still_compiles_and_exits_0() {
+    let f = no_agent();
+    let a = f.setup(&["--scope", "repo"]).success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+    assert_eq!(err.lines().collect::<Vec<_>>(), [NO_AGENT]);
+    assert!(!out(&a).contains("not on PATH"), "{}", out(&a));
+    let r = f.root();
+    assert!(r.join(".kulman/index.json").exists());
+    // What a setup with an agent writes besides the agent's own files, and nothing else.
+    let (files, dirs) = tree(&r);
+    assert_eq!(
+        files,
+        [
+            (PathBuf::from(".gitignore"), b".kulman/\n".to_vec()),
+            (
+                PathBuf::from("src/lib.rs"),
+                b"pub fn load_creds() {}\n".to_vec()
+            )
+        ]
+    );
+    assert_eq!(
+        dirs,
+        [
+            PathBuf::from(".agents"),
+            ".agents/memory".into(),
+            "src".into()
+        ]
+    );
+    // A later setup of an agent there, and its removal, end as they do in a fresh project.
+    let fresh = no_agent();
+    for args in [
+        &["--agent", "cursor", "--scope", "repo"][..],
+        &["--remove", "--agent", "cursor", "--scope", "repo"],
+    ] {
+        f.setup(args).success();
+        fresh.setup(args).success();
+        assert_eq!(tree(&f.root()), tree(&fresh.root()), "{args:?}");
+    }
+}
+
+#[test]
+fn setup_remove_with_no_agent_is_not_an_error() {
+    let f = no_agent();
+    f.setup(&["--scope", "local"]).success();
+    let exclude = read(&f.root().join(".git/info/exclude"));
+    let before = tree(&f.root());
+    for _ in 0..2 {
+        let a = f.setup(&["--remove", "--scope", "local"]).success();
+        assert!(
+            out(&a).contains("kept the ignore lines and .kulman/"),
+            "{}",
+            out(&a)
+        );
+        assert_eq!(tree(&f.root()), before);
+        assert_eq!(read(&f.root().join(".git/info/exclude")), exclude);
+    }
 }
 
 #[test]

@@ -43,8 +43,6 @@ pub enum WikiError {
     Watch(String),
     #[error("serve failed: {0}")]
     Serve(String),
-    #[error("{0}")]
-    Setup(String),
 }
 
 #[allow(clippy::struct_excessive_bools)] // independent switches, not states

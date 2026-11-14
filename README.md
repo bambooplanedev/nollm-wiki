@@ -222,7 +222,12 @@ steps, and the server marks its tools to load up front instead of behind a `Tool
 own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- kalka:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
-names them. Codex is set up only when named: its MCP config is global.
+names them. Codex is set up only when named: its MCP config is global. When none is found and
+`--agent` is not given, setup asks at a terminal which to set up (numbers or names, an empty line
+for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
+ignore lines and the memory folder, sets up no agent, says
+`no agent set up: the wiki is in .kulman/; run kalka setup --agent … later` on stderr and exits 0.
+`--remove` with no agent found has nothing agent-specific to remove and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,

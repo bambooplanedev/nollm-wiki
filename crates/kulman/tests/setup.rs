@@ -284,6 +284,21 @@ fn setup_memory_without_kalka_is_usage() {
 }
 
 #[test]
+fn setup_without_asking_gives_the_modules_no_input() {
+    let reads: &[u8] = b"#!/bin/sh\nread -r line; echo \"read [$line]\" >> \"$KULMAN_TEST_LOG\"\n";
+    let f = installed(reads, "kalka");
+    let out = kulman(&f.home, &f.base)
+        .args(["setup", "--scope", "repo", "--yes"])
+        .current_dir(f.t.path().join("project"))
+        .env("KULMAN_TEST_LOG", f.log())
+        .write_stdin("claude\n")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(f.logged(), ["read []"]);
+}
+
+#[test]
 fn setup_agent_without_kalka_is_usage() {
     let f = installed(LOGS, "plaz");
     let out = f.setup(&["--scope", "repo", "--agent", "claude"]);

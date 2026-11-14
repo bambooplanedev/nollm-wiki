@@ -23,7 +23,7 @@ const NAV_RULES: &str = include_str!("navigation.md");
 const NAV_BEGIN: &str = "<!-- kalka:navigation -->";
 const NAV_END: &str = "<!-- /kalka:navigation -->";
 
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
     Claude,
     Pi,
@@ -41,7 +41,7 @@ pub enum Scope {
 }
 
 pub struct SetupOptions {
-    /// `None`: detect.
+    /// `None`: detect. Empty: no agent, only what is not agent-specific.
     pub agents: Option<Vec<Agent>>,
     pub scope: Scope,
     pub hook: bool,
@@ -338,6 +338,46 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> O
     run().unwrap_or_else(Outcome::Foreign)
 }
 
+/// The agents found in `root` (Codex never: its config is global).
+pub fn detect(root: &Path) -> Vec<Agent> {
+    let mut a = Vec::new();
+    if root.join(".claude").exists()
+        || root.join("CLAUDE.md").exists()
+        || find_on_path("claude").is_some()
+    {
+        a.push(Agent::Claude);
+    }
+    if root.join(".pi").exists() || find_on_path("pi").is_some() {
+        a.push(Agent::Pi);
+    }
+    // Only the project folder: Cursor on PATH says nothing about this project.
+    if root.join(".cursor").is_dir() {
+        a.push(Agent::Cursor);
+    }
+    a
+}
+
+/// An answer to the agent question: numbers (from 1, in [`Agent`] order) or names, separated
+/// by commas or spaces; empty is none.
+pub fn parse_agents(line: &str) -> Result<Vec<Agent>, String> {
+    let all = Agent::value_variants();
+    let mut chosen = Vec::new();
+    for word in line
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+    {
+        let agent = match word.parse::<usize>() {
+            Ok(n) => n.checked_sub(1).and_then(|i| all.get(i)).copied(),
+            Err(_) => Agent::from_str(word, true).ok(),
+        }
+        .ok_or_else(|| format!("no agent {word:?}: choose 1-{} or names", all.len()))?;
+        if !chosen.contains(&agent) {
+            chosen.push(agent);
+        }
+    }
+    Ok(chosen)
+}
+
 /// Installs (or with `remove`, undoes) what `opts` asks for in `root`.
 /// `Ok(false)`: something was skipped.
 pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool, WikiError> {
@@ -349,30 +389,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         wrote_pi: false,
         guard_tracked: local && !opts.remove,
     };
-    let agents = if let Some(a) = &opts.agents {
-        a.clone()
-    } else {
-        let mut a = Vec::new();
-        if root.join(".claude").exists()
-            || root.join("CLAUDE.md").exists()
-            || find_on_path("claude").is_some()
-        {
-            a.push(Agent::Claude);
-        }
-        if root.join(".pi").exists() || find_on_path("pi").is_some() {
-            a.push(Agent::Pi);
-        }
-        // Only the project folder: Cursor on PATH says nothing about this project.
-        if root.join(".cursor").is_dir() {
-            a.push(Agent::Cursor);
-        }
-        if a.is_empty() {
-            return Err(WikiError::Setup(
-                "no agent found: pass --agent claude,pi,cursor,codex".into(),
-            ));
-        }
-        a
-    };
+    let agents = opts.agents.clone().unwrap_or_else(|| detect(root));
 
     if let Some(top) = git(root, &["rev-parse", "--show-toplevel"]) {
         if std::fs::canonicalize(top).ok() != root.canonicalize().ok() {
@@ -432,7 +449,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    if !opts.remove && find_on_path("kalka").is_none() {
+    if !opts.remove && !agents.is_empty() && find_on_path("kalka").is_none() {
         r.line("warning: kalka is not on PATH; the agents will not find it until it is")?;
     }
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
@@ -619,4 +636,22 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
     }
     Ok(r.ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_agent_answer_takes_numbers_and_names() {
+        use Agent::{Claude, Codex, Cursor, Pi};
+        assert_eq!(parse_agents(""), Ok(vec![]));
+        assert_eq!(parse_agents("  \n"), Ok(vec![]));
+        assert_eq!(parse_agents("1"), Ok(vec![Claude]));
+        assert_eq!(parse_agents("4, 2"), Ok(vec![Codex, Pi]));
+        assert_eq!(parse_agents("cursor,Claude 3 1"), Ok(vec![Cursor, Claude]));
+        for bad in ["0", "5", "vim", "1,x"] {
+            assert!(parse_agents(bad).is_err(), "{bad}");
+        }
+    }
 }

@@ -102,7 +102,8 @@ no module installed there is nothing to set up (exit 1). The modules write into 
 People and agents get the same commands. A command asks only when stdin and stdout are both
 terminals and `--yes` is absent; otherwise it asks nothing and the defaults apply (`install`: the
 release's defaults; `setup`: every installed module, memory on). A value with no default must then
-be given as a flag: `kulman setup` without a terminal needs `--scope`. `remove`, whose question
+be given as a flag: `kulman setup` without a terminal needs `--scope`. When kulman does not ask,
+the modules it runs get no input, so they ask nothing either. `remove`, whose question
 defaults to no, does nothing without a terminal unless `--yes` is given. A confirmation is asked
 once the command holds `.lock` and has read the state, so what it shows is what it does. Names
 typed at a prompt match in any case.
