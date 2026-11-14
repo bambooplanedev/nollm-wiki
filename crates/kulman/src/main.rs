@@ -299,6 +299,7 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     if !on_path {
         println!("add to PATH: {}", bin.display());
     }
+    println!("next: run \"kulman setup --scope repo\" (or local) in a project");
     Ok(())
 }
 
@@ -482,7 +483,7 @@ fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     // Without state.json, a home with a `.lock` may be left by a remove killed before its last
     // step: only that lock is removed below. Anything else is not opened, so nothing is created.
     if !is_installed(&home_path)? && !home_path.join(".lock").try_exists()? {
-        println!("nothing installed");
+        nothing_installed(&home_path, false);
         return Ok(());
     }
     if ask {
@@ -511,17 +512,29 @@ fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     result
 }
 
+/// `kulman remove` with no state: says so, whether home `holds` other files, and how to remove
+/// a `bin/kulman` (install.sh's).
+fn nothing_installed(home: &Path, holds: bool) {
+    println!("nothing installed");
+    if holds {
+        let home = home.display();
+        println!("{home} holds files kulman has no record of; left as they are");
+    }
+    let kulman = home.join("bin/kulman");
+    if kulman.is_file() {
+        println!(
+            "to remove the installer itself, delete {}",
+            kulman.display()
+        );
+    }
+}
+
 /// Under the lock: every name is checked (by `State::load` and against the state) before the
 /// first file is deleted.
 fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
     let Some(mut state) = State::load(&home.path)? else {
         // No record of owning anything: no binary and no manifest is deleted.
-        let holds = store::remove_lock(home)?;
-        println!("nothing installed");
-        if holds {
-            let home = home.path.display();
-            println!("{home} holds files kulman has no record of; left as they are");
-        }
+        nothing_installed(&home.path, store::remove_lock(home)?);
         return Ok(());
     };
     // Stale temp entries are cleaned only in a home a state records as kulman's.

@@ -15,7 +15,9 @@ machine (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-
 against that file and puts the binary at `~/.kulman/bin/kulman`. It needs `curl`, `tar` and
 `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the check. It writes
 nothing else and edits no shell profile. On any failure it exits non-zero and leaves no `kulman`
-in `bin/` and no temp dir; a home directory it created is removed again if empty.
+in `bin/` and no temp dir; a home directory it created is removed again if empty. Over an
+installation (`state.json` present) it ends by saying to run `kulman update`, which brings the
+modules to the version of the `kulman` it just put in place.
 
 By hand, the same: download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release
 page, then
@@ -64,7 +66,8 @@ at the installed version, and puts back any listed binary missing from `bin/`; a
 exists, it still installs at the installed version and says so (`newer release X.Y.Z: kulman
 update`). If the installed version differs from `--version`, or is newer than the latest release,
 it changes nothing and exits 1: an older one gets the advice to run `kulman update`; a newer one,
-to run `kulman remove`, then `kulman install --version <X.Y.Z>`.
+to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful install ends with
+the next steps: adding `bin/` to `PATH` if it is not there, then `kulman setup` in a project.
 
     kulman update [--yes]
 
@@ -75,7 +78,9 @@ than the installed one is not installed: nothing changes.
 
 Removes the named modules; without `--modules`, every module, kulman itself, its manifest, state
 and lock, then `bin/` and the home directory if they are empty. Only what `state.json` lists is
-deleted; any other file stays. `kulman` is not a module: `--modules kulman` is a usage error.
+deleted; any other file stays (with no `state.json`, nothing at all is, and a `bin/kulman` that
+`install.sh` put there is named for you to delete). `kulman` is not a module: `--modules kulman`
+is a usage error.
 At a terminal it asks first (default: no); without one it needs `--yes`, and otherwise changes
 nothing and exits 2.
 

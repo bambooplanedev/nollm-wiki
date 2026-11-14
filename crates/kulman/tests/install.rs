@@ -617,8 +617,14 @@ fn install_says_how_to_add_to_path() {
     let home = t.path().join("home");
     let bin = home.join("bin");
     let hint = format!("add to PATH: {}", bin.display());
+    let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
     let out = kulman(&home, &base).arg("install").output().unwrap();
-    assert!(stdout(&out).lines().any(|l| l == hint), "{}", stdout(&out));
+    let text = stdout(&out);
+    assert_eq!(
+        text.lines().rev().take(2).collect::<Vec<_>>(),
+        [next, hint.as_str()],
+        "{text}"
+    );
 
     let path = std::env::join_paths(
         std::iter::once(bin.clone())
@@ -632,6 +638,7 @@ fn install_says_how_to_add_to_path() {
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("add to PATH"), "{}", stdout(&out));
+    assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
 }
 
 #[test]

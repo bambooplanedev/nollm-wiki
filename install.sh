@@ -66,7 +66,7 @@ main() {
     # The Linux build needs glibc: its loader, or its libc where Debian or Fedora keep it.
     if [ "$ki_os" = Linux ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ] &&
         [ ! -e /lib/x86_64-linux-gnu/libc.so.6 ] && [ ! -e /lib64/libc.so.6 ]; then
-        die "no build for this system (the Linux build needs glibc)"
+        die "no build for this system (the Linux build needs glibc at the standard paths)"
     fi
 
     for ki_tool in curl tar mktemp; do
@@ -152,7 +152,12 @@ main() {
     mv -f -- "$ki_unpack/kulman" "$ki_dest"
 
     printf 'kulman installed in %s\n' "$ki_bin"
-    printf 'next: %s/kulman install\n' "$ki_bin"
+    if [ -e "$ki_home/state.json" ]; then
+        printf 'kulman replaced; run "%s/kulman update" to bring the modules to the same version\n' \
+            "$ki_bin"
+    else
+        printf 'next: %s/kulman install\n' "$ki_bin"
+    fi
 }
 
 die() {

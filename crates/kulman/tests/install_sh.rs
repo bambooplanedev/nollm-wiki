@@ -106,6 +106,30 @@ fn install_sh_puts_kulman_in_bin() {
 }
 
 #[test]
+fn install_sh_over_an_installation_says_update() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let home = t.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join("state.json"),
+        r#"{"version":"0.6.0","modules":[]}"#,
+    )
+    .unwrap();
+    let out = install_sh(&home, &base);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let bin = home.join("bin");
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
+             modules to the same version\n",
+            bin.display(),
+            bin.display()
+        )
+    );
+}
+
+#[test]
 fn install_sh_reads_a_crlf_sha256sums() {
     let (t, base) = setup(KULMAN_BYTES);
     let path = t.path().join("release/latest/download/SHA256SUMS");

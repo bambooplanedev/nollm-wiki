@@ -567,7 +567,11 @@ fn remove_on_a_home_with_no_state_deletes_no_file() {
             "{} holds files kulman has no record of; left as they are",
             home.display()
         );
-        assert_eq!(lines(&out), ["nothing installed", second.as_str()]);
+        let third = format!(
+            "to remove the installer itself, delete {}",
+            home.join("bin/kulman").display()
+        );
+        assert_eq!(lines(&out), ["nothing installed", &second, &third]);
         assert_eq!(snapshot(&home), before, "{args:?}");
         assert!(t.path().join("release").exists());
     }
@@ -637,4 +641,25 @@ fn remove_without_a_terminal_needs_yes() {
         );
         assert_eq!(snapshot(t.path()), before, "{args:?}");
     }
+}
+
+#[test]
+fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let home = t.path().join("home");
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
+    let before = snapshot(&home);
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let last = format!(
+        "to remove the installer itself, delete {}",
+        home.join("bin/kulman").display()
+    );
+    assert_eq!(lines(&out), ["nothing installed", last.as_str()]);
+    assert_eq!(snapshot(&home), before);
 }
