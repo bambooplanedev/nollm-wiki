@@ -332,10 +332,21 @@ fn setup_remove_with_no_agent_is_not_an_error() {
             "{}",
             out(&a)
         );
+        let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+        assert_eq!(err.lines().collect::<Vec<_>>(), [NO_AGENT_REMOVED]);
         assert_eq!(tree(&f.root()), before);
         assert_eq!(read(&f.root().join(".git/info/exclude")), exclude);
     }
+    // An agent named: no such line.
+    let a = f
+        .setup(&["--remove", "--agent", "cursor", "--scope", "local"])
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+    assert!(!err.contains("no agent found"), "{err}");
 }
+
+const NO_AGENT_REMOVED: &str =
+    "no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring";
 
 #[test]
 fn setup_repo_writes_wiki_even_when_not_on_path() {

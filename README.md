@@ -230,7 +230,9 @@ names them. Codex is set up only when named: its MCP config is global. When none
 for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
 ignore lines and the memory folder, sets up no agent, says
 `no agent set up: the wiki is in .kulman/; run kalka setup --agent … later` on stderr and exits 0.
-`--remove` with no agent found has nothing agent-specific to remove and exits 0.
+`--remove` with no agent found and no `--agent` has nothing agent-specific to remove: it says
+`no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring` on
+stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,

@@ -554,7 +554,8 @@ fn run() -> Result<()> {
             let scope = scope.map_or_else(ask_scope, Ok)?;
             let root = std::env::current_dir()?;
             // None found: asked at a terminal, else none; `--remove` then removes nothing
-            // agent-specific.
+            // agent-specific, and says so when no `--agent` was given.
+            let named = agent.is_some();
             let agents = match agent {
                 Some(a) => a,
                 None => match kalka::setup::detect(&root) {
@@ -562,7 +563,7 @@ fn run() -> Result<()> {
                     a => a,
                 },
             };
-            let none = agents.is_empty() && !remove;
+            let none = agents.is_empty();
             let opts = SetupOptions {
                 agents: Some(agents),
                 scope,
@@ -573,9 +574,15 @@ fn run() -> Result<()> {
             if !kalka::setup::run(&root, &opts, &mut std::io::stdout())? {
                 std::process::exit(1);
             }
-            if none {
+            if none && !remove {
                 eprintln!(
                     "no agent set up: the wiki is in {OUT_DIR}/; run kalka setup --agent … later"
+                );
+            }
+            if none && remove && !named {
+                eprintln!(
+                    "no agent found: nothing agent-specific removed; pass --agent … to remove \
+                     one agent's wiring"
                 );
             }
         }

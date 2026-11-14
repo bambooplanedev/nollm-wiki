@@ -236,7 +236,9 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 налаштувати (номери чи назви, порожній рядок — нікого); без термінала, або коли нікого не вибрано,
 він однаково компілює вікі, пише рядки в ignore-файли й теку памʼяті, не налаштовує жодного агента,
 пише в stderr `no agent set up: the wiki is in .kulman/; run kalka setup --agent … later` і
-виходить з кодом 0. `--remove`, коли агента не знайдено, нічого агентського не прибирає й виходить з кодом 0.
+виходить з кодом 0. `--remove`, коли агента не знайдено і `--agent` не задано, нічого агентського не прибирає: пише в
+stderr `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring`
+і виходить з кодом 0.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,
