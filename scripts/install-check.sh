@@ -37,5 +37,6 @@ printf 'def f(x):\n    if x:\n        return 1\n    return 2\n' >f.py
 code=0 && "$bin/kulman" setup </dev/null || code=$?
 [ "$code" = 2 ] || fail "kulman setup without --scope and a terminal exited $code, not 2"
 "$bin/kulman" setup --scope repo --yes </dev/null || fail "kulman setup --scope repo failed"
-[ -f .kulman/index.md ] && [ -d .kulman/map ] || fail "setup made no .kulman/index.md or .kulman/map/"
+[ -f .kulman/index.md ] || fail "setup made no .kulman/index.md"
+[ -d .kulman/map ] || fail "setup made no .kulman/map/"
 printf 'install-check.sh: %s on %s/%s: ok\n' "$version" "$(uname -s)" "$(uname -m)"
