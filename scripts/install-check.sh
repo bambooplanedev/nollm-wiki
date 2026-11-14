@@ -7,7 +7,7 @@
 # installed first when missing (apk or apt-get). Exit 0, or 1 with a line naming what failed.
 set -eu
 version=$1
-tree=$(cd -- "${2:-/release}" && pwd)
+tree=$(CDPATH='' cd -- "${2:-/release}" && pwd)
 fail() { printf 'install-check.sh: %s\n' "$1" >&2; exit 1; }
 
 if ! command -v curl >/dev/null || ! command -v git >/dev/null; then
@@ -19,6 +19,7 @@ tmp=$(mktemp -d)
 trap 'rm -rf -- "$tmp"' EXIT
 HOME=$tmp/home KULMAN_HOME=$tmp/home/.kulman-home KULMAN_RELEASE_URL=file://$tree
 export HOME KULMAN_HOME KULMAN_RELEASE_URL
+unset CLAUDE_CONFIG_DIR XDG_CONFIG_HOME
 mkdir -- "$HOME" "$tmp/project"
 bin=$KULMAN_HOME/bin
 

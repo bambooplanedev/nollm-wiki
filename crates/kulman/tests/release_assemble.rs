@@ -129,6 +129,21 @@ fn sha256sums_lists_every_archive_once() {
 }
 
 #[test]
+fn cdpath_does_not_move_the_script_off_its_repository() {
+    let (_t, dir) = assets();
+    let repo = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    let out = Command::new("sh")
+        .arg("scripts/release-assemble.sh")
+        .args([Path::new(VERSION), &dir])
+        .current_dir(repo)
+        .env("CDPATH", repo)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(dir.join("manifest.json").exists());
+}
+
+#[test]
 fn a_missing_archive_fails_the_assembly() {
     let (_t, dir) = assets();
     let gone = file("plaz", "aarch64-apple-darwin");

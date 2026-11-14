@@ -1,4 +1,5 @@
 /target
+/target-musl
 /crates/kalka/demo_raw/
 /crates/kalka/demo_wiki/
 .quartz-build/

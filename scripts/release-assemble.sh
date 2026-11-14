@@ -47,7 +47,7 @@ else
     die "sha256sum or shasum is required"
 fi
 
-repo=$(cd -- "$(dirname -- "$0")/.." && pwd)
+repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 modules=$repo/release/modules.json
 [ -d "$dir" ] || die "$dir is not a directory"
 if [ -n "$tree" ] && { [ -e "$tree" ] || [ -L "$tree" ]; }; then
@@ -79,17 +79,17 @@ for b in $binaries; do
     done
 done
 
-# Checked: write.
-: >"$dir/SHA256SUMS"
+# Checked: write into the scratch directory, then move into <dir> once everything succeeded.
+: >"$scratch/SHA256SUMS"
 for b in $binaries; do
     for t in $targets; do
         f=$b-v$version-$t.tar.gz
         sum=$(sha "$dir/$f")
-        printf '%s  %s\n' "${sum%% *}" "$f" >>"$dir/SHA256SUMS"
+        printf '%s  %s\n' "${sum%% *}" "$f" >>"$scratch/SHA256SUMS"
     done
 done
 
-jq --arg v "$version" --rawfile sums "$dir/SHA256SUMS" '
+jq --arg v "$version" --rawfile sums "$scratch/SHA256SUMS" '
     def archives($b): ($b + "-v" + $v + "-") as $p
         | [$sums | split("\n")[] | select(. != "") | split("  ")
            | {file: .[1], sha256: .[0]} | select(.file | startswith($p))
@@ -97,9 +97,10 @@ jq --arg v "$version" --rawfile sums "$dir/SHA256SUMS" '
         | from_entries;
     {version: $v, modules: map(. + {archives: archives(.name)}),
      kulman: {archives: archives("kulman")}}
-' "$modules" >"$dir/manifest.json"
+' "$modules" >"$scratch/manifest.json"
 
 cp -- "$repo/install.sh" "$dir/install.sh"
+mv -- "$scratch/SHA256SUMS" "$scratch/manifest.json" "$dir/"
 
 if [ -n "$tree" ]; then
     mkdir -p -- "$tree/download/v$version" "$tree/latest/download"
