@@ -243,11 +243,11 @@ fn setup_with_nothing_installed_says_so() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("kulman: nothing installed; run kulman install"),
-        "{}",
-        stderr(&out)
+    let expect = format!(
+        "kulman: nothing installed in {}; run kulman install",
+        home.display()
     );
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!home.exists());
 }
 

@@ -52,7 +52,11 @@ fn status_lists_what_is_installed() {
     let home = t.path().join("home");
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out), ["nothing installed; run kulman install"]);
+    let nothing = format!(
+        "nothing installed in {}; run kulman install",
+        home.display()
+    );
+    assert_eq!(lines(&out), [nothing]);
     assert!(!home.exists());
 
     kulman(&home, &base).arg("install").assert().success();
@@ -270,7 +274,11 @@ fn update_with_nothing_installed_creates_nothing() {
     let home = t.path().join("home");
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: nothing installed; run kulman install"));
+    let expect = format!(
+        "kulman: nothing installed in {}; run kulman install",
+        home.display()
+    );
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!home.exists());
 }
 

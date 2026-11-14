@@ -373,7 +373,10 @@ fn place(
 fn status() -> Result<()> {
     let home = store::home_path()?;
     let Some(state) = State::load(&home)? else {
-        println!("nothing installed; run kulman install");
+        println!(
+            "nothing installed in {}; run kulman install",
+            home.display()
+        );
         return Ok(());
     };
     println!("kulman {} in {}", state.version, home.display());
@@ -416,7 +419,10 @@ fn update(ask: bool) -> Result<()> {
     let home_path = store::home_path()?;
     let target = target()?;
     if !is_installed(&home_path)? {
-        bail!("nothing installed; run kulman install");
+        bail!(
+            "nothing installed in {}; run kulman install",
+            home_path.display()
+        );
     }
     let (manifest, raw) = release::manifest(&base, None, release::WAIT)?;
     let home = Home::open(home_path)?;
@@ -439,7 +445,10 @@ fn renew(
     ask: bool,
 ) -> Result<()> {
     let Some(state) = State::load(&home.path)? else {
-        bail!("nothing installed; run kulman install");
+        bail!(
+            "nothing installed in {}; run kulman install",
+            home.path.display()
+        );
     };
     home.clean_tmp()?;
     let (have, latest) = (&state.version, &manifest.version);
@@ -599,7 +608,10 @@ fn setup(a: SetupArgs) -> Result<()> {
     }
     let home = store::home_path()?;
     let Some(state) = State::load(&home)? else {
-        bail!("nothing installed; run kulman install");
+        bail!(
+            "nothing installed in {}; run kulman install",
+            home.display()
+        );
     };
     if state.modules.is_empty() {
         bail!("nothing to set up: no module is installed (kulman install)");
