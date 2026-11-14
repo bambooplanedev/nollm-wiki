@@ -2567,3 +2567,22 @@ fn a_page_says_when_module_level_code_or_test_code_is_not_charted() {
         }
     }
 }
+
+#[test]
+fn build_leaves_a_compiled_wiki_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
+    common::write_files(&src, &[("src/a.rs", "pub fn f() {}\n")]);
+    let wiki = [
+        ("index.md", "# Index\n"),
+        ("AGENTS.md", "agents\n"),
+        ("index.json", "{\"pages\": []}\n"),
+        (".wiki/cache.json", "{\"v\": 1}\n"),
+    ];
+    common::write_files(&vault, &wiki);
+    let w = plaz::build(&src, &vault).unwrap();
+    assert_eq!((w.written, w.removed, w.left_alone), (1, 0, 0));
+    for (path, text) in wiki {
+        assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), text);
+    }
+}

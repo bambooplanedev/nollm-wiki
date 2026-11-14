@@ -1215,3 +1215,28 @@ fn process_folders_and_vendored_code_are_skipped_unless_no_ignore() {
         assert!(all.contains(*p), "{p} missing: {all:?}");
     }
 }
+
+#[test]
+fn compile_leaves_the_map_folder_alone() {
+    let dir = tempdir().unwrap();
+    let project = dir.path();
+    let out = project.join(".kulman");
+    let page = ".kulman/map/src/a.rs.md";
+    let map = "---\ntitle: a.rs\ntags: [\"plaz\"]\nkind: map\nsource: src/a.rs\n---\nA map page.\n";
+    write(project, "src/a.rs", "pub fn f() {}\n");
+    write(project, page, map);
+
+    for _ in 0..2 {
+        let r = compile(project, &out, &CompileOptions::default()).unwrap();
+        assert_eq!(r.pages_total, 1, "only src/a.rs has a page");
+        assert_eq!(fs::read_to_string(project.join(page)).unwrap(), map);
+        assert!(out.join("a.md").exists());
+    }
+    for name in ["index.json", "llms.txt"] {
+        let text = fs::read_to_string(out.join(name)).unwrap();
+        assert!(
+            !text.contains("map/") && !text.contains("A map page"),
+            "{name}"
+        );
+    }
+}
