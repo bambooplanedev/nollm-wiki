@@ -13,10 +13,6 @@ fn skill(dir: &str) -> String {
     SKILL.replace("<memory-dir>", dir)
 }
 
-/// The memory-only skill the last release that had one wrote for Claude Code, naming `dir`.
-fn memory_skill(dir: &str) -> String {
-    memory_part(&OLD_SKILLS[5].replace("<memory-dir>", dir)).unwrap()
-}
 const ENTRY: &str = "{\n  \"command\": \"kalka\",\n  \"args\": [\n    \"serve\",\n    \"--source\",\n    \".\"\n  ]\n}";
 
 struct Fixture {
@@ -57,20 +53,9 @@ impl Fixture {
     fn claude_config(&self) -> PathBuf {
         self.tmp.path().join("claude-config")
     }
-    /// Where an earlier release kept local memory of the fixture's repo (needs real git and a commit).
-    fn local_memory(&self) -> PathBuf {
-        let env = |k: &str| {
-            ["HOME", "XDG_DATA_HOME", "LOCALAPPDATA"]
-                .contains(&k)
-                .then(|| self.home().to_string_lossy().into_owned())
-        };
-        let data = kalka::memory::data_dir_for(std::env::consts::OS, &env).unwrap();
-        data.join("wiki/memory")
-            .join(kalka::memory::repo_key(&self.root()).unwrap())
-    }
 }
 
-/// `with_wiki`: a `wiki` symlink on PATH; `with_claude`: the stub `claude`.
+/// `with_wiki`: a `kalka` symlink on PATH; `with_claude`: the stub `claude`.
 fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
     let f = Fixture {
         tmp: tempdir().unwrap(),
@@ -183,27 +168,6 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
     );
     assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".wiki/"));
     assert!(r.join(".wiki/index.json").exists());
-}
-
-#[test]
-fn setup_replaces_an_untouched_claude_navigation_skill() {
-    let f = fixture(true, true);
-    let old = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
-    fs::create_dir_all(old.parent().unwrap()).unwrap();
-    fs::write(&old, skill(".agents/memory")).unwrap();
-    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert!(!old.exists(), "{}", out(&a));
-    assert!(out(&a).contains("removed .claude/skills/kalka-navigation/SKILL.md"));
-}
-
-#[test]
-fn setup_keeps_an_edited_claude_navigation_skill() {
-    let f = fixture(true, true);
-    let old = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
-    fs::create_dir_all(old.parent().unwrap()).unwrap();
-    fs::write(&old, "my own notes\n").unwrap();
-    f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert_eq!(read(&old), "my own notes\n");
 }
 
 #[test]
@@ -365,25 +329,6 @@ fn setup_remove_undoes_the_default_hooks() {
     // No hooks installed: plain --remove still succeeds and says so.
     let a = f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert!(out(&a).contains("not present: .pi/extensions/kalka-hint/index.ts hook for pi"));
-}
-
-#[test]
-fn setup_upgrades_and_removes_a_pi_hook_from_an_earlier_release() {
-    let f = fixture(true, true);
-    let r = f.root();
-    let file = r.join(".pi/extensions/kalka-hint/index.ts");
-    let old = include_str!("../src/setup/shipped/wiki-hint-1.ts").replace("<cmd>", "kalka");
-    let args = ["--agent", "pi", "--scope", "repo"];
-    fs::create_dir_all(file.parent().unwrap()).unwrap();
-    fs::write(&file, &old).unwrap();
-    f.setup(&args).success();
-    assert_eq!(
-        read(&file),
-        include_str!("../src/setup/kalka-hint.ts").replace("<cmd>", "kalka")
-    );
-    fs::write(&file, &old).unwrap();
-    f.setup(&[&["--remove"], &args[..]].concat()).success();
-    assert!(!file.exists());
 }
 
 #[test]
@@ -588,7 +533,6 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
         o.contains("agent memory folder") || o.contains("no agent memory folders found"),
         "{o}"
     );
-    assert!(!f.root().join(".claude/skills/wiki-memory").exists());
     let text = read(&f.root().join(".agents/skills/kalka-navigation/SKILL.md"));
     assert!(text.contains("`.agents/memory`"), "{text}");
     assert!(!text.contains("<memory-dir>"));
@@ -601,7 +545,7 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     );
 }
 
-/// A fixture with real git and a commit, so the old per-user memory folder has a key.
+/// A fixture with real git and a commit.
 fn committed() -> Fixture {
     let f = fixture(true, true);
     real_git(&f);
@@ -685,55 +629,6 @@ fn setup_local_outside_git_still_creates_agents_memory() {
         "{}",
         out(&a)
     );
-}
-
-/// Puts `text` where an earlier release wrote Claude Code's memory skill, then runs setup in
-/// `scope` twice and `--remove` once: the skill goes on the first run, in both modes, and the
-/// memory folder stays.
-fn old_memory_skill_goes(f: &Fixture, scope: &str, text: &str) {
-    let p = f.root().join(".claude/skills/wiki-memory/SKILL.md");
-    let put = || {
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(&p, text).unwrap();
-    };
-    put();
-    let args = ["--agent", "claude", "--scope", scope];
-    let a = f.setup(&args).success();
-    assert!(!p.exists(), "{}", out(&a));
-    assert!(
-        out(&a).contains(
-            "removed .claude/skills/wiki-memory/SKILL.md: Claude Code keeps its own memory, which the wiki now reads"
-        ),
-        "{}",
-        out(&a)
-    );
-    f.setup(&args).success();
-    put();
-    let a = f.setup(&[&["--remove"], &args[..]].concat()).success();
-    assert!(!p.exists(), "{}", out(&a));
-    assert!(f.root().join(".agents/memory").is_dir());
-}
-
-#[test]
-fn setup_local_removes_an_old_local_scope_memory_skill() {
-    let f = committed();
-    let old = kalka::memory::display_path(&f.local_memory());
-    old_memory_skill_goes(&f, "local", &memory_skill(&old));
-    let ex = read(&f.root().join(".git/info/exclude"));
-    assert!(ex.lines().any(|l| l == "/.agents/memory/"), "{ex}");
-
-    // pi's skill from then named the per-user folder; setup upgrades it.
-    let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
-    fs::create_dir_all(p.parent().unwrap()).unwrap();
-    fs::write(&p, OLD_SKILLS[5].replace("<memory-dir>", &old)).unwrap();
-    f.setup(&["--agent", "pi", "--scope", "local"]).success();
-    assert_eq!(read(&p), skill(".agents/memory"));
-}
-
-#[test]
-fn setup_removes_an_old_repo_scope_memory_skill() {
-    let f = committed();
-    old_memory_skill_goes(&f, "repo", &memory_skill(".agents/memory"));
 }
 
 #[test]
@@ -880,99 +775,15 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     assert!(read(&f.root().join("AGENTS.md")).contains("<!-- kalka:navigation -->"));
 }
 
-const OLD_NAVS: [&str; 2] = [
-    include_str!("../src/setup/shipped/navigation-1.md"),
-    include_str!("../src/setup/shipped/navigation-2.md"),
-];
-const OLD_SKILLS: [&str; 8] = [
-    include_str!("../src/setup/shipped/skill-1.md"),
-    include_str!("../src/setup/shipped/skill-2.md"),
-    include_str!("../src/setup/shipped/skill-3.md"),
-    include_str!("../src/setup/shipped/skill-4.md"),
-    include_str!("../src/setup/shipped/skill-5.md"),
-    include_str!("../src/setup/shipped/skill-6.md"),
-    include_str!("../src/setup/shipped/skill-7.md"),
-    include_str!("../src/setup/shipped/skill-8.md"),
-];
-
-fn nav_block(nav: &str) -> String {
-    format!("<!-- kalka:navigation -->\n{nav}<!-- /kalka:navigation -->\n")
-}
-
-fn memory_part(skill: &str) -> Option<String> {
-    let (_, rules) = skill.split_once("\n# Memory\n")?;
-    Some(format!(
-        "---\nname: wiki-memory\ndescription: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.\n---\n\n# Memory\n{rules}"
-    ))
-}
-
-#[test]
-fn setup_upgrades_previous_release() {
-    // Codex: every earlier block in AGENTS.md.
-    for (i, old) in OLD_NAVS.iter().enumerate() {
-        let f = fixture(true, false);
-        codex_stub(&f);
-        let agents = f.root().join("AGENTS.md");
-        fs::write(&agents, format!("# Team rules\n\n{}", nav_block(old))).unwrap();
-        let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
-        let now = read(&agents);
-        assert_eq!(
-            now,
-            format!("# Team rules\n\n{}", nav_block(NAV)),
-            "navigation-{}: {}",
-            i + 1,
-            out(&a)
-        );
-        assert_eq!(now.matches("<!-- kalka:navigation -->").count(), 1);
-    }
-
-    // pi, repo scope: every earlier skill, with the memory folder filled in.
-    let skill_file = ".agents/skills/kalka-navigation/SKILL.md";
-    // Claude Code: the memory-only skill cut from every earlier skill that has a Memory section,
-    // which setup now removes.
-    let mem_file = ".claude/skills/wiki-memory/SKILL.md";
-    for (i, old) in OLD_SKILLS.iter().enumerate() {
-        let f = fixture(true, true);
-        let p = f.root().join(skill_file);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        fs::write(&p, old.replace("<memory-dir>", ".agents/memory")).unwrap();
-        let m = f.root().join(mem_file);
-        if let Some(old_mem) = memory_part(&old.replace("<memory-dir>", ".agents/memory")) {
-            fs::create_dir_all(m.parent().unwrap()).unwrap();
-            fs::write(&m, old_mem).unwrap();
-        }
-        let a = f
-            .setup(&["--agent", "claude,pi", "--scope", "repo"])
-            .success();
-        assert_eq!(
-            read(&p),
-            skill(".agents/memory"),
-            "skill-{}: {}",
-            i + 1,
-            out(&a)
-        );
-        assert!(!m.exists(), "skill-{}", i + 1);
-    }
-
-    // Local scope without a local folder wrote the variant without the Memory section; now the
-    // Memory section names `.agents/memory` in both scopes.
-    for (i, old) in OLD_SKILLS.iter().enumerate() {
-        let f = fixture(true, true);
-        let p = f.root().join(skill_file);
-        fs::create_dir_all(p.parent().unwrap()).unwrap();
-        let head = old.split_once("\n# Memory\n").map_or(*old, |(h, _)| h);
-        fs::write(&p, head).unwrap();
-        f.setup(&["--agent", "pi", "--scope", "local"]).success();
-        assert_eq!(read(&p), skill(".agents/memory"), "skill-{}", i + 1);
-    }
-}
-
 #[test]
 fn setup_keeps_hand_edited_block() {
     let f = fixture(true, false);
     codex_stub(&f);
     let agents = f.root().join("AGENTS.md");
-    let edited = nav_block(&OLD_NAVS[0].replace("exact", "approximate"));
+    let edited = format!(
+        "<!-- kalka:navigation -->\n{}<!-- /kalka:navigation -->\n",
+        NAV.replace("exact", "approximate")
+    );
     fs::write(&agents, &edited).unwrap();
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert_eq!(read(&agents), edited);
@@ -985,38 +796,10 @@ fn setup_keeps_hand_edited_block() {
 
     let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
     fs::create_dir_all(p.parent().unwrap()).unwrap();
-    let mine = OLD_SKILLS[4].replace("<memory-dir>", ".agents/memory") + "my line\n";
+    let mine = skill(".agents/memory") + "my line\n";
     fs::write(&p, &mine).unwrap();
     f.setup(&["--agent", "pi", "--scope", "repo"]).code(1);
     assert_eq!(read(&p), mine);
-}
-
-#[test]
-fn remove_takes_out_old_block() {
-    for (i, old) in OLD_NAVS.iter().enumerate() {
-        let f = fixture(true, false);
-        codex_stub(&f);
-        let agents = f.root().join("AGENTS.md");
-        fs::write(&agents, format!("# Team rules\n\n{}", nav_block(old))).unwrap();
-        let a = f
-            .setup(&["--remove", "--agent", "codex", "--scope", "repo"])
-            .success();
-        assert_eq!(
-            read(&agents),
-            "# Team rules\n",
-            "navigation-{}: {}",
-            i + 1,
-            out(&a)
-        );
-    }
-
-    let f = fixture(true, false);
-    let p = f.root().join(".agents/skills/kalka-navigation/SKILL.md");
-    fs::create_dir_all(p.parent().unwrap()).unwrap();
-    fs::write(&p, OLD_SKILLS[3].replace("<memory-dir>", ".agents/memory")).unwrap();
-    f.setup(&["--remove", "--agent", "pi", "--scope", "repo"])
-        .success();
-    assert!(!p.exists());
 }
 
 #[test]
@@ -1050,37 +833,6 @@ fn default_texts_name_only_default_tools() {
                 "{text_name} names `{name}`"
             );
         }
-    }
-}
-
-#[test]
-fn setup_and_remove_clear_every_shipped_claude_navigation_skill() {
-    for (i, old) in OLD_SKILLS.iter().enumerate() {
-        for remove in [false, true] {
-            let f = fixture(true, true);
-            let p = f.root().join(".claude/skills/kalka-navigation/SKILL.md");
-            fs::create_dir_all(p.parent().unwrap()).unwrap();
-            fs::write(&p, old.replace("<memory-dir>", ".agents/memory")).unwrap();
-            let mut args = vec!["--agent", "claude", "--scope", "repo"];
-            if remove {
-                args.insert(0, "--remove");
-            }
-            let a = f.setup(&args).success();
-            assert!(!p.exists(), "skill-{} remove={remove}: {}", i + 1, out(&a));
-        }
-    }
-}
-
-#[test]
-fn setup_removes_a_lone_old_agents_md_beside_claude_md() {
-    for old in OLD_NAVS {
-        let f = fixture(true, false);
-        codex_stub(&f);
-        fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
-        fs::write(f.root().join("AGENTS.md"), nav_block(old)).unwrap();
-        let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
-        assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
-        assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
     }
 }
 

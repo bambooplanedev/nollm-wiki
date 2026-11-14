@@ -12,40 +12,13 @@ use std::process::Command;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/kalka-navigation";
-/// Claude Code's memory-only skill (this head and an earlier `SKILL.md`'s Memory section) that
-/// earlier releases wrote. Claude Code keeps its own memory, which the wiki reads, so setup now
-/// only removes it.
-const MEMORY_SKILL_DIR: &str = "skills/wiki-memory";
-const MEMORY_SKILL_HEAD: &str = "---
-name: wiki-memory
-description: Save or update a note in this project's memory: a decision, a fact or a journal entry. Use whenever something about this project should be remembered.
----
-";
 const PI_HOOK: &str = include_str!("kalka-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/kalka-hint/index.ts";
-/// Every earlier release's pi hook, so setup can upgrade or remove what an older `wiki` wrote.
-const SHIPPED_PI_HOOKS: &[&str] = &[include_str!("shipped/wiki-hint-1.ts")];
 /// The command the agents run.
 const CMD: &str = "kalka";
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
 /// `--remove` takes out exactly them.
 const NAV_RULES: &str = include_str!("navigation.md");
-/// Every earlier release's `navigation.md` and `SKILL.md` (from git history), so setup can
-/// upgrade or remove what an older `wiki` wrote while a hand-edited copy stays foreign.
-const SHIPPED_NAV: &[&str] = &[
-    include_str!("shipped/navigation-1.md"),
-    include_str!("shipped/navigation-2.md"),
-];
-const SHIPPED_SKILLS: &[&str] = &[
-    include_str!("shipped/skill-1.md"),
-    include_str!("shipped/skill-2.md"),
-    include_str!("shipped/skill-3.md"),
-    include_str!("shipped/skill-4.md"),
-    include_str!("shipped/skill-5.md"),
-    include_str!("shipped/skill-6.md"),
-    include_str!("shipped/skill-7.md"),
-    include_str!("shipped/skill-8.md"),
-];
 const NAV_BEGIN: &str = "<!-- kalka:navigation -->";
 const NAV_END: &str = "<!-- /kalka:navigation -->";
 
@@ -316,33 +289,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
 
     let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
     let skill_text = skill_text.as_str();
-    // Earlier releases' skills named `.agents/memory`, or in local scope the per-user folder, or
-    // (local scope without that folder) had no Memory section.
-    let old_local = memory::local_dir(root).map(|d| memory::display_path(&d));
-    let old_skills: Vec<String> = SHIPPED_SKILLS
-        .iter()
-        .flat_map(|t| {
-            let head = t.split_once("\n# Memory\n").map_or(*t, |(h, _)| h);
-            [
-                Some(t.replace("<memory-dir>", memory::REPO_DIR)),
-                old_local.as_ref().map(|d| t.replace("<memory-dir>", d)),
-                Some(head.to_string()),
-            ]
-        })
-        .flatten()
-        .collect();
-    let old_skills: Vec<&str> = old_skills.iter().map(String::as_str).collect();
-    let old_memory_skills: Vec<String> = old_skills
-        .iter()
-        .filter_map(|t| t.split_once("\n# Memory\n"))
-        .map(|(_, rules)| format!("{MEMORY_SKILL_HEAD}\n# Memory\n{rules}"))
-        .collect();
-    let old_memory_skills: Vec<&str> = old_memory_skills.iter().map(String::as_str).collect();
-    let old_blocks: Vec<String> = SHIPPED_NAV
-        .iter()
-        .map(|n| format!("{NAV_BEGIN}\n{n}{NAV_END}\n"))
-        .collect();
-    let old_blocks: Vec<&str> = old_blocks.iter().map(String::as_str).collect();
     if !opts.remove {
         let d = root.join(memory::REPO_DIR);
         let what = format!("memory folder {}", memory::display_path(&d));
@@ -422,20 +368,19 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let block = format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n");
                 let res = || {
                     if opts.remove {
-                        edit::remove_block(root, &path, &block, &old_blocks)
+                        edit::remove_block(root, &path, &block)
                     } else {
-                        edit::upsert_block(&path, NAV_BEGIN, &block, &old_blocks)
+                        edit::upsert_block(&path, NAV_BEGIN, &block)
                     }
                 };
                 let what = "AGENTS.md kalka navigation steps";
                 // pi reads AGENTS.md instead of CLAUDE.md when both exist, so
                 // beside a CLAUDE.md the steps get no AGENTS.md of their own; one
                 // an earlier setup created holds only them and goes.
-                let lone = std::fs::read_to_string(&path)
-                    .is_ok_and(|t| t == block || old_blocks.contains(&t.as_str()));
+                let lone = std::fs::read_to_string(&path).is_ok_and(|t| t == block);
                 if !opts.remove && root.join("CLAUDE.md").exists() && (lone || !path.exists()) {
                     if lone {
-                        edit::remove_block(root, &path, &block, &old_blocks)?;
+                        edit::remove_block(root, &path, &block)?;
                         r.line("removed AGENTS.md: it held only the kalka steps and hid CLAUDE.md from pi")?;
                     }
                     r.skip(
@@ -484,42 +429,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let file = skill.join("SKILL.md");
             let res = || {
                 if opts.remove {
-                    edit::remove_file(root, &root.join(&file), skill_text, &old_skills)
+                    edit::remove_file(root, &root.join(&file), skill_text)
                 } else {
-                    edit::write_file(&root.join(&file), skill_text, &old_skills)
+                    edit::write_file(&root.join(&file), skill_text)
                 }
             };
             let what = format!("{} skill for {name}", file.display());
             if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
                 ignore.push(format!("/{}/", skill.display()));
-            }
-        } else {
-            // The skills an earlier setup wrote for Claude Code, if untouched (and, in local
-            // scope, not tracked by git).
-            for (dir, current, shipped, why) in [
-                (
-                    SKILL_DIR,
-                    Some(skill_text),
-                    &old_skills,
-                    "the server instructions carry its steps",
-                ),
-                (
-                    MEMORY_SKILL_DIR,
-                    old_memory_skills.first().copied(),
-                    &old_memory_skills,
-                    "Claude Code keeps its own memory, which the wiki now reads",
-                ),
-            ] {
-                let Some(current) = current else { continue };
-                let old = Path::new(".claude").join(dir).join("SKILL.md");
-                let old_file = old.to_string_lossy();
-                if std::fs::read_to_string(root.join(&old))
-                    .is_ok_and(|t| t == current || shipped.contains(&t.as_str()))
-                    && !(r.guard_tracked && tracked(root, &old_file))
-                {
-                    edit::remove_file(root, &root.join(&old), current, shipped)?;
-                    r.line(&format!("removed {old_file}: {why}"))?;
-                }
             }
         }
 
@@ -527,17 +444,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         if opts.hook || opts.remove {
             if pi {
                 let content = PI_HOOK.replace("<cmd>", CMD);
-                let shipped: Vec<String> = SHIPPED_PI_HOOKS
-                    .iter()
-                    .map(|h| h.replace("<cmd>", CMD))
-                    .collect();
-                let shipped: Vec<&str> = shipped.iter().map(String::as_str).collect();
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &content, &shipped)
+                        edit::remove_file(root, &path, &content)
                     } else {
-                        edit::write_file(&path, &content, &shipped)
+                        edit::write_file(&path, &content)
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
