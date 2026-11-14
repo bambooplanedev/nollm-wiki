@@ -1637,12 +1637,12 @@ fn tail_gate_long_word_in_title_alias_or_summary() {
         "{tail:?}"
     );
     // A four-character word passes the default gate (4) and fails under
-    // `WIKI_MEMORY_GATE=8`, read once per process, so through the binary.
+    // `KALKA_MEMORY_GATE=8`, read once per process, so through the binary.
     let rows = |gate: Option<&str>| {
         let mut cmd = assert_cmd::Command::cargo_bin("kalka").unwrap();
         cmd.args(["search", "rota zebra", "--dir"]).arg(&out);
         if let Some(g) = gate {
-            cmd.env("WIKI_MEMORY_GATE", g);
+            cmd.env("KALKA_MEMORY_GATE", g);
         }
         let lines = cmd.assert().success();
         let lines = String::from_utf8(lines.get_output().stdout.clone()).unwrap();

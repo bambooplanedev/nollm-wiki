@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test for strip-chrome.awk on pages the current compiler writes (no network).
-# Uses $WIKI_BIN when set, else `cargo run` on this repo's kalka crate.
+# Uses $KALKA_BIN when set, else `cargo run` on this repo's kalka crate.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AWK="$SCRIPT_DIR/strip-chrome.awk"
@@ -23,8 +23,8 @@ printf '%s\n' '# Guide' '' 'Uses [b](b.py).' '' '## Mentioned in' \
     'Author text under a chrome-like heading.' '' '## Imported by' 'More author text.' '' \
     '## Notes' 'Author notes inside the body.' > "$tmp/src/guide.md"
 printf '# Other\n\nSee [guide](guide.md).\n' > "$tmp/src/other.md"
-if [ -n "${WIKI_BIN:-}" ]; then
-    "$WIKI_BIN" compile "$tmp/src" "$tmp/out" > /dev/null
+if [ -n "${KALKA_BIN:-}" ]; then
+    "$KALKA_BIN" compile "$tmp/src" "$tmp/out" > /dev/null
 else
     cargo run --quiet --manifest-path "$SCRIPT_DIR/../Cargo.toml" -p kalka -- compile "$tmp/src" "$tmp/out" > /dev/null
 fi

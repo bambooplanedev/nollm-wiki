@@ -162,7 +162,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
 
 ## Module map
 
-The workspace holds four crates. `kalka` (`crates/kalka`) owns
+The workspace holds five crates. `kalka` (`crates/kalka`) owns
 everything about a wiki: the pipeline, pages and their ids, the graph,
 rendering, the manifest, queries, the CLI, `serve` and `setup`. `wiki-code`
 (`crates/wiki-code`, lib `wiki_code`) owns the code layer a sibling tool can use
@@ -176,12 +176,14 @@ consumer that depends on it by git does not use this lock file. `techlog`
 (`crates/techlog`) holds where agent memory lives, and the `Origin` of a
 memory note. `plaz` (`crates/plaz`) is the second tool of the set: it draws per-function decision charts and call
 targets from the code layer in `wiki-code`, depends on nothing of `kalka`, and writes its pages to `.kulman/map/`, which
-`compile` leaves alone. Paths below that start with `src/` or `tests/` are in
+`compile` leaves alone. `kulman` (`crates/kulman`) is the installer of the set: it installs, updates and
+removes the modules' release binaries in `~/.kulman-home` and runs each module's own `setup`; it depends on no other
+crate of the workspace, and `install.sh` at the repository root fetches it. Paths below that start with `src/` or `tests/` are in
 `crates/kalka`.
 
 | Module | Responsibility |
 |---|---|
-| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `WIKI_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
+| `src/lib.rs` | `compile()` / `compile_inner()` — orchestrates the pipeline; `disambiguate_ids` name qualification; slug dedup; reserved-name remap; `CompileOptions`/`CompileResult`/`WikiError`; with `KALKA_TIMINGS=1`, one stderr line of stage timings (`walk`, `extract`, `global`, `render`, `write`, `tail`). |
 | `crates/techlog/src/lib.rs` (crate `techlog`, re-exported as `memory`) | Where agent memory lives: `REPO_DIR`; Claude Code's folder for a project (`claude_slug`: every UTF-16 unit that is not an ASCII letter or digit becomes `-`, cut at 200 with a Java-style hash; `claude_memory_dir`: `<config dir>/projects/<slug>/memory`, config dir `CLAUDE_CONFIG_DIR` else `$HOME` (then `USERPROFILE`)`/.claude`, keyed on the main checkout via `git rev-parse --git-common-dir`); `agent_dirs` (one entry per adapter, Claude Code only for now); `resolve` and `display_path` for stable external paths. `Origin` (a note's origin: `local`, or `repo` with its last author and whether it was edited; `trust` ranks them) and `repo_origins`, which reads it from git, live here too; kalka reaches them as `memory::Origin`. |
 | `crates/wiki-code/src/walk.rs` (re-exported by `src/walk.rs`) | Filesystem walk with `.gitignore`-aware filtering that also prunes `SKIPPED_DIRS` (process folders and vendored code); produces sorted `Vec<SourceFile>`. |
 | `src/formats/mod.rs` | `Extractor` trait, `Registry` (extension → extractor dispatch), `ExtractError`. |
@@ -214,7 +216,7 @@ targets from the code layer in `wiki-code`, depends on nothing of `kalka`, and w
 | `src/dirlock.rs` | Advisory locks under `<dir>/.serve/` (`SERVE_DIR`): `try_writer` for `writer.lock` (one writer per `--dir`), and `compile.lock`, held `exclusive` while a compile writes (`serve`, `kalka compile` and `kalka setup` alike) and `shared`/`try_shared`/`shared_until` (polls until a deadline, so a call's wait stays bounded) while a load reads, so a load never sees half a wiki. |
 | `src/hint.rs` | `hint_lines()` — `kalka hint`: code-only search plus, when the prompt passes the shared memory gate (`Wiki::passes_gate`, the one `search`'s tail uses), `MEMORY_HEADER` and one `memory (<origin>): <path> — <summary>` line (`serve::memory_prefix`) for the most trusted passing note (`Origin::trust`; the best scored of equals), the code `HEADER` only when there are code lines; pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `LINE_CHARS`; no code lines when the best page scores below `HINT_MIN_SHARE` (0.5) of the prompt's available score (`PassStats::available`, the summed idf of its counted words); empty when nothing matches, on a harness-written turn (text opening with a tag) and on a prompt with fewer than `HINT_MIN_TOKENS` (2) words of two or more characters (`Wiki::prompt_tokens` drops one-character words from every prompt search). `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `kalka generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `kalka setup`: compiles `.` into `.kulman` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config), Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `kalka-navigation` skill (its Memory section names `.agents/memory`) and the ignore lines; Claude Code gets no skill; `--remove` undoes only what it wrote, and entries under the old `wiki` names are foreign. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`. |
+| `src/setup/mod.rs` | `run()` — `kalka setup`: compiles `.` into `.kulman` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`) unless `--no-memory` (`SetupOptions::memory` off: no folder, no memory compiled, the server registered as `serve --source . --memory none` by `serve_args`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or `codex mcp add` for Codex's global config) in the chosen memory variant, either variant counting as its own, Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `kalka-navigation` skill (`skill_text`: its Memory section, naming `.agents/memory`, only with memory) and the ignore lines; Claude Code gets no skill. With no agent (`SetupOptions::agents` empty: none detected and none named or chosen) it still compiles and writes the ignore lines and the memory folder, and `main.rs` says that no agent was set up (or, with `--remove`, that nothing agent-specific was removed); `--remove` undoes only what it wrote, and entries under the old `wiki` names are foreign. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`; `detect()` finds the agents of a project, and `parse_agents()` reads the answer when none is found and setup asks. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files, marked text blocks and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/setup/navigation.md` | The navigation steps `setup` writes into `AGENTS.md` for Codex. |
@@ -638,7 +640,7 @@ matching:
   best code hit's. Note scores come from `MemoryScope::Only`, whose `N`, `df`
   and `avglen` count project pages and notes alike, so the ratio compares
   scores on the project's scale; only the candidates are notes. The
-  environment variable `WIKI_MEMORY_GATE` sets the gate length; it exists for
+  environment variable `KALKA_MEMORY_GATE` sets the gate length; it exists for
   measurement and is not a user setting. `lines` prints a tail row as
   `memory (<origin>): <path> — <summary>` (the title when the summary is empty) and, when the hit has one, its snippet on an indented line; `page` on a note returns its text, JSON
   as a full hit; tag-only listings have no tail and mark a superseded note.

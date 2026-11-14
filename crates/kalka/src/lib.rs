@@ -43,8 +43,6 @@ pub enum WikiError {
     Watch(String),
     #[error("serve failed: {0}")]
     Serve(String),
-    #[error("{0}")]
-    Setup(String),
 }
 
 #[allow(clippy::struct_excessive_bools)] // independent switches, not states
@@ -154,7 +152,7 @@ fn compile_inner(
     // page is written, rather than lazily inside a rayon worker with output
     // already committed for other files.
     formats::code::validate_queries();
-    let timings = std::env::var_os("WIKI_TIMINGS").is_some_and(|v| v == "1");
+    let timings = std::env::var_os("KALKA_TIMINGS").is_some_and(|v| v == "1");
     let t0 = Instant::now();
 
     let project = opts.project.clone().unwrap_or_else(|| {

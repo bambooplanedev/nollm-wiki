@@ -168,10 +168,10 @@ enum Command {
     },
     /// Install the MCP server and what tells each agent to use it (Claude Code, pi, Cursor, Codex) in this project, plus the prompt hook for Claude Code and pi.
     Setup {
-        /// Agents to set up (default: the ones found; Codex only when named, its config is global).
+        /// Agents to set up (default: the ones found, asked at a terminal when none is; Codex only when named, its config is global).
         #[arg(long, value_delimiter = ',')]
         agent: Option<Vec<Agent>>,
-        /// Where the files go (asked when omitted and stdin is a terminal).
+        /// Where the files go (asked when omitted and stdin and stdout are terminals).
         #[arg(long)]
         scope: Option<Scope>,
         /// Skip the prompt hook (installed by default for Claude Code and pi).
@@ -180,6 +180,12 @@ enum Command {
         /// Undo what setup wrote (ignore lines and `.kulman/` stay).
         #[arg(long)]
         remove: bool,
+        /// Set up agent memory (the default).
+        #[arg(long, conflicts_with = "no_memory")]
+        memory: bool,
+        /// No agent memory: no `.agents/memory`, and the server runs with `--memory none`.
+        #[arg(long)]
+        no_memory: bool,
     },
     /// Write a synthetic corpus (same seed, same files).
     Generate {
@@ -194,10 +200,15 @@ enum Command {
     },
 }
 
-fn ask_scope() -> Result<Scope> {
+/// setup asks only when stdin and stdout are both terminals.
+fn at_terminal() -> bool {
     use std::io::IsTerminal;
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
+fn ask_scope() -> Result<Scope> {
     anyhow::ensure!(
-        std::io::stdin().is_terminal(),
+        at_terminal(),
         "no terminal to ask: pass --scope repo or --scope local"
     );
     println!(
@@ -212,6 +223,26 @@ fn ask_scope() -> Result<Scope> {
         "2" => Ok(Scope::Local),
         _ => anyhow::bail!("choose 1 or 2"),
     }
+}
+
+/// No agent was found: which to set up, asked at a terminal (as [`ask_scope`] decides one);
+/// without one, none.
+fn ask_agents() -> Result<Vec<Agent>> {
+    use clap::ValueEnum;
+    if !at_terminal() {
+        return Ok(Vec::new());
+    }
+    println!("No agent found in this project. Which should setup wire?");
+    for (i, a) in Agent::value_variants().iter().enumerate() {
+        if let Some(v) = a.to_possible_value() {
+            println!("  {}) {}", i + 1, v.get_name());
+        }
+    }
+    print!("Numbers or names, comma separated (empty for none): ");
+    std::io::Write::flush(&mut std::io::stdout())?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    kalka::setup::parse_agents(&answer).map_err(anyhow::Error::msg)
 }
 
 /// The wiki a command reads: `--dir`, else `./.kulman` if it exists, else `out`.
@@ -517,17 +548,42 @@ fn run() -> Result<()> {
             scope,
             no_hook,
             remove,
+            memory: _,
+            no_memory,
         } => {
             let scope = scope.map_or_else(ask_scope, Ok)?;
+            let root = std::env::current_dir()?;
+            // None found: asked at a terminal, else none; `--remove` then removes nothing
+            // agent-specific, and says so when no `--agent` was given.
+            let named = agent.is_some();
+            let agents = match agent {
+                Some(a) => a,
+                None => match kalka::setup::detect(&root) {
+                    a if a.is_empty() && !remove => ask_agents()?,
+                    a => a,
+                },
+            };
+            let none = agents.is_empty();
             let opts = SetupOptions {
-                agents: agent,
+                agents: Some(agents),
                 scope,
                 hook: !no_hook,
                 remove,
+                memory: !no_memory,
             };
-            let root = std::env::current_dir()?;
             if !kalka::setup::run(&root, &opts, &mut std::io::stdout())? {
                 std::process::exit(1);
+            }
+            if none && !remove {
+                eprintln!(
+                    "no agent set up: the wiki is in {OUT_DIR}/; run kalka setup --agent … later"
+                );
+            }
+            if none && remove && !named {
+                eprintln!(
+                    "no agent found: nothing agent-specific removed; pass --agent … to remove \
+                     one agent's wiring"
+                );
             }
         }
         Command::Generate { dir, files, seed } => {

@@ -1,0 +1,24 @@
+[package]
+name = "kulman"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Installs, updates and sets up the modules of the kulman set"
+license.workspace = true
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+hex = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+
+[lints]
+workspace = true

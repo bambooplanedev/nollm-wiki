@@ -1317,18 +1317,33 @@ mod tests {
 
     #[test]
     fn a_burst_longer_than_the_quiet_window_compiles_once() {
-        let (src, _out, live, before) = debounced(400, 10_000);
-        // 12 writes 50 ms apart: a 600 ms burst, longer than the 400 ms window.
-        for i in 0..12 {
+        let (src, _out, live, before) = debounced(1000, 10_000);
+        // 25 writes 50 ms apart: a 1.2 s burst, longer than the 1 s window. A
+        // stalled machine can stretch a gap; one past half the window is a
+        // stall, and only a gap past the whole window compiles. So a stall
+        // may add a compile but need not: the count is a range, not a value.
+        let mut starts = Vec::new();
+        for i in 0..25 {
+            starts.push(Instant::now());
             std::fs::write(src.path().join("a.md"), format!("# A\n\nword{i}\n")).unwrap();
             std::thread::sleep(Duration::from_millis(50));
         }
+        let gaps: Vec<Duration> = starts.windows(2).map(|w| w[1] - w[0]).collect();
+        let stalls = gaps
+            .iter()
+            .filter(|g| **g > Duration::from_millis(500))
+            .count();
         let (wiki, stale) = live.fresh();
         assert_eq!(stale, None);
-        assert!(finds(&wiki, "word11"));
+        assert!(finds(&wiki, "word24"));
         // Anything still pending would compile by now.
-        std::thread::sleep(Duration::from_millis(1200));
-        assert_eq!(live.compiles.load(Ordering::Relaxed) - before, 1);
+        std::thread::sleep(Duration::from_millis(1500));
+        let n = live.compiles.load(Ordering::Relaxed) - before;
+        assert!(
+            (1..=1 + stalls).contains(&n),
+            "{n} compiles, {stalls} stalls, largest gap {} ms",
+            gaps.iter().max().unwrap().as_millis()
+        );
     }
 
     #[test]

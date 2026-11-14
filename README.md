@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -83,7 +83,7 @@ crates/kalka/src/lib.rs
 
 - macOS (Apple silicon or Intel) or Linux x86_64 for the release binary. The Linux one is built on
   GitHub's `ubuntu-latest`, so an older distribution's glibc may need a build from source.
-- Or Rust 1.89 or later to build from source. Windows is not tested.
+- Or Rust 1.90 or later to build from source. Windows is not tested.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `kalka setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
 
@@ -108,6 +108,33 @@ From source:
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
     cd llm-wiki-nollm
     cargo install --path crates/kalka      # into ~/.cargo/bin
+
+### With kulman (available from the first release of the set, 0.7.0)
+
+No release of the set exists yet; until it does, use the steps above. From that release on,
+`kulman` installs, updates and sets up `kalka` and `plaz`. One line fetches `kulman` itself:
+
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+
+The script downloads the `kulman` archive for your platform, checks it against the release's
+`SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
+`~/.kulman-home/bin/kulman`. It writes nothing else and edits no shell profile. To do the same by hand,
+download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release page, check them as
+above, and move the `kulman` binary from the archive to `~/.kulman-home/bin/`.
+
+Add `~/.kulman-home/bin` to your `PATH` (agents start `kalka` by its name; `kulman` and
+`kulman setup` say when it is missing), then:
+
+    kulman install                     # the release's default modules, into ~/.kulman-home/bin
+    cd your-project
+    kulman setup --scope local         # runs kalka setup and plaz setup here
+    kulman update                      # later: everything to the latest release
+
+Everything is on by default; turn things off with flags (`kulman install --modules kalka`,
+`kulman setup --no-memory`). `kulman setup` runs every chosen module even when one fails, and
+names the ones that failed at the end. `kulman remove` deletes what kulman installed (without a
+terminal it needs `--yes`); projects set up with kulman keep `kalka` in their agent configs, so run
+`kulman setup --remove` in them first. Commands, exit codes and the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
 
 ## Quick start
 
@@ -189,7 +216,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 
 `kalka setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
 
 It compiles `.` into `.kulman`, then installs the MCP server (`kalka serve --source .`) and what tells
 each agent to use it. pi gets the `kalka-navigation` skill (how to find code, and the memory rules).
@@ -198,20 +225,32 @@ steps, and the server marks its tools to load up front instead of behind a `Tool
 own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- kalka:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
-names them. Codex is set up only when named: its MCP config is global.
+names them. Codex is set up only when named: its MCP config is global. When none is found and
+`--agent` is not given, setup asks at a terminal which to set up (numbers or names, an empty line
+for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
+ignore lines and the memory folder, sets up no agent, says
+`no agent set up: the wiki is in .kulman/; run kalka setup --agent … later` on stderr and exits 0.
+`--remove` with no agent found and no `--agent` has nothing agent-specific to remove: it says
+`no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring` on
+stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,
   `.agents/skills/kalka-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json kalka … --scope local`, the other files are written and the ones setup
-  created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
+  created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on. A file git already tracks is skipped; use
   `--scope repo` for it.
-- Either scope creates `.agents/memory/`.
+- Agent memory is on by default: either scope creates `.agents/memory/`. `--no-memory` creates no
+  `.agents/memory/`, compiles without memory and registers the server as
+  `kalka serve --source . --memory none`. Running setup again with the other choice switches the
+  registered server; a server added through the `codex` or `claude` CLI that carries settings of
+  your own is left alone and reported, for you to remove and set up again.
 - Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
-- Without `--scope`, setup asks on a terminal and fails without one.
+- Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
+  stdout are both terminals.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
@@ -419,7 +458,7 @@ MCP server.
 Agents keep notes as Markdown files. kalka compiles the folders they write to, and `search` and
 `kalka hint` show the matching notes after the code. The sources:
 
-- **`.agents/memory/`** in the project. `kalka setup` creates it in both scopes; in `--scope local`
+- **`.agents/memory/`** in the project. `kalka setup` creates it in both scopes unless given `--no-memory`; in `--scope local`
   it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `kalka compile`
   includes it unless `--memory none` is given.
 - **The agents' own folders.** `serve --source` and `kalka setup` look for them. Today that is Claude
@@ -541,7 +580,7 @@ for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermo
 - `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
-- `WIKI_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
+- `KALKA_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
   per-stage milliseconds, files read, pages written. `kalka serve --source` and `kalka setup` honour
   it too; it never changes the output.
 

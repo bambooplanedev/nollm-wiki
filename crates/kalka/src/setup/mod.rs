@@ -23,7 +23,7 @@ const NAV_RULES: &str = include_str!("navigation.md");
 const NAV_BEGIN: &str = "<!-- kalka:navigation -->";
 const NAV_END: &str = "<!-- /kalka:navigation -->";
 
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
     Claude,
     Pi,
@@ -41,11 +41,32 @@ pub enum Scope {
 }
 
 pub struct SetupOptions {
-    /// `None`: detect.
+    /// `None`: detect. Empty: no agent, only what is not agent-specific.
     pub agents: Option<Vec<Agent>>,
     pub scope: Scope,
     pub hook: bool,
     pub remove: bool,
+    /// Agent memory: the `.agents/memory` folder, the skill's Memory section and the server's
+    /// memory. Off, the server runs with `--memory none`. `--remove` takes either variant.
+    pub memory: bool,
+}
+
+/// The server's arguments; without memory, `serve --memory none`'s.
+fn serve_args(memory: bool) -> Vec<&'static str> {
+    let mut a = vec!["serve", "--source", "."];
+    if !memory {
+        a.extend(["--memory", "none"]);
+    }
+    a
+}
+
+/// The skill, with its Memory section only when `memory`.
+fn skill_text(memory: bool) -> String {
+    let text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
+    match text.split_once("\n# Memory\n") {
+        Some((nav, _)) if !memory => format!("{}\n", nav.trim_end()),
+        _ => text,
+    }
 }
 
 #[cfg(unix)]
@@ -182,68 +203,179 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     cli("claude", root, args)
 }
 
+/// A switch to the other memory variant leaves alone an entry with settings setup did not write.
+fn other_settings(remove: &str) -> Outcome {
+    Outcome::Foreign(format!(
+        "kalka's server carries other settings; remove it with `{remove}` and run `kalka setup` again"
+    ))
+}
+
+/// The add after a switch's remove failed: the old entry is gone.
+fn lost(e: &str) -> String {
+    format!(
+        "kalka's server entry was removed and the new one could not be added ({e}); \
+         run `kalka setup` again to add it"
+    )
+}
+
 /// Codex's MCP server, through its CLI. Its config is global, so one entry serves every project:
 /// Codex starts the server in the directory it runs in.
-fn codex_mcp(root: &Path, remove: bool) -> Outcome {
+/// Either memory variant is ours; the other one is replaced only when `mcp get` shows nothing
+/// but what setup's own `mcp add` yields (the stdio lines, `cwd: -`, `env: -`, the remove hint).
+fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = cli("codex", root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
-            if !(has(&format!("command: {CMD}")) && has("args: serve --source .")) {
+            let args = |m| has(&format!("args: {}", serve_args(m).join(" ")));
+            if !(has(&format!("command: {CMD}")) && (args(true) || args(false))) {
                 return Ok(Outcome::Foreign(
                     "another \"kalka\" server is configured".into(),
                 ));
             }
-            if !remove {
+            if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
+            let own_line = |l: &str| {
+                [
+                    "kalka",
+                    "enabled: true",
+                    "transport: stdio",
+                    &format!("command: {CMD}"),
+                    &format!("args: {}", serve_args(true).join(" ")),
+                    &format!("args: {}", serve_args(false).join(" ")),
+                    "cwd: -",
+                    "env: -",
+                    "remove: codex mcp remove kalka",
+                ]
+                .contains(&l)
+            };
+            if !remove
+                && !text
+                    .lines()
+                    .map(str::trim)
+                    .all(|l| l.is_empty() || own_line(l))
+            {
+                return Ok(other_settings("codex mcp remove kalka"));
+            }
             cli("codex", root, &["mcp", "remove", "kalka"])?;
-            return Ok(Outcome::Done);
-        }
-        if remove {
+            if remove {
+                return Ok(Outcome::Done);
+            }
+        } else if remove {
             return Ok(Outcome::AlreadyThere);
         }
-        cli(
-            "codex",
-            root,
-            &["mcp", "add", "kalka", "--", CMD, "serve", "--source", "."],
-        )?;
+        let mut add = vec!["mcp", "add", "kalka", "--", CMD];
+        add.extend(serve_args(memory));
+        cli("codex", root, &add).map_err(|e| if found { lost(&e) } else { e })?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)
 }
 
-/// Claude Code's own local-scope MCP config, through its CLI.
-fn claude_local_mcp(root: &Path, entry: &Value, remove: bool) -> Outcome {
+/// Claude Code's own local-scope MCP config, through its CLI. Either memory variant is ours; the
+/// other one is replaced by `entry` only when `mcp get` shows nothing but what setup's own
+/// `add-json` yields (scope, status and its issue, type, command, args, the remove hint): an
+/// `Environment:`, `Timeout:` or any other line is a setting setup did not write.
+fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = claude(root, &["mcp", "get", "kalka"])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
+            let args = |m| has(&format!("Args: {}", serve_args(m).join(" ")));
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
                 && has(&format!("Command: {CMD}"))
-                && has("Args: serve --source .");
+                && (args(true) || args(false));
             if !ours {
                 return Ok(Outcome::Foreign(
                     "another \"kalka\" server is configured".into(),
                 ));
             }
-            if !remove {
+            if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
+            let own_line = |l: &str| {
+                [
+                    "Scope: ",
+                    "Status: ",
+                    "Issue: ",
+                    "To remove this server, run: ",
+                ]
+                .iter()
+                .any(|k| l.starts_with(k))
+                    || [
+                        "kalka:",
+                        "Type: stdio",
+                        &format!("Command: {CMD}"),
+                        &format!("Args: {}", serve_args(true).join(" ")),
+                        &format!("Args: {}", serve_args(false).join(" ")),
+                    ]
+                    .contains(&l)
+            };
+            if !remove
+                && !text
+                    .lines()
+                    .map(str::trim)
+                    .all(|l| l.is_empty() || own_line(l))
+            {
+                return Ok(other_settings("claude mcp remove kalka --scope local"));
+            }
             claude(root, &["mcp", "remove", "kalka", "--scope", "local"])?;
-            return Ok(Outcome::Done);
-        }
-        if remove {
+            if remove {
+                return Ok(Outcome::Done);
+            }
+        } else if remove {
             return Ok(Outcome::AlreadyThere);
         }
         let json = entry.to_string();
         claude(
             root,
             &["mcp", "add-json", "kalka", &json, "--scope", "local"],
-        )?;
+        )
+        .map_err(|e| if found { lost(&e) } else { e })?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)
+}
+
+/// The agents found in `root` (Codex never: its config is global).
+pub fn detect(root: &Path) -> Vec<Agent> {
+    let mut a = Vec::new();
+    if root.join(".claude").exists()
+        || root.join("CLAUDE.md").exists()
+        || find_on_path("claude").is_some()
+    {
+        a.push(Agent::Claude);
+    }
+    if root.join(".pi").exists() || find_on_path("pi").is_some() {
+        a.push(Agent::Pi);
+    }
+    // Only the project folder: Cursor on PATH says nothing about this project.
+    if root.join(".cursor").is_dir() {
+        a.push(Agent::Cursor);
+    }
+    a
+}
+
+/// An answer to the agent question: numbers (from 1, in [`Agent`] order) or names, separated
+/// by commas or spaces; empty is none.
+pub fn parse_agents(line: &str) -> Result<Vec<Agent>, String> {
+    let all = Agent::value_variants();
+    let mut chosen = Vec::new();
+    for word in line
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|w| !w.is_empty())
+    {
+        let agent = match word.parse::<usize>() {
+            Ok(n) => n.checked_sub(1).and_then(|i| all.get(i)).copied(),
+            Err(_) => Agent::from_str(word, true).ok(),
+        }
+        .ok_or_else(|| format!("no agent {word:?}: choose 1-{} or names", all.len()))?;
+        if !chosen.contains(&agent) {
+            chosen.push(agent);
+        }
+    }
+    Ok(chosen)
 }
 
 /// Installs (or with `remove`, undoes) what `opts` asks for in `root`.
@@ -257,30 +389,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         wrote_pi: false,
         guard_tracked: local && !opts.remove,
     };
-    let agents = if let Some(a) = &opts.agents {
-        a.clone()
-    } else {
-        let mut a = Vec::new();
-        if root.join(".claude").exists()
-            || root.join("CLAUDE.md").exists()
-            || find_on_path("claude").is_some()
-        {
-            a.push(Agent::Claude);
-        }
-        if root.join(".pi").exists() || find_on_path("pi").is_some() {
-            a.push(Agent::Pi);
-        }
-        // Only the project folder: Cursor on PATH says nothing about this project.
-        if root.join(".cursor").is_dir() {
-            a.push(Agent::Cursor);
-        }
-        if a.is_empty() {
-            return Err(WikiError::Setup(
-                "no agent found: pass --agent claude,pi,cursor,codex".into(),
-            ));
-        }
-        a
-    };
+    let agents = opts.agents.clone().unwrap_or_else(|| detect(root));
 
     if let Some(top) = git(root, &["rev-parse", "--show-toplevel"]) {
         if std::fs::canonicalize(top).ok() != root.canonicalize().ok() {
@@ -288,38 +397,46 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let skill_text = SKILL_TEMPLATE.replace("<memory-dir>", memory::REPO_DIR);
-    let skill_text = skill_text.as_str();
+    // Own variants, this run's choice first; `--remove` takes either.
+    let choice = [opts.memory, !opts.memory];
+    let skills = choice.map(skill_text);
+    let skills = skills.each_ref().map(String::as_str);
+    let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
     if !opts.remove {
-        let d = root.join(memory::REPO_DIR);
-        let what = format!("memory folder {}", memory::display_path(&d));
-        let existed = d.is_dir();
-        std::fs::create_dir_all(&d)?;
-        let o = if existed {
-            Outcome::AlreadyThere
-        } else {
-            Outcome::Done
-        };
-        r.item(&what, false, Ok(o))?;
-        let agent_dirs = memory::agent_dirs(root);
-        for d in &agent_dirs {
-            let state = if d.is_dir() {
-                "found"
+        // As the registered server compiles: `--memory none` has no memory at all.
+        let mut agent_dirs = Vec::new();
+        if opts.memory {
+            let d = root.join(memory::REPO_DIR);
+            let what = format!("memory folder {}", memory::display_path(&d));
+            let existed = d.is_dir();
+            std::fs::create_dir_all(&d)?;
+            let o = if existed {
+                Outcome::AlreadyThere
             } else {
-                "not yet created"
+                Outcome::Done
             };
-            r.line(&format!(
-                "agent memory folder {} ({state})",
-                memory::display_path(d)
-            ))?;
-        }
-        if agent_dirs.is_empty() {
-            r.line("no agent memory folders found")?;
+            r.item(&what, false, Ok(o))?;
+            agent_dirs = memory::agent_dirs(root);
+            for d in &agent_dirs {
+                let state = if d.is_dir() {
+                    "found"
+                } else {
+                    "not yet created"
+                };
+                r.line(&format!(
+                    "agent memory folder {} ({state})",
+                    memory::display_path(d)
+                ))?;
+            }
+            if agent_dirs.is_empty() {
+                r.line("no agent memory folders found")?;
+            }
         }
         let wiki = root.join(OUT_DIR);
         let c = CompileOptions {
             incremental: true,
             memory: agent_dirs,
+            repo_memory: opts.memory,
             ..CompileOptions::default()
         };
         let res = crate::dirlock::exclusive(&wiki, || compile(root, &wiki, &c))?;
@@ -332,12 +449,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    if !opts.remove && find_on_path("kalka").is_none() {
+    if !opts.remove && !agents.is_empty() && find_on_path("kalka").is_none() {
         r.line("warning: kalka is not on PATH; the agents will not find it until it is")?;
     }
-    let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
-    let mut ignore = vec![format!("{OUT_DIR}/"), format!("/{}/", memory::REPO_DIR)];
+    let mut ignore = vec![format!("{OUT_DIR}/")];
+    if opts.memory {
+        ignore.push(format!("/{}/", memory::REPO_DIR));
+    }
     let mut cursor_added = false;
 
     for agent in agents {
@@ -349,9 +468,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(file);
                 let res = || {
                     if opts.remove {
-                        edit::remove_entry(root, &path, &["mcpServers"], "kalka", &entry)
+                        edit::remove_entry(root, &path, &["mcpServers"], "kalka", &entries)
                     } else {
-                        edit::upsert_entry(&path, &["mcpServers"], "kalka", &entry)
+                        edit::upsert_entry(&path, &["mcpServers"], "kalka", &entries)
                     }
                 };
                 let before = path.exists();
@@ -364,7 +483,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 continue;
             }
             Agent::Codex => {
-                let o = codex_mcp(root, opts.remove);
+                let o = codex_mcp(root, opts.remove, opts.memory);
                 r.item("Codex kalka server (~/.codex/config.toml)", false, Ok(o))?;
                 // The navigation steps, which Codex otherwise never reads.
                 let file = "AGENTS.md";
@@ -405,11 +524,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // MCP
         if pi || !local {
             let (file, value) = if pi {
-                let mut v = entry.clone();
-                v["exposure"] = json!("direct");
+                let v = entries.clone().map(|mut v| {
+                    v["exposure"] = json!("direct");
+                    v
+                });
                 (".pi/mcp.json", v)
             } else {
-                (".mcp.json", entry.clone())
+                (".mcp.json", entries.clone())
             };
             let path = root.join(file);
             let res = || {
@@ -423,7 +544,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, &entry, opts.remove);
+            let o = claude_local_mcp(root, &entries[0], opts.remove, opts.memory);
             r.item("Claude Code local kalka server", false, Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
@@ -433,9 +554,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             let file = skill.join("SKILL.md");
             let res = || {
                 if opts.remove {
-                    edit::remove_file(root, &root.join(&file), skill_text)
+                    edit::remove_file(root, &root.join(&file), &skills)
                 } else {
-                    edit::write_file(&root.join(&file), skill_text)
+                    edit::write_file(&root.join(&file), &skills)
                 }
             };
             let what = format!("{} skill for {name}", file.display());
@@ -451,9 +572,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &content)
+                        edit::remove_file(root, &path, &[&content])
                     } else {
-                        edit::write_file(&path, &content)
+                        edit::write_file(&path, &[&content])
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
@@ -515,4 +636,22 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
     }
     Ok(r.ok)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_agent_answer_takes_numbers_and_names() {
+        use Agent::{Claude, Codex, Cursor, Pi};
+        assert_eq!(parse_agents(""), Ok(vec![]));
+        assert_eq!(parse_agents("  \n"), Ok(vec![]));
+        assert_eq!(parse_agents("1"), Ok(vec![Claude]));
+        assert_eq!(parse_agents("4, 2"), Ok(vec![Codex, Pi]));
+        assert_eq!(parse_agents("cursor,Claude 3 1"), Ok(vec![Cursor, Claude]));
+        for bad in ["0", "5", "vim", "1,x"] {
+            assert!(parse_agents(bad).is_err(), "{bad}");
+        }
+    }
 }

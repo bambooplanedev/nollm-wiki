@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -89,7 +89,7 @@ crates/kalka/src/lib.rs
 - macOS (Apple silicon чи Intel) або Linux x86_64 для релізного бінарника. Бінарник для Linux
   зібрано на `ubuntu-latest` від GitHub, тож на старішому дистрибутиві через glibc може знадобитися
   збірка з коду.
-- Або Rust 1.89 чи новіший, щоб зібрати з коду. Windows не перевірявся.
+- Або Rust 1.90 чи новіший, щоб зібрати з коду. Windows не перевірявся.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `kalka setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 
@@ -113,6 +113,33 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
     git clone https://github.com/bambooplanedev/llm-wiki-nollm
     cd llm-wiki-nollm
     cargo install --path crates/kalka      # у ~/.cargo/bin
+
+### Через kulman (буде доступно з першого релізу набору, 0.7.0)
+
+Релізу набору ще немає; доки його немає, користуйтеся кроками вище. Починаючи з цього релізу,
+`kulman` встановлює, оновлює й налаштовує `kalka` і `plaz`. Сам `kulman` завантажує один рядок:
+
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+
+Скрипт завантажує архів `kulman` для вашої платформи, перевіряє його за `SHA256SUMS` релізу
+(і зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman-home/bin/kulman`.
+Більше він нічого не записує і не змінює профілів оболонки. Те саме вручну: завантажте
+`kulman-v<version>-<target>.tar.gz` і `SHA256SUMS` зі сторінки релізу, перевірте їх, як описано вище,
+і перенесіть бінарник `kulman` з архіву в `~/.kulman-home/bin/`.
+
+Додайте `~/.kulman-home/bin` у свій `PATH` (агенти запускають `kalka` за назвою; `kulman` і
+`kulman setup` кажуть, коли його там немає), далі:
+
+    kulman install                     # модулі релізу за замовчуванням, у ~/.kulman-home/bin
+    cd your-project
+    kulman setup --scope local         # запускає тут kalka setup і plaz setup
+    kulman update                      # згодом: усе до останнього релізу
+
+За замовчуванням усе ввімкнено; вимикайте прапорцями (`kulman install --modules kalka`,
+`kulman setup --no-memory`). `kulman setup` запускає кожен вибраний модуль, навіть коли якийсь
+завершився з помилкою, і наприкінці називає ті, що не вдалися. `kulman remove` видаляє те, що
+встановив kulman (без термінала потрібен `--yes`); проєкти, налаштовані через kulman, лишають
+`kalka` у конфігах агентів, тож спершу запустіть у них `kulman setup --remove`. Команди, коди виходу й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
 
 ## Швидкий старт
 
@@ -195,7 +222,7 @@ calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: match
 
 `kalka setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
 
 Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`kalka serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `kalka-navigation` (як шукати код і правила
@@ -205,20 +232,31 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 навігації в `AGENTS.md`, між маркерами `<!-- kalka:navigation -->`. Агенти визначаються автоматично
 (`.claude/`, `CLAUDE.md` чи `claude` у `PATH`; `.pi/` чи `pi` у `PATH`; тека `.cursor/`), якщо
 `--agent` їх не називає. Codex налаштовується лише тоді, коли його названо: його MCP-конфіг
-глобальний.
+глобальний. Коли жодного агента не знайдено і `--agent` не задано, setup у терміналі питає, кого
+налаштувати (номери чи назви, порожній рядок — нікого); без термінала, або коли нікого не вибрано,
+він однаково компілює вікі, пише рядки в ignore-файли й теку памʼяті, не налаштовує жодного агента,
+пише в stderr `no agent set up: the wiki is in .kulman/; run kalka setup --agent … later` і
+виходить з кодом 0. `--remove`, коли агента не знайдено і `--agent` не задано, нічого агентського не прибирає: пише в
+stderr `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring`
+і виходить з кодом 0.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `AGENTS.md`,
   `.agents/skills/kalka-navigation/SKILL.md` і `.kulman/` у `.gitignore`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
   `claude mcp add-json kalka … --scope local`, інші файли записуються, а ті, що setup створив,
-  вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`. Файл, який git уже відстежує, пропускається; для нього беріть
+  вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`, коли памʼять увімкнена. Файл, який git уже відстежує, пропускається; для нього беріть
   `--scope repo`.
-- Обидва варіанти створюють `.agents/memory/`.
+- Памʼять агента ввімкнена за замовчуванням: обидва варіанти створюють `.agents/memory/`.
+  З `--no-memory` тека `.agents/memory/` не створюється, компіляція йде без памʼяті, а сервер
+  реєструється як `kalka serve --source . --memory none`. Повторний запуск з іншим вибором перемикає
+  зареєстрований сервер; сервер, доданий через CLI `codex` чи `claude` з вашими власними
+  налаштуваннями, лишається як є, і setup про це повідомляє: видаліть його й запустіть setup знову.
 - Обидва варіанти додають сервер для Codex командою `codex mcp add kalka -- kalka serve --source .`,
   яка пише в `~/.codex/config.toml`: MCP-конфігу на рівні проєкту Codex не має, а сервер запускає в
   теці, де запущений сам, тож один запис працює для всіх проєктів.
-- Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою.
+- Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою. Setup питає лише
+  тоді, коли і stdin, і stdout — термінали.
 - Хук запиту додає рядки коду з вікі до кожного запиту, перш ніж його побачить модель. Claude
   Code отримує запис `UserPromptSubmit` (`kalka hint --claude-hook`) у `.claude/settings.json`
   (`settings.local.json` з `--scope local`); pi — `.pi/extensions/kalka-hint/index.ts`. Хук мовчить,
@@ -425,7 +463,7 @@ CLI не обмежує, а `search` повертає 5 результатів �
 Агенти тримають нотатки як Markdown-файли. Вікі компілює теки, у які вони пишуть, а `search` і
 `kalka hint` показують відповідні нотатки після коду. Джерела:
 
-- **`.agents/memory/`** у проєкті. `kalka setup` створює її в обох режимах; з `--scope local` ще й
+- **`.agents/memory/`** у проєкті. `kalka setup` створює її в обох режимах, якщо не передано `--no-memory`; з `--scope local` ще й
   вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `kalka compile`
   включає її, якщо не передано `--memory none`.
 - **Власні теки агентів.** Їх шукають `serve --source` і `kalka setup`. Поки що це
@@ -551,7 +589,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 - `--memory <none|DIR>` (можна повторювати) — ще й компілювати теку памʼяті агента як позначені
   сторінки памʼяті. `<INPUT>/.agents/memory` компілюється теж; `--memory none` вимикає всю памʼять,
   зокрема цю теку (`none` разом із `DIR` — помилка використання); `--memory local` — помилка.
-- `WIKI_TIMINGS=1` (змінна середовища) — друкувати в stderr по одному рядку `timings:` на кожну
+- `KALKA_TIMINGS=1` (змінна середовища) — друкувати в stderr по одному рядку `timings:` на кожну
   компіляцію: загальний час і мілісекунди за етапами, прочитані файли, записані сторінки.
   `kalka serve --source` і `kalka setup` його теж враховують; на вивід він не впливає.
 

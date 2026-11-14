@@ -234,7 +234,7 @@ fn hint_gate_length_comes_from_the_env() {
         .unwrap()
         .args(["hint", prompt, "--dir"])
         .arg(tmp.path().join(".kulman"))
-        .env("WIKI_MEMORY_GATE", "8")
+        .env("KALKA_MEMORY_GATE", "8")
         .assert()
         .success();
     let gated = String::from_utf8(gated.get_output().stdout.clone()).unwrap();
@@ -245,7 +245,7 @@ fn hint_gate_length_comes_from_the_env() {
         .unwrap()
         .args(["hint", prompt, "--dir"])
         .arg(tmp.path().join(".kulman"))
-        .env("WIKI_MEMORY_GATE", "0")
+        .env("KALKA_MEMORY_GATE", "0")
         .assert()
         .success();
     let zero = String::from_utf8(zero.get_output().stdout.clone()).unwrap();

@@ -83,6 +83,11 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
 /// A `claude` that logs its argv and answers `mcp get kalka` as a local server running `cmd`
 /// once `add-json` has been called (the state file).
 fn claude_stub(f: &Fixture, cmd: &str) {
+    claude_stub_args(f, cmd, "serve --source .");
+}
+
+/// [`claude_stub`] whose server runs `cmd` with `args`.
+fn claude_stub_args(f: &Fixture, cmd: &str, args: &str) {
     let t = f.tmp.path().display();
     f.stub(
             "claude",
@@ -90,7 +95,7 @@ fn claude_stub(f: &Fixture, cmd: &str) {
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
 "mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "kalka".'; exit 1; }}
-  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n' ;;
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;
 esac"#
@@ -264,13 +269,84 @@ fn setup_without_scope_and_terminal_fails() {
     assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
 }
 
-#[test]
-fn setup_without_agents_fails() {
+/// A fixture with no agent to detect: no agent folder, no `claude` or `pi` on `PATH`.
+fn no_agent() -> Fixture {
     let f = fixture(true, false);
     fs::remove_file(f.bin().join("pi")).unwrap();
-    let a = f.setup(&["--scope", "repo"]).failure();
-    assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--agent"));
+    f
 }
+
+const NO_AGENT: &str = "no agent set up: the wiki is in .kulman/; run kalka setup --agent … later";
+
+#[test]
+fn setup_with_no_agent_still_compiles_and_exits_0() {
+    let f = no_agent();
+    let a = f.setup(&["--scope", "repo"]).success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+    assert_eq!(err.lines().collect::<Vec<_>>(), [NO_AGENT]);
+    assert!(!out(&a).contains("not on PATH"), "{}", out(&a));
+    let r = f.root();
+    assert!(r.join(".kulman/index.json").exists());
+    // What a setup with an agent writes besides the agent's own files, and nothing else.
+    let (files, dirs) = tree(&r);
+    assert_eq!(
+        files,
+        [
+            (PathBuf::from(".gitignore"), b".kulman/\n".to_vec()),
+            (
+                PathBuf::from("src/lib.rs"),
+                b"pub fn load_creds() {}\n".to_vec()
+            )
+        ]
+    );
+    assert_eq!(
+        dirs,
+        [
+            PathBuf::from(".agents"),
+            ".agents/memory".into(),
+            "src".into()
+        ]
+    );
+    // A later setup of an agent there, and its removal, end as they do in a fresh project.
+    let fresh = no_agent();
+    for args in [
+        &["--agent", "cursor", "--scope", "repo"][..],
+        &["--remove", "--agent", "cursor", "--scope", "repo"],
+    ] {
+        f.setup(args).success();
+        fresh.setup(args).success();
+        assert_eq!(tree(&f.root()), tree(&fresh.root()), "{args:?}");
+    }
+}
+
+#[test]
+fn setup_remove_with_no_agent_is_not_an_error() {
+    let f = no_agent();
+    f.setup(&["--scope", "local"]).success();
+    let exclude = read(&f.root().join(".git/info/exclude"));
+    let before = tree(&f.root());
+    for _ in 0..2 {
+        let a = f.setup(&["--remove", "--scope", "local"]).success();
+        assert!(
+            out(&a).contains("kept the ignore lines and .kulman/"),
+            "{}",
+            out(&a)
+        );
+        let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+        assert_eq!(err.lines().collect::<Vec<_>>(), [NO_AGENT_REMOVED]);
+        assert_eq!(tree(&f.root()), before);
+        assert_eq!(read(&f.root().join(".git/info/exclude")), exclude);
+    }
+    // An agent named: no such line.
+    let a = f
+        .setup(&["--remove", "--agent", "cursor", "--scope", "local"])
+        .success();
+    let err = String::from_utf8_lossy(&a.get_output().stderr).into_owned();
+    assert!(!err.contains("no agent found"), "{err}");
+}
+
+const NO_AGENT_REMOVED: &str =
+    "no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring";
 
 #[test]
 fn setup_repo_writes_wiki_even_when_not_on_path() {
@@ -641,7 +717,7 @@ fn setup_local_twice_reports_everything_already_there() {
     assert!(!o.contains("skipped"), "{o}");
 }
 
-/// A `codex` that logs its argv and answers `mcp get kalka` as our server once `mcp add` ran.
+/// A `codex` that logs its argv and answers `mcp get kalka` with the server `mcp add` added.
 fn codex_stub(f: &Fixture) {
     let t = f.tmp.path().display();
     f.stub(
@@ -650,8 +726,9 @@ fn codex_stub(f: &Fixture) {
             r#"echo "$@" >> {t}/codex.log
 case "$1 $2" in
 "mcp get") [ -f {t}/codex.state ] || {{ echo "Error: No MCP server named 'kalka' found." >&2; exit 1; }}
-  printf 'kalka\n  enabled: true\n  transport: stdio\n  command: kalka\n  args: serve --source .\n' ;;
-"mcp add") echo x > {t}/codex.state ;;
+  set -- $(/bin/cat {t}/codex.state); c=$1; shift
+  printf 'kalka\n  enabled: true\n  transport: stdio\n  command: %s\n  args: %s\n' "$c" "$*" ;;
+"mcp add") shift 4; echo "$@" > {t}/codex.state ;;
 "mcp remove") /bin/rm -f {t}/codex.state ;;
 esac"#
         ),
@@ -938,4 +1015,312 @@ fn remove_takes_only_kalkas_entries() {
     }
     assert!(!r.join(".agents/skills/kalka-navigation").exists());
     assert!(!r.join(".cursor/mcp.json").exists());
+}
+
+/// Files and directories below `root` (`.git` and `.kulman` left out), relative to it.
+fn tree(root: &Path) -> (Vec<(PathBuf, Vec<u8>)>, Vec<PathBuf>) {
+    let rel = |p: &Path| p.strip_prefix(root).unwrap().to_path_buf();
+    (
+        files(root).into_iter().map(|(p, b)| (rel(&p), b)).collect(),
+        dirs(root).iter().map(|p| rel(p)).collect(),
+    )
+}
+
+fn mcp_args(p: &Path) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(&read(p)).unwrap();
+    serde_json::from_value(v["mcpServers"]["kalka"]["args"].clone()).unwrap()
+}
+
+#[test]
+fn setup_no_memory_creates_no_folder_and_serves_without_memory() {
+    let f = committed();
+    codex_stub(&f);
+    let r = f.root();
+    fs::create_dir_all(r.join(".agents/memory")).unwrap();
+    fs::write(r.join(".agents/memory/note.md"), "# Kelp\n\nKelp notes.\n").unwrap();
+    let slug = kalka::memory::claude_slug(&kalka::memory::display_path(&r.canonicalize().unwrap()));
+    let mem = f.claude_config().join("projects").join(slug).join("memory");
+    fs::create_dir_all(&mem).unwrap();
+    fs::write(mem.join("tide.md"), "# Tide\n\nTide notes.\n").unwrap();
+    let o = out(&f
+        .setup(&[&ALL_AGENTS[..], &["--no-memory"]].concat())
+        .success());
+    assert!(!o.contains("memory folder"), "{o}");
+    for file in [".mcp.json", ".pi/mcp.json", ".cursor/mcp.json"] {
+        assert!(
+            mcp_args(&r.join(file)).ends_with(&["--memory".into(), "none".into()]),
+            "{file}"
+        );
+    }
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(
+        log.contains("mcp add kalka -- kalka serve --source . --memory none\n"),
+        "{log}"
+    );
+    let skill = read(&r.join(".agents/skills/kalka-navigation/SKILL.md"));
+    assert!(!skill.contains("# Memory"), "{skill}");
+    assert!(skill.ends_with("fall back to grep.\n"), "{skill}");
+    let index = read(&r.join(".kulman/index.json"));
+    assert!(
+        !index.contains("note.md") && !index.contains("tide.md"),
+        "{index}"
+    );
+
+    let fresh = fixture(true, true);
+    fresh
+        .setup(&["--agent", "claude,pi", "--scope", "local", "--no-memory"])
+        .success();
+    assert!(!fresh.root().join(".agents/memory").exists());
+    let ex = read(&fresh.root().join(".git/info/exclude"));
+    assert!(!ex.contains("memory"), "{ex}");
+}
+
+#[test]
+fn setup_memory_flag_equals_the_default() {
+    let (f, g) = (fixture(true, true), fixture(true, true));
+    codex_stub(&f);
+    codex_stub(&g);
+    f.setup(&ALL_AGENTS).success();
+    g.setup(&[&ALL_AGENTS[..], &["--memory"]].concat())
+        .success();
+    assert_eq!(tree(&f.root()), tree(&g.root()));
+    let log = |f: &Fixture| read(&f.tmp.path().join("codex.log"));
+    assert_eq!(log(&f), log(&g));
+}
+
+#[test]
+fn setup_memory_and_no_memory_conflict() {
+    let f = fixture(true, true);
+    f.setup(&[&ALL_AGENTS[..], &["--memory", "--no-memory"]].concat())
+        .code(2);
+    assert!(!f.root().join(".agents").exists());
+}
+
+#[test]
+fn setup_no_memory_then_default_turns_memory_on() {
+    let no = [&ALL_AGENTS[..], &["--no-memory"]].concat();
+    let once = |args: &[&str]| {
+        let f = fixture(true, true);
+        codex_stub(&f);
+        f.setup(args).success();
+        f
+    };
+    let (plain, bare) = (once(&ALL_AGENTS), once(&no));
+
+    let f = once(&no);
+    let a = f.setup(&ALL_AGENTS).success();
+    assert!(!out(&a).contains("skipped"), "{}", out(&a));
+    assert_eq!(tree(&f.root()), tree(&plain.root()));
+    assert!(read(&f.tmp.path().join("codex.state")).ends_with("serve --source .\n"));
+
+    let f = once(&ALL_AGENTS);
+    fs::write(
+        f.root().join(".agents/memory/note.md"),
+        "# Kelp\n\nKelp notes.\n",
+    )
+    .unwrap();
+    let a = f.setup(&no).success();
+    assert!(!out(&a).contains("skipped"), "{}", out(&a));
+    fs::remove_file(f.root().join(".agents/memory/note.md")).unwrap();
+    let (files, mut dirs) = tree(&f.root());
+    // Setup never deletes a memory folder.
+    assert!(dirs.contains(&PathBuf::from(".agents/memory")));
+    dirs.retain(|d| d != Path::new(".agents/memory"));
+    assert_eq!((files, dirs), tree(&bare.root()));
+    assert!(read(&f.tmp.path().join("codex.state")).ends_with("--memory none\n"));
+    let index = read(&f.root().join(".kulman/index.json"));
+    assert!(!index.contains("note.md"), "{index}");
+}
+
+#[test]
+fn setup_remove_after_no_memory_restores_the_project() {
+    let remove = [&["--remove"], &ALL_AGENTS[..]].concat();
+    let run = |first: &[&str]| {
+        let f = fixture(true, true);
+        codex_stub(&f);
+        f.setup(first).success();
+        f.setup(&remove).success();
+        assert!(!f.tmp.path().join("codex.state").exists());
+        f
+    };
+    let plain = run(&ALL_AGENTS);
+    let no = run(&[&ALL_AGENTS[..], &["--no-memory"]].concat());
+    let (files, mut dirs) = tree(&plain.root());
+    dirs.retain(|d| !d.starts_with(".agents"));
+    assert_eq!((files, dirs), tree(&no.root()));
+}
+
+#[test]
+fn setup_local_no_memory_then_default_goes_through_claude() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "kalka", "serve --source . --memory none");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(
+        out(&a).contains("wrote Claude Code local kalka server"),
+        "{}",
+        out(&a)
+    );
+    let log = f.claude_log();
+    assert!(log.contains("mcp remove kalka --scope local"), "{log}");
+    assert!(
+        log.contains(r#"mcp add-json kalka {"command":"kalka","args":["serve","--source","."]} --scope local"#),
+        "{log}"
+    );
+}
+
+/// A `codex` whose `mcp get kalka` always prints `get` (as `codex mcp get` does: stdio lines,
+/// `cwd`, `env`, the remove hint) and whose `mcp add` runs `add`.
+fn codex_fixed(f: &Fixture, get: &str, add: &str) {
+    let t = f.tmp.path().display();
+    f.stub(
+        "codex",
+        &format!(
+            r#"echo "$@" >> {t}/codex.log
+case "$1 $2" in
+"mcp get") printf '%s\n' '{get}' ;;
+"mcp add") {add} ;;
+esac"#
+        ),
+    );
+}
+
+fn codex_get(args: &str, env: &str) -> String {
+    format!(
+        "kalka\n  enabled: true\n  transport: stdio\n  command: kalka\n  args: {args}\n  cwd: -\n  env: {env}\n  remove: codex mcp remove kalka"
+    )
+}
+
+const CODEX_ONLY: [&str; 4] = ["--agent", "codex", "--scope", "repo"];
+
+#[test]
+fn setup_switches_a_fixed_codex_entry_without_memory_to_the_default() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source . --memory none", "-"),
+        "exit 0",
+    );
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(out(&a).contains("wrote Codex kalka server"), "{}", out(&a));
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(log.contains("mcp remove kalka\n"), "{log}");
+    assert!(
+        log.contains("mcp add kalka -- kalka serve --source .\n"),
+        "{log}"
+    );
+}
+
+#[test]
+fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
+    let f = fixture(true, false);
+    codex_fixed(&f, &codex_get("serve --source .", "TOKEN=*****"), "exit 0");
+    let a = f
+        .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
+        .code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Codex kalka server (~/.codex/config.toml): kalka's server carries other settings; remove it with `codex mcp remove kalka`"),
+        "{o}"
+    );
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(
+        !log.contains("mcp remove") && !log.contains("mcp add"),
+        "{log}"
+    );
+    // The same choice leaves it alone as before; `--remove` still removes it.
+    f.setup(&CODEX_ONLY).success();
+    f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
+        .success();
+    assert!(read(&f.tmp.path().join("codex.log")).contains("mcp remove kalka"));
+}
+
+#[test]
+fn a_switch_leaves_a_claude_entry_with_other_settings_alone() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "kalka", "serve --source .\n  Environment:\n    TOKEN=x");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local", "--no-memory"])
+        .code(1);
+    assert!(
+        out(&a).contains("skipped Claude Code local kalka server: kalka's server carries other settings; remove it with `claude mcp remove kalka --scope local`"),
+        "{}",
+        out(&a)
+    );
+    let log = f.claude_log();
+    assert!(
+        !log.contains("mcp remove") && !log.contains("add-json"),
+        "{log}"
+    );
+}
+
+#[test]
+fn a_failed_add_after_a_switch_says_the_entry_was_removed() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source .", "-"),
+        "echo boom >&2; exit 1",
+    );
+    let a = f
+        .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
+        .code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Codex kalka server (~/.codex/config.toml): kalka's server entry was removed and the new one could not be added (`codex mcp add` failed: boom); run `kalka setup` again to add it"),
+        "{o}"
+    );
+}
+
+#[test]
+fn setup_local_default_then_no_memory_goes_through_claude() {
+    let f = fixture(true, true);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    f.setup(&["--agent", "claude", "--scope", "local", "--no-memory"])
+        .success();
+    let log = f.claude_log();
+    assert!(log.contains("mcp remove kalka --scope local"), "{log}");
+    assert!(
+        log.contains(r#"mcp add-json kalka {"command":"kalka","args":["serve","--source",".","--memory","none"]} --scope local"#),
+        "{log}"
+    );
+}
+
+#[test]
+fn setup_remove_takes_a_local_claude_entry_without_memory() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "kalka", "serve --source . --memory none");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let a = f
+        .setup(&["--remove", "--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(
+        out(&a).contains("removed Claude Code local kalka server"),
+        "{}",
+        out(&a)
+    );
+    assert!(f.claude_log().contains("mcp remove kalka --scope local"));
+}
+
+#[test]
+fn setup_remove_ignores_the_memory_flags() {
+    let run = |first: &[&str], flag: &str| {
+        let f = fixture(true, true);
+        codex_stub(&f);
+        f.setup(first).success();
+        f.setup(&[&["--remove", flag], &ALL_AGENTS[..]].concat())
+            .success();
+        assert!(!f.tmp.path().join("codex.state").exists());
+        let (files, mut dirs) = tree(&f.root());
+        dirs.retain(|d| !d.starts_with(".agents"));
+        (files, dirs)
+    };
+    let no = [&ALL_AGENTS[..], &["--no-memory"]].concat();
+    let want = run(&ALL_AGENTS, "--memory");
+    assert_eq!(run(&ALL_AGENTS, "--no-memory"), want);
+    assert_eq!(run(&no, "--memory"), want);
+    assert_eq!(run(&no, "--no-memory"), want);
 }

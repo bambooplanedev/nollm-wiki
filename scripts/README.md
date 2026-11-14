@@ -77,7 +77,7 @@ headings keeps them.
 scripts/test-strip-chrome.sh
 ```
 
-It compiles a small source tree with the current compiler (`$WIKI_BIN` if set, else `cargo run`), runs
+It compiles a small source tree with the current compiler (`$KALKA_BIN` if set, else `cargo run`), runs
 the awk filter over the pages and asserts that the chrome and hand-written notes are removed while body content
 stays. CI runs it after `cargo test`.
 
