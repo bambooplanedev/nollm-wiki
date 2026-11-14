@@ -547,3 +547,19 @@ fn update_when_current_does_not_need_every_module_in_the_release() {
     assert_eq!(lines(&out), ["up to date"]);
     assert_eq!(snapshot(t.path()), before);
 }
+
+#[test]
+fn remove_without_state_keeps_stale_temp_entries() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let home = t.path().join("home");
+    fs::create_dir_all(home.join(".tmp-x")).unwrap();
+    fs::write(home.join(".lock"), "").unwrap();
+    fs::write(home.join(".tmp-x/f"), "not kulman's by any record").unwrap();
+    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        fs::read_to_string(home.join(".tmp-x/f")).unwrap(),
+        "not kulman's by any record"
+    );
+}

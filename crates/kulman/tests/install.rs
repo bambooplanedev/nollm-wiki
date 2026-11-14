@@ -635,3 +635,28 @@ fn install_repairs_a_first_install_that_died_before_its_state() {
     assert_binary(&home, "kulman", KULMAN_BYTES);
     no_tmp_left(&home);
 }
+
+#[test]
+fn install_refuses_a_directory_in_place_of_the_manifest() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    fs::remove_file(home.join("manifest.json")).unwrap();
+    fs::create_dir(home.join("manifest.json")).unwrap();
+    fs::write(home.join("manifest.json/inner"), "x").unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "plaz"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!(
+        "kulman: {} is not a file",
+        home.join("manifest.json").display()
+    );
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}

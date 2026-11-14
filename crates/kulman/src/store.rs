@@ -32,8 +32,8 @@ pub fn home_path() -> Result<PathBuf> {
 }
 
 impl Home {
-    /// Creates the directory if needed (its parent must exist), waits for the lock, then
-    /// deletes stale temp entries. On failure, removes what it created.
+    /// Creates the directory if needed (its parent must exist) and waits for the lock. On
+    /// failure, removes what it created. Stale temp entries are the caller's to clean.
     pub fn open(path: PathBuf) -> Result<Home> {
         let parent = path.parent().unwrap_or(Path::new("/"));
         if !parent.is_dir() {
@@ -76,7 +76,7 @@ impl Home {
                 created,
                 _lock: lock,
             };
-            if let Err(e) = home.check_bin().and_then(|()| home.clean_tmp()) {
+            if let Err(e) = home.check_bin() {
                 home.abandon();
                 return Err(e);
             }
@@ -98,7 +98,8 @@ impl Home {
         }
     }
 
-    /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run.
+    /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run. Only
+    /// when a state records home as kulman's, or this run is about to write one.
     pub fn clean_tmp(&self) -> Result<()> {
         let named = |p: &Path| p.display().to_string();
         for entry in fs::read_dir(&self.path).with_context(|| named(&self.path))? {
@@ -230,7 +231,9 @@ pub fn stage(
 pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) -> Result<()> {
     let bin = home.path.join("bin");
     let dests: Vec<PathBuf> = staged.iter().map(|s| bin.join(&s.name)).collect();
+    let records = ["manifest.json", "state.json"].map(|n| home.path.join(n));
     check_files(&dests)?;
+    check_files(&records)?;
     fs::create_dir_all(&bin).with_context(|| bin.display().to_string())?;
     for (s, dest) in staged.iter().zip(&dests) {
         fs::rename(&s.path, dest).with_context(|| dest.display().to_string())?;

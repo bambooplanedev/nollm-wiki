@@ -1,14 +1,16 @@
 //! kulman: installs, updates and sets up the modules of the kulman set into `~/.kulman`.
 
+mod prompt;
 mod release;
 mod store;
 
 use std::collections::BTreeSet;
+use std::io::{self, IsTerminal};
 use std::path::Path;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 
 use anyhow::{bail, Context, Result};
-use clap::{ColorChoice, Parser, Subcommand};
+use clap::{Args, ColorChoice, Parser, Subcommand};
 
 use release::Manifest;
 use store::{Home, State};
@@ -53,6 +55,37 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
+    /// Set up the current project: runs each chosen module's own setup.
+    Setup(SetupArgs),
+}
+
+#[derive(Args)]
+#[allow(clippy::struct_excessive_bools)] // independent switches, passed through
+struct SetupArgs {
+    /// Modules to set up, comma separated (default: every installed module).
+    #[arg(long, value_delimiter = ',')]
+    modules: Option<Vec<String>>,
+    /// kalka: agent memory on (default: the release's choice, on unless it says off).
+    #[arg(long, conflicts_with = "no_memory")]
+    memory: bool,
+    /// kalka: agent memory off.
+    #[arg(long)]
+    no_memory: bool,
+    /// kalka: the agents to wire, passed through as given.
+    #[arg(long, value_name = "LIST")]
+    agent: Option<String>,
+    /// repo (committed, for the whole team) or local (this checkout only).
+    #[arg(long, value_parser = ["repo", "local"])]
+    scope: Option<String>,
+    /// kalka: no hook.
+    #[arg(long)]
+    no_hook: bool,
+    /// Undo each module's setup.
+    #[arg(long)]
+    remove: bool,
+    /// Ask nothing; a value with no default must then be given as a flag.
+    #[arg(long)]
+    yes: bool,
 }
 
 fn parse_version(v: &str) -> Result<String, String> {
@@ -77,16 +110,16 @@ impl std::error::Error for Usage {}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    // A terminal behaves as --yes until the prompts exist.
     let result = match cli.command {
         None => status(),
         Some(Cmd::Install {
             modules,
             version,
-            yes: _,
-        }) => install(modules, version.as_deref()),
-        Some(Cmd::Update { yes: _ }) => update(),
-        Some(Cmd::Remove { modules, yes: _ }) => remove(modules),
+            yes,
+        }) => install(modules, version.as_deref(), asks(yes)),
+        Some(Cmd::Update { yes }) => update(asks(yes)),
+        Some(Cmd::Remove { modules, yes }) => remove(modules, asks(yes)),
+        Some(Cmd::Setup(args)) => setup(args),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -95,6 +128,32 @@ fn main() -> ExitCode {
             ExitCode::from(if e.is::<Usage>() { 2 } else { 1 })
         }
     }
+}
+
+/// Questions are asked only when stdin and stdout are terminals and `--yes` is absent.
+fn asks(yes: bool) -> bool {
+    !yes && io::stdin().is_terminal() && io::stdout().is_terminal()
+}
+
+/// `prompt::confirm` at the terminal.
+fn ask_yes(question: &str, default_yes: bool) -> Result<bool> {
+    Ok(prompt::confirm(
+        &mut io::stdin().lock(),
+        &mut io::stdout(),
+        question,
+        default_yes,
+    )?)
+}
+
+/// `prompt::choose` at the terminal.
+fn ask_choose(title: &str, items: &[(&str, &str, bool)], one: bool) -> Result<Vec<String>> {
+    Ok(prompt::choose(
+        &mut io::stdin().lock(),
+        &mut io::stdout(),
+        title,
+        items,
+        one,
+    )?)
 }
 
 /// The release base, checked: a usage error when it is neither https:// nor file://.
@@ -149,7 +208,7 @@ fn choose(manifest: &Manifest, wanted: Option<Vec<String>>) -> Result<BTreeSet<S
     Ok(chosen)
 }
 
-fn install(wanted: Option<Vec<String>>, version: Option<&str>) -> Result<()> {
+fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Result<()> {
     let base = release_base()?;
     let home_path = store::home_path()?;
     let target = target()?;
@@ -157,7 +216,24 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>) -> Result<()> {
         release::check_name(name, "--modules")?;
     }
     let (manifest, raw) = release::manifest(&base, version)?;
+    let wanted = match wanted {
+        None if ask => {
+            let items: Vec<_> = (manifest.modules.iter())
+                .map(|m| (m.name.as_str(), m.summary.as_str(), m.default))
+                .collect();
+            Some(ask_choose("Modules to install:", &items, false)?)
+        }
+        wanted => wanted,
+    };
     let chosen = choose(&manifest, wanted)?;
+    if ask {
+        let bin = home_path.join("bin");
+        let question = format!("Install {} module(s) into {}?", chosen.len(), bin.display());
+        if !ask_yes(&question, true)? {
+            println!("nothing changed");
+            return Ok(());
+        }
+    }
     let home = Home::open(home_path)?;
     let result = place(&home, &base, &manifest, &raw, target, chosen);
     if result.is_err() {
@@ -176,6 +252,7 @@ fn place(
     target: &str,
     chosen: BTreeSet<String>,
 ) -> Result<()> {
+    home.clean_tmp()?;
     let mut modules = BTreeSet::new();
     if let Some(state) = State::load(&home.path)? {
         let (have, want) = (&state.version, &manifest.version);
@@ -242,7 +319,7 @@ fn is_installed(home: &Path) -> Result<bool> {
         .context("cannot read state.json")
 }
 
-fn update() -> Result<()> {
+fn update(ask: bool) -> Result<()> {
     let base = release_base()?;
     let home_path = store::home_path()?;
     let target = target()?;
@@ -250,6 +327,19 @@ fn update() -> Result<()> {
         bail!("nothing installed; run kulman install");
     }
     let (manifest, raw) = release::manifest(&base, None)?;
+    if ask {
+        // Asked only when there is a newer release; the answer is checked again under the lock.
+        if let Some(state) = State::load(&home_path)? {
+            let (have, latest) = (&state.version, &manifest.version);
+            if release::version_key(latest) > release::version_key(have) {
+                let question = format!("Update {} module(s) to {latest}?", state.modules.len());
+                if !ask_yes(&question, true)? {
+                    println!("nothing changed");
+                    return Ok(());
+                }
+            }
+        }
+    }
     let home = Home::open(home_path)?;
     let result = renew(&home, &base, &manifest, &raw, target);
     if result.is_err() {
@@ -261,6 +351,7 @@ fn update() -> Result<()> {
 /// Under the lock: unless already current or newer, stages kulman and every installed module
 /// at the latest version, and only when all are ready commits them (kulman last).
 fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str) -> Result<()> {
+    home.clean_tmp()?;
     let Some(state) = State::load(&home.path)? else {
         bail!("nothing installed; run kulman install");
     };
@@ -297,7 +388,7 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
     Ok(())
 }
 
-fn remove(names: Option<Vec<String>>) -> Result<()> {
+fn remove(names: Option<Vec<String>>, ask: bool) -> Result<()> {
     for name in names.iter().flatten() {
         release::check_name(name, "--modules")?;
         if name == "kulman" {
@@ -311,6 +402,23 @@ fn remove(names: Option<Vec<String>>) -> Result<()> {
     if !is_installed(&home_path)? && !home_path.join(".lock").try_exists()? {
         println!("nothing installed");
         return Ok(());
+    }
+    if ask {
+        // With no state only the lock is removed: nothing to ask.
+        if let Some(state) = State::load(&home_path)? {
+            let what = match &names {
+                Some(names) => names.join(", "),
+                None => (state.modules.iter().map(String::as_str))
+                    .chain(["kulman itself"])
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            };
+            let question = format!("Remove {what} from {}?", home_path.display());
+            if !ask_yes(&question, false)? {
+                println!("nothing changed");
+                return Ok(());
+            }
+        }
     }
     let home = Home::open(home_path)?;
     let result = uninstall(&home, names);
@@ -334,6 +442,8 @@ fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
         }
         return Ok(());
     };
+    // Stale temp entries are cleaned only in a home a state records as kulman's.
+    home.clean_tmp()?;
     let Some(mut names) = names else {
         store::remove_all(home, &state.modules)?;
         for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
@@ -350,6 +460,131 @@ fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
     store::remove_modules(home, &names, &state)?;
     for name in &names {
         println!("removed {name}");
+    }
+    Ok(())
+}
+
+/// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
+/// in the current directory, and stops at the first failure with its exit status.
+fn setup(a: SetupArgs) -> Result<()> {
+    for name in a.modules.iter().flatten() {
+        release::check_name(name, "--modules")?;
+        if name == "kulman" {
+            return Err(Usage("kulman is not a module".to_string()).into());
+        }
+    }
+    let home = store::home_path()?;
+    let Some(state) = State::load(&home)? else {
+        bail!("nothing installed; run kulman install");
+    };
+    let manifest = std::fs::read(home.join("manifest.json"))
+        .context("cannot read manifest.json")
+        .and_then(|bytes| Manifest::parse(&bytes))?;
+    if let Some(name) = a
+        .modules
+        .iter()
+        .flatten()
+        .find(|n| !state.modules.contains(n))
+    {
+        bail!("{name} is not installed; run kulman install --modules {name}");
+    }
+    let ask = asks(a.yes);
+    let module = |name: &str| manifest.modules.iter().find(|m| m.name == name);
+    let mut installed = state.modules.clone();
+    // Manifest order; any the manifest lacks last.
+    installed.sort_by_key(|n| {
+        let at = manifest.modules.iter().position(|m| &m.name == n);
+        at.unwrap_or(usize::MAX)
+    });
+    let wanted = match a.modules {
+        Some(wanted) => wanted,
+        None if ask => {
+            let items: Vec<_> = (installed.iter())
+                .map(|n| {
+                    (
+                        n.as_str(),
+                        module(n).map_or("", |m| m.summary.as_str()),
+                        true,
+                    )
+                })
+                .collect();
+            ask_choose("Modules to set up:", &items, false)?
+        }
+        None => installed.clone(),
+    };
+    let chosen: Vec<&String> = installed.iter().filter(|n| wanted.contains(n)).collect();
+    let kalka = chosen.iter().any(|n| *n == "kalka");
+    for (given, flag) in [
+        (a.memory, "--memory"),
+        (a.no_memory, "--no-memory"),
+        (a.agent.is_some(), "--agent"),
+        (a.no_hook, "--no-hook"),
+    ] {
+        if given && !kalka {
+            let why = format!("{flag} applies to kalka, which is not chosen");
+            return Err(Usage(why).into());
+        }
+    }
+    let memory_default = module("kalka")
+        .and_then(|m| m.options.iter().find(|o| o.name == "memory"))
+        .is_none_or(|o| o.default);
+    let memory = match (a.memory, a.no_memory) {
+        (true, _) => true,
+        (_, true) => false,
+        _ if kalka && ask && !a.remove => ask_yes("agent memory?", memory_default)?,
+        _ => memory_default,
+    };
+    // kalka needs the scope even to remove; plaz does not.
+    let scope_needed = kalka || !a.remove;
+    let scope = match a.scope {
+        None if scope_needed && ask => {
+            let items = [
+                ("repo", "committed, for the whole team", false),
+                ("local", "this checkout only, not committed", false),
+            ];
+            ask_choose("Scope:", &items, true)?.pop()
+        }
+        scope => scope,
+    };
+    if scope.is_none() && scope_needed {
+        return Err(Usage("--scope is required (repo or local)".to_string()).into());
+    }
+    let bin = home.join("bin");
+    for name in &chosen {
+        let path = bin.join(name);
+        if !path.is_file() {
+            let path = path.display();
+            bail!("{name} is installed but {path} is missing; run kulman update");
+        }
+    }
+    for name in chosen {
+        let is_kalka = name == "kalka";
+        let mut args = vec!["setup"];
+        if let (true, Some(agent)) = (is_kalka, &a.agent) {
+            args.extend(["--agent", agent]);
+        }
+        if let Some(scope) = &scope {
+            args.extend(["--scope", scope]);
+        }
+        if is_kalka && a.no_hook {
+            args.push("--no-hook");
+        }
+        if is_kalka {
+            args.push(if memory { "--memory" } else { "--no-memory" });
+        }
+        if a.remove {
+            args.push("--remove");
+        }
+        let path = bin.join(name);
+        let status = Command::new(&path)
+            .args(&args)
+            .status()
+            .with_context(|| format!("cannot run {}", path.display()))?;
+        if !status.success() {
+            eprintln!("kulman: {name} setup failed");
+            // Its own exit status; a module ended by a signal has none: 1.
+            std::process::exit(status.code().unwrap_or(1));
+        }
     }
     Ok(())
 }

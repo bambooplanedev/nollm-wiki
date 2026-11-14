@@ -25,11 +25,23 @@ pub struct Manifest {
 pub struct Module {
     pub name: String,
     #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
     pub default: bool,
     #[serde(default)]
     pub requires: Vec<String>,
     #[serde(default)]
+    pub options: Vec<ModuleOption>,
+    #[serde(default)]
     pub archives: BTreeMap<String, Archive>,
+}
+
+/// A choice a module's own `setup` offers, such as kalka's `memory`; its summary is not read.
+#[derive(Deserialize)]
+pub struct ModuleOption {
+    pub name: String,
+    #[serde(default)]
+    pub default: bool,
 }
 
 #[derive(Deserialize)]
@@ -293,6 +305,17 @@ mod tests {
         assert_eq!(agent(None).config().timeouts().global, None);
         let whole = Some(MANIFEST_TIME);
         assert_eq!(agent(whole).config().timeouts().global, whole);
+    }
+
+    #[test]
+    fn a_manifest_without_summary_or_options_parses() {
+        let m = Manifest::parse(
+            br#"{"version": "0.1.0", "modules": [{"name": "kalka"}],
+            "kulman": {"archives": {}}, "later": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(m.modules[0].summary, "");
+        assert!(m.modules[0].options.is_empty());
     }
 
     #[test]
