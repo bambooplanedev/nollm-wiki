@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -89,7 +89,7 @@ crates/kalka/src/lib.rs
 - macOS (Apple silicon чи Intel) або Linux x86_64 для релізного бінарника. Бінарник для Linux
   зібрано на `ubuntu-latest` від GitHub, тож на старішому дистрибутиві через glibc може знадобитися
   збірка з коду.
-- Або Rust 1.89 чи новіший, щоб зібрати з коду. Windows не перевірявся.
+- Або Rust 1.90 чи новіший, щоб зібрати з коду. Windows не перевірявся.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `kalka setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 

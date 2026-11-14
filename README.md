@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/llm-wiki-nollm/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/llm-wiki-nollm)](https://github.com/bambooplanedev/llm-wiki-nollm/releases)
-[![Rust 1.89+](https://img.shields.io/badge/rust-1.89%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 </div>
@@ -83,7 +83,7 @@ crates/kalka/src/lib.rs
 
 - macOS (Apple silicon or Intel) or Linux x86_64 for the release binary. The Linux one is built on
   GitHub's `ubuntu-latest`, so an older distribution's glibc may need a build from source.
-- Or Rust 1.89 or later to build from source. Windows is not tested.
+- Or Rust 1.90 or later to build from source. Windows is not tested.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `kalka setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
 
