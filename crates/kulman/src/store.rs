@@ -1,4 +1,4 @@
-//! `~/.kulman`: where it is, one run at a time, the state, and placing binaries.
+//! `~/.kulman-home`: where it is, one run at a time, the state, and placing binaries.
 
 use std::env;
 use std::fs::{self, File};
@@ -21,12 +21,12 @@ pub struct Home {
     _lock: File,
 }
 
-/// `KULMAN_HOME` (empty counts as unset; made absolute), else `$HOME/.kulman`.
+/// `KULMAN_HOME` (empty counts as unset; made absolute), else `$HOME/.kulman-home`.
 pub fn home_path() -> Result<PathBuf> {
     let set = |key| env::var_os(key).filter(|v| !v.is_empty());
     let path = match (set("KULMAN_HOME"), set("HOME")) {
         (Some(home), _) => PathBuf::from(home),
-        (None, Some(home)) => Path::new(&home).join(".kulman"),
+        (None, Some(home)) => Path::new(&home).join(".kulman-home"),
         (None, None) => bail!("set HOME or KULMAN_HOME"),
     };
     Ok(std::path::absolute(path)?)

@@ -106,6 +106,23 @@ fn install_sh_puts_kulman_in_bin() {
 }
 
 #[test]
+fn install_sh_defaults_to_dot_kulman_home() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let user = t.path().join("user-home");
+    fs::create_dir_all(&user).unwrap();
+    let out = Command::new("sh")
+        .arg(SCRIPT)
+        .env_remove("KULMAN_HOME")
+        .env("KULMAN_RELEASE_URL", &base)
+        .env("HOME", &user)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&user.join(".kulman-home"), "kulman", KULMAN_BYTES);
+    assert!(!user.join(".kulman").exists());
+}
+
+#[test]
 fn install_sh_over_an_installation_says_update() {
     let (t, base) = setup(KULMAN_BYTES);
     let home = t.path().join("home");

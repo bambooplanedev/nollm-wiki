@@ -12,7 +12,7 @@ then, build the tools from source (see the [repository README](../../README.md))
 
 `install.sh` reads `SHA256SUMS` of the latest release, downloads the `kulman` archive for this
 machine (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`), checks it
-against that file and puts the binary at `~/.kulman/bin/kulman`. It needs `curl`, `tar` and
+against that file and puts the binary at `~/.kulman-home/bin/kulman`. It needs `curl`, `tar` and
 `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the check. It writes
 nothing else and edits no shell profile. On any failure it exits non-zero and leaves no `kulman`
 in `bin/` and no temp dir; a home directory it created is removed again if empty. Over an
@@ -24,17 +24,17 @@ page, then
 
     sha256sum -c --ignore-missing SHA256SUMS      # on macOS: shasum -a 256 -c --ignore-missing SHA256SUMS
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
-    mkdir -p ~/.kulman/bin && mv kulman ~/.kulman/bin/
+    mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Then add `~/.kulman/bin` to `PATH` yourself (agents start `kalka` by its name) and run:
+Then add `~/.kulman-home/bin` to `PATH` yourself (agents start `kalka` by its name) and run:
 
-    ~/.kulman/bin/kulman install       # kulman and the release's default modules
+    ~/.kulman-home/bin/kulman install       # kulman and the release's default modules
     cd your-project
     kulman setup --scope local         # each installed module's own setup, in this project
 
 ## Where things go
 
-Everything is in `~/.kulman` (`KULMAN_HOME` if set):
+Everything is in `~/.kulman-home` (`KULMAN_HOME` if set):
 
 - `bin/kulman` and `bin/<module>` for each installed module;
 - `manifest.json`, the manifest of the installed release;
@@ -87,13 +87,15 @@ nothing and exits 2.
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
 
-Runs each chosen module's own `setup` (`~/.kulman/bin/<module> setup …`) in the current directory,
+Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current directory,
 in the release's order, and stops at the first that fails. Without `--modules` every installed
 module is set up. `--scope` goes to every module; `--agent`, `--no-hook` and `--memory`/
 `--no-memory` are kalka's and are a usage error when kalka is not chosen. Agent memory is on unless
 `--no-memory` is given (or the release turns it off). `--remove` undoes each module's setup.
 Before the first module runs, every chosen module's binary must be in `bin/` and executable; with
-no module installed there is nothing to set up (exit 1).
+no module installed there is nothing to set up (exit 1). The modules write into the project's
+`.kulman/`, a folder of its own: setup refuses (exit 1) to run where that folder is kulman's home
+(`KULMAN_HOME` set to `<project>/.kulman`).
 
 ## Asking and not asking
 
@@ -118,13 +120,13 @@ killed by a signal), after the line `kulman: <module> setup failed (exit N)` (or
 
 ## Environment
 
-- `KULMAN_HOME` — the home directory (default `$HOME/.kulman`; empty counts as unset).
+- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset).
 - `KULMAN_RELEASE_URL` — where releases are (default
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` or `file://…`, nothing else.
 
 ## One run at a time, and interruptions
 
-A command that changes `~/.kulman` holds `.lock`; a second one waits for it. Downloads are checked
+A command that changes `~/.kulman-home` holds `.lock`; a second one waits for it. Downloads are checked
 and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in `bin/` changes; then the
 binaries are renamed into `bin/` (kulman last), then `manifest.json`, then `state.json`.
 

@@ -1,4 +1,4 @@
-//! kulman: installs, updates and sets up the modules of the kulman set into `~/.kulman`.
+//! kulman: installs, updates and sets up the modules of the kulman set into `~/.kulman-home`.
 
 mod prompt;
 mod release;
@@ -6,7 +6,7 @@ mod store;
 
 use std::collections::BTreeSet;
 use std::io::{self, IsTerminal};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -30,7 +30,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Install modules of a release into ~/.kulman/bin (with kulman itself).
+    /// Install modules of a release into ~/.kulman-home/bin (with kulman itself).
     Install {
         /// Modules to install, comma separated (default: the release's defaults).
         #[arg(long, value_delimiter = ',')]
@@ -580,6 +580,17 @@ fn setup(a: SetupArgs) -> Result<()> {
     };
     if state.modules.is_empty() {
         bail!("nothing to set up: no module is installed (kulman install)");
+    }
+    // The modules write into the project's `.kulman`: never into kulman's own home.
+    let project = std::env::current_dir().and_then(|d| std::fs::metadata(d.join(".kulman")));
+    if let (Ok(p), Ok(h)) = (project, std::fs::metadata(&home)) {
+        if (p.dev(), p.ino()) == (h.dev(), h.ino()) {
+            bail!(
+                "{} is kulman's own folder; set the project up from another directory or move \
+                 KULMAN_HOME",
+                home.display()
+            );
+        }
     }
     let manifest = std::fs::read(home.join("manifest.json"))
         .context("cannot read manifest.json")

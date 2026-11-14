@@ -559,7 +559,7 @@ fn install_without_home_says_so() {
 }
 
 #[test]
-fn install_falls_back_to_dot_kulman_in_home() {
+fn the_default_home_is_dot_kulman_home() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let user = t.path().join("user-home");
@@ -568,7 +568,8 @@ fn install_falls_back_to_dot_kulman_in_home() {
         .args(["install", "--modules", "kalka"])
         .assert()
         .success();
-    assert_binary(&user.join(".kulman"), "kalka", KALKA);
+    assert_binary(&user.join(".kulman-home"), "kalka", KALKA);
+    assert!(!user.join(".kulman").exists());
     assert!(!home.exists());
 }
 

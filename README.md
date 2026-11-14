@@ -118,13 +118,13 @@ No release of the set exists yet; until it does, use the steps above. From that 
 
 The script downloads the `kulman` archive for your platform, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
-`~/.kulman/bin/kulman`. It writes nothing else and edits no shell profile. To do the same by hand,
+`~/.kulman-home/bin/kulman`. It writes nothing else and edits no shell profile. To do the same by hand,
 download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release page, check them as
-above, and move the `kulman` binary from the archive to `~/.kulman/bin/`.
+above, and move the `kulman` binary from the archive to `~/.kulman-home/bin/`.
 
-Add `~/.kulman/bin` to your `PATH`, then:
+Add `~/.kulman-home/bin` to your `PATH`, then:
 
-    kulman install                     # the release's default modules, into ~/.kulman/bin
+    kulman install                     # the release's default modules, into ~/.kulman-home/bin
     cd your-project
     kulman setup --scope local         # runs kalka setup and plaz setup here
     kulman update                      # later: everything to the latest release

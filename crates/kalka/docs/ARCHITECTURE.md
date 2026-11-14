@@ -177,7 +177,7 @@ consumer that depends on it by git does not use this lock file. `techlog`
 memory note. `plaz` (`crates/plaz`) is the second tool of the set: it draws per-function decision charts and call
 targets from the code layer in `wiki-code`, depends on nothing of `kalka`, and writes its pages to `.kulman/map/`, which
 `compile` leaves alone. `kulman` (`crates/kulman`) is the installer of the set: it installs, updates and
-removes the modules' release binaries in `~/.kulman` and runs each module's own `setup`; it depends on no other
+removes the modules' release binaries in `~/.kulman-home` and runs each module's own `setup`; it depends on no other
 crate of the workspace, and `install.sh` at the repository root fetches it. Paths below that start with `src/` or `tests/` are in
 `crates/kalka`.
 

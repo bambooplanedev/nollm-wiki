@@ -209,6 +209,31 @@ fn setup_of_a_module_not_installed_says_how() {
 }
 
 #[test]
+fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("plaz", LOGS)]);
+    let project = t.path().join("project");
+    let home = project.join(".kulman");
+    fs::create_dir(&project).unwrap();
+    kulman(&home, &base).arg("install").assert().success();
+    let log = t.path().join("log");
+    let out = kulman(&home, &base)
+        .args(["setup", "--scope", "repo"])
+        .current_dir(&project)
+        .env("KULMAN_TEST_LOG", &log)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!(
+        "kulman: {} is kulman's own folder; set the project up from another directory or move \
+         KULMAN_HOME",
+        home.display()
+    );
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert!(!log.exists(), "no module runs");
+}
+
+#[test]
 fn setup_with_nothing_installed_says_so() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("kalka", LOGS)]);

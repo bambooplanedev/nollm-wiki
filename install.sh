@@ -1,5 +1,5 @@
 #!/bin/sh
-# install.sh: puts the kulman binary of the latest release into ~/.kulman/bin.
+# install.sh: puts the kulman binary of the latest release into ~/.kulman-home/bin.
 #
 #   curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 #
@@ -7,7 +7,7 @@
 # checks it against that file, and moves the one binary to <home>/bin/kulman. It writes nothing
 # else and edits no shell profile; `kulman install` then installs the modules.
 #
-# KULMAN_HOME     the home directory (default: $HOME/.kulman)
+# KULMAN_HOME     the home directory (default: $HOME/.kulman-home)
 # KULMAN_RELEASE_URL  where releases are (default: https://github.com/bambooplanedev/kulman/releases)
 #
 # Everything is inside main, called on the last line: a download cut off midway runs nothing.
@@ -40,7 +40,7 @@ main() {
     if [ -n "${KULMAN_HOME:-}" ]; then
         ki_home=$KULMAN_HOME
     elif [ -n "${HOME:-}" ]; then
-        ki_home=$HOME/.kulman
+        ki_home=$HOME/.kulman-home
     else
         die "set HOME or KULMAN_HOME"
     fi

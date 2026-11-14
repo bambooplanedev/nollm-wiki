@@ -122,14 +122,14 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
 Скрипт завантажує архів `kulman` для вашої платформи, перевіряє його за `SHA256SUMS` релізу
-(і зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman/bin/kulman`.
+(і зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman-home/bin/kulman`.
 Більше він нічого не записує і не змінює профілів оболонки. Те саме вручну: завантажте
 `kulman-v<version>-<target>.tar.gz` і `SHA256SUMS` зі сторінки релізу, перевірте їх, як описано вище,
-і перенесіть бінарник `kulman` з архіву в `~/.kulman/bin/`.
+і перенесіть бінарник `kulman` з архіву в `~/.kulman-home/bin/`.
 
-Додайте `~/.kulman/bin` у свій `PATH`, далі:
+Додайте `~/.kulman-home/bin` у свій `PATH`, далі:
 
-    kulman install                     # модулі релізу за замовчуванням, у ~/.kulman/bin
+    kulman install                     # модулі релізу за замовчуванням, у ~/.kulman-home/bin
     cd your-project
     kulman setup --scope local         # запускає тут kalka setup і plaz setup
     kulman update                      # згодом: усе до останнього релізу
