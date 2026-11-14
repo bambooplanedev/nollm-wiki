@@ -105,13 +105,15 @@ impl Manifest {
     }
 }
 
-/// `X.Y.Z`, three runs of digits.
+/// `X.Y.Z`, three runs of digits, each with no leading zero (but `0`) and within `u64`.
 pub fn is_version(v: &str) -> bool {
     let parts: Vec<&str> = v.split('.').collect();
     parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+        && parts.iter().all(|p| {
+            p.bytes().all(|b| b.is_ascii_digit())
+                && (*p == "0" || !p.starts_with('0'))
+                && p.parse::<u64>().is_ok()
+        })
 }
 
 /// The three integers of a version, for comparing.
@@ -325,6 +327,21 @@ fn is_lone_file(meta: &Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_version_is_three_plain_numbers_that_fit_u64() {
+        let max = u64::MAX;
+        for good in ["0.0.0", "0.7.0", "1.10.200", &format!("{max}.0.{max}")] {
+            assert!(is_version(good), "{good}");
+        }
+        let past = format!("0.{max}0.0"); // ten times u64::MAX
+        for bad in [
+            "", "1", "1.2", "1.2.3.4", "1..3", "01.2.3", "1.02.3", "1.2.03", "00.1.2", "+1.2.3",
+            "1.2.3 ", "1.2.x", &past,
+        ] {
+            assert!(!is_version(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn only_a_lone_regular_file_passes() {
