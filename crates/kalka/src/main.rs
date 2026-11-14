@@ -171,7 +171,7 @@ enum Command {
         /// Agents to set up (default: the ones found, asked at a terminal when none is; Codex only when named, its config is global).
         #[arg(long, value_delimiter = ',')]
         agent: Option<Vec<Agent>>,
-        /// Where the files go (asked when omitted and stdin is a terminal).
+        /// Where the files go (asked when omitted and stdin and stdout are terminals).
         #[arg(long)]
         scope: Option<Scope>,
         /// Skip the prompt hook (installed by default for Claude Code and pi).
@@ -200,10 +200,15 @@ enum Command {
     },
 }
 
-fn ask_scope() -> Result<Scope> {
+/// setup asks only when stdin and stdout are both terminals.
+fn at_terminal() -> bool {
     use std::io::IsTerminal;
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
+fn ask_scope() -> Result<Scope> {
     anyhow::ensure!(
-        std::io::stdin().is_terminal(),
+        at_terminal(),
         "no terminal to ask: pass --scope repo or --scope local"
     );
     println!(
@@ -224,8 +229,7 @@ fn ask_scope() -> Result<Scope> {
 /// without one, none.
 fn ask_agents() -> Result<Vec<Agent>> {
     use clap::ValueEnum;
-    use std::io::IsTerminal;
-    if !std::io::stdin().is_terminal() {
+    if !at_terminal() {
         return Ok(Vec::new());
     }
     println!("No agent found in this project. Which should setup wire?");

@@ -253,7 +253,8 @@ Claude Code вікі читає сама. Codex не читає ні того, �
 - Обидва варіанти додають сервер для Codex командою `codex mcp add kalka -- kalka serve --source .`,
   яка пише в `~/.codex/config.toml`: MCP-конфігу на рівні проєкту Codex не має, а сервер запускає в
   теці, де запущений сам, тож один запис працює для всіх проєктів.
-- Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою.
+- Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою. Setup питає лише
+  тоді, коли і stdin, і stdout — термінали.
 - Хук запиту додає рядки коду з вікі до кожного запиту, перш ніж його побачить модель. Claude
   Code отримує запис `UserPromptSubmit` (`kalka hint --claude-hook`) у `.claude/settings.json`
   (`settings.local.json` з `--scope local`); pi — `.pi/extensions/kalka-hint/index.ts`. Хук мовчить,

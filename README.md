@@ -247,7 +247,8 @@ ignore lines and the memory folder, sets up no agent, says
 - Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
-- Without `--scope`, setup asks on a terminal and fails without one.
+- Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
+  stdout are both terminals.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
