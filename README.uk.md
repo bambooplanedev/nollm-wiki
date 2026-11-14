@@ -135,8 +135,8 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
     kulman update                      # згодом: усе до останнього релізу
 
 За замовчуванням усе ввімкнено; вимикайте прапорцями (`kulman install --modules kalka`,
-`kulman setup --no-memory`). `kulman remove` видаляє те, що встановив kulman. Команди, коди виходу
-й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
+`kulman setup --no-memory`). `kulman remove` видаляє те, що встановив kulman (без термінала
+потрібен `--yes`). Команди, коди виходу й будова релізу: [crates/kulman/README.md](crates/kulman/README.md) (англійською).
 
 ## Швидкий старт
 

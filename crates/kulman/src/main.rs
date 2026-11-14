@@ -118,7 +118,7 @@ fn main() -> ExitCode {
             yes,
         }) => install(modules, version.as_deref(), asks(yes)),
         Some(Cmd::Update { yes }) => update(asks(yes)),
-        Some(Cmd::Remove { modules, yes }) => remove(modules, asks(yes)),
+        Some(Cmd::Remove { modules, yes }) => remove(modules, yes),
         Some(Cmd::Setup(args)) => setup(args),
     };
     match result {
@@ -427,13 +427,19 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
     Ok(())
 }
 
-fn remove(names: Option<Vec<String>>, ask: bool) -> Result<()> {
+fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     for name in names.iter().flatten() {
         release::check_name(name, "--modules")?;
         if name == "kulman" {
             let why = "kulman is not a module; kulman remove without --modules removes everything";
             return Err(Usage(why.to_string()).into());
         }
+    }
+    // The question's default is no: without a terminal to ask at, that is nothing to do.
+    let ask = asks(yes);
+    if !yes && !ask {
+        let why = "remove needs --yes when there is no terminal";
+        return Err(Usage(why.to_string()).into());
     }
     let home_path = store::home_path()?;
     // Without state.json, a home with a `.lock` may be left by a remove killed before its last

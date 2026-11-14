@@ -130,8 +130,8 @@ Add `~/.kulman/bin` to your `PATH`, then:
     kulman update                      # later: everything to the latest release
 
 Everything is on by default; turn things off with flags (`kulman install --modules kalka`,
-`kulman setup --no-memory`). `kulman remove` deletes what kulman installed. Commands, exit codes and
-the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
+`kulman setup --no-memory`). `kulman remove` deletes what kulman installed (without a terminal it
+needs `--yes`). Commands, exit codes and the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
 
 ## Quick start
 

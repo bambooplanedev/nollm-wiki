@@ -71,6 +71,8 @@ than the installed one is not installed: nothing changes.
 Removes the named modules; without `--modules`, every module, kulman itself, its manifest, state
 and lock, then `bin/` and the home directory if they are empty. Only what `state.json` lists is
 deleted; any other file stays. `kulman` is not a module: `--modules kulman` is a usage error.
+At a terminal it asks first (default: no); without one it needs `--yes`, and otherwise changes
+nothing and exits 2.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
@@ -86,14 +88,15 @@ module is set up. `--scope` goes to every module; `--agent`, `--no-hook` and `--
 People and agents get the same commands. A command asks only when stdin and stdout are both
 terminals and `--yes` is absent; otherwise it asks nothing and the defaults apply (`install`: the
 release's defaults; `setup`: every installed module, memory on). A value with no default must then
-be given as a flag: `kulman setup` without a terminal needs `--scope`.
+be given as a flag: `kulman setup` without a terminal needs `--scope`. `remove`, whose question
+defaults to no, does nothing without a terminal unless `--yes` is given.
 
 ## Exit codes
 
 - `0` — done, or nothing to do.
 - `1` — failed; the message says why.
 - `2` — usage error (an unknown flag, a module the release does not have, a missing `--scope`, a
-  bad `KULMAN_RELEASE_URL`).
+  bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
 
 `kulman setup` exits with a module's own status when that module's setup fails.
 

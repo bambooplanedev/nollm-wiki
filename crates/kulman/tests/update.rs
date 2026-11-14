@@ -256,7 +256,7 @@ fn remove_modules_drops_only_those() {
 
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "plaz"])
+        .args(["remove", "--modules", "plaz", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -266,7 +266,7 @@ fn remove_modules_drops_only_those() {
     // A listed binary already missing counts as removed.
     fs::remove_file(home.join("bin/kalka")).unwrap();
     kulman(&home, &base)
-        .args(["remove", "--modules", "kalka"])
+        .args(["remove", "--modules", "kalka", "--yes"])
         .assert()
         .success();
     assert_eq!(state(&home), json!({"version": "0.7.0", "modules": []}));
@@ -278,7 +278,10 @@ fn remove_everything_leaves_foreign_files() {
     let (t, base, home) = installed();
     fs::write(home.join("notes.txt"), "mine").unwrap();
     fs::write(home.join("bin/other"), "mine too").unwrap();
-    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out),
@@ -310,7 +313,10 @@ fn remove_everything_removes_an_empty_home() {
     assert!(!home.exists());
     assert_eq!(snapshot(&t.path().join("user-home")), outside);
 
-    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out), ["nothing installed"]);
     assert!(!home.exists());
@@ -326,7 +332,10 @@ fn remove_everything_removes_an_empty_home() {
     ] {
         fs::remove_file(home.join(name)).unwrap();
     }
-    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out), ["nothing installed"]);
     assert!(!home.exists());
@@ -337,14 +346,14 @@ fn remove_kulman_by_name_is_usage() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "kalka,kulman"])
+        .args(["remove", "--modules", "kalka,kulman", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
 
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "../x"])
+        .args(["remove", "--modules", "../x", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -364,8 +373,8 @@ fn remove_refuses_a_path_like_name_in_the_state() {
     .unwrap();
     let before = snapshot(t.path());
     for args in [
-        &["remove"][..],
-        &["remove", "--modules", "kalka"],
+        &["remove", "--yes"][..],
+        &["remove", "--modules", "kalka", "--yes"],
         &["update"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
@@ -434,8 +443,8 @@ fn remove_refuses_a_symlinked_bin() {
         home.join("bin").display()
     );
     for args in [
-        &["remove"][..],
-        &["remove", "--modules", "kalka"],
+        &["remove", "--yes"][..],
+        &["remove", "--modules", "kalka", "--yes"],
         &["update"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
@@ -453,7 +462,10 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
     fs::write(home.join("bin/plaz/inner"), "x").unwrap();
     let before = snapshot(t.path());
     let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
-    for args in [&["remove"][..], &["remove", "--modules", "kalka,plaz"]] {
+    for args in [
+        &["remove", "--yes"][..],
+        &["remove", "--modules", "kalka,plaz", "--yes"],
+    ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -477,7 +489,7 @@ fn a_state_naming_kulman_or_a_module_twice_is_malformed() {
         let bad = json!({"version": "0.7.0", "modules": modules});
         fs::write(home.join("state.json"), bad.to_string()).unwrap();
         let before = snapshot(t.path());
-        for args in [&[][..], &["update"], &["remove"]] {
+        for args in [&[][..], &["update"], &["remove", "--yes"]] {
             let out = kulman(&home, &base).args(args).output().unwrap();
             assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
             assert!(stderr(&out).contains(expect), "{}", stderr(&out));
@@ -515,7 +527,10 @@ fn update_adds_what_an_installed_module_now_requires() {
 
 #[test]
 fn remove_on_a_home_with_no_state_deletes_no_file() {
-    for args in [&["remove"][..], &["remove", "--modules", "kalka"]] {
+    for args in [
+        &["remove", "--yes"][..],
+        &["remove", "--modules", "kalka", "--yes"],
+    ] {
         let (t, base, home) = installed();
         // Not kulman's by any record: no state.json.
         fs::remove_file(home.join("state.json")).unwrap();
@@ -575,10 +590,29 @@ fn remove_without_state_keeps_stale_temp_entries() {
     fs::create_dir_all(home.join(".tmp-x")).unwrap();
     fs::write(home.join(".lock"), "").unwrap();
     fs::write(home.join(".tmp-x/f"), "not kulman's by any record").unwrap();
-    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         fs::read_to_string(home.join(".tmp-x/f")).unwrap(),
         "not kulman's by any record"
     );
+}
+
+#[test]
+fn remove_without_a_terminal_needs_yes() {
+    let (t, base, home) = installed();
+    let before = snapshot(t.path());
+    for args in [&["remove"][..], &["remove", "--modules", "plaz"]] {
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
+        assert!(
+            stderr(&out).contains("kulman: remove needs --yes when there is no terminal"),
+            "{}",
+            stderr(&out)
+        );
+        assert_eq!(snapshot(t.path()), before, "{args:?}");
+    }
 }
