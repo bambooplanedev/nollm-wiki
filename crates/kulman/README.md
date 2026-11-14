@@ -164,9 +164,10 @@ A release holds, under `<base>/download/v<version>/`:
 - `install.sh`.
 
 `<base>/latest/download/` serves the same files of the latest release. kulman reads the manifest
-from there (or from `download/v<version>/` with `--version`, and for `install` over an installed
-version the latest release is not) and every archive from
-`download/v<version>/`; `install.sh` reads `SHA256SUMS` from there.
+from there; from `download/v<version>/` with `--version`; and from `download/v<installed>/` for an
+`install` over an installed version when the latest release is newer or cannot be read. It reads
+every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
+`latest/download/`.
 
 `manifest.json`:
 
