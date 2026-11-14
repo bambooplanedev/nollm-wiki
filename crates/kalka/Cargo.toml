@@ -20,6 +20,7 @@ path = "src/lib.rs"
 
 [dependencies]
 wiki-code = { path = "../wiki-code" }
+techlog = { path = "../techlog" }
 aho-corasick = "1"
 anyhow = "1"
 thiserror = "2"

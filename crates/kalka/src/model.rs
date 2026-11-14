@@ -78,64 +78,7 @@ impl KindFilter {
     }
 }
 
-/// Where a memory note came from: written on this machine, or committed to the repo.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum Origin {
-    /// An agent folder, or a repo note git does not track (or no git at all).
-    #[default]
-    Local,
-    /// A note in the repo's `.agents/memory` that git tracks: the name of the
-    /// last commit's author (`None` when the history does not reach it), and
-    /// whether the file differs from `HEAD`.
-    Repo {
-        author: Option<String>,
-        edited: bool,
-        /// The author's email is the compiling person's `git config user.email`.
-        mine: bool,
-    },
-}
-
-impl Origin {
-    /// `local`, or `repo` then `, <author>`, `, you` (the person's own
-    /// note) and `, edited` when they apply: `repo, Jane Doe, you, edited`.
-    pub fn label(&self) -> String {
-        match self {
-            Origin::Local => "local".into(),
-            Origin::Repo {
-                author,
-                edited,
-                mine,
-            } => {
-                let mut s = String::from("repo");
-                if let Some(a) = author {
-                    s += ", ";
-                    s += a;
-                }
-                if *mine {
-                    s += ", you";
-                }
-                if *edited {
-                    s += ", edited";
-                }
-                s
-            }
-        }
-    }
-
-    /// How far to trust the note: `local` 1.0, the person's own or edited
-    /// `repo` note 0.8, any other `repo` note 0.5.
-    pub fn trust(&self) -> f64 {
-        match self {
-            Origin::Local => 1.0,
-            Origin::Repo {
-                mine: false,
-                edited: false,
-                ..
-            } => 0.5,
-            Origin::Repo { .. } => 0.8,
-        }
-    }
-}
+pub use techlog::Origin;
 
 #[derive(Clone, Debug, Default)]
 pub struct Entity {

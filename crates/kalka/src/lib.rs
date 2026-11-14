@@ -12,7 +12,7 @@ pub mod labels;
 pub mod lint;
 pub(crate) mod live;
 pub mod manifest;
-pub mod memory;
+pub use techlog as memory;
 pub mod model;
 pub mod outline;
 pub mod query;

@@ -1,10 +1,67 @@
 //! Where agent memory lives: the repo's own folder, and the folders agents keep outside it.
 
-use crate::hash::{hash_str, to_hex};
-use crate::model::Origin;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Where a memory note came from: written on this machine, or committed to the repo.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Origin {
+    /// An agent folder, or a repo note git does not track (or no git at all).
+    #[default]
+    Local,
+    /// A note in the repo's `.agents/memory` that git tracks: the name of the
+    /// last commit's author (`None` when the history does not reach it), and
+    /// whether the file differs from `HEAD`.
+    Repo {
+        author: Option<String>,
+        edited: bool,
+        /// The author's email is the compiling person's `git config user.email`.
+        mine: bool,
+    },
+}
+
+impl Origin {
+    /// `local`, or `repo` then `, <author>`, `, you` (the person's own
+    /// note) and `, edited` when they apply: `repo, Jane Doe, you, edited`.
+    pub fn label(&self) -> String {
+        match self {
+            Origin::Local => "local".into(),
+            Origin::Repo {
+                author,
+                edited,
+                mine,
+            } => {
+                let mut s = String::from("repo");
+                if let Some(a) = author {
+                    s += ", ";
+                    s += a;
+                }
+                if *mine {
+                    s += ", you";
+                }
+                if *edited {
+                    s += ", edited";
+                }
+                s
+            }
+        }
+    }
+
+    /// How far to trust the note: `local` 1.0, the person's own or edited
+    /// `repo` note 0.8, any other `repo` note 0.5.
+    pub fn trust(&self) -> f64 {
+        match self {
+            Origin::Local => 1.0,
+            Origin::Repo {
+                mine: false,
+                edited: false,
+                ..
+            } => 0.5,
+            Origin::Repo { .. } => 0.8,
+        }
+    }
+}
 
 /// Project memory kept inside the checkout.
 pub const REPO_DIR: &str = ".agents/memory";
@@ -187,7 +244,7 @@ pub fn repo_origins(dir: &Path) -> BTreeMap<String, Origin> {
         .collect()
 }
 
-pub(crate) fn git(root: &Path, args: &[&str]) -> Option<String> {
+pub fn git(root: &Path, args: &[&str]) -> Option<String> {
     let out = Command::new("git")
         .arg("-C")
         .arg(root)
@@ -234,7 +291,12 @@ pub fn repo_key(root: &Path) -> Option<String> {
     }
     let dir = root.join(common);
     let dir = dir.canonicalize().unwrap_or(dir);
-    Some(to_hex(&hash_str(&dir.to_string_lossy()))[..16].to_string())
+    Some(dir_key(&dir))
+}
+
+/// The key of a repo with no usable root commit: 16 hex digits of a hash of its git common dir.
+fn dir_key(dir: &Path) -> String {
+    blake3::hash(dir.to_string_lossy().as_bytes()).to_hex()[..16].to_string()
 }
 
 /// The local memory folder of the repo at `root` (not created).
@@ -262,6 +324,12 @@ mod tests {
             .output()
             .unwrap();
         assert!(s.status.success(), "git {args:?}");
+    }
+
+    #[test]
+    fn the_repo_key_of_a_known_path_is_pinned() {
+        // Computed with the code before the move; a change orphans local memory.
+        assert_eq!(dir_key(Path::new("/srv/checkouts/app")), "eb5800f6b276c96a");
     }
 
     #[test]
