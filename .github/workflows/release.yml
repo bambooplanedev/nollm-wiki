@@ -162,13 +162,27 @@ jobs:
         with:
           name: dist
           path: dist
-      - uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-          files: |
-            dist/*.tar.gz
-            dist/SHA256SUMS
-            dist/manifest.json
-            dist/install.sh
+      - name: Check dist holds the 6 archives, SHA256SUMS, manifest.json and install.sh
+        run: |
+          ls -l dist
+          [ "$(find dist -mindepth 1 | wc -l)" -eq 9 ] || { echo "dist must hold 9 files"; exit 1; }
+          [ "$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 6 ] ||
+            { echo "dist must hold 6 archives"; exit 1; }
+          for f in SHA256SUMS manifest.json install.sh; do
+            [ -f "dist/$f" ] || { echo "dist/$f is missing"; exit 1; }
+          done
+      # The runner's own gh, so the one job that can write runs no third-party action. A release
+      # for the tag that already exists, draft or published, fails the step: no second draft, no
+      # overwrite. The listing includes drafts, which gh release create alone does not promise.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
+          if printf '%s\n' "$tags" | grep -qxF -- "$TAG"; then
+            echo "a release for $TAG already exists"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --generate-notes --verify-tag --title "$TAG" \
+            dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/install.sh
