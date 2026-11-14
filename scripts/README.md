@@ -114,6 +114,11 @@ with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.jso
 lays out the `latest/download/` and `download/v<version>/` paths a `file://` `KULMAN_RELEASE_URL`
 reads. Needs `jq`, `tar` and `sha256sum` or `shasum`; tested in `crates/kulman/tests/release_assemble.rs`.
 
+`install-check.sh <version> [<tree>]` — installs the release laid out at `<tree>` (default `/release`)
+the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `kulman install --yes`,
+checks each binary's `--version` and sets up a throwaway git project. The release workflow runs it
+in Alpine and Debian containers and on macOS.
+
 Search-quality measurement now lives in `crates/kalka/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI
 (`.github/workflows/rust.yml`: fmt, clippy, test, the strip-chrome test, docs). See the
