@@ -294,16 +294,43 @@ fn setup_agent_without_kalka_is_usage() {
     assert_eq!(f.logged(), NONE);
 }
 
+/// `out`'s stderr ends with `kulman: <failed> setup failed (<how>)` for each failure, then the
+/// summary naming them all.
+fn failed(out: &std::process::Output, failures: &[(&str, &str)]) {
+    let err = stderr(out);
+    for (name, how) in failures {
+        let line = format!("kulman: {name} setup failed ({how})");
+        assert!(err.lines().any(|l| l == line), "{err}");
+    }
+    let names: Vec<&str> = failures.iter().map(|f| f.0).collect();
+    let last = format!("kulman: setup finished with errors: {}", names.join(", "));
+    assert_eq!(err.lines().last(), Some(last.as_str()), "{err}");
+}
+
 #[test]
-fn setup_stops_at_the_first_failing_module() {
+fn setup_runs_every_module_even_when_one_fails() {
     let f = installed(LOGS_THEN_FAILS, "kalka,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
-    assert_eq!(f.logged(), ["kalka setup --scope repo --memory"]);
     assert_eq!(
-        stderr(&out).lines().last(),
-        Some("kulman: kalka setup failed (exit 3)")
+        f.logged(),
+        [
+            "kalka setup --scope repo --memory",
+            "plaz setup --scope repo"
+        ]
     );
+    failed(&out, &[("kalka", "exit 3")]);
+}
+
+#[test]
+fn setup_remove_runs_every_module_even_when_one_fails() {
+    let f = installed(LOGS_THEN_FAILS, "kalka,plaz");
+    // plaz fails too: the status is the first failure's.
+    fs::write(f.home.join("bin/plaz"), b"#!/bin/sh\nexit 4\n").unwrap();
+    let out = f.setup(&["--remove", "--scope", "repo"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert_eq!(f.logged(), ["kalka setup --scope repo --memory --remove"]);
+    failed(&out, &[("kalka", "exit 3"), ("plaz", "exit 4")]);
 }
 
 #[test]
@@ -311,11 +338,8 @@ fn setup_of_a_module_exiting_2_exits_2_and_says_it_was_the_module() {
     let f = installed(b"#!/bin/sh\nexit 2\n", "kalka,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
-    assert_eq!(
-        stderr(&out).lines().last(),
-        Some("kulman: kalka setup failed (exit 2)")
-    );
-    assert_eq!(f.logged(), NONE);
+    failed(&out, &[("kalka", "exit 2")]);
+    assert_eq!(f.logged(), ["plaz setup --scope repo"]);
 }
 
 #[test]
@@ -350,9 +374,6 @@ fn setup_of_a_module_killed_by_a_signal_exits_1() {
     let f = installed(killed, "kalka,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert_eq!(
-        stderr(&out).lines().last(),
-        Some("kulman: kalka setup failed (signal 9)")
-    );
-    assert_eq!(f.logged(), NONE);
+    failed(&out, &[("kalka", "signal 9")]);
+    assert_eq!(f.logged(), ["plaz setup --scope repo"]);
 }

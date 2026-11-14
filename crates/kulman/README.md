@@ -88,7 +88,7 @@ nothing and exits 2.
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
 
 Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current directory,
-in the release's order, and stops at the first that fails. Without `--modules` every installed
+in the release's order: every chosen module runs, whatever the earlier ones returned. Without `--modules` every installed
 module is set up. `--scope` goes to every module; `--agent`, `--no-hook` and `--memory`/
 `--no-memory` are kalka's and are a usage error when kalka is not chosen. Agent memory is on unless
 `--no-memory` is given (or the release turns it off). `--remove` undoes each module's setup.
@@ -115,8 +115,10 @@ typed at a prompt match in any case.
 - `2` — usage error (an unknown flag, an empty or malformed name in `--modules` or one the release
   does not have, a missing `--scope`, a bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
 
-`kulman setup` exits with a module's own status when that module's setup fails (1 if it was
-killed by a signal), after the line `kulman: <module> setup failed (exit N)` (or `(signal N)`).
+Each module whose setup fails gets the line `kulman: <module> setup failed (exit N)` (or
+`(signal N)`); the others still run. Then `kulman setup` prints `kulman: setup finished with
+errors: <modules>` and exits with the status of the first module that failed (1 if it was killed
+by a signal).
 
 ## Environment
 

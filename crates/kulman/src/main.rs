@@ -567,7 +567,8 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
 }
 
 /// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
-/// in the current directory, and stops at the first failure with its exit status.
+/// in the current directory, whatever the earlier ones returned; when any failed, names them
+/// and exits with the first failure's status.
 fn setup(a: SetupArgs) -> Result<()> {
     for name in a.modules.iter().flatten() {
         if name == "kulman" {
@@ -679,6 +680,9 @@ fn setup(a: SetupArgs) -> Result<()> {
             Some(_) => {}
         }
     }
+    // Names of the modules that failed, and the first failure's status.
+    let mut failures: Vec<&str> = Vec::new();
+    let mut first_code = None;
     for name in chosen {
         let is_kalka = name == "kalka";
         let mut args = vec!["setup"];
@@ -698,19 +702,25 @@ fn setup(a: SetupArgs) -> Result<()> {
             args.push("--remove");
         }
         let path = bin.join(name);
-        let status = Command::new(&path)
-            .args(&args)
-            .status()
-            .with_context(|| format!("cannot run {}", path.display()))?;
-        if !status.success() {
-            // Its own exit status; a module ended by a signal has none: 1.
-            let (how, code) = match (status.code(), status.signal()) {
+        // Its own exit status; a module ended by a signal has none: 1.
+        let (how, code) = match Command::new(&path).args(&args).status() {
+            Ok(status) if status.success() => continue,
+            Ok(status) => match (status.code(), status.signal()) {
                 (Some(code), _) => (format!("exit {code}"), code),
                 (None, signal) => (format!("signal {}", signal.unwrap_or(0)), 1),
-            };
-            eprintln!("kulman: {name} setup failed ({how})");
-            std::process::exit(code);
-        }
+            },
+            Err(e) => (format!("cannot run {}: {e}", path.display()), 1),
+        };
+        eprintln!("kulman: {name} setup failed ({how})");
+        failures.push(name);
+        first_code.get_or_insert(code);
+    }
+    if let Some(code) = first_code {
+        eprintln!(
+            "kulman: setup finished with errors: {}",
+            failures.join(", ")
+        );
+        std::process::exit(code);
     }
     Ok(())
 }
