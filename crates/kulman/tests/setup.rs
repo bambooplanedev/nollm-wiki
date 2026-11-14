@@ -275,6 +275,48 @@ fn setup_stops_at_the_first_failing_module() {
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     assert_eq!(f.logged(), ["kalka setup --scope repo --memory"]);
+    assert_eq!(
+        stderr(&out).lines().last(),
+        Some("kulman: kalka setup failed (exit 3)")
+    );
+}
+
+#[test]
+fn setup_of_a_module_exiting_2_exits_2_and_says_it_was_the_module() {
+    let f = installed(b"#!/bin/sh\nexit 2\n", "kalka,plaz");
+    let out = f.setup(&["--scope", "repo"]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out).lines().last(),
+        Some("kulman: kalka setup failed (exit 2)")
+    );
+    assert_eq!(f.logged(), NONE);
+}
+
+#[test]
+fn setup_runs_no_module_when_one_is_not_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = installed(LOGS, "kalka,plaz");
+    let plaz = f.home.join("bin/plaz");
+    fs::set_permissions(&plaz, fs::Permissions::from_mode(0o644)).unwrap();
+    let out = f.setup(&["--scope", "repo"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!("kulman: {} is not executable", plaz.display());
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(f.logged(), NONE);
+}
+
+#[test]
+fn setup_with_no_module_installed_says_so() {
+    let f = installed(LOGS, "plaz");
+    kulman(&f.home, &f.base)
+        .args(["remove", "--modules", "plaz", "--yes"])
+        .assert()
+        .success();
+    let out = f.setup(&["--scope", "repo"]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = "kulman: nothing to set up: no module is installed (kulman install)";
+    assert!(stderr(&out).contains(expect), "{}", stderr(&out));
 }
 
 #[test]
@@ -283,5 +325,9 @@ fn setup_of_a_module_killed_by_a_signal_exits_1() {
     let f = installed(killed, "kalka,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out).lines().last(),
+        Some("kulman: kalka setup failed (signal 9)")
+    );
     assert_eq!(f.logged(), NONE);
 }

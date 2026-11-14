@@ -6,6 +6,8 @@ mod store;
 
 use std::collections::BTreeSet;
 use std::io::{self, IsTerminal};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
@@ -276,19 +278,14 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
         wanted => wanted,
     };
     let chosen = choose(&manifest, wanted)?;
-    if ask {
-        let bin = home_path.join("bin");
-        let question = format!("Install {} module(s) into {}?", chosen.len(), bin.display());
-        if !ask_yes(&question, true)? {
-            println!("nothing changed");
-            return Ok(());
-        }
-    }
     let home = Home::open(home_path)?;
-    let result = place(&home, &base, &manifest, &raw, target, chosen);
-    if result.is_err() {
-        home.abandon();
-        return result;
+    match place(&home, &base, &manifest, &raw, target, chosen, ask) {
+        Ok(true) => {}
+        // Declined: as if never run.
+        done => {
+            home.abandon();
+            return done.map(|_| ());
+        }
     }
     if let Some(newer) = newer {
         println!("newer release {newer}: kulman update");
@@ -304,7 +301,8 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
 }
 
 /// Under the lock: checks the installed state, stages every chosen module not installed and
-/// every listed binary missing from `bin/`, and only when all are ready commits them.
+/// every listed binary missing from `bin/`, and only when all are ready commits them. With
+/// `ask`, asks first; `false` when declined.
 fn place(
     home: &Home,
     base: &str,
@@ -312,7 +310,8 @@ fn place(
     raw: &[u8],
     target: &str,
     chosen: BTreeSet<String>,
-) -> Result<()> {
+    ask: bool,
+) -> Result<bool> {
     home.clean_tmp()?;
     let mut modules = BTreeSet::new();
     let state = State::load(&home.path)?;
@@ -340,6 +339,13 @@ fn place(
         .filter(|n| missing(n))
         .cloned()
         .collect();
+    if ask && !names.is_empty() {
+        let question = format!("Install {} module(s) into {}?", names.len(), bin.display());
+        if !ask_yes(&question, true)? {
+            println!("nothing changed");
+            return Ok(false);
+        }
+    }
     if kulman_too {
         names.push("kulman".to_string());
     }
@@ -353,7 +359,7 @@ fn place(
     for s in &staged {
         println!("installed {} {}", s.name, manifest.version);
     }
-    Ok(())
+    Ok(true)
 }
 
 /// `kulman` with no command. Only reads: home is not created, nor locked.
@@ -402,21 +408,8 @@ fn update(ask: bool) -> Result<()> {
         bail!("nothing installed; run kulman install");
     }
     let (manifest, raw) = release::manifest(&base, None, release::WAIT)?;
-    if ask {
-        // Asked only when there is a newer release; the answer is checked again under the lock.
-        if let Some(state) = State::load(&home_path)? {
-            let (have, latest) = (&state.version, &manifest.version);
-            if release::version_key(latest) > release::version_key(have) {
-                let question = format!("Update {} module(s) to {latest}?", state.modules.len());
-                if !ask_yes(&question, true)? {
-                    println!("nothing changed");
-                    return Ok(());
-                }
-            }
-        }
-    }
     let home = Home::open(home_path)?;
-    let result = renew(&home, &base, &manifest, &raw, target);
+    let result = renew(&home, &base, &manifest, &raw, target, ask);
     if result.is_err() {
         home.abandon();
     }
@@ -424,8 +417,16 @@ fn update(ask: bool) -> Result<()> {
 }
 
 /// Under the lock: unless already current or newer, stages kulman and every installed module
-/// at the latest version, and only when all are ready commits them (kulman last).
-fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str) -> Result<()> {
+/// at the latest version, and only when all are ready commits them (kulman last). With `ask`,
+/// a move to a newer release is asked first.
+fn renew(
+    home: &Home,
+    base: &str,
+    manifest: &Manifest,
+    raw: &[u8],
+    target: &str,
+    ask: bool,
+) -> Result<()> {
     home.clean_tmp()?;
     let Some(state) = State::load(&home.path)? else {
         bail!("nothing installed; run kulman install");
@@ -452,6 +453,13 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
         manifest.archive(name, target)?;
     }
     let modules = choose(manifest, Some(state.modules.clone()))?;
+    if ask && release::version_key(latest) > release::version_key(have) {
+        let question = format!("Update {} module(s) to {latest}?", modules.len());
+        if !ask_yes(&question, true)? {
+            println!("nothing changed");
+            return Ok(());
+        }
+    }
     let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
@@ -486,25 +494,8 @@ fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
         nothing_installed(&home_path, false);
         return Ok(());
     }
-    if ask {
-        // With no state only the lock is removed: nothing to ask.
-        if let Some(state) = State::load(&home_path)? {
-            let what = match &names {
-                Some(names) => names.join(", "),
-                None => (state.modules.iter().map(String::as_str))
-                    .chain(["kulman itself"])
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            };
-            let question = format!("Remove {what} from {}?", home_path.display());
-            if !ask_yes(&question, false)? {
-                println!("nothing changed");
-                return Ok(());
-            }
-        }
-    }
     let home = Home::open(home_path)?;
-    let result = uninstall(&home, names);
+    let result = uninstall(&home, names, ask);
     // A run that created home (it vanished while this run waited) found nothing: undo it.
     if result.is_err() || home.created {
         home.abandon();
@@ -529,28 +520,44 @@ fn nothing_installed(home: &Path, holds: bool) {
     }
 }
 
-/// Under the lock: every name is checked (by `State::load` and against the state) before the
-/// first file is deleted.
-fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
+/// Under the lock: every name is checked (by `State::load` and against the state) before
+/// anything is asked (with `ask`) or the first file is deleted.
+fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<()> {
     let Some(mut state) = State::load(&home.path)? else {
-        // No record of owning anything: no binary and no manifest is deleted.
+        // No record of owning anything: no binary and no manifest is deleted, nothing asked.
         nothing_installed(&home.path, store::remove_lock(home)?);
         return Ok(());
     };
+    if let Some(names) = &mut names {
+        names.sort();
+        names.dedup();
+        if let Some(name) = names.iter().find(|n| !state.modules.contains(n)) {
+            bail!("{name} is not installed");
+        }
+    }
+    if ask {
+        let what = match &names {
+            Some(names) => names.join(", "),
+            None => (state.modules.iter().map(String::as_str))
+                .chain(["kulman itself"])
+                .collect::<Vec<_>>()
+                .join(", "),
+        };
+        let question = format!("Remove {what} from {}?", home.path.display());
+        if !ask_yes(&question, false)? {
+            println!("nothing changed");
+            return Ok(());
+        }
+    }
     // Stale temp entries are cleaned only in a home a state records as kulman's.
     home.clean_tmp()?;
-    let Some(mut names) = names else {
+    let Some(names) = names else {
         store::remove_all(home, &state.modules)?;
         for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
             println!("removed {name}");
         }
         return Ok(());
     };
-    names.sort();
-    names.dedup();
-    if let Some(name) = names.iter().find(|n| !state.modules.contains(n)) {
-        bail!("{name} is not installed");
-    }
     state.modules.retain(|m| !names.contains(m));
     store::remove_modules(home, &names, &state)?;
     for name in &names {
@@ -571,6 +578,9 @@ fn setup(a: SetupArgs) -> Result<()> {
     let Some(state) = State::load(&home)? else {
         bail!("nothing installed; run kulman install");
     };
+    if state.modules.is_empty() {
+        bail!("nothing to set up: no module is installed (kulman install)");
+    }
     let manifest = std::fs::read(home.join("manifest.json"))
         .context("cannot read manifest.json")
         .and_then(|bytes| Manifest::parse(&bytes))?;
@@ -646,9 +656,16 @@ fn setup(a: SetupArgs) -> Result<()> {
     let bin = home.join("bin");
     for name in &chosen {
         let path = bin.join(name);
-        if !path.is_file() {
-            let path = path.display();
-            bail!("{name} is installed but {path} is missing; run kulman update");
+        let meta = std::fs::metadata(&path)
+            .ok()
+            .filter(std::fs::Metadata::is_file);
+        match meta.map(|m| m.permissions().mode()) {
+            None => bail!(
+                "{name} is installed but {} is missing; run kulman update",
+                path.display()
+            ),
+            Some(mode) if mode & 0o111 == 0 => bail!("{} is not executable", path.display()),
+            Some(_) => {}
         }
     }
     for name in chosen {
@@ -675,9 +692,13 @@ fn setup(a: SetupArgs) -> Result<()> {
             .status()
             .with_context(|| format!("cannot run {}", path.display()))?;
         if !status.success() {
-            eprintln!("kulman: {name} setup failed");
             // Its own exit status; a module ended by a signal has none: 1.
-            std::process::exit(status.code().unwrap_or(1));
+            let (how, code) = match (status.code(), status.signal()) {
+                (Some(code), _) => (format!("exit {code}"), code),
+                (None, signal) => (format!("signal {}", signal.unwrap_or(0)), 1),
+            };
+            eprintln!("kulman: {name} setup failed ({how})");
+            std::process::exit(code);
         }
     }
     Ok(())

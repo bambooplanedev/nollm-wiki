@@ -92,6 +92,8 @@ in the release's order, and stops at the first that fails. Without `--modules` e
 module is set up. `--scope` goes to every module; `--agent`, `--no-hook` and `--memory`/
 `--no-memory` are kalka's and are a usage error when kalka is not chosen. Agent memory is on unless
 `--no-memory` is given (or the release turns it off). `--remove` undoes each module's setup.
+Before the first module runs, every chosen module's binary must be in `bin/` and executable; with
+no module installed there is nothing to set up (exit 1).
 
 ## Asking and not asking
 
@@ -99,7 +101,9 @@ People and agents get the same commands. A command asks only when stdin and stdo
 terminals and `--yes` is absent; otherwise it asks nothing and the defaults apply (`install`: the
 release's defaults; `setup`: every installed module, memory on). A value with no default must then
 be given as a flag: `kulman setup` without a terminal needs `--scope`. `remove`, whose question
-defaults to no, does nothing without a terminal unless `--yes` is given.
+defaults to no, does nothing without a terminal unless `--yes` is given. A confirmation is asked
+once the command holds `.lock` and has read the state, so what it shows is what it does. Names
+typed at a prompt match in any case.
 
 ## Exit codes
 
@@ -109,7 +113,8 @@ defaults to no, does nothing without a terminal unless `--yes` is given.
 - `2` — usage error (an unknown flag, an empty or malformed name in `--modules` or one the release
   does not have, a missing `--scope`, a bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
 
-`kulman setup` exits with a module's own status when that module's setup fails.
+`kulman setup` exits with a module's own status when that module's setup fails (1 if it was
+killed by a signal), after the line `kulman: <module> setup failed (exit N)` (or `(signal N)`).
 
 ## Environment
 

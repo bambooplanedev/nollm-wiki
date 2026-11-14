@@ -3,7 +3,7 @@
 use std::io::{self, BufRead, Write};
 
 /// Shows `items` (name, summary, default) as a numbered list and reads one line of numbers or
-/// names, separated by commas or spaces. An empty line or end of input takes the defaults; an
+/// names (any case), separated by commas or spaces. An empty line or end of input takes the defaults; an
 /// unknown entry asks again. With `one`, exactly one item must be chosen (an empty line takes
 /// the default only when there is exactly one); at end of input with no single default, none.
 pub fn choose(
@@ -43,7 +43,7 @@ pub fn choose(
                 let number = entry.parse::<usize>().ok();
                 let number = number.filter(|n| (1..=items.len()).contains(n));
                 (number.map(|n| n - 1))
-                    .or_else(|| items.iter().position(|it| it.0 == entry))
+                    .or_else(|| items.iter().position(|it| it.0.eq_ignore_ascii_case(entry)))
                     .ok_or(entry)
             })
             .collect();
@@ -127,6 +127,8 @@ mod tests {
         assert_eq!(pick("  2 extra 2\n", false).0, ["plaz", "extra"]);
         assert_eq!(pick("local\n", true).0, ["local"]);
         assert_eq!(pick("1\n", true).0, ["repo"]);
+        assert_eq!(pick("Kalka, PLAZ\n", false).0, ["kalka", "plaz"]);
+        assert_eq!(pick("Local\n", true).0, ["local"]);
     }
 
     #[test]
