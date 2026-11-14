@@ -694,11 +694,17 @@ fn remove_without_a_terminal_on_a_missing_home_is_usage_and_creates_nothing() {
     let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
     let home = t.path().join("home");
     let mut cmd = kulman(&home, &base);
-    let before = snapshot(t.path());
+    // All but the user's home, where an emulator (Rosetta) may keep a cache of its own.
+    let tree = || {
+        let mut s = snapshot(t.path());
+        s.retain(|p, _| !p.starts_with("user-home"));
+        s
+    };
+    let before = tree();
     let out = cmd.arg("remove").output().unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert!(!home.exists());
-    assert_eq!(snapshot(t.path()), before);
+    assert_eq!(tree(), before);
 }
 
 #[test]
