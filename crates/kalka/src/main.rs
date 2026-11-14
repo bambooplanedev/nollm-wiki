@@ -1,5 +1,10 @@
 //! CLI entry point for `kalka`: compile, search, neighbors, page, lint, serve, hint, setup, and generate subcommands.
 
+// musl's own malloc serialises threads; this also replaces it for the C code of the grammars.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use kalka::generator::generate_corpus;

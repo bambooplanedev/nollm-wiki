@@ -10,11 +10,7 @@ use assert_cmd::Command;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-pub const TARGETS: [&str; 3] = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-];
+pub const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-unknown-linux-musl"];
 
 /// The bytes the helper packs as kulman's own binary.
 pub const KULMAN_BYTES: &[u8] = b"#!/bin/sh\necho kulman\n";

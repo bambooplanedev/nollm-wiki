@@ -202,8 +202,7 @@ fn target() -> Result<&'static str> {
     use std::env::consts::{ARCH, OS};
     Ok(match (OS, ARCH) {
         ("macos", "aarch64") => "aarch64-apple-darwin",
-        ("macos", "x86_64") => "x86_64-apple-darwin",
-        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("linux", "x86_64") => "x86_64-unknown-linux-musl",
         _ => bail!("no build for {OS}/{ARCH}"),
     })
 }
