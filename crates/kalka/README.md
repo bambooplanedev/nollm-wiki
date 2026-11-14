@@ -5,7 +5,7 @@ install it, the CLI and the MCP server are in the [repository README](../../READ
 
 ## Build
 
-    cargo build --release      # target/release/kalka
+    cargo build --release      # ../../target/release/kalka, at the workspace root
     cargo test
 
 ## Library

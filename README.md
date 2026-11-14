@@ -205,9 +205,7 @@ names them. Codex is set up only when named: its MCP config is global.
   `claude mcp add-json kalka … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included. A file git already tracks is skipped; use
   `--scope repo` for it.
-- Either scope creates `.agents/memory/`. When Claude Code is set up, the
-  `.claude/skills/kalka-navigation` and `.claude/skills/wiki-memory` skills an earlier release wrote
-  are removed if untouched (in local scope, only if git does not track them).
+- Either scope creates `.agents/memory/`.
 - Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
   `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
   directory it runs in, so the one entry serves every project.
@@ -216,9 +214,7 @@ names them. Codex is set up only when named: its MCP config is global.
   a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
-  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`. Up to 0.4 the hook
-  was opt-in with `--hook`, which is gone: rerunning setup after an upgrade adds the hook (in a
-  committed `.claude/settings.json` with `--scope repo`), unless `--no-hook` is given.
+  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's server only when it is
   the one setup added. Ignore lines, `.kulman/` and memory notes stay.
 
@@ -388,8 +384,9 @@ turn. `lint` is exposed only when `--tools` names it: it serves the person keepi
 each exposed tool costs schema tokens on every request. `neighbors` is opt-in too: agents almost
 never called it (16 of 11,056 calls in the measurement rig, 0 of 37 on the bench) and its schema
 took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors,callers` brings it
-back. After upgrading, rerun `kalka setup` so that a committed AGENTS.md block or skill stops naming
-it; `kalka setup` leaves a copy you edited by hand alone, so delete its `neighbors` sentence yourself.
+back. A committed AGENTS.md block or skill that still names it is not updated by `kalka setup`, which
+leaves a block that differs from its own alone and reports it: delete the block or the skill file,
+then run setup again.
 
 **Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
 `wiki://llms.txt`.
@@ -787,8 +784,8 @@ kind, add groups in Graph view > Groups with the queries `tag:#wiki/code`, `tag:
 
 A note's or doc's own links are rewritten so Obsidian finds their target (code bodies are fenced
 and left alone): `[[Matching Engine]]` becomes `[[matching_engine]]` when that page exists, and a
-relative Markdown link to an indexed page, such as `[readme](../../README.md)`, becomes
-`[readme](nollm_wiki.md)`. Links to anything else stay as written and show up as unresolved nodes
+relative Markdown link to an indexed page, such as `[guide](../docs/guide.md)`, becomes
+`[guide](guide.md)`. Links to anything else stay as written and show up as unresolved nodes
 (in this repository, `LICENSE`). A `#` that Obsidian would read as a tag, like `#76→`, is
 escaped as `\#`.
 
