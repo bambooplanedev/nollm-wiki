@@ -1216,21 +1216,31 @@ fn process_folders_and_vendored_code_are_skipped_unless_no_ignore() {
     }
 }
 
-#[test]
-fn compile_leaves_the_map_folder_alone() {
+/// A map page under `<out_dir>/map/` stays byte-identical, and no kalka
+/// artifact names it, through a first compile and a second one that prunes the
+/// stale page of a removed source file.
+fn map_folder_survives(out_dir: &str) {
     let dir = tempdir().unwrap();
     let project = dir.path();
-    let out = project.join(".kulman");
-    let page = ".kulman/map/src/a.rs.md";
+    let out = project.join(out_dir);
+    let page = format!("{out_dir}/map/src/a.rs.md");
     let map = "---\ntitle: a.rs\ntags: [\"plaz\"]\nkind: map\nsource: src/a.rs\n---\nA map page.\n";
     write(project, "src/a.rs", "pub fn f() {}\n");
-    write(project, page, map);
+    write(project, "src/b.rs", "pub fn g() {}\n");
+    write(project, &page, map);
 
-    for _ in 0..2 {
+    for (round, pages) in [(0, 2), (1, 1)] {
+        if round == 1 {
+            fs::remove_file(project.join("src/b.rs")).unwrap();
+        }
         let r = compile(project, &out, &CompileOptions::default()).unwrap();
-        assert_eq!(r.pages_total, 1, "only src/a.rs has a page");
-        assert_eq!(fs::read_to_string(project.join(page)).unwrap(), map);
+        assert_eq!(
+            r.pages_total, pages,
+            "round {round}: only src files have pages"
+        );
         assert!(out.join("a.md").exists());
+        assert_eq!(out.join("b.md").exists(), round == 0, "round {round}");
+        assert_eq!(fs::read_to_string(project.join(&page)).unwrap(), map);
     }
     for name in ["index.json", "llms.txt"] {
         let text = fs::read_to_string(out.join(name)).unwrap();
@@ -1239,4 +1249,14 @@ fn compile_leaves_the_map_folder_alone() {
             "{name}"
         );
     }
+}
+
+#[test]
+fn compile_leaves_the_map_folder_alone() {
+    map_folder_survives(".kulman");
+}
+
+#[test]
+fn compile_leaves_the_map_folder_of_a_visible_output_folder_alone() {
+    map_folder_survives("out");
 }
