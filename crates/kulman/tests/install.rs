@@ -40,6 +40,7 @@ fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) ->
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
+    assert_eq!(stderr(&out).lines().last(), Some("nothing changed"));
     assert_eq!(snapshot(t.path()), before);
     stderr(&out)
 }
@@ -154,8 +155,13 @@ fn install_checksum_mismatch_changes_nothing() {
 fn install_missing_archive_changes_nothing() {
     plaz_fails_and_changes_nothing(
         |r| fs::remove_file(archive_path(r, "0.7.0", "plaz")).unwrap(),
-        "kulman: plaz: download failed",
+        "kulman: plaz: download failed: file://",
     );
+    let err = plaz_fails_and_changes_nothing(
+        |r| fs::remove_file(archive_path(r, "0.7.0", "plaz")).unwrap(),
+        "/download/v0.7.0/plaz-v0.7.0.tar.gz: ",
+    );
+    assert_eq!(err.lines().count(), 2, "{err}");
 }
 
 #[test]
@@ -301,7 +307,7 @@ fn install_bounds_what_it_downloads() {
             .ends_with("/manifest.json: larger than 1 MiB"),
         "{err}"
     );
-    assert_eq!(err.lines().count(), 1, "{err}");
+    assert_eq!(err.lines().count(), 2, "{err}");
 }
 
 #[test]
@@ -507,6 +513,17 @@ fn install_version_must_match_the_manifest() {
         "{}",
         stderr(&out)
     );
+    assert!(!home.exists());
+
+    // A release that does not exist: where it was looked for.
+    let out = kulman(&home, &base)
+        .args(["install", "--version", "0.6.12"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let expect =
+        format!("kulman: manifest.json: download failed: {base}/download/v0.6.12/manifest.json: ");
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!home.exists());
 
     let out = kulman(&home, &base)

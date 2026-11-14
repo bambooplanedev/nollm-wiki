@@ -5,6 +5,7 @@ use std::fs::{self, File};
 use std::io::{self, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -217,7 +218,7 @@ pub fn stage(
         let archive = manifest.archive(name, target)?;
         let file = tmp.join(format!("{name}.tar.gz"));
         release::fetch_to(base, &manifest.version, &archive.file, &file)
-            .map_err(|e| anyhow::anyhow!("{name}: download failed: {e}"))?;
+            .with_context(|| format!("{name}: download failed"))?;
         if !release::sha256(&file)?.eq_ignore_ascii_case(&archive.sha256) {
             bail!("{name}: checksum mismatch");
         }
@@ -232,6 +233,9 @@ pub fn stage(
     Ok(staged)
 }
 
+/// Set once `commit` starts changing files: a run that fails before that changed nothing.
+pub static COMMITTING: AtomicBool = AtomicBool::new(false);
+
 /// Renames each staged binary (already synced) into `bin/` in the given order (the caller
 /// puts kulman last), then writes `manifest.json`, then `state.json`, each through a synced
 /// temp file. Removing the temp dir afterwards is best effort: the install is done.
@@ -241,6 +245,7 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     let records = ["manifest.json", "state.json"].map(|n| home.path.join(n));
     check_files(&dests)?;
     check_files(&records)?;
+    COMMITTING.store(true, Ordering::Relaxed);
     fs::create_dir_all(&bin).with_context(|| bin.display().to_string())?;
     for (s, dest) in staged.iter().zip(&dests) {
         fs::rename(&s.path, dest).with_context(|| dest.display().to_string())?;

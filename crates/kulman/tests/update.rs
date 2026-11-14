@@ -94,15 +94,23 @@ fn status_survives_an_unreachable_release() {
     let (t, _, home) = installed();
     let missing = format!("file://{}", t.path().join("nowhere").display());
     let before = snapshot(t.path());
-    for base in [missing.as_str(), "http://example.invalid/releases"] {
+    for (base, start) in [
+        (
+            missing.as_str(),
+            format!("could not check for a newer release ({missing}: "),
+        ),
+        (
+            "http://example.invalid/releases",
+            "could not check for a newer release (KULMAN_RELEASE_URL must start with ".to_string(),
+        ),
+    ] {
         let out = kulman(&home, base).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let text = lines(&out);
         assert_eq!(text.len(), 4, "{text:?}");
-        assert!(
-            text[3].starts_with("could not check for a newer release: "),
-            "{text:?}"
-        );
+        assert!(text[3].starts_with(&start), "{text:?}");
+        assert!(text[3].ends_with(')'), "{text:?}");
+        assert!(!text[3].contains("download failed"), "{text:?}");
     }
     assert_eq!(snapshot(t.path()), before);
 }
@@ -154,6 +162,7 @@ fn update_with_one_bad_archive_changes_nothing() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
+    assert_eq!(stderr(&out).lines().last(), Some("nothing changed"));
     assert_eq!(snapshot(t.path()), before);
 
     // A module the latest release no longer holds.

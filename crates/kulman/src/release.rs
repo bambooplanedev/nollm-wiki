@@ -174,27 +174,55 @@ fn local_path(url: &str) -> Option<PathBuf> {
 const MANIFEST_LIMIT: u64 = 1 << 20;
 const ARCHIVE_LIMIT: u64 = 256 << 20;
 
-/// The longest a manifest fetch may take: `kulman` with no command must not hang on it.
-const MANIFEST_TIME: Duration = Duration::from_secs(20);
+/// How long a manifest fetch may take to connect, and in all.
+#[derive(Clone, Copy)]
+pub struct Wait {
+    pub connect: Duration,
+    pub whole: Duration,
+}
 
-/// The HTTPS client: 15 s to connect, 60 s for any one read, `whole` for the whole request
+/// For `install` and `update` (an archive: the same to connect, no limit in all).
+pub const WAIT: Wait = Wait {
+    connect: Duration::from_secs(15),
+    whole: Duration::from_secs(20),
+};
+
+/// For `kulman` with no command, which must not hang on a release host that does not answer.
+pub const STATUS_WAIT: Wait = Wait {
+    connect: Duration::from_secs(5),
+    whole: Duration::from_secs(8),
+};
+
+/// The HTTPS client: `connect` to connect, 60 s for any one read, `whole` for the whole request
 /// (none for an archive), redirects followed but never to plain `http://`.
-fn agent(whole: Option<Duration>) -> ureq::Agent {
+fn agent(connect: Duration, whole: Option<Duration>) -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
         .timeout_global(whole)
-        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_connect(Some(connect))
         .timeout_per_read(Some(Duration::from_secs(60)))
         .build()
         .into()
 }
 
 /// Copies `url` into `out`, from disk for `file://`, failing once more than `limit` bytes
-/// arrive or, over https, once `whole` has passed.
-fn download(url: &str, out: &mut impl Write, limit: u64, whole: Option<Duration>) -> Result<()> {
+/// arrive or, over https, past the time limits.
+fn download(
+    url: &str,
+    out: &mut impl Write,
+    limit: u64,
+    connect: Duration,
+    whole: Option<Duration>,
+) -> Result<()> {
     let reader: Box<dyn Read> = match local_path(url) {
         Some(path) => Box::new(File::open(path)?),
-        None => Box::new(agent(whole).get(url).call()?.into_body().into_reader()),
+        None => Box::new(
+            agent(connect, whole)
+                .get(url)
+                .call()?
+                .into_body()
+                .into_reader(),
+        ),
     };
     if io::copy(&mut reader.take(limit + 1), out)? > limit {
         bail!("larger than {} MiB", limit >> 20);
@@ -203,14 +231,20 @@ fn download(url: &str, out: &mut impl Write, limit: u64, whole: Option<Duration>
 }
 
 /// The manifest of `version`, or of the latest release; with its bytes as read.
-pub fn manifest(base: &str, version: Option<&str>) -> Result<(Manifest, Vec<u8>)> {
+pub fn manifest(base: &str, version: Option<&str>, wait: Wait) -> Result<(Manifest, Vec<u8>)> {
     let url = match version {
         Some(v) => format!("{base}/download/v{v}/manifest.json"),
         None => format!("{base}/latest/download/manifest.json"),
     };
     let mut bytes = Vec::new();
-    download(&url, &mut bytes, MANIFEST_LIMIT, Some(MANIFEST_TIME))
-        .map_err(|e| anyhow!("manifest.json: download failed: {url}: {e}"))?;
+    download(
+        &url,
+        &mut bytes,
+        MANIFEST_LIMIT,
+        wait.connect,
+        Some(wait.whole),
+    )
+    .with_context(|| format!("manifest.json: download failed: {url}"))?;
     let m = Manifest::parse(&bytes)?;
     if let Some(v) = version {
         if m.version != v {
@@ -225,11 +259,11 @@ pub fn fetch_to(base: &str, version: &str, file: &str, dest: &Path) -> Result<()
     let url = format!("{base}/download/v{version}/{file}");
     let result = File::create(dest)
         .map_err(anyhow::Error::from)
-        .and_then(|mut out| download(&url, &mut out, ARCHIVE_LIMIT, None));
+        .and_then(|mut out| download(&url, &mut out, ARCHIVE_LIMIT, WAIT.connect, None));
     if result.is_err() {
         let _ = fs::remove_file(dest);
     }
-    result
+    result.context(url)
 }
 
 /// The SHA-256 of a file, as lowercase hex.
@@ -308,10 +342,23 @@ mod tests {
 
     #[test]
     fn the_client_refuses_plain_http() {
-        assert!(agent(None).config().https_only());
-        assert_eq!(agent(None).config().timeouts().global, None);
-        let whole = Some(MANIFEST_TIME);
-        assert_eq!(agent(whole).config().timeouts().global, whole);
+        let connect = Duration::from_secs(15);
+        assert!(agent(connect, None).config().https_only());
+        assert_eq!(agent(connect, None).config().timeouts().global, None);
+        assert_eq!(
+            agent(connect, None).config().timeouts().connect,
+            Some(connect)
+        );
+    }
+
+    #[test]
+    fn the_status_check_waits_less_than_install() {
+        let secs = Duration::from_secs;
+        assert_eq!((WAIT.connect, WAIT.whole), (secs(15), secs(20)));
+        assert_eq!((STATUS_WAIT.connect, STATUS_WAIT.whole), (secs(5), secs(8)));
+        let agent = agent(STATUS_WAIT.connect, Some(STATUS_WAIT.whole));
+        assert_eq!(agent.config().timeouts().connect, Some(secs(5)));
+        assert_eq!(agent.config().timeouts().global, Some(secs(8)));
     }
 
     #[test]
@@ -331,8 +378,8 @@ mod tests {
         let file = dir.path().join("f");
         fs::write(&file, [0u8; 11]).unwrap();
         let url = format!("file://{}", file.display());
-        assert!(download(&url, &mut Vec::new(), 11, None).is_ok());
-        let err = download(&url, &mut Vec::new(), 10, None).unwrap_err();
+        assert!(download(&url, &mut Vec::new(), 11, WAIT.connect, None).is_ok());
+        let err = download(&url, &mut Vec::new(), 10, WAIT.connect, None).unwrap_err();
         assert!(err.to_string().starts_with("larger than"), "{err}");
     }
 }

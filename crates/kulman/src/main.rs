@@ -110,6 +110,7 @@ impl std::error::Error for Usage {}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let changes = matches!(cli.command, Some(Cmd::Install { .. } | Cmd::Update { .. }));
     let result = match cli.command {
         None => status(),
         Some(Cmd::Install {
@@ -128,6 +129,9 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("kulman: {e:#}");
+            if changes && !store::COMMITTING.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("nothing changed");
+            }
             ExitCode::from(if e.is::<Usage>() { 2 } else { 1 })
         }
     }
@@ -247,17 +251,17 @@ fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Res
     };
     let (manifest, raw, newer) = match installed {
         None => {
-            let (manifest, raw) = release::manifest(&base, version)?;
+            let (manifest, raw) = release::manifest(&base, version, release::WAIT)?;
             (manifest, raw, None)
         }
-        Some(v) => match release::manifest(&base, None) {
+        Some(v) => match release::manifest(&base, None, release::WAIT) {
             // Not newer: used as it is (an older one is refused under the lock).
             Ok((m, raw)) if release::version_key(&m.version) <= release::version_key(&v) => {
                 (m, raw, None)
             }
             latest => {
                 let newer = latest.ok().map(|(m, _)| m.version);
-                let (manifest, raw) = release::manifest(&base, Some(&v))?;
+                let (manifest, raw) = release::manifest(&base, Some(&v), release::WAIT)?;
                 (manifest, raw, newer)
             }
         },
@@ -366,13 +370,18 @@ fn status() -> Result<()> {
             println!("{name}  (missing: run kulman update)");
         }
     }
-    match release_base().and_then(|base| release::manifest(&base, None)) {
+    // Said with the base and the first cause: the URL under the base adds nothing.
+    let latest = release_base().and_then(|base| {
+        release::manifest(&base, None, release::STATUS_WAIT)
+            .map_err(|e| anyhow::anyhow!("{base}: {}", e.root_cause()))
+    });
+    match latest {
         Ok((latest, _)) => {
             if release::version_key(&latest.version) > release::version_key(&state.version) {
                 println!("newer release: {} (kulman update)", latest.version);
             }
         }
-        Err(e) => println!("could not check for a newer release: {e:#}"),
+        Err(e) => println!("could not check for a newer release ({e:#})"),
     }
     Ok(())
 }
@@ -391,7 +400,7 @@ fn update(ask: bool) -> Result<()> {
     if !is_installed(&home_path)? {
         bail!("nothing installed; run kulman install");
     }
-    let (manifest, raw) = release::manifest(&base, None)?;
+    let (manifest, raw) = release::manifest(&base, None, release::WAIT)?;
     if ask {
         // Asked only when there is a newer release; the answer is checked again under the lock.
         if let Some(state) = State::load(&home_path)? {

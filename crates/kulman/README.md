@@ -50,7 +50,8 @@ symlink or not a directory is refused. No shell profile is edited.
 
 With no command: the installed version and modules (a module whose binary is missing is marked
 `(missing: run kulman update)`), and whether a newer release exists. It only reads: nothing is
-created.
+created. The release host gets 5 s to connect and 8 s in all; past that, or on any error, the
+last line says what could not be reached, and why.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
@@ -98,7 +99,8 @@ defaults to no, does nothing without a terminal unless `--yes` is given.
 ## Exit codes
 
 - `0` — done, or nothing to do.
-- `1` — failed; the message says why.
+- `1` — failed; the message says why (a download, what and from where). A failed `install` or
+  `update` that changed nothing ends with the line `nothing changed`.
 - `2` — usage error (an unknown flag, an empty or malformed name in `--modules` or one the release
   does not have, a missing `--scope`, a bad `KULMAN_RELEASE_URL`, `remove` without a terminal and without `--yes`).
 
