@@ -1,0 +1,465 @@
+mod common;
+
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+
+use common::{
+    archive_path, edit_manifest, kulman, pack, read_manifest, release, replace_archive, set_sha256,
+    snapshot, version_dir, KULMAN_BYTES,
+};
+use serde_json::{json, Value};
+
+const KALKA: &[u8] = b"#!/bin/sh\necho kalka\n";
+const PLAZ: &[u8] = b"#!/bin/sh\necho plaz\n";
+
+/// A temp root holding `release/` (version 0.7.0, kalka and plaz) and the path `home`.
+fn setup() -> (tempfile::TempDir, String) {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("kalka", KALKA), ("plaz", PLAZ)],
+    );
+    (t, base)
+}
+
+fn stderr(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+fn stdout(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn state(home: &Path) -> Value {
+    serde_json::from_slice(&fs::read(home.join("state.json")).unwrap()).unwrap()
+}
+
+fn assert_binary(home: &Path, name: &str, bytes: &[u8]) {
+    let path = home.join("bin").join(name);
+    let meta = fs::symlink_metadata(&path).unwrap();
+    assert!(meta.file_type().is_file(), "{name} is not a regular file");
+    assert_eq!(meta.permissions().mode() & 0o7777, 0o755, "{name} mode");
+    assert_eq!(fs::read(&path).unwrap(), bytes, "{name} bytes");
+}
+
+fn no_tmp_left(home: &Path) {
+    for entry in fs::read_dir(home).unwrap() {
+        let name = entry.unwrap().file_name();
+        assert!(
+            !name.to_string_lossy().starts_with(".tmp-"),
+            "{} left",
+            name.display()
+        );
+    }
+}
+
+/// Installs kalka, then runs `install --modules plaz` after `break_it`; asserts exit 1, the
+/// stderr fragment, and that nothing under the temp root (home included) changed.
+fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    break_it(&t.path().join("release"));
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "plaz"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains(expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn install_defaults_installs_every_default_module() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kalka", KALKA);
+    assert_binary(&home, "plaz", PLAZ);
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+    assert_eq!(
+        fs::read(home.join("manifest.json")).unwrap(),
+        fs::read(version_dir(&t.path().join("release"), "0.7.0").join("manifest.json")).unwrap()
+    );
+    let text = stdout(&out);
+    for line in [
+        "installed kalka 0.7.0",
+        "installed plaz 0.7.0",
+        "installed kulman 0.7.0",
+    ] {
+        assert!(text.lines().any(|l| l == line), "{text}");
+    }
+    no_tmp_left(&home);
+}
+
+#[test]
+fn install_modules_takes_only_the_named() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka", "--yes"])
+        .assert()
+        .success();
+    assert_binary(&home, "kalka", KALKA);
+    assert!(!home.join("bin/plaz").exists());
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka"]})
+    );
+
+    // The same version again adds the missing module; a stale temp entry is cleared first.
+    fs::create_dir(home.join(".tmp-stale")).unwrap();
+    fs::write(home.join(".tmp-stale/junk"), "x").unwrap();
+    kulman(&home, &base)
+        .args(["install", "--modules", "plaz"])
+        .assert()
+        .success();
+    assert_binary(&home, "plaz", PLAZ);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+    no_tmp_left(&home);
+}
+
+#[test]
+fn install_a_module_whose_default_is_false_is_left_out() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("kalka", KALKA), ("plaz", PLAZ), ("extra", b"extra")],
+    );
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    assert!(!home.join("bin/extra").exists());
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+}
+
+#[test]
+fn install_unknown_module_is_usage() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "kalka,nope"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("nope") && err.contains("kalka, plaz"), "{err}");
+    assert!(
+        !err.contains("kulman,") && !err.contains(", kulman"),
+        "{err}"
+    );
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_checksum_mismatch_changes_nothing() {
+    plaz_fails_and_changes_nothing(
+        |r| set_sha256(r, "0.7.0", "plaz", &"0".repeat(64)),
+        "kulman: plaz: checksum mismatch",
+    );
+}
+
+#[test]
+fn install_missing_archive_changes_nothing() {
+    plaz_fails_and_changes_nothing(
+        |r| fs::remove_file(archive_path(r, "0.7.0", "plaz")).unwrap(),
+        "kulman: plaz: download failed",
+    );
+}
+
+#[test]
+fn install_broken_archive_changes_nothing() {
+    plaz_fails_and_changes_nothing(
+        |r| replace_archive(r, "0.7.0", "plaz", b"this is not a tar.gz"),
+        "kulman: plaz: cannot unpack: ",
+    );
+}
+
+/// Packs `build`'s contents (member `plaz` among them) as plaz's archive.
+fn plaz_archive(release: &Path, members: &[&str], build: impl FnOnce(&Path)) {
+    let stage = tempfile::tempdir().unwrap();
+    build(stage.path());
+    let out = stage.path().join("out.tar.gz");
+    pack(stage.path(), members, &out);
+    replace_archive(release, "0.7.0", "plaz", &fs::read(&out).unwrap());
+}
+
+#[test]
+fn install_refuses_a_symlink_member() {
+    plaz_fails_and_changes_nothing(
+        |r| {
+            plaz_archive(r, &["plaz"], |d| {
+                std::os::unix::fs::symlink("../../outside", d.join("plaz")).unwrap();
+            });
+        },
+        "kulman: plaz: archive holds no regular file plaz",
+    );
+}
+
+#[test]
+fn install_refuses_a_directory_member() {
+    plaz_fails_and_changes_nothing(
+        |r| {
+            plaz_archive(r, &["plaz"], |d| {
+                fs::create_dir(d.join("plaz")).unwrap();
+                fs::write(d.join("plaz/inner"), "x").unwrap();
+            });
+        },
+        "kulman: plaz: archive holds no regular file plaz",
+    );
+}
+
+#[test]
+fn install_refuses_a_hard_link_member() {
+    // GNU tar cannot link to a member it did not extract; whatever bsdtar makes of it, a file
+    // with a second link is not installed.
+    plaz_fails_and_changes_nothing(
+        |r| {
+            plaz_archive(r, &["other", "plaz"], |d| {
+                fs::write(d.join("other"), PLAZ).unwrap();
+                fs::hard_link(d.join("other"), d.join("plaz")).unwrap();
+            });
+        },
+        "kulman: plaz: ",
+    );
+}
+
+#[test]
+fn install_refuses_a_path_like_name() {
+    plaz_fails_and_changes_nothing(
+        |r| {
+            edit_manifest(r, "0.7.0", |m| {
+                m["modules"][1]["name"] = json!("../x");
+            });
+        },
+        "kulman: bad name in manifest: ../x",
+    );
+    plaz_fails_and_changes_nothing(
+        |r| {
+            edit_manifest(r, "0.7.0", |m| {
+                for a in m["modules"][1]["archives"]
+                    .as_object_mut()
+                    .unwrap()
+                    .values_mut()
+                {
+                    a["file"] = json!("../plaz.tar.gz");
+                }
+            });
+        },
+        "kulman: bad name in manifest: ../plaz.tar.gz",
+    );
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "../x"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("kulman: bad name in --modules: ../x"));
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_refuses_a_malformed_state() {
+    for (bad, expect) in [
+        (&b"{not json"[..], "state.json"),
+        (
+            &br#"{"version":"0.7.0","modules":["../../victim"]}"#[..],
+            "kulman: bad name in state.json: ../../victim",
+        ),
+    ] {
+        let (t, base) = setup();
+        let home = t.path().join("home");
+        kulman(&home, &base)
+            .args(["install", "--modules", "kalka"])
+            .assert()
+            .success();
+        fs::write(home.join("state.json"), bad).unwrap();
+        let before = snapshot(t.path());
+        let out = kulman(&home, &base)
+            .args(["install", "--modules", "plaz"])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        assert!(stderr(&out).contains(expect), "{}", stderr(&out));
+        assert_eq!(snapshot(t.path()), before);
+    }
+}
+
+#[test]
+fn install_at_an_older_version_says_update() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    let newer = release(&t.path().join("newer"), "0.8.0", &[("kalka", KALKA)]);
+    let before = snapshot(&home);
+    let out = kulman(&home, &newer).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("kulman: version 0.7.0 is installed; run kulman update"));
+    assert_eq!(snapshot(&home), before);
+}
+
+#[test]
+fn install_at_a_newer_version_says_remove() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let newer = release(&t.path().join("newer"), "0.10.0", &[("kalka", KALKA)]);
+    kulman(&home, &newer).arg("install").assert().success();
+    let before = snapshot(&home);
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains(
+        "kulman: version 0.10.0 is installed, newer than 0.7.0; \
+         run kulman remove, then kulman install --version 0.7.0"
+    ));
+    assert_eq!(snapshot(&home), before);
+}
+
+#[test]
+fn install_version_must_match_the_manifest() {
+    let (t, base) = setup();
+    let rel = t.path().join("release");
+    let home = t.path().join("home");
+    // download/v0.6.0/manifest.json that states 0.7.0.
+    let v6 = version_dir(&rel, "0.6.0");
+    fs::create_dir_all(&v6).unwrap();
+    fs::write(
+        v6.join("manifest.json"),
+        serde_json::to_vec(&read_manifest(&rel, "0.7.0")).unwrap(),
+    )
+    .unwrap();
+    let out = kulman(&home, &base)
+        .args(["install", "--version", "0.6.0"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("0.6.0"), "{}", stderr(&out));
+    assert!(!home.exists());
+
+    let out = kulman(&home, &base)
+        .args(["install", "--version", "v0.7"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+
+    // The latest manifest is not read with --version: break it, install still works.
+    fs::write(rel.join("latest/download/manifest.json"), "broken").unwrap();
+    kulman(&home, &base)
+        .args(["install", "--version", "0.7.0"])
+        .assert()
+        .success();
+    assert_eq!(state(&home)["version"], "0.7.0");
+}
+
+#[test]
+fn install_without_home_says_so() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    for kulman_home in [None, Some("")] {
+        let mut cmd = kulman(&home, &base);
+        cmd.env_remove("HOME").env_remove("KULMAN_HOME");
+        if let Some(v) = kulman_home {
+            cmd.env("KULMAN_HOME", v);
+        }
+        let out = cmd.arg("install").output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        assert!(stderr(&out).contains("kulman: set HOME or KULMAN_HOME"));
+    }
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_falls_back_to_dot_kulman_in_home() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let user = t.path().join("user-home");
+    kulman(&home, &base)
+        .env_remove("KULMAN_HOME")
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    assert_binary(&user.join(".kulman"), "kalka", KALKA);
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_rejects_a_plain_http_base() {
+    let t = tempfile::tempdir().unwrap();
+    let home = t.path().join("home");
+    for base in [
+        "http://example.invalid/releases",
+        "file://host/x",
+        "ftp://x",
+    ] {
+        let out = kulman(&home, base).arg("install").output().unwrap();
+        assert_eq!(out.status.code(), Some(2), "{base}");
+    }
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_without_tar_says_so() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let empty = t.path().join("empty-path");
+    fs::create_dir(&empty).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", &empty)
+        .arg("install")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("kulman: tar is required"));
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_says_how_to_add_to_path() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let bin = home.join("bin");
+    let hint = format!("add to PATH: {}", bin.display());
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(stdout(&out).lines().any(|l| l == hint), "{}", stdout(&out));
+
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", path)
+        .arg("install")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("add to PATH"), "{}", stdout(&out));
+}
+
+#[test]
+fn a_failed_first_install_leaves_no_home() {
+    let (t, base) = setup();
+    set_sha256(&t.path().join("release"), "0.7.0", "plaz", &"0".repeat(64));
+    let home = t.path().join("home");
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
+    assert!(!home.exists());
+}
