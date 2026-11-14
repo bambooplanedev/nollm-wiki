@@ -265,8 +265,13 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
         bail!("nothing installed; run kulman install");
     };
     let (have, latest) = (&state.version, &manifest.version);
+    // The installed modules, plus what they require in the latest release.
+    for name in &state.modules {
+        manifest.archive(name, target)?;
+    }
+    let modules = choose(manifest, Some(state.modules.clone()))?;
     let bin = home.path.join("bin");
-    let mut names = state.modules.clone();
+    let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
     match release::version_key(have).cmp(&release::version_key(latest)) {
         std::cmp::Ordering::Greater => {
@@ -282,7 +287,7 @@ fn renew(home: &Home, base: &str, manifest: &Manifest, raw: &[u8], target: &str)
     let staged = store::stage(home, base, manifest, target, &names)?;
     let state = State {
         version: latest.clone(),
-        modules: state.modules,
+        modules: modules.into_iter().collect(),
     };
     store::commit(home, &staged, raw, &state)?;
     for s in &staged {
@@ -300,7 +305,9 @@ fn remove(names: Option<Vec<String>>) -> Result<()> {
         }
     }
     let home_path = store::home_path()?;
-    if !is_installed(&home_path)? {
+    // Without state.json, a home with kulman's `.lock` is left by a remove killed before its
+    // last step: it is finished below. Anything else is not opened, so nothing is created.
+    if !is_installed(&home_path)? && !home_path.join(".lock").try_exists()? {
         println!("nothing installed");
         return Ok(());
     }
@@ -317,11 +324,12 @@ fn remove(names: Option<Vec<String>>) -> Result<()> {
 /// first file is deleted.
 fn uninstall(home: &Home, names: Option<Vec<String>>) -> Result<()> {
     let Some(mut state) = State::load(&home.path)? else {
+        store::remove_all(home, &[])?;
         println!("nothing installed");
         return Ok(());
     };
     let Some(mut names) = names else {
-        store::remove_all(home, &state)?;
+        store::remove_all(home, &state.modules)?;
         for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
             println!("removed {name}");
         }

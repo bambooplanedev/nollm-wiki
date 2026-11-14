@@ -76,7 +76,7 @@ impl Home {
                 created,
                 _lock: lock,
             };
-            if let Err(e) = home.clean_tmp() {
+            if let Err(e) = home.check_bin().and_then(|()| home.clean_tmp()) {
                 home.abandon();
                 return Err(e);
             }
@@ -86,6 +86,16 @@ impl Home {
             "cannot lock {}: it was removed while waiting",
             lock_path.display()
         )
+    }
+
+    /// `<home>/bin`, if present, is a real directory: never a symlink kulman would write or
+    /// delete through. (Home itself may be a symlink.)
+    fn check_bin(&self) -> Result<()> {
+        let bin = self.path.join("bin");
+        match fs::symlink_metadata(&bin) {
+            Ok(m) if !m.is_dir() => bail!("{} is not a directory kulman can use", bin.display()),
+            _ => Ok(()),
+        }
     }
 
     /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run.
@@ -156,8 +166,14 @@ impl State {
         if !release::is_version(&state.version) {
             bail!("state.json is malformed: bad version {:?}", state.version);
         }
-        for name in &state.modules {
+        for (i, name) in state.modules.iter().enumerate() {
             release::check_name(name, "state.json")?;
+            if name == "kulman" {
+                bail!("bad name in state.json: kulman");
+            }
+            if state.modules[..i].contains(name) {
+                bail!("state.json is malformed: {name} is listed twice");
+            }
         }
         Ok(Some(state))
     }
@@ -233,28 +249,45 @@ fn write(home: &Home, name: &str, bytes: &[u8]) -> Result<()> {
 /// Deletes `bin/<name>` for each of `names`, then writes `state` (a crash in between leaves a
 /// listed binary missing, which `kulman update` puts back).
 pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()> {
-    for name in names {
-        delete(&home.path.join("bin").join(name))?;
+    let bin = home.path.join("bin");
+    let paths: Vec<PathBuf> = names.iter().map(|n| bin.join(n)).collect();
+    check_files(&paths)?;
+    for path in &paths {
+        delete(path)?;
     }
     write(home, "state.json", &serde_json::to_vec(state)?)?;
     let _ = fs::remove_dir_all(home.tmp());
     Ok(())
 }
 
-/// Deletes the binaries `state` lists and `bin/kulman`, then `manifest.json`, `.lock` and
-/// `state.json` last; then `bin/` and home if empty. Nothing else is touched: any other file
-/// keeps its directory.
-pub fn remove_all(home: &Home, state: &State) -> Result<()> {
+/// Deletes `bin/<module>` for each of `modules` and `bin/kulman`, then `manifest.json`,
+/// `state.json` and `.lock` last (a run that arrives after the lock is gone finds no state);
+/// then `bin/` and home if empty. Nothing else is touched: any other file keeps its directory.
+pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
     let bin = home.path.join("bin");
-    for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
-        delete(&bin.join(name))?;
+    let mut paths: Vec<PathBuf> = modules.iter().map(|n| bin.join(n)).collect();
+    paths.push(bin.join("kulman"));
+    check_files(&paths)?;
+    for path in &paths {
+        delete(path)?;
     }
-    for name in ["manifest.json", ".lock", "state.json"] {
+    for name in ["manifest.json", "state.json", ".lock"] {
         delete(&home.path.join(name))?;
     }
     // remove_dir fails on a directory that is not empty, or is a symlink: both are kept.
     let _ = fs::remove_dir(&bin);
     let _ = fs::remove_dir(&home.path);
+    Ok(())
+}
+
+/// Each of `paths` is missing, a file or a symlink: checked before the first deletion.
+fn check_files(paths: &[PathBuf]) -> Result<()> {
+    for path in paths {
+        match fs::symlink_metadata(path) {
+            Ok(m) if !m.is_file() && !m.is_symlink() => bail!("{} is not a file", path.display()),
+            _ => {}
+        }
+    }
     Ok(())
 }
 

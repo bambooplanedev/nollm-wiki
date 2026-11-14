@@ -572,3 +572,49 @@ fn a_run_waiting_on_a_home_that_vanishes_starts_again() {
     assert_binary(&home, "kalka", KALKA);
     assert!(home.join(".lock").exists());
 }
+
+#[test]
+fn install_refuses_a_symlinked_bin() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    let outside = t.path().join("outside");
+    fs::rename(home.join("bin"), &outside).unwrap();
+    std::os::unix::fs::symlink(&outside, home.join("bin")).unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "plaz"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!(
+        "kulman: {} is not a directory kulman can use",
+        home.join("bin").display()
+    );
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn install_checks_every_build_before_any_download() {
+    // kalka's archive is missing and plaz has no build at all: the error names plaz, so
+    // nothing was fetched for kalka first.
+    let (t, base) = setup();
+    let rel = t.path().join("release");
+    fs::remove_file(archive_path(&rel, "0.7.0", "kalka")).unwrap();
+    edit_manifest(&rel, "0.7.0", |m| m["modules"][1]["archives"] = json!({}));
+    let home = t.path().join("home");
+    let before = snapshot(&rel);
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        stderr(&out).contains("kulman: plaz: no build for "),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(snapshot(&rel), before);
+    assert!(!home.exists());
+}

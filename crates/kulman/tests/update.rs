@@ -295,6 +295,22 @@ fn remove_everything_removes_an_empty_home() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out), ["nothing installed"]);
     assert!(!home.exists());
+
+    // A remove killed after state.json, before `.lock`: the next one finishes the job.
+    kulman(&home, &base).arg("install").assert().success();
+    for name in [
+        "bin/kalka",
+        "bin/plaz",
+        "bin/kulman",
+        "manifest.json",
+        "state.json",
+    ] {
+        fs::remove_file(home.join(name)).unwrap();
+    }
+    let out = kulman(&home, &base).arg("remove").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(lines(&out), ["nothing installed"]);
+    assert!(!home.exists());
 }
 
 #[test]
@@ -379,4 +395,101 @@ fn two_installs_at_once_keep_both_modules() {
     assert_binary(&home, "kalka", KALKA);
     assert_binary(&home, "plaz", PLAZ);
     assert_binary(&home, "kulman", KULMAN_BYTES);
+}
+
+/// Moves `home/bin` to `outside` and links `home/bin` to it.
+fn link_bin(t: &Path, home: &Path) -> std::path::PathBuf {
+    let outside = t.join("outside");
+    fs::rename(home.join("bin"), &outside).unwrap();
+    std::os::unix::fs::symlink(&outside, home.join("bin")).unwrap();
+    outside
+}
+
+#[test]
+fn remove_refuses_a_symlinked_bin() {
+    let (t, base, home) = installed();
+    link_bin(t.path(), &home);
+    let before = snapshot(t.path());
+    let expect = format!(
+        "kulman: {} is not a directory kulman can use",
+        home.join("bin").display()
+    );
+    for args in [
+        &["remove"][..],
+        &["remove", "--modules", "kalka"],
+        &["update"],
+    ] {
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+        assert_eq!(snapshot(t.path()), before, "{args:?}");
+    }
+}
+
+#[test]
+fn remove_refuses_a_directory_in_place_of_a_binary() {
+    let (t, base, home) = installed();
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    fs::create_dir(home.join("bin/plaz")).unwrap();
+    fs::write(home.join("bin/plaz/inner"), "x").unwrap();
+    let before = snapshot(t.path());
+    let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
+    for args in [&["remove"][..], &["remove", "--modules", "kalka,plaz"]] {
+        let out = kulman(&home, &base).args(args).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+        assert_eq!(snapshot(t.path()), before, "{args:?}");
+    }
+}
+
+#[test]
+fn a_state_naming_kulman_or_a_module_twice_is_malformed() {
+    for (modules, expect) in [
+        (
+            json!(["kalka", "kulman"]),
+            "kulman: bad name in state.json: kulman",
+        ),
+        (
+            json!(["kalka", "plaz", "kalka"]),
+            "kulman: state.json is malformed: kalka is listed twice",
+        ),
+    ] {
+        let (t, base, home) = installed();
+        let bad = json!({"version": "0.7.0", "modules": modules});
+        fs::write(home.join("state.json"), bad.to_string()).unwrap();
+        let before = snapshot(t.path());
+        for args in [&[][..], &["update"], &["remove"]] {
+            let out = kulman(&home, &base).args(args).output().unwrap();
+            assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
+            assert!(stderr(&out).contains(expect), "{}", stderr(&out));
+            assert_eq!(snapshot(t.path()), before, "{args:?}");
+        }
+    }
+}
+
+#[test]
+fn update_adds_what_an_installed_module_now_requires() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("kalka", KALKA), ("plaz", PLAZ)],
+    );
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    publish_0_8(t.path());
+    common::edit_manifest(&t.path().join("release"), "0.8.0", |m| {
+        m["modules"][0]["requires"] = json!(["plaz"]);
+    });
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+    );
+    assert_binary(&home, "kalka", KALKA_8);
+    assert_binary(&home, "plaz", PLAZ_8);
 }

@@ -155,11 +155,15 @@ fn local_path(url: &str) -> Option<PathBuf> {
 const MANIFEST_LIMIT: u64 = 1 << 20;
 const ARCHIVE_LIMIT: u64 = 256 << 20;
 
-/// The HTTPS client: 15 s to connect, 60 s for any one read, no limit on the whole,
-/// redirects followed but never to plain `http://`.
-fn agent() -> ureq::Agent {
+/// The longest a manifest fetch may take: `kulman` with no command must not hang on it.
+const MANIFEST_TIME: Duration = Duration::from_secs(20);
+
+/// The HTTPS client: 15 s to connect, 60 s for any one read, `whole` for the whole request
+/// (none for an archive), redirects followed but never to plain `http://`.
+fn agent(whole: Option<Duration>) -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
+        .timeout_global(whole)
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_per_read(Some(Duration::from_secs(60)))
         .build()
@@ -167,11 +171,11 @@ fn agent() -> ureq::Agent {
 }
 
 /// Copies `url` into `out`, from disk for `file://`, failing once more than `limit` bytes
-/// arrive.
-fn download(url: &str, out: &mut impl Write, limit: u64) -> Result<()> {
+/// arrive or, over https, once `whole` has passed.
+fn download(url: &str, out: &mut impl Write, limit: u64, whole: Option<Duration>) -> Result<()> {
     let reader: Box<dyn Read> = match local_path(url) {
         Some(path) => Box::new(File::open(path)?),
-        None => Box::new(agent().get(url).call()?.into_body().into_reader()),
+        None => Box::new(agent(whole).get(url).call()?.into_body().into_reader()),
     };
     if io::copy(&mut reader.take(limit + 1), out)? > limit {
         bail!("larger than {} MiB", limit >> 20);
@@ -186,7 +190,7 @@ pub fn manifest(base: &str, version: Option<&str>) -> Result<(Manifest, Vec<u8>)
         None => format!("{base}/latest/download/manifest.json"),
     };
     let mut bytes = Vec::new();
-    download(&url, &mut bytes, MANIFEST_LIMIT)
+    download(&url, &mut bytes, MANIFEST_LIMIT, Some(MANIFEST_TIME))
         .map_err(|e| anyhow!("manifest.json: download failed: {e}"))?;
     let m = Manifest::parse(&bytes)?;
     if let Some(v) = version {
@@ -202,7 +206,7 @@ pub fn fetch_to(base: &str, version: &str, file: &str, dest: &Path) -> Result<()
     let url = format!("{base}/download/v{version}/{file}");
     let result = File::create(dest)
         .map_err(anyhow::Error::from)
-        .and_then(|mut out| download(&url, &mut out, ARCHIVE_LIMIT));
+        .and_then(|mut out| download(&url, &mut out, ARCHIVE_LIMIT, None));
     if result.is_err() {
         let _ = fs::remove_file(dest);
     }
@@ -283,7 +287,10 @@ mod tests {
 
     #[test]
     fn the_client_refuses_plain_http() {
-        assert!(agent().config().https_only());
+        assert!(agent(None).config().https_only());
+        assert_eq!(agent(None).config().timeouts().global, None);
+        let whole = Some(MANIFEST_TIME);
+        assert_eq!(agent(whole).config().timeouts().global, whole);
     }
 
     #[test]
@@ -292,8 +299,8 @@ mod tests {
         let file = dir.path().join("f");
         fs::write(&file, [0u8; 11]).unwrap();
         let url = format!("file://{}", file.display());
-        assert!(download(&url, &mut Vec::new(), 11).is_ok());
-        let err = download(&url, &mut Vec::new(), 10).unwrap_err();
+        assert!(download(&url, &mut Vec::new(), 11, None).is_ok());
+        let err = download(&url, &mut Vec::new(), 10, None).unwrap_err();
         assert!(err.to_string().starts_with("larger than"), "{err}");
     }
 }
