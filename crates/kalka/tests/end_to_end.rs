@@ -49,7 +49,7 @@ fn output_is_deterministic_across_jobs() {
     );
     // The Python path resolves owners by ancestry, gates on `__all__`, and
     // splices decorators — none of which the .txt or .rs fixtures exercise.
-    // Written into the tempdir, so it never compiles into `.wiki/`.
+    // Written into the tempdir, so it never compiles into `.kulman/`.
     // Named deep_py.py (not deep.py) because deep.rs already slugs to "deep";
     // a colliding slug would silently drop one fixture and this test would
     // pass for the wrong reason.

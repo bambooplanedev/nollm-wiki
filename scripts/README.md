@@ -102,7 +102,7 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 ## Also in this directory
 
-`selfhost.sh` — compiles this repository into its own wiki at `.wiki/`
+`selfhost.sh` — compiles this repository into its own wiki at `.kulman/`
 (always rebuilds the release binary first) and fails on a broken wikilink
 (`wiki lint`). See the repo root
 [`README.md`](../README.md#self-hosting).

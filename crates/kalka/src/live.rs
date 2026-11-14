@@ -798,7 +798,7 @@ mod tests {
 
     #[test]
     fn opening_a_walked_file_is_not_an_edit() {
-        let dir = Path::new("/proj/.wiki");
+        let dir = Path::new("/proj/.kulman");
         let file = PathBuf::from("/proj/src/a.rs");
         let set = WatchSet::new(
             Path::new("/proj"),

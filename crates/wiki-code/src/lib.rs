@@ -33,6 +33,9 @@ pub mod model;
 pub mod support;
 pub mod walk;
 
+/// The folder inside a project that the tools write into.
+pub const OUT_DIR: &str = ".kulman";
+
 mod formats {
     pub(crate) mod code;
     pub(crate) mod extract_cpp;

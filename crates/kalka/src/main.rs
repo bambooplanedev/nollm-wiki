@@ -8,8 +8,9 @@ use kalka::query::{PackBudget, Wiki};
 use kalka::setup::{Agent, Scope, SetupOptions};
 use kalka::{compile, CompileOptions};
 use std::path::{Path, PathBuf};
+use wiki_code::OUT_DIR;
 
-const DIR_HELP: &str = "Wiki to read (default: `.wiki` if that directory exists, else `out`)";
+const DIR_HELP: &str = "Wiki to read (default: `.kulman` if that directory exists, else `out`)";
 
 #[derive(Parser)]
 #[command(
@@ -140,8 +141,8 @@ enum Command {
         /// Compile this project, watch it, and recompile on every edit.
         #[arg(long)]
         source: Option<PathBuf>,
-        /// Wiki to serve (default: `<source>/.wiki` with `--source`, else
-        /// `.wiki` if that directory exists, else `out`).
+        /// Wiki to serve (default: `<source>/.kulman` with `--source`, else
+        /// `.kulman` if that directory exists, else `out`).
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Tools to expose, comma-separated, from search, page, neighbors,
@@ -158,7 +159,7 @@ enum Command {
     Hint {
         /// The task text (not used with `--claude-hook`).
         text: Option<String>,
-        /// Wiki to read (default: `.wiki`, or `$CLAUDE_PROJECT_DIR/.wiki` with `--claude-hook`).
+        /// Wiki to read (default: `.kulman`, or `$CLAUDE_PROJECT_DIR/.kulman` with `--claude-hook`).
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Read a Claude Code `UserPromptSubmit` hook's JSON from stdin.
@@ -176,7 +177,7 @@ enum Command {
         /// Skip the prompt hook (installed by default for Claude Code and pi).
         #[arg(long)]
         no_hook: bool,
-        /// Undo what setup wrote (ignore lines and `.wiki/` stay).
+        /// Undo what setup wrote (ignore lines and `.kulman/` stay).
         #[arg(long)]
         remove: bool,
     },
@@ -213,10 +214,10 @@ fn ask_scope() -> Result<Scope> {
     }
 }
 
-/// The wiki a command reads: `--dir`, else `./.wiki` if it exists, else `out`.
+/// The wiki a command reads: `--dir`, else `./.kulman` if it exists, else `out`.
 fn wiki_dir(dir: Option<PathBuf>) -> PathBuf {
     dir.unwrap_or_else(|| {
-        let local = PathBuf::from(".wiki");
+        let local = PathBuf::from(OUT_DIR);
         if local.is_dir() {
             local
         } else {
@@ -480,7 +481,7 @@ fn run() -> Result<()> {
             memory,
         } => {
             no_memory_mix(&memory);
-            let dir = wiki_dir(dir.or_else(|| source.as_ref().map(|s| s.join(".wiki"))));
+            let dir = wiki_dir(dir.or_else(|| source.as_ref().map(|s| s.join(OUT_DIR))));
             kalka::serve::run(&dir, source.as_deref(), cli.jobs, tools.as_deref(), &memory)?;
         }
         Command::Hint {
@@ -503,8 +504,8 @@ fn run() -> Result<()> {
             };
             let dir = dir.unwrap_or_else(|| {
                 match std::env::var_os("CLAUDE_PROJECT_DIR").filter(|_| claude_hook) {
-                    Some(p) => PathBuf::from(p).join(".wiki"),
-                    None => ".wiki".into(),
+                    Some(p) => PathBuf::from(p).join(OUT_DIR),
+                    None => OUT_DIR.into(),
                 }
             });
             if let Ok(w) = Wiki::load(&dir) {

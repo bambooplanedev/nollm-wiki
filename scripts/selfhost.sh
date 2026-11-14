@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile this repository into its own wiki at .wiki/ (self-hosting).
+# Compile this repository into its own wiki at .kulman/ (self-hosting).
 # Re-run after changes; compilation is incremental.
 set -euo pipefail
 
@@ -12,6 +12,6 @@ BIN="$REPO_ROOT/target/release/kalka"
 cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml"
 
 cd "$REPO_ROOT"
-"$BIN" compile . .wiki --incremental --emit-json
+"$BIN" compile . .kulman --incremental --emit-json
 # Gate: a broken wikilink in the self-hosted wiki fails the script (exit 1).
-"$BIN" lint --dir .wiki
+"$BIN" lint --dir .kulman

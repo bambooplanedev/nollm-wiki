@@ -344,7 +344,7 @@ mod tests {
             ("node_modules/x/e.js", "n"),
             (".git/HEAD", "h"),
             ("sub/.git", "gitdir: elsewhere"),
-            (".wiki/page.md", "the output, not a skipped source"),
+            (".kulman/page.md", "the output, not a skipped source"),
             (".agents/memory/note.md", "compiled from the memory walk"),
         ] {
             let p = root.join(path);
@@ -359,12 +359,44 @@ mod tests {
         let root = dir.path();
         tree_with_every_skip(root);
 
-        let own = [root.join(".wiki"), root.join(".agents/memory")];
+        let own = [root.join(crate::OUT_DIR), root.join(".agents/memory")];
         assert_eq!(
             skipped(root, &own),
             vec![("superpowers", 3), ("node_modules", 1), ("ignored", 5)],
             "ignored is .gitignore, secret.txt, build/ (2) and .hidden/"
         );
+    }
+
+    #[test]
+    fn the_output_folder_is_not_a_source() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for p in [format!("{}/page.md", crate::OUT_DIR), "src/a.rs".into()] {
+            fs::create_dir_all(root.join(&p).parent().unwrap()).unwrap();
+            fs::write(root.join(p), "x").unwrap();
+        }
+        let rels: Vec<_> = walk(root, true, &all)
+            .files
+            .into_iter()
+            .map(|f| f.rel_path)
+            .collect();
+        assert_eq!(rels, vec!["src/a.rs"]);
+    }
+
+    #[test]
+    fn an_old_wiki_folder_is_not_a_source() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        for p in [".wiki/page.md", "src/a.rs"] {
+            fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
+            fs::write(root.join(p), "x").unwrap();
+        }
+        let rels: Vec<_> = walk(root, true, &all)
+            .files
+            .into_iter()
+            .map(|f| f.rel_path)
+            .collect();
+        assert_eq!(rels, vec!["src/a.rs"]);
     }
 
     #[test]

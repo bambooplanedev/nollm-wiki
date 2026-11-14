@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use wiki_code::OUT_DIR;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/kalka-navigation";
@@ -315,14 +316,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         if agent_dirs.is_empty() {
             r.line("no agent memory folders found")?;
         }
-        let wiki = root.join(".wiki");
+        let wiki = root.join(OUT_DIR);
         let c = CompileOptions {
             incremental: true,
             memory: agent_dirs,
             ..CompileOptions::default()
         };
         let res = crate::dirlock::exclusive(&wiki, || compile(root, &wiki, &c))?;
-        r.line(&format!("Compiled {} pages into .wiki", res.pages_total))?;
+        r.line(&format!(
+            "Compiled {} pages into {OUT_DIR}",
+            res.pages_total
+        ))?;
         if res.pages_total == 0 {
             r.line("warning: no pages compiled; is this the project root?")?;
         }
@@ -332,8 +336,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("warning: kalka is not on PATH; the agents will not find it until it is")?;
     }
     let entry = json!({"command": CMD, "args": ["serve", "--source", "."]});
-    // Local scope only: repo scope puts just `.wiki/` in `.gitignore`.
-    let mut ignore = vec![".wiki/".to_string(), format!("/{}/", memory::REPO_DIR)];
+    // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
+    let mut ignore = vec![format!("{OUT_DIR}/"), format!("/{}/", memory::REPO_DIR)];
     let mut cursor_added = false;
 
     for agent in agents {
@@ -443,7 +447,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // Hook (`--remove` always looks, so it undoes a hook installed earlier)
         if opts.hook || opts.remove {
             if pi {
-                let content = PI_HOOK.replace("<cmd>", CMD);
+                let content = PI_HOOK.replace("<cmd>", CMD).replace("<out>", OUT_DIR);
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
@@ -480,12 +484,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
 
     if opts.remove {
-        r.line("kept the ignore lines and .wiki/ (delete them by hand if unwanted)")?;
+        r.line("kept the ignore lines and .kulman/ (delete them by hand if unwanted)")?;
     } else if !local {
         r.item(
-            ".wiki/ in .gitignore",
+            &format!("{OUT_DIR}/ in .gitignore"),
             false,
-            edit::ensure_line(&root.join(".gitignore"), ".wiki/"),
+            edit::ensure_line(&root.join(".gitignore"), &format!("{OUT_DIR}/")),
         )?;
     } else if let Some(exclude) = exclude_file(root) {
         let prefix = worktree_prefix(root);

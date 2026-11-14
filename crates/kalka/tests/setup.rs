@@ -111,7 +111,7 @@ fn dirs(dir: &Path) -> Vec<PathBuf> {
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
         let n = p.file_name().unwrap().to_string_lossy().into_owned();
-        if p.is_dir() && n != ".git" && n != ".wiki" {
+        if p.is_dir() && n != ".git" && n != ".kulman" {
             v.extend(dirs(&p));
             v.push(p);
         }
@@ -125,7 +125,7 @@ fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
         let n = p.file_name().unwrap().to_string_lossy().into_owned();
-        if n == ".git" || n == ".wiki" {
+        if n == ".git" || n == ".kulman" {
             continue;
         }
         if p.is_dir() {
@@ -166,8 +166,8 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
         read(&r.join(".agents/skills/kalka-navigation/SKILL.md")),
         skill(".agents/memory")
     );
-    assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".wiki/"));
-    assert!(r.join(".wiki/index.json").exists());
+    assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
+    assert!(r.join(".kulman/index.json").exists());
 }
 
 #[test]
@@ -207,7 +207,7 @@ fn setup_local_uses_claude_cli_and_git_exclude() {
     assert!(!f.root().join(".mcp.json").exists());
     let ex = read(&f.root().join(".git/info/exclude"));
     for l in [
-        ".wiki/",
+        ".kulman/",
         "/.pi/mcp.json",
         "/.agents/skills/kalka-navigation/",
         "/.agents/memory/",
@@ -245,7 +245,7 @@ fn setup_remove_restores_the_project() {
         .setup(&["--remove", "--agent", "claude,pi", "--scope", "repo"])
         .success();
     let mut want = before;
-    want.push((f.root().join(".gitignore"), b".wiki/\n".to_vec()));
+    want.push((f.root().join(".gitignore"), b".kulman/\n".to_vec()));
     want.sort();
     assert_eq!(files(&f.root()), want);
     // The memory folder setup created stays, like any note in it.
@@ -253,8 +253,8 @@ fn setup_remove_restores_the_project() {
     want_dirs.extend([f.root().join(".agents"), f.root().join(".agents/memory")]);
     want_dirs.sort();
     assert_eq!(dirs(&f.root()), want_dirs);
-    assert!(f.root().join(".wiki").exists());
-    assert!(out(&a).contains("kept the ignore lines and .wiki/"));
+    assert!(f.root().join(".kulman").exists());
+    assert!(out(&a).contains("kept the ignore lines and .kulman/"));
 }
 
 #[test]
@@ -357,9 +357,9 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
     let ex = read(&main.join(".git/info/exclude"));
     // Worktree top: lines unprefixed. Subdirectory: anchored to the worktree top, so prefixed.
     for l in [
-        ".wiki/",
+        ".kulman/",
         "/.pi/mcp.json",
-        "/src/.wiki/",
+        "/src/.kulman/",
         "/src/.pi/mcp.json",
         "/src/.agents/skills/kalka-navigation/",
     ] {
@@ -424,9 +424,9 @@ fn setup_local_leaves_a_foreign_claude_server_alone() {
         !log.contains("mcp add-json") && !log.contains("mcp remove"),
         "{log}"
     );
-    // The skipped server leaves no exclude line; `.wiki/` still gets one.
+    // The skipped server leaves no exclude line; `.kulman/` still gets one.
     let ex = read(&f.root().join(".git/info/exclude"));
-    assert!(ex.lines().any(|l| l == ".wiki/"), "{ex}");
+    assert!(ex.lines().any(|l| l == ".kulman/"), "{ex}");
 }
 
 #[test]
@@ -571,7 +571,7 @@ fn setup_and_serve_find_the_claude_memory_folder() {
         "{}",
         out(&a)
     );
-    let index = read(&f.root().join(".wiki/index.json"));
+    let index = read(&f.root().join(".kulman/index.json"));
     assert!(index.contains(&format!("{shown}/n.md")), "{index}");
     assert!(index.contains("\"memory\": true"), "{index}");
     assert!(!index.contains("logs/x.md"), "{index}");
@@ -610,7 +610,7 @@ fn setup_local_creates_agents_memory_and_excludes_it() {
     let note = dir.join("tide.md");
     fs::write(&note, "# Tide table\n\nHarbour tide notes.\n").unwrap();
     f.setup(&args).success();
-    let index = read(&f.root().join(".wiki/index.json"));
+    let index = read(&f.root().join(".kulman/index.json"));
     assert!(index.contains(".agents/memory/tide.md"), "{index}");
     assert!(index.contains("\"memory\": true"), "{index}");
     f.setup(&[&["--remove"], &args[..]].concat()).success();
@@ -852,13 +852,13 @@ fn setup_waits_for_a_compile_holding_the_lock() {
     use std::time::Duration;
     let f = fixture(true, true);
     let root = f.root();
-    fs::create_dir_all(root.join(".wiki/.serve")).unwrap();
+    fs::create_dir_all(root.join(".kulman/.serve")).unwrap();
     let (held_tx, held_rx) = channel();
     let (release_tx, release_rx) = channel::<()>();
     std::thread::scope(|s| {
         let root_ref = &root;
         s.spawn(move || {
-            kalka::dirlock::exclusive(&root_ref.join(".wiki"), || {
+            kalka::dirlock::exclusive(&root_ref.join(".kulman"), || {
                 held_tx.send(()).unwrap();
                 let _ = release_rx.recv_timeout(Duration::from_secs(20));
             });
@@ -868,19 +868,19 @@ fn setup_waits_for_a_compile_holding_the_lock() {
             f.setup(&["--agent", "claude", "--scope", "repo"]).success();
         });
         std::thread::sleep(Duration::from_secs(1));
-        assert!(!root.join(".wiki/index.json").exists());
+        assert!(!root.join(".kulman/index.json").exists());
         release_tx.send(()).unwrap();
         setup.join().unwrap();
     });
-    assert!(root.join(".wiki/index.json").exists());
+    assert!(root.join(".kulman/index.json").exists());
 }
 
 #[test]
 fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     let f = fixture(true, true);
     f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert!(f.root().join(".wiki/index.json").exists());
-    assert!(!f.root().join(".wiki/.serve").exists());
+    assert!(f.root().join(".kulman/index.json").exists());
+    assert!(!f.root().join(".kulman/.serve").exists());
 }
 
 /// A project that `wiki setup` set up in an earlier life: its `wiki` server, skill and block.

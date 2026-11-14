@@ -679,7 +679,7 @@ fn cli_page_names_a_missing_memory_note_file() {
 fn compile_reports_what_it_skipped_after_the_lint_line() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
-    let output = input.join(".wiki");
+    let output = input.join(".kulman");
     fs::create_dir_all(input.join("vendor/x")).unwrap();
     fs::write(input.join("a.txt"), "# A\n").unwrap();
     fs::write(input.join("vendor/x/b.txt"), "# B\n").unwrap();
@@ -714,6 +714,29 @@ fn search_from(cwd: &std::path::Path) -> assert_cmd::assert::Assert {
 }
 
 #[test]
+fn the_default_wiki_is_dot_kulman() {
+    let dir = tempdir().unwrap();
+    let cwd = dir.path();
+    fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();
+    let compile = |output: &str| {
+        Command::cargo_bin("kalka")
+            .unwrap()
+            .current_dir(cwd)
+            .args(["compile", ".", output])
+            .assert()
+            .success();
+    };
+    compile(".kulman");
+    search_from(cwd).success().stdout(contains("alpha"));
+
+    // An old `.wiki/` is not the default: with `out` beside it, `out` is read.
+    fs::remove_dir_all(cwd.join(".kulman")).unwrap();
+    fs::create_dir(cwd.join(".wiki")).unwrap();
+    compile("out");
+    search_from(cwd).success().stdout(contains("alpha"));
+}
+
+#[test]
 fn read_commands_default_to_dot_wiki_then_out() {
     let dir = tempdir().unwrap();
     let cwd = dir.path();
@@ -731,10 +754,10 @@ fn read_commands_default_to_dot_wiki_then_out() {
     compile("out");
     search_from(cwd).success().stdout(contains("alpha"));
 
-    // `.wiki` wins over `out`: empty it would fail the load, not fall through.
-    fs::create_dir(cwd.join(".wiki")).unwrap();
+    // `.kulman` wins over `out`: empty it would fail the load, not fall through.
+    fs::create_dir(cwd.join(".kulman")).unwrap();
     search_from(cwd).failure().stderr(contains("load wiki"));
-    compile(".wiki");
+    compile(".kulman");
     search_from(cwd).success().stdout(contains("alpha"));
 
     // An explicit `--dir` wins over both.
@@ -767,7 +790,7 @@ fn read_commands_default_to_dot_wiki_then_out() {
             .args([cmd, "--help"])
             .assert()
             .success()
-            .stdout(contains("`.wiki` if that directory exists, else `out`"));
+            .stdout(contains("`.kulman` if that directory exists, else `out`"));
     }
 }
 

@@ -458,8 +458,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join(".gitignore");
         fs::write(&p, "target/").unwrap();
-        assert_eq!(ensure_line(&p, ".wiki/").unwrap(), Outcome::Done);
-        assert_eq!(fs::read_to_string(&p).unwrap(), "target/\n.wiki/\n");
-        assert_eq!(ensure_line(&p, ".wiki/").unwrap(), Outcome::AlreadyThere);
+        assert_eq!(ensure_line(&p, ".kulman/").unwrap(), Outcome::Done);
+        assert_eq!(fs::read_to_string(&p).unwrap(), "target/\n.kulman/\n");
+        assert_eq!(ensure_line(&p, ".kulman/").unwrap(), Outcome::AlreadyThere);
     }
 }
