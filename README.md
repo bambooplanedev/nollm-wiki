@@ -114,7 +114,7 @@ From source:
 No release of the set exists yet; until it does, use the steps above. From that release on,
 `kulman` installs, updates and sets up `kalka` and `plaz`. One line fetches `kulman` itself:
 
-    curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
 The script downloads the `kulman` archive for your platform, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at

@@ -8,7 +8,7 @@ then, build the tools from source (see the [repository README](../../README.md))
 
 ## Getting it
 
-    curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
 `install.sh` reads `SHA256SUMS` of the latest release, downloads the `kulman` archive for this
 machine (`aarch64-apple-darwin`, `x86_64-apple-darwin` or `x86_64-unknown-linux-gnu`), checks it
@@ -54,8 +54,9 @@ reads: nothing is created.
 Installs kulman and the named modules (comma separated), with the modules they require. Without
 `--modules` it installs the modules the release marks as default; to leave one out, name the others.
 `--version` installs that release instead of the latest. Run again with other modules, it adds them
-at the installed version; with an older version installed it says to run `kulman update`, with a
-newer one it changes nothing.
+at the installed version. If the installed version differs from the release, it changes nothing
+and exits 1: an older one gets the advice to run `kulman update`; a newer one, to run
+`kulman remove`, then `kulman install --version <X.Y.Z>`.
 
     kulman update [--yes]
 

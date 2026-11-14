@@ -119,7 +119,7 @@ v0.6.13 — останній реліз із назвою `wiki`: його бі�
 Релізу набору ще немає; доки його немає, користуйтеся кроками вище. Починаючи з цього релізу,
 `kulman` встановлює, оновлює й налаштовує `kalka` і `plaz`. Сам `kulman` завантажує один рядок:
 
-    curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
 Скрипт завантажує архів `kulman` для вашої платформи, перевіряє його за `SHA256SUMS` релізу
 (і зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman/bin/kulman`.

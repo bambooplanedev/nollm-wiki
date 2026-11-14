@@ -1,7 +1,7 @@
 #!/bin/sh
 # install.sh: puts the kulman binary of the latest release into ~/.kulman/bin.
 #
-#   curl --proto '=https' --tlsv1.2 -sSf https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+#   curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 #
 # It reads SHA256SUMS of the latest release, downloads the kulman archive for this machine,
 # checks it against that file, and moves the one binary to <home>/bin/kulman. It writes nothing
@@ -63,6 +63,11 @@ main() {
         Linux/x86_64) ki_target=x86_64-unknown-linux-gnu ;;
         *) die "no build for $ki_os/$ki_arch" ;;
     esac
+    # The Linux build needs glibc: its loader, or its libc where Debian or Fedora keep it.
+    if [ "$ki_os" = Linux ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ] &&
+        [ ! -e /lib/x86_64-linux-gnu/libc.so.6 ] && [ ! -e /lib64/libc.so.6 ]; then
+        die "no build for this system (the Linux build needs glibc)"
+    fi
 
     for ki_tool in curl tar mktemp; do
         command -v "$ki_tool" >/dev/null 2>&1 || die "$ki_tool is required"
@@ -102,8 +107,11 @@ main() {
     # Under home, so the final mv is a rename on one file system.
     ki_tmp=$(mktemp -d "$ki_home/.tmp-install.XXXXXX") || die "cannot create a temp dir in $ki_home"
 
-    ki_sums=$ki_tmp/SHA256SUMS
-    fetch "$ki_base/latest/download/SHA256SUMS" "$ki_sums" 1048576
+    fetch "$ki_base/latest/download/SHA256SUMS" "$ki_tmp/SHA256SUMS" 1048576
+    # Without a carriage return at the end of each line, so a CRLF file reads the same.
+    ki_cr=$(printf '\r')
+    ki_sums=$ki_tmp/SHA256SUMS.lf
+    sed "s/$ki_cr\$//" "$ki_tmp/SHA256SUMS" >"$ki_sums"
     ki_name='kulman-v[0-9]+\.[0-9]+\.[0-9]+-'$ki_target'\.tar\.gz'
     ki_count=$(grep -Ec "[ *]$ki_name\$" "$ki_sums" || :)
     [ "$ki_count" = 1 ] ||
@@ -121,10 +129,11 @@ main() {
 
     ki_archive=$ki_tmp/kulman.tar.gz
     fetch "$ki_base/download/v$ki_version/$ki_file" "$ki_archive" 268435456
+    # From stdin: given a path holding `\` or a newline, both tools put a `\` before the hash.
     if [ "$ki_sha" = sha256sum ]; then
-        ki_got=$(sha256sum "$ki_archive")
+        ki_got=$(sha256sum <"$ki_archive")
     else
-        ki_got=$(shasum -a 256 "$ki_archive")
+        ki_got=$(shasum -a 256 <"$ki_archive")
     fi
     [ "${ki_got%% *}" = "$ki_want" ] || die "$ki_file: checksum mismatch"
 

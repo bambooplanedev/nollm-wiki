@@ -70,12 +70,12 @@ fn paths(dir: &Path) -> Vec<PathBuf> {
     snapshot(dir).into_keys().collect()
 }
 
-/// Nothing was written to the user's home, but for `.cache/` (where Rosetta, emulating `x86_64`
-/// in a Linux container, keeps its own cache).
+/// Nothing was written to the user's home, but for `.cache/rosetta` (where Rosetta, emulating
+/// `x86_64` in a Linux container, keeps its own cache).
 fn nothing_in_user_home(t: &Path) {
     let written: Vec<PathBuf> = paths(&t.join("user-home"))
         .into_iter()
-        .filter(|p| !p.starts_with(".cache"))
+        .filter(|p| p != Path::new(".cache") && !p.starts_with(".cache/rosetta"))
         .collect();
     assert_eq!(written, Vec::<PathBuf>::new());
 }
@@ -103,6 +103,36 @@ fn install_sh_puts_kulman_in_bin() {
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+}
+
+#[test]
+fn install_sh_reads_a_crlf_sha256sums() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let path = t.path().join("release/latest/download/SHA256SUMS");
+    let crlf = fs::read_to_string(&path).unwrap().replace('\n', "\r\n");
+    fs::write(&path, crlf).unwrap();
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+}
+
+#[test]
+fn install_sh_leaves_nothing_when_the_archive_is_missing() {
+    let (t, base) = setup(KULMAN_BYTES);
+    for target in common::TARGETS {
+        let name = format!("kulman-v0.7.0-{target}.tar.gz");
+        fs::remove_file(version_dir(&t.path().join("release"), "0.7.0").join(name)).unwrap();
+    }
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("cannot download"), "{}", stderr(&out));
+    assert!(!home.exists());
+    fs::create_dir_all(&home).unwrap();
+    let out = install_sh(&home, &base);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(paths(&home), Vec::<PathBuf>::new());
 }
 
 #[test]
@@ -252,10 +282,16 @@ fn a_truncated_script_does_nothing() {
     let (t, base) = setup(KULMAN_BYTES);
     let home = t.path().join("home");
     let script = fs::read(SCRIPT).unwrap();
-    let out = sh(&home, &base, &script[..script.len() / 2]);
-    assert!(!out.status.success());
-    assert!(!home.exists());
-    nothing_in_user_home(t.path());
+    let call = script.len() - b"main \"$@\"\n".len();
+    assert!(script[call..].starts_with(b"main "));
+    // Eighths of the script, the cut just before the call, and one inside it. A prefix may exit
+    // 0 (nothing left to run) or not; either way nothing is created.
+    let cuts = (1..8).map(|i| script.len() * i / 8).chain([call, call + 6]);
+    for cut in cuts {
+        sh(&home, &base, &script[..cut]);
+        assert!(!home.exists(), "cut at {cut}");
+        nothing_in_user_home(t.path());
+    }
 }
 
 /// A dir holding `git` and `tar` only, as scripts that run the real ones: a `PATH` with no
