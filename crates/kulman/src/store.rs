@@ -40,21 +40,27 @@ impl Home {
             bail!("{} does not exist", parent.display());
         }
         let lock_path = path.join(".lock");
-        // Twice at most: a failed first install may remove home and its lock file while this
-        // run waits for that lock.
+        // Twice at most: a failed first install or a `kulman remove` may remove home and its
+        // lock file while this run waits for that lock.
         for _ in 0..2 {
             let created = match fs::create_dir(&path) {
                 Ok(()) => true,
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => false,
                 Err(e) => bail!("cannot create {}: {e}", path.display()),
             };
-            let lock = File::options()
+            let lock = match File::options()
                 .create(true)
                 .truncate(false)
                 .write(true)
                 .open(&lock_path)
-                .and_then(|f| f.lock().map(|()| f))
-                .with_context(|| format!("cannot lock {}", lock_path.display()));
+            {
+                // Home was removed since create_dir, by a run that held the lock: start again.
+                // What is there now is not this run's to undo.
+                Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
+                open => open
+                    .and_then(|f| f.lock().map(|()| f))
+                    .with_context(|| format!("cannot lock {}", lock_path.display())),
+            };
             let lock = match lock {
                 Ok(lock) => lock,
                 Err(e) => {
@@ -138,9 +144,10 @@ pub struct State {
 }
 
 impl State {
+    /// The state in home directory `home`, read without the lock or creating anything.
     /// `None` when nothing is installed; malformed or unreadable is an error.
-    pub fn load(home: &Home) -> Result<Option<State>> {
-        let bytes = match fs::read(home.path.join("state.json")) {
+    pub fn load(home: &Path) -> Result<Option<State>> {
+        let bytes = match fs::read(home.join("state.json")) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => bail!("cannot read state.json: {e}"),
@@ -162,8 +169,9 @@ pub struct Staged {
     pub path: PathBuf,
 }
 
-/// Fetches, checks and unpacks each of `names` (modules and `kulman`) into the temp dir.
-/// Nothing outside the temp dir is touched.
+/// Fetches, checks and unpacks each of `names` (modules and `kulman`) into the temp dir;
+/// nothing is fetched unless the release has an archive for every one. Nothing outside the
+/// temp dir is touched.
 pub fn stage(
     home: &Home,
     base: &str,
@@ -171,6 +179,9 @@ pub fn stage(
     target: &str,
     names: &[String],
 ) -> Result<Vec<Staged>> {
+    for name in names {
+        manifest.archive(name, target)?;
+    }
     let tmp = home.tmp();
     fs::create_dir(&tmp)?;
     let mut staged = Vec::new();
@@ -202,14 +213,57 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     for s in staged {
         fs::rename(&s.path, bin.join(&s.name))?;
     }
-    let state = serde_json::to_vec(state)?;
-    for (name, bytes) in [("manifest.json", manifest), ("state.json", &state)] {
-        let tmp = home.tmp().join(name);
-        let mut file = File::create(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        fs::rename(&tmp, home.path.join(name))?;
-    }
+    write(home, "manifest.json", manifest)?;
+    write(home, "state.json", &serde_json::to_vec(state)?)?;
     let _ = fs::remove_dir_all(home.tmp());
     Ok(())
+}
+
+/// Replaces `<home>/<name>` by `bytes` through a synced file in the temp dir.
+fn write(home: &Home, name: &str, bytes: &[u8]) -> Result<()> {
+    fs::create_dir_all(home.tmp())?;
+    let tmp = home.tmp().join(name);
+    let mut file = File::create(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    fs::rename(&tmp, home.path.join(name))?;
+    Ok(())
+}
+
+/// Deletes `bin/<name>` for each of `names`, then writes `state` (a crash in between leaves a
+/// listed binary missing, which `kulman update` puts back).
+pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()> {
+    for name in names {
+        delete(&home.path.join("bin").join(name))?;
+    }
+    write(home, "state.json", &serde_json::to_vec(state)?)?;
+    let _ = fs::remove_dir_all(home.tmp());
+    Ok(())
+}
+
+/// Deletes the binaries `state` lists and `bin/kulman`, then `manifest.json`, `.lock` and
+/// `state.json` last; then `bin/` and home if empty. Nothing else is touched: any other file
+/// keeps its directory.
+pub fn remove_all(home: &Home, state: &State) -> Result<()> {
+    let bin = home.path.join("bin");
+    for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
+        delete(&bin.join(name))?;
+    }
+    for name in ["manifest.json", ".lock", "state.json"] {
+        delete(&home.path.join(name))?;
+    }
+    // remove_dir fails on a directory that is not empty, or is a symlink: both are kept.
+    let _ = fs::remove_dir(&bin);
+    let _ = fs::remove_dir(&home.path);
+    Ok(())
+}
+
+/// Removes the file (or symlink) at `path`; one already missing counts as removed.
+fn delete(path: &Path) -> Result<()> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => {
+            bail!("cannot remove {}: {e}", path.display())
+        }
+        _ => Ok(()),
+    }
 }

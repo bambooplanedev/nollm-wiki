@@ -1,12 +1,11 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use common::{
-    archive_path, edit_manifest, kulman, pack, read_manifest, release, replace_archive, set_sha256,
-    snapshot, version_dir, KULMAN_BYTES,
+    archive_path, assert_binary, edit_manifest, kulman, no_tmp_left, pack, read_manifest, release,
+    replace_archive, set_sha256, snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::{json, Value};
 
@@ -22,37 +21,6 @@ fn setup() -> (tempfile::TempDir, String) {
         &[("kalka", KALKA), ("plaz", PLAZ)],
     );
     (t, base)
-}
-
-fn stderr(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stderr).into_owned()
-}
-
-fn stdout(out: &std::process::Output) -> String {
-    String::from_utf8_lossy(&out.stdout).into_owned()
-}
-
-fn state(home: &Path) -> Value {
-    serde_json::from_slice(&fs::read(home.join("state.json")).unwrap()).unwrap()
-}
-
-fn assert_binary(home: &Path, name: &str, bytes: &[u8]) {
-    let path = home.join("bin").join(name);
-    let meta = fs::symlink_metadata(&path).unwrap();
-    assert!(meta.file_type().is_file(), "{name} is not a regular file");
-    assert_eq!(meta.permissions().mode() & 0o7777, 0o755, "{name} mode");
-    assert_eq!(fs::read(&path).unwrap(), bytes, "{name} bytes");
-}
-
-fn no_tmp_left(home: &Path) {
-    for entry in fs::read_dir(home).unwrap() {
-        let name = entry.unwrap().file_name();
-        assert!(
-            !name.to_string_lossy().starts_with(".tmp-"),
-            "{} left",
-            name.display()
-        );
-    }
 }
 
 /// Installs kalka, then runs `install --modules plaz` after `break_it`; asserts exit 1, the
@@ -311,19 +279,9 @@ fn install_refuses_bad_entries_in_the_manifest() {
 
 #[test]
 fn install_bounds_what_it_downloads() {
-    // A sparse file one byte over 256 MiB: written instantly, refused while streaming.
+    // The manifest's limit end to end. The archive's (256 MiB, too big to write on every
+    // run) goes through the same `download`, whose unit test covers the limit.
     let err = plaz_fails_and_changes_nothing(
-        |r| {
-            let path = archive_path(r, "0.7.0", "plaz");
-            fs::File::create(&path)
-                .unwrap()
-                .set_len((256 << 20) + 1)
-                .unwrap();
-        },
-        "kulman: plaz: download failed: larger than 256 MiB",
-    );
-    assert_eq!(err.lines().count(), 1, "{err}");
-    plaz_fails_and_changes_nothing(
         |r| {
             edit_manifest(r, "0.7.0", |m| {
                 m["padding"] = json!(" ".repeat(1 << 20));
@@ -331,6 +289,7 @@ fn install_bounds_what_it_downloads() {
         },
         "kulman: manifest.json: download failed: larger than 1 MiB",
     );
+    assert_eq!(err.lines().count(), 1, "{err}");
 }
 
 #[test]

@@ -144,6 +144,37 @@ pub fn kulman(home: &Path, release: &str) -> Command {
     cmd
 }
 
+pub fn stderr(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+pub fn stdout(out: &std::process::Output) -> String {
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+pub fn state(home: &Path) -> Value {
+    serde_json::from_slice(&fs::read(home.join("state.json")).unwrap()).unwrap()
+}
+
+pub fn assert_binary(home: &Path, name: &str, bytes: &[u8]) {
+    let path = home.join("bin").join(name);
+    let meta = fs::symlink_metadata(&path).unwrap();
+    assert!(meta.file_type().is_file(), "{name} is not a regular file");
+    assert_eq!(meta.permissions().mode() & 0o7777, 0o755, "{name} mode");
+    assert_eq!(fs::read(&path).unwrap(), bytes, "{name} bytes");
+}
+
+pub fn no_tmp_left(home: &Path) {
+    for entry in fs::read_dir(home).unwrap() {
+        let name = entry.unwrap().file_name();
+        assert!(
+            !name.to_string_lossy().starts_with(".tmp-"),
+            "{} left",
+            name.display()
+        );
+    }
+}
+
 /// Every path under `root` with its kind, mode and bytes (a symlink's bytes are its target).
 pub fn snapshot(root: &Path) -> BTreeMap<PathBuf, (&'static str, u32, Vec<u8>)> {
     let mut out = BTreeMap::new();
