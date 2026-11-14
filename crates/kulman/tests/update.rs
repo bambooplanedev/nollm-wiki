@@ -135,7 +135,12 @@ fn update_moves_every_module() {
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(
         fs::read(home.join("manifest.json")).unwrap(),
-        fs::read(version_dir(&t.path().join("release"), "0.8.0").join("manifest.json")).unwrap()
+        [
+            fs::read(version_dir(&t.path().join("release"), "0.8.0").join("manifest.json"))
+                .unwrap(),
+            b"\n".to_vec()
+        ]
+        .concat()
     );
     no_tmp_left(&home);
 }

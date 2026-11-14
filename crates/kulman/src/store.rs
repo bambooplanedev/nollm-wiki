@@ -250,13 +250,19 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     Ok(())
 }
 
-/// Replaces `<home>/<name>` by `bytes` through a synced file in the temp dir.
+/// Replaces `<home>/<name>` by `bytes`, ending with a newline, through a synced file in the
+/// temp dir.
 fn write(home: &Home, name: &str, bytes: &[u8]) -> Result<()> {
     let tmp = home.tmp().join(name);
     let dest = home.path.join(name);
+    let end: &[u8] = if bytes.ends_with(b"\n") { b"" } else { b"\n" };
     fs::create_dir_all(home.tmp())
         .and_then(|()| File::create(&tmp))
-        .and_then(|mut file| file.write_all(bytes).and_then(|()| file.sync_all()))
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.write_all(end)?;
+            file.sync_all()
+        })
         .with_context(|| tmp.display().to_string())?;
     fs::rename(&tmp, &dest).with_context(|| dest.display().to_string())
 }

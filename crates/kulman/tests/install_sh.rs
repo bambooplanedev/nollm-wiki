@@ -375,3 +375,10 @@ fn setup_with_the_real_kalka_and_plaz() {
     setup(&["--remove"]);
     assert!(mcp()["mcpServers"].get("kalka").is_none(), "{}", mcp());
 }
+
+#[test]
+fn install_sh_is_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(SCRIPT).unwrap().permissions().mode();
+    assert_eq!(mode & 0o111, 0o111, "{mode:o}");
+}

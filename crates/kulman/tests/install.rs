@@ -59,7 +59,12 @@ fn install_defaults_installs_every_default_module() {
     );
     assert_eq!(
         fs::read(home.join("manifest.json")).unwrap(),
-        fs::read(version_dir(&t.path().join("release"), "0.7.0").join("manifest.json")).unwrap()
+        [
+            fs::read(version_dir(&t.path().join("release"), "0.7.0").join("manifest.json"))
+                .unwrap(),
+            b"\n".to_vec()
+        ]
+        .concat()
     );
     let text = stdout(&out);
     for line in [
@@ -777,4 +782,26 @@ fn a_failed_install_with_no_state_leaves_no_lock() {
         stderr(&out)
     );
     assert_eq!(snapshot(&home), before);
+}
+
+#[test]
+fn state_and_manifest_end_with_one_newline() {
+    let (t, base) = setup();
+    let rel = t.path().join("release");
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    let state = fs::read(home.join("state.json")).unwrap();
+    assert!(
+        state.ends_with(b"}\n"),
+        "{}",
+        String::from_utf8_lossy(&state)
+    );
+    // A manifest that already ends with a newline gets no second one.
+    let mut manifest = fs::read(version_dir(&rel, "0.7.0").join("manifest.json")).unwrap();
+    manifest.push(b'\n');
+    fs::write(version_dir(&rel, "0.7.0").join("manifest.json"), &manifest).unwrap();
+    fs::write(rel.join("latest/download/manifest.json"), &manifest).unwrap();
+    fs::remove_file(home.join("manifest.json")).unwrap();
+    kulman(&home, &base).arg("update").assert().success();
+    assert_eq!(fs::read(home.join("manifest.json")).unwrap(), manifest);
 }
