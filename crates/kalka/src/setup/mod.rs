@@ -203,9 +203,25 @@ fn claude(root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     cli("claude", root, args)
 }
 
+/// A switch to the other memory variant leaves alone an entry with settings setup did not write.
+fn other_settings(remove: &str) -> Outcome {
+    Outcome::Foreign(format!(
+        "kalka's server carries other settings; remove it with `{remove}` and run `kalka setup` again"
+    ))
+}
+
+/// The add after a switch's remove failed: the old entry is gone.
+fn lost(e: &str) -> String {
+    format!(
+        "kalka's server entry was removed and the new one could not be added ({e}); \
+         run `kalka setup` again to add it"
+    )
+}
+
 /// Codex's MCP server, through its CLI. Its config is global, so one entry serves every project:
 /// Codex starts the server in the directory it runs in.
-/// Either memory variant is ours; the other one is replaced.
+/// Either memory variant is ours; the other one is replaced only when `mcp get` shows nothing
+/// but what setup's own `mcp add` yields (the stdio lines, `cwd: -`, `env: -`, the remove hint).
 fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = cli("codex", root, &["mcp", "get", "kalka"])?;
@@ -220,6 +236,28 @@ fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
             if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
+            let own_line = |l: &str| {
+                [
+                    "kalka",
+                    "enabled: true",
+                    "transport: stdio",
+                    &format!("command: {CMD}"),
+                    &format!("args: {}", serve_args(true).join(" ")),
+                    &format!("args: {}", serve_args(false).join(" ")),
+                    "cwd: -",
+                    "env: -",
+                    "remove: codex mcp remove kalka",
+                ]
+                .contains(&l)
+            };
+            if !remove
+                && !text
+                    .lines()
+                    .map(str::trim)
+                    .all(|l| l.is_empty() || own_line(l))
+            {
+                return Ok(other_settings("codex mcp remove kalka"));
+            }
             cli("codex", root, &["mcp", "remove", "kalka"])?;
             if remove {
                 return Ok(Outcome::Done);
@@ -229,14 +267,16 @@ fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
         }
         let mut add = vec!["mcp", "add", "kalka", "--", CMD];
         add.extend(serve_args(memory));
-        cli("codex", root, &add)?;
+        cli("codex", root, &add).map_err(|e| if found { lost(&e) } else { e })?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)
 }
 
 /// Claude Code's own local-scope MCP config, through its CLI. Either memory variant is ours; the
-/// other one is replaced by `entry`.
+/// other one is replaced by `entry` only when `mcp get` shows nothing but what setup's own
+/// `add-json` yields (scope, status and its issue, type, command, args, the remove hint): an
+/// `Environment:`, `Timeout:` or any other line is a setting setup did not write.
 fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> Outcome {
     let run = || -> Result<Outcome, String> {
         let (found, text) = claude(root, &["mcp", "get", "kalka"])?;
@@ -254,6 +294,32 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> O
             if !remove && args(memory) {
                 return Ok(Outcome::AlreadyThere);
             }
+            let own_line = |l: &str| {
+                [
+                    "Scope: ",
+                    "Status: ",
+                    "Issue: ",
+                    "To remove this server, run: ",
+                ]
+                .iter()
+                .any(|k| l.starts_with(k))
+                    || [
+                        "kalka:",
+                        "Type: stdio",
+                        &format!("Command: {CMD}"),
+                        &format!("Args: {}", serve_args(true).join(" ")),
+                        &format!("Args: {}", serve_args(false).join(" ")),
+                    ]
+                    .contains(&l)
+            };
+            if !remove
+                && !text
+                    .lines()
+                    .map(str::trim)
+                    .all(|l| l.is_empty() || own_line(l))
+            {
+                return Ok(other_settings("claude mcp remove kalka --scope local"));
+            }
             claude(root, &["mcp", "remove", "kalka", "--scope", "local"])?;
             if remove {
                 return Ok(Outcome::Done);
@@ -265,7 +331,8 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> O
         claude(
             root,
             &["mcp", "add-json", "kalka", &json, "--scope", "local"],
-        )?;
+        )
+        .map_err(|e| if found { lost(&e) } else { e })?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)

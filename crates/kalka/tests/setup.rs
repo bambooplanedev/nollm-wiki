@@ -1099,3 +1099,157 @@ fn setup_local_no_memory_then_default_goes_through_claude() {
         "{log}"
     );
 }
+
+/// A `codex` whose `mcp get kalka` always prints `get` (as `codex mcp get` does: stdio lines,
+/// `cwd`, `env`, the remove hint) and whose `mcp add` runs `add`.
+fn codex_fixed(f: &Fixture, get: &str, add: &str) {
+    let t = f.tmp.path().display();
+    f.stub(
+        "codex",
+        &format!(
+            r#"echo "$@" >> {t}/codex.log
+case "$1 $2" in
+"mcp get") printf '%s\n' '{get}' ;;
+"mcp add") {add} ;;
+esac"#
+        ),
+    );
+}
+
+fn codex_get(args: &str, env: &str) -> String {
+    format!(
+        "kalka\n  enabled: true\n  transport: stdio\n  command: kalka\n  args: {args}\n  cwd: -\n  env: {env}\n  remove: codex mcp remove kalka"
+    )
+}
+
+const CODEX_ONLY: [&str; 4] = ["--agent", "codex", "--scope", "repo"];
+
+#[test]
+fn setup_switches_a_fixed_codex_entry_without_memory_to_the_default() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source . --memory none", "-"),
+        "exit 0",
+    );
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(out(&a).contains("wrote Codex kalka server"), "{}", out(&a));
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(log.contains("mcp remove kalka\n"), "{log}");
+    assert!(
+        log.contains("mcp add kalka -- kalka serve --source .\n"),
+        "{log}"
+    );
+}
+
+#[test]
+fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
+    let f = fixture(true, false);
+    codex_fixed(&f, &codex_get("serve --source .", "TOKEN=*****"), "exit 0");
+    let a = f
+        .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
+        .code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Codex kalka server (~/.codex/config.toml): kalka's server carries other settings; remove it with `codex mcp remove kalka`"),
+        "{o}"
+    );
+    let log = read(&f.tmp.path().join("codex.log"));
+    assert!(
+        !log.contains("mcp remove") && !log.contains("mcp add"),
+        "{log}"
+    );
+    // The same choice leaves it alone as before; `--remove` still removes it.
+    f.setup(&CODEX_ONLY).success();
+    f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
+        .success();
+    assert!(read(&f.tmp.path().join("codex.log")).contains("mcp remove kalka"));
+}
+
+#[test]
+fn a_switch_leaves_a_claude_entry_with_other_settings_alone() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "kalka", "serve --source .\n  Environment:\n    TOKEN=x");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local", "--no-memory"])
+        .code(1);
+    assert!(
+        out(&a).contains("skipped Claude Code local kalka server: kalka's server carries other settings; remove it with `claude mcp remove kalka --scope local`"),
+        "{}",
+        out(&a)
+    );
+    let log = f.claude_log();
+    assert!(
+        !log.contains("mcp remove") && !log.contains("add-json"),
+        "{log}"
+    );
+}
+
+#[test]
+fn a_failed_add_after_a_switch_says_the_entry_was_removed() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source .", "-"),
+        "echo boom >&2; exit 1",
+    );
+    let a = f
+        .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
+        .code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Codex kalka server (~/.codex/config.toml): kalka's server entry was removed and the new one could not be added (`codex mcp add` failed: boom); run `kalka setup` again to add it"),
+        "{o}"
+    );
+}
+
+#[test]
+fn setup_local_default_then_no_memory_goes_through_claude() {
+    let f = fixture(true, true);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    f.setup(&["--agent", "claude", "--scope", "local", "--no-memory"])
+        .success();
+    let log = f.claude_log();
+    assert!(log.contains("mcp remove kalka --scope local"), "{log}");
+    assert!(
+        log.contains(r#"mcp add-json kalka {"command":"kalka","args":["serve","--source",".","--memory","none"]} --scope local"#),
+        "{log}"
+    );
+}
+
+#[test]
+fn setup_remove_takes_a_local_claude_entry_without_memory() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "kalka", "serve --source . --memory none");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let a = f
+        .setup(&["--remove", "--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(
+        out(&a).contains("removed Claude Code local kalka server"),
+        "{}",
+        out(&a)
+    );
+    assert!(f.claude_log().contains("mcp remove kalka --scope local"));
+}
+
+#[test]
+fn setup_remove_ignores_the_memory_flags() {
+    let run = |first: &[&str], flag: &str| {
+        let f = fixture(true, true);
+        codex_stub(&f);
+        f.setup(first).success();
+        f.setup(&[&["--remove", flag], &ALL_AGENTS[..]].concat())
+            .success();
+        assert!(!f.tmp.path().join("codex.state").exists());
+        let (files, mut dirs) = tree(&f.root());
+        dirs.retain(|d| !d.starts_with(".agents"));
+        (files, dirs)
+    };
+    let no = [&ALL_AGENTS[..], &["--no-memory"]].concat();
+    let want = run(&ALL_AGENTS, "--memory");
+    assert_eq!(run(&ALL_AGENTS, "--no-memory"), want);
+    assert_eq!(run(&no, "--memory"), want);
+    assert_eq!(run(&no, "--no-memory"), want);
+}
