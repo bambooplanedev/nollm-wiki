@@ -1,8 +1,8 @@
 //! A release: its manifest, fetching an archive, checking it and unpacking its one binary.
 
 use std::collections::BTreeMap;
-use std::fs::{self, File};
-use std::io::{self, Read};
+use std::fs::{self, File, Metadata};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -53,6 +53,10 @@ impl Manifest {
         }
         for module in &m.modules {
             check_name(&module.name, "manifest")?;
+            // kulman is the installer, never a module.
+            if module.name == "kulman" {
+                bail!("bad name in manifest: kulman");
+            }
             for name in &module.requires {
                 check_name(name, "manifest")?;
             }
@@ -60,6 +64,10 @@ impl Manifest {
         let archives = m.modules.iter().flat_map(|x| x.archives.values());
         for archive in archives.chain(m.kulman.archives.values()) {
             check_file(&archive.file, "manifest")?;
+            let hex = archive.sha256.bytes().all(|b| b.is_ascii_hexdigit());
+            if archive.sha256.len() != 64 || !hex {
+                bail!("bad sha256 in manifest: {}", archive.sha256);
+            }
         }
         Ok(m)
     }
@@ -126,9 +134,11 @@ pub fn check_file(name: &str, place: &str) -> Result<()> {
     }
 }
 
-/// Checks a release base: `https://…`, or `file://` with no host or `localhost`.
+/// Checks a release base (trailing slashes already trimmed): `https://…`, or `file://` with no
+/// host or `localhost`; no `?` or `#`, which would garble the paths appended to it.
 pub fn check_base(base: &str) -> Result<()> {
-    if base.starts_with("https://") || local_path(base).is_some() {
+    let https = base.strip_prefix("https://").is_some_and(|h| !h.is_empty());
+    if !base.contains(['?', '#']) && (https || local_path(base).is_some()) {
         Ok(())
     } else {
         bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {base})")
@@ -141,18 +151,32 @@ fn local_path(url: &str) -> Option<PathBuf> {
     rest.starts_with('/').then(|| PathBuf::from(rest))
 }
 
-/// Reads `url` as a stream: from disk for `file://`, else over HTTPS (15 s to connect,
-/// 60 s for any one read, no limit on the whole, redirects followed).
-fn open(url: &str) -> Result<Box<dyn Read>> {
-    if let Some(path) = local_path(url) {
-        return Ok(Box::new(File::open(path)?));
-    }
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+/// The most bytes read for `manifest.json`, and for one archive.
+const MANIFEST_LIMIT: u64 = 1 << 20;
+const ARCHIVE_LIMIT: u64 = 256 << 20;
+
+/// The HTTPS client: 15 s to connect, 60 s for any one read, no limit on the whole,
+/// redirects followed but never to plain `http://`.
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .https_only(true)
         .timeout_connect(Some(Duration::from_secs(15)))
         .timeout_per_read(Some(Duration::from_secs(60)))
         .build()
-        .into();
-    Ok(Box::new(agent.get(url).call()?.into_body().into_reader()))
+        .into()
+}
+
+/// Copies `url` into `out`, from disk for `file://`, failing once more than `limit` bytes
+/// arrive.
+fn download(url: &str, out: &mut impl Write, limit: u64) -> Result<()> {
+    let reader: Box<dyn Read> = match local_path(url) {
+        Some(path) => Box::new(File::open(path)?),
+        None => Box::new(agent().get(url).call()?.into_body().into_reader()),
+    };
+    if io::copy(&mut reader.take(limit + 1), out)? > limit {
+        bail!("larger than {} MiB", limit >> 20);
+    }
+    Ok(())
 }
 
 /// The manifest of `version`, or of the latest release; with its bytes as read.
@@ -162,8 +186,7 @@ pub fn manifest(base: &str, version: Option<&str>) -> Result<(Manifest, Vec<u8>)
         None => format!("{base}/latest/download/manifest.json"),
     };
     let mut bytes = Vec::new();
-    open(&url)
-        .and_then(|mut r| Ok(r.read_to_end(&mut bytes)?))
+    download(&url, &mut bytes, MANIFEST_LIMIT)
         .map_err(|e| anyhow!("manifest.json: download failed: {e}"))?;
     let m = Manifest::parse(&bytes)?;
     if let Some(v) = version {
@@ -174,11 +197,16 @@ pub fn manifest(base: &str, version: Option<&str>) -> Result<(Manifest, Vec<u8>)
     Ok((m, bytes))
 }
 
-/// Streams `<base>/download/v<version>/<file>` into `dest`.
+/// Streams `<base>/download/v<version>/<file>` into `dest`; on failure `dest` is removed.
 pub fn fetch_to(base: &str, version: &str, file: &str, dest: &Path) -> Result<()> {
-    let mut reader = open(&format!("{base}/download/v{version}/{file}"))?;
-    io::copy(&mut reader, &mut File::create(dest)?)?;
-    Ok(())
+    let url = format!("{base}/download/v{version}/{file}");
+    let result = File::create(dest)
+        .map_err(anyhow::Error::from)
+        .and_then(|mut out| download(&url, &mut out, ARCHIVE_LIMIT));
+    if result.is_err() {
+        let _ = fs::remove_file(dest);
+    }
+    result
 }
 
 /// The SHA-256 of a file, as lowercase hex.
@@ -196,7 +224,7 @@ pub fn sha256(path: &Path) -> Result<String> {
 }
 
 /// Unpacks member `name` of `archive` into the empty dir `into` with the system tar, and
-/// returns it only if it is one regular file with a single link, now mode 0o755.
+/// returns it only if it is one regular file with a single link, now mode 0o755 and synced.
 pub fn unpack_one(archive: &Path, name: &str, into: &Path) -> Result<PathBuf> {
     let out = Command::new("tar")
         .arg("-xzf")
@@ -210,18 +238,62 @@ pub fn unpack_one(archive: &Path, name: &str, into: &Path) -> Result<PathBuf> {
             io::ErrorKind::NotFound => anyhow!("tar is required"),
             _ => anyhow!("{name}: cannot run tar: {e}"),
         })?;
+    // 127: the exec failed in the child, where the spawner could not report it (seen under
+    // x86_64 emulation on Linux). Neither GNU tar nor bsdtar exits 127 itself.
+    if out.status.code() == Some(127) {
+        bail!("tar is required");
+    }
     if !out.status.success() {
+        // GNU tar prints the cause last; bsdtar prints one line.
         let err = String::from_utf8_lossy(&out.stderr);
-        bail!(
-            "{name}: cannot unpack: {}",
-            err.lines().next().unwrap_or("")
-        );
+        let last = err.lines().rev().find(|l| !l.trim().is_empty());
+        bail!("{name}: cannot unpack: {}", last.unwrap_or("").trim());
     }
     let path = into.join(name);
-    let meta = fs::symlink_metadata(&path);
-    if !meta.is_ok_and(|m| m.file_type().is_file() && m.nlink() == 1) {
+    if !fs::symlink_metadata(&path).is_ok_and(|m| is_lone_file(&m)) {
         bail!("{name}: archive holds no regular file {name}");
     }
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+    File::open(&path)?.sync_all()?;
     Ok(path)
+}
+
+/// A regular file with no second name: not a symlink, a directory or a hard link.
+fn is_lone_file(meta: &Metadata) -> bool {
+    meta.file_type().is_file() && meta.nlink() == 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_lone_regular_file_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("file");
+        fs::write(&file, "x").unwrap();
+        let meta = |p: &Path| fs::symlink_metadata(p).unwrap();
+        assert!(is_lone_file(&meta(&file)));
+        std::os::unix::fs::symlink(&file, dir.path().join("link")).unwrap();
+        assert!(!is_lone_file(&meta(&dir.path().join("link"))));
+        assert!(!is_lone_file(&meta(dir.path())));
+        fs::hard_link(&file, dir.path().join("hard")).unwrap();
+        assert!(!is_lone_file(&meta(&file)));
+    }
+
+    #[test]
+    fn the_client_refuses_plain_http() {
+        assert!(agent().config().https_only());
+    }
+
+    #[test]
+    fn a_download_over_the_limit_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        fs::write(&file, [0u8; 11]).unwrap();
+        let url = format!("file://{}", file.display());
+        assert!(download(&url, &mut Vec::new(), 11).is_ok());
+        let err = download(&url, &mut Vec::new(), 10).unwrap_err();
+        assert!(err.to_string().starts_with("larger than"), "{err}");
+    }
 }

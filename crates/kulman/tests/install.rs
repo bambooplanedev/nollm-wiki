@@ -56,8 +56,8 @@ fn no_tmp_left(home: &Path) {
 }
 
 /// Installs kalka, then runs `install --modules plaz` after `break_it`; asserts exit 1, the
-/// stderr fragment, and that nothing under the temp root (home included) changed.
-fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) {
+/// stderr fragment, and that nothing under the temp root (home included) changed. Returns stderr.
+fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) -> String {
     let (t, base) = setup();
     let home = t.path().join("home");
     kulman(&home, &base)
@@ -73,6 +73,7 @@ fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) {
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
+    stderr(&out)
 }
 
 #[test]
@@ -228,16 +229,107 @@ fn install_refuses_a_directory_member() {
 
 #[test]
 fn install_refuses_a_hard_link_member() {
-    // GNU tar cannot link to a member it did not extract; whatever bsdtar makes of it, a file
-    // with a second link is not installed.
-    plaz_fails_and_changes_nothing(
+    // `plaz` is stored as a hard link to `x`, and only `plaz` is extracted. Both tars refuse a
+    // link to a member they did not extract; were one to make a file, its second link (or
+    // its content) would still keep it out — the `nlink == 1` check has its own unit test.
+    let err = plaz_fails_and_changes_nothing(
         |r| {
-            plaz_archive(r, &["other", "plaz"], |d| {
-                fs::write(d.join("other"), PLAZ).unwrap();
-                fs::hard_link(d.join("other"), d.join("plaz")).unwrap();
+            plaz_archive(r, &["x", "plaz"], |d| {
+                fs::write(d.join("x"), PLAZ).unwrap();
+                fs::hard_link(d.join("x"), d.join("plaz")).unwrap();
             });
         },
         "kulman: plaz: ",
+    );
+    let line = err.lines().next().unwrap();
+    assert!(
+        line.starts_with("kulman: plaz: cannot unpack: ")
+            || line == "kulman: plaz: archive holds no regular file plaz",
+        "{err}"
+    );
+}
+
+#[test]
+fn install_refuses_a_member_written_through_a_symlink() {
+    // `plaz` is a symlink to a directory outside home, then `plaz/evil` is a file: tar must
+    // not write it there (the snapshot covers the outside directory).
+    plaz_fails_and_changes_nothing(
+        |r| {
+            let dir = r.with_file_name("outside");
+            fs::create_dir(&dir).unwrap();
+            plaz_archive(r, &["plaz", "plaz/evil"], |d| {
+                std::os::unix::fs::symlink(&dir, d.join("plaz")).unwrap();
+                fs::write(dir.join("evil"), "x").unwrap();
+            });
+            fs::remove_file(dir.join("evil")).unwrap();
+        },
+        "kulman: plaz: ",
+    );
+}
+
+#[test]
+fn install_refuses_bad_entries_in_the_manifest() {
+    type Edit = fn(&mut Value);
+    let bad: [(Edit, &str); 4] = [
+        (
+            |m| m["modules"][1]["requires"] = json!(["../y"]),
+            "kulman: bad name in manifest: ../y",
+        ),
+        (
+            |m| {
+                for a in m["kulman"]["archives"]
+                    .as_object_mut()
+                    .unwrap()
+                    .values_mut()
+                {
+                    a["file"] = json!("../k.tar.gz");
+                }
+            },
+            "kulman: bad name in manifest: ../k.tar.gz",
+        ),
+        (
+            |m| m["modules"][1]["name"] = json!("kulman"),
+            "kulman: bad name in manifest: kulman",
+        ),
+        (
+            |m| {
+                for a in m["modules"][1]["archives"]
+                    .as_object_mut()
+                    .unwrap()
+                    .values_mut()
+                {
+                    a["sha256"] = json!("abc");
+                }
+            },
+            "kulman: bad sha256 in manifest: abc",
+        ),
+    ];
+    for (edit, expect) in bad {
+        plaz_fails_and_changes_nothing(|r| edit_manifest(r, "0.7.0", edit), expect);
+    }
+}
+
+#[test]
+fn install_bounds_what_it_downloads() {
+    // A sparse file one byte over 256 MiB: written instantly, refused while streaming.
+    let err = plaz_fails_and_changes_nothing(
+        |r| {
+            let path = archive_path(r, "0.7.0", "plaz");
+            fs::File::create(&path)
+                .unwrap()
+                .set_len((256 << 20) + 1)
+                .unwrap();
+        },
+        "kulman: plaz: download failed: larger than 256 MiB",
+    );
+    assert_eq!(err.lines().count(), 1, "{err}");
+    plaz_fails_and_changes_nothing(
+        |r| {
+            edit_manifest(r, "0.7.0", |m| {
+                m["padding"] = json!(" ".repeat(1 << 20));
+            });
+        },
+        "kulman: manifest.json: download failed: larger than 1 MiB",
     );
 }
 
@@ -350,7 +442,11 @@ fn install_version_must_match_the_manifest() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("0.6.0"), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("kulman: manifest.json of 0.6.0 states version 0.7.0"),
+        "{}",
+        stderr(&out)
+    );
     assert!(!home.exists());
 
     let out = kulman(&home, &base)
@@ -407,6 +503,10 @@ fn install_rejects_a_plain_http_base() {
         "http://example.invalid/releases",
         "file://host/x",
         "ftp://x",
+        "https://",
+        "file:///",
+        "https://example.invalid/releases?x=1",
+        "https://example.invalid/releases#x",
     ] {
         let out = kulman(&home, base).arg("install").output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{base}");
@@ -426,7 +526,11 @@ fn install_without_tar_says_so() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: tar is required"));
+    assert!(
+        stderr(&out).contains("kulman: tar is required"),
+        "{}",
+        stderr(&out)
+    );
     assert!(!home.exists());
 }
 
@@ -462,4 +566,50 @@ fn a_failed_first_install_leaves_no_home() {
     assert_eq!(out.status.code(), Some(1));
     assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
     assert!(!home.exists());
+}
+
+#[test]
+fn install_into_a_missing_parent_says_so() {
+    let (t, base) = setup();
+    let parent = t.path().join("missing");
+    let out = kulman(&t.path().join("home"), &base)
+        .env("KULMAN_HOME", parent.join("home"))
+        .arg("install")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let expect = format!("kulman: {} does not exist", parent.display());
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert!(!parent.exists());
+}
+
+#[test]
+fn a_run_waiting_on_a_home_that_vanishes_starts_again() {
+    // This test holds the lock as a first install would, then removes home and the lock file
+    // as that install does when it fails; the waiting run must create home again.
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    fs::create_dir(&home).unwrap();
+    let lock = fs::File::create(home.join(".lock")).unwrap();
+    lock.lock().unwrap();
+    let user = t.path().join("user-home");
+    fs::create_dir_all(&user).unwrap();
+    let child = std::process::Command::new(assert_cmd::cargo::cargo_bin("kulman"))
+        .env("KULMAN_HOME", &home)
+        .env("KULMAN_RELEASE_URL", &base)
+        .env("HOME", &user)
+        .args(["install", "--modules", "kalka"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    fs::remove_file(home.join(".lock")).unwrap();
+    fs::remove_dir(&home).unwrap();
+    drop(lock);
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kalka", KALKA);
+    assert!(home.join(".lock").exists());
 }

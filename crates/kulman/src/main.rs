@@ -83,8 +83,9 @@ fn release_base() -> Result<String> {
         .ok()
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| RELEASES.to_string());
-    release::check_base(&base).map_err(|e| Usage(e.to_string()))?;
-    Ok(base.trim_end_matches('/').to_string())
+    let base = base.trim_end_matches('/');
+    release::check_base(base).map_err(|e| Usage(e.to_string()))?;
+    Ok(base.to_string())
 }
 
 /// The build target of this machine.
