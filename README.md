@@ -29,7 +29,7 @@ each.
 
 ## Install
 
-The current release is 0.7.0. One line fetches `kulman` itself:
+One line fetches `kulman` itself:
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
@@ -51,21 +51,25 @@ written outside that folder. Then, in each project:
 
 This runs `kalka setup` and `plaz setup` there. They write into the project's `.kulman/` folder (the
 wiki, and the map under `.kulman/map/`), add the agent configs and the prompt hook for the agents
-they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`.
-`--scope repo` writes committed files for the whole team; `--scope local` keeps everything to this
-checkout and lists what it created in `.git/info/exclude` instead.
+they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`. `--scope
+repo` writes committed files for the whole team. `--scope local` writes its files into this checkout
+only and lists the ones it created in `.git/info/exclude` instead; the exception is Claude Code's
+kalka server, which goes through `claude mcp add-json … --scope local` into Claude Code's own
+configuration and needs the `claude` CLI. Codex keeps its server in `~/.codex/config.toml` with
+either scope.
 
-Later, `kulman update` brings everything to the latest release, `kulman setup --remove` undoes a
-project's setup and `kulman remove` deletes what kulman installed. Commands, flags, exit codes and
-the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
+Later, `kulman update` brings everything to the latest release, `kulman setup --scope repo --remove`
+undoes a project's setup (with the scope it was set up with) and `kulman remove` deletes what kulman
+installed. Commands, flags, exit codes and the layout of a release:
+[crates/kulman/README.md](crates/kulman/README.md).
 
 ### Checking a release
 
 A release is checked by SHA-256 only: `install.sh` and `kulman` compare each archive with the sums
 in the release's `SHA256SUMS` and `manifest.json`. Releases are not signed: the sums show that a
-download is the file the release lists, not who made the release. To check by hand, with the
-archives and `SHA256SUMS` in one folder, run `sha256sum -c --ignore-missing SHA256SUMS` (on macOS
-`shasum -a 256 -c --ignore-missing SHA256SUMS`).
+download is the file the release lists, not who made the release. To check an archive by hand, with
+it and `SHA256SUMS` in one folder, run `grep <archive> SHA256SUMS | sha256sum -c -` (on macOS `grep
+<archive> SHA256SUMS | shasum -a 256 -c -`).
 
 ## Modules
 
@@ -83,7 +87,8 @@ flowchart: the literal condition of each branch, who calls the function and what
 Rust and Python are charted; other languages get a "not covered yet" note.
 
 **[techlog](crates/techlog/README.md)** is a library: where agent memory lives — the project's
-`.agents/memory/` and the folders agents keep outside it — and who wrote each note. kalka uses it.
+`.agents/memory/` and the folders agents keep outside it — and who last changed each committed note.
+kalka uses it.
 
 **[wiki-code](crates/wiki-code/README.md)** is the library kalka and plaz share: it walks a source
 tree, extracts functions and types with tree-sitter, and indexes calls and imports.
@@ -91,9 +96,9 @@ tree, extracts functions and types with tree-sitter, and indexes calls and impor
 ## Requirements
 
 - A release runs on macOS on Apple silicon (`aarch64-apple-darwin`) and on Linux x86_64
-  (`x86_64-unknown-linux-musl`). The Linux build is static and runs on glibc and musl systems
-  alike. Those are the only two builds; anything else, Intel Macs included, builds from source.
-  Windows is not tested.
+  (`x86_64-unknown-linux-musl`). The Linux build is static and runs on glibc and musl systems alike.
+  Those are the only two builds; anything else, Intel Macs included, builds from source. Windows is
+  not supported.
 - `install.sh` needs `curl`, `tar`, `mktemp` and `sha256sum` or `shasum`.
 - For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. See
   [kalka's requirements](crates/kalka/README.md#requirements).
@@ -112,10 +117,13 @@ Building needs Rust 1.90 or later; the tests also need `jq`.
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
 
-`cargo install` puts the binaries in `~/.cargo/bin`; a `kulman` built this way still installs the
-modules of a published release. Pushing a `v*` tag that equals the workspace version builds the
-macOS and Linux archives, checks that they install, and makes a draft GitHub Release with their
-`SHA256SUMS`.
+`cargo install` puts the binaries in `~/.cargo/bin`. On the two release systems a `kulman` built
+this way installs the modules of a published release. On any other system it cannot: there is no
+build for that system, and `kulman install` stops with `no build for <os>/<arch>`. There, use the
+`kalka` and `plaz` built here and run their own setup in each project (`kalka setup --scope repo`,
+`plaz setup --scope repo`). kulman's own tests install a release, which also needs one of the two
+release systems. Pushing a `v*` tag that equals the workspace version builds the macOS and Linux
+archives, checks that they install, and makes a draft GitHub Release with their `SHA256SUMS`.
 
 ## License
 

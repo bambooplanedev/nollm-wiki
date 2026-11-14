@@ -85,6 +85,11 @@ A release of the kulman set carries `kalka` for the two systems above; on any ot
 it from source. The static Linux build uses a different allocator, and its peak memory on large
 projects is higher than a glibc build's.
 
+Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
+folder was `.wiki/`. From 0.7.0 the binary is `kalka` and the folder `.kulman/`. The agent configs
+an old setup wrote start a server named `wiki`, which 0.7.0 does not have, so remove that setup
+first with the old binary: `wiki setup --remove` with the same `--scope`.
+
 ### With kulman
 
 `kulman` installs, updates and sets up `kalka` together with the other modules; the steps are in
@@ -100,8 +105,8 @@ Add `~/.kulman-home/bin` to your `PATH` (agents start `kalka` by its name; `kulm
 (`kulman install --modules kalka`, `kulman setup --no-memory`). `kulman setup` runs every chosen
 module even when one fails, and names the ones that failed at the end. `kulman remove` deletes what
 kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `kalka` in
-their agent configs, so run `kulman setup --remove` in them first. Commands, exit codes and the
-layout of a release: [crates/kulman/README.md](../kulman/README.md).
+their agent configs, so run `kulman setup --remove` with the same `--scope` in them first.
+Commands, exit codes and the layout of a release: [crates/kulman/README.md](../kulman/README.md).
 
 ### From source
 
@@ -381,7 +386,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
   not exist at start is picked up when it appears if its parent exists (the parent is watched
   recursively; a missing parent needs a restart). On Linux the parent watch costs one inotify watch
   per directory under it, so pass an existing folder when the parent is large. `.agents/memory` is
-  compiled unless `--memory none` is given. Behaviour change: before this release `none` turned off only
+  compiled unless `--memory none` is given. Behaviour change: before 0.6.6 `none` turned off only
   the discovery and `.agents/memory` was still compiled.
 
 | Tool | Parameters | Returns |
