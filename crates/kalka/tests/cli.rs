@@ -871,7 +871,7 @@ fn cli_search_says_which_names_it_did_not_find() {
 }
 
 #[test]
-fn compile_prints_stage_timings_only_with_wiki_timings() {
+fn compile_prints_stage_timings_only_with_kalka_timings() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");
     fs::create_dir_all(&input).unwrap();
