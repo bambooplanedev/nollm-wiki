@@ -51,9 +51,9 @@ written outside that folder. Then, in each project:
 
 This runs `kalka setup` and `plaz setup` there. They write into the project's `.kulman/` folder (the
 wiki, and the map under `.kulman/map/`), add the agent configs and the prompt hook for the agents
-they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`. `--scope repo`
-writes committed files for the whole team; `--scope local` keeps everything to this checkout and
-lists what it created in `.git/info/exclude` instead.
+they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`.
+`--scope repo` writes committed files for the whole team; `--scope local` keeps everything to this
+checkout and lists what it created in `.git/info/exclude` instead.
 
 Later, `kulman update` brings everything to the latest release, `kulman setup --remove` undoes a
 project's setup and `kulman remove` deletes what kulman installed. Commands, flags, exit codes and
@@ -63,8 +63,8 @@ the layout of a release: [crates/kulman/README.md](crates/kulman/README.md).
 
 A release is checked by SHA-256 only: `install.sh` and `kulman` compare each archive with the sums
 in the release's `SHA256SUMS` and `manifest.json`. Releases are not signed: the sums show that a
-download is the file the release lists, not who made the release. To check by hand, with the archives and
-`SHA256SUMS` in one folder, run `sha256sum -c --ignore-missing SHA256SUMS` (on macOS
+download is the file the release lists, not who made the release. To check by hand, with the
+archives and `SHA256SUMS` in one folder, run `sha256sum -c --ignore-missing SHA256SUMS` (on macOS
 `shasum -a 256 -c --ignore-missing SHA256SUMS`).
 
 ## Modules
@@ -113,9 +113,9 @@ Building needs Rust 1.90 or later; the tests also need `jq`.
     cargo fmt --check
 
 `cargo install` puts the binaries in `~/.cargo/bin`; a `kulman` built this way still installs the
-modules of a published release. Pushing a `v*` tag that equals the workspace version
-builds the macOS and Linux archives, checks that they install, and makes a draft GitHub Release with
-their `SHA256SUMS`.
+modules of a published release. Pushing a `v*` tag that equals the workspace version builds the
+macOS and Linux archives, checks that they install, and makes a draft GitHub Release with their
+`SHA256SUMS`.
 
 ## License
 
