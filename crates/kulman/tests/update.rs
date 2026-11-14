@@ -689,6 +689,19 @@ fn remove_without_a_terminal_needs_yes() {
 }
 
 #[test]
+fn remove_without_a_terminal_on_a_missing_home_is_usage_and_creates_nothing() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let home = t.path().join("home");
+    let mut cmd = kulman(&home, &base);
+    let before = snapshot(t.path());
+    let out = cmd.arg("remove").output().unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(!home.exists());
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
 fn remove_says_when_it_waits_for_another_run() {
     let (_t, base, home) = installed();
     let lock = fs::File::options()

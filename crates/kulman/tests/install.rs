@@ -464,6 +464,27 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     assert_eq!(snapshot(t.path()), before);
 }
 
+#[test]
+fn install_version_of_the_installed_release_works_while_a_newer_exists() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    publish_newer(&t.path().join("release"));
+    let out = kulman(&home, &base)
+        .args(["install", "--version", "0.7.0", "--modules", "plaz"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert_binary(&home, "plaz", PLAZ);
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+    );
+}
+
 /// Publishes 0.8.0 (kalka and plaz, other bytes) as the latest release in `rel`.
 fn publish_newer(rel: &Path) {
     release(
@@ -509,6 +530,41 @@ fn install_reads_the_installed_version_once_it_holds_the_lock() {
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+    );
+}
+
+#[test]
+fn a_failure_once_files_change_does_not_say_nothing_changed() {
+    use std::os::unix::fs::PermissionsExt;
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    // bin/ read-only: the first rename into it fails, after commit started.
+    let bin = home.join("bin");
+    let mode = |m| fs::set_permissions(&bin, fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if fs::write(bin.join("probe"), "").is_ok() {
+        // root: permissions do not stop it, so there is no failure to see here.
+        fs::remove_file(bin.join("probe")).unwrap();
+        mode(0o755);
+        eprintln!("skipped: bin/ stays writable for this user");
+        return;
+    }
+    let out = kulman(&home, &base)
+        .args(["install", "--modules", "plaz"])
+        .output()
+        .unwrap();
+    mode(0o755);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let expect = format!("kulman: {}: ", bin.join("plaz").display());
+    assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
+    assert!(
+        !stderr(&out).contains("nothing changed"),
+        "{}",
+        stderr(&out)
     );
 }
 
