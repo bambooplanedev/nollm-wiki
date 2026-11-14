@@ -376,6 +376,29 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_file_that_cannot_be_read_is_listed_as_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("ok.txt"), b"ok").unwrap();
+        let locked = root.join("locked.txt");
+        fs::write(&locked, b"secret").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads a mode-000 file anyway: nothing to test there.
+        let readable = fs::read(&locked).is_ok();
+
+        let w = walk(root, true, &all);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+        if readable {
+            return;
+        }
+        let rels: Vec<_> = w.files.iter().map(|f| f.rel_path.clone()).collect();
+        assert_eq!(rels, vec!["ok.txt"]);
+        assert_eq!(w.unreadable, vec!["locked.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn symlinks_are_not_followed() {
         use std::os::unix::fs::symlink;
         let dir = tempdir().unwrap();

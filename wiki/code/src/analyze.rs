@@ -175,17 +175,49 @@ mod tests {
 
     #[test]
     fn defs_hold_in_every_family() {
-        for (path, src, name) in [
-            ("a.py", "def f(x):\n    return g(x)\n", "f"),
-            ("a.go", "package a\nfunc F(x int) int { return g(x) }\n", "F"),
-            ("a.ts", "export function f(n: number) { return g(n) }\n", "f"),
-            ("a.sh", "f() {\n  g \"$1\"\n}\nf x\n", "f"),
-            ("a.cpp", "#if X\nint f(int a) { return g(a); }\n#else\nint h(int a) { return a; }\n#endif\n", "h"),
-            ("a.vue", "<template><div/></template>\n<script setup lang=\"ts\">\nfunction go(n: number) { emit(n) }\n</script>\n", "go"),
+        for (path, src, name, want) in [
+            ("a.py", "def f(x):\n    return g(x)\n", "f", "def f(x):\n    return g(x)"),
+            ("a.go", "package a\nfunc F(x int) int { return g(x) }\n", "F", "func F(x int) int { return g(x) }"),
+            ("a.ts", "export function f(n: number) { return g(n) }\n", "f", "function f(n: number) { return g(n) }"),
+            ("a.sh", "f() {\n  g \"$1\"\n}\nf x\n", "f", "f() {\n  g \"$1\"\n}"),
+            ("a.cpp", "#if X\nint f(int a) { return g(a); }\n#else\nint h(int a) { return a; }\n#endif\n", "h", "int h(int a) { return a; }"),
+            ("a.vue", "<template><div/></template>\n<script setup lang=\"ts\">\nfunction go(n: number) { emit(n) }\n</script>\n", "go", "function go(n: number) { emit(n) }"),
         ] {
             let a = analyze(path, src).unwrap();
-            assert!(def_text(&a, name).contains(name), "{path}");
+            let i = a.file.items.iter().position(|it| it.name == name).unwrap();
+            let d = a.defs[i].as_ref().unwrap();
+            let s = &a.sources[d.source];
+            assert!(s.is_function(s.node(d).unwrap()), "{path}");
+            assert_eq!(def_text(&a, name), want, "{path}");
         }
+    }
+
+    #[test]
+    fn a_function_split_by_the_preprocessor_has_a_def_in_each_tree() {
+        let src = "#ifdef A\nint f(int a) {\n#else\nint f(long a) {\n#endif\n  return g(a);\n}\n";
+        let a = analyze("a.cpp", src).unwrap();
+        assert_eq!(a.sources.len(), 2);
+        assert_eq!(a.defs.len(), a.file.items.len());
+        let trees: Vec<usize> = a.defs.iter().flatten().map(|d| d.source).collect();
+        assert!(trees.contains(&0) && trees.contains(&1), "{trees:?}");
+    }
+
+    #[test]
+    fn shell_fallback_items_have_no_node() {
+        let src = "FOO=1\nf() {\n echo\n}\nh() { ((( ; }\nBAZ=3\nf\n";
+        let a = analyze("a.sh", src).unwrap();
+        assert_eq!(a.defs.len(), a.file.items.len());
+        let none: Vec<&str> = a
+            .file
+            .items
+            .iter()
+            .zip(&a.defs)
+            .filter(|(_, d)| d.is_none())
+            .map(|(it, _)| it.name.as_str())
+            .collect();
+        assert_eq!(none, ["h", "<top level>"]);
+        let foo = a.file.items.iter().position(|it| it.name == "FOO").unwrap();
+        assert!(a.defs[foo].is_some());
     }
 
     #[test]
