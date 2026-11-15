@@ -883,7 +883,7 @@ fn setup_codex_leaves_another_wiki_server_alone() {
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert!(
         out(&a).contains(
-            "skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"
+            "skipped Codex kalka server (machine-wide): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"
         ),
         "{}",
         out(&a)
@@ -1793,27 +1793,31 @@ fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
         .code(1);
     let o = out(&a);
     assert!(
-        o.contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"),
+        o.contains("skipped Codex kalka server (machine-wide): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"),
         "{o}"
     );
     assert_eq!(
         read(&f.root().join(".codex/config.toml")),
         CODEX_BLOCK_NO_MEMORY
     );
-    // Asked on every run, but reported only where the project had no kalka of its own.
+    // Asked on every run; setup reports it only where the project had no kalka of its own.
     let a = f.setup(&CODEX_ONLY).success();
     assert!(!out(&a).contains("skipped"), "{}", out(&a));
-    f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
-        .success();
-    assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(3));
-    // Again once the project has none, and left.
-    let a = f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat()).code(1);
-    assert!(
-        out(&a).contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and runs in every Codex session; `codex mcp remove kalka` removes it\n"),
-        "{}",
-        out(&a)
-    );
-    assert!(!codex_log(&f).contains("mcp remove"));
+    // Every `--remove` notes it and leaves it, without changing the exit code.
+    let left = "left the Codex kalka server (machine-wide): another \"kalka\" server that kalka did not write; `codex mcp remove kalka` removes it\n";
+    for removed in ["removed", "not present:"] {
+        let a = f
+            .setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
+            .success();
+        let o = out(&a);
+        assert!(
+            o.contains(&format!(
+                "{removed} .codex/config.toml kalka server\n{left}"
+            )),
+            "{o}"
+        );
+    }
+    assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(4));
 }
 
 #[test]
@@ -1849,7 +1853,7 @@ fn a_failed_codex_mcp_remove_is_reported_and_the_project_block_still_written() {
         .code(1);
     let o = out(&a);
     assert!(
-        o.contains("skipped Codex kalka server (~/.codex/config.toml): `codex mcp remove` failed: boom; run `codex mcp remove kalka` by hand\n"),
+        o.contains("skipped Codex kalka server (machine-wide): `codex mcp remove` failed: boom; run `codex mcp remove kalka` by hand\n"),
         "{o}"
     );
     assert!(!o.contains("removed the machine-wide"), "{o}");

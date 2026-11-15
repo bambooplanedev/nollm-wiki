@@ -33,6 +33,7 @@ use std::time::Instant;
 pub(crate) use wiki_code::support::is_under;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum WikiError {
     #[error(transparent)]
     Io(#[from] std::io::Error),

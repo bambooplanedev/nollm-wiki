@@ -18,8 +18,8 @@ const UNREADABLE: &str = "not a regular UTF-8 file; left as it is";
 const HOME: &str =
     "this .codex/ is Codex's own (CODEX_HOME or ~/.codex), whose config is machine-wide; left as it is";
 pub(super) const HINT: &str = "Codex loads the server only in a project it trusts: open the project in Codex and accept the trust question.";
-/// What the machine-wide entry is reported as, as the old setup named it.
-const MACHINE: &str = "Codex kalka server (~/.codex/config.toml)";
+/// What the machine-wide entry is reported as (`CODEX_HOME` may put it anywhere).
+const MACHINE: &str = "Codex kalka server (machine-wide)";
 
 /// The file's text (`None`: absent) when it may be edited: no link on the way, inside the
 /// project, a regular file with one name, UTF-8; not Codex's own home.
@@ -90,15 +90,13 @@ fn machine_get() -> Option<bool> {
 }
 
 /// After the project's block is in place: the old setup's machine-wide entry is removed, another
-/// one reported.
+/// one reported (on `--remove` as a note: nothing of setup's was skipped).
 fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiError> {
+    if !exact && remove {
+        return r.line(&format!("left the {MACHINE}: another \"kalka\" server that kalka did not write; `codex mcp remove kalka` removes it"));
+    }
     if !exact {
-        let why = if remove {
-            format!("{ANOTHER} machine-wide and runs in every Codex session; `codex mcp remove kalka` removes it")
-        } else {
-            format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's {FILE} entry was written and takes precedence here")
-        };
-        return r.skip(MACHINE, &why);
+        return r.skip(MACHINE, &format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's {FILE} entry was written and takes precedence here"));
     }
     match cli("codex", &std::env::temp_dir(), &["mcp", "remove", "kalka"]) {
         // Gone in the meantime: nothing was removed.
@@ -117,7 +115,8 @@ fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiErr
 /// entry is looked at on every run that may edit the file, and acted on only once the block is
 /// in place (written, already there, removed, or nothing to remove), so a failed write never
 /// leaves no server at all: an exact one goes (a failed remove is retried next run), another is
-/// reported on the run that finds the project without a `kalka` of its own.
+/// reported by setup on the run that finds the project without a `kalka` of its own, and noted
+/// by every `--remove`.
 pub(super) fn run(
     root: &Path,
     r: &mut Report,
@@ -155,7 +154,7 @@ pub(super) fn run(
         Ok(Outcome::Done)
     };
     let present = r.file_item(root, FILE, &format!("{FILE} kalka server"), false, edit)?;
-    if let Some(exact) = machine.filter(|&exact| present && (exact || absent)) {
+    if let Some(exact) = machine.filter(|&exact| present && (exact || absent || remove)) {
         machine_wide(r, exact, remove)?;
     }
     Ok(present)
