@@ -719,22 +719,31 @@ fn setup_local_twice_reports_everything_already_there() {
     assert!(!o.contains("skipped"), "{o}");
 }
 
-/// `mcp get` failing for another reason than "no such server" is not absence: no add follows.
+/// A failed `mcp get` with nothing on stdout is no server, whatever stderr says first (a
+/// warning, a reworded message): the entry is added, and a broken CLI fails there.
 #[test]
-fn setup_local_reports_a_failed_claude_get() {
+fn setup_local_adds_the_server_after_a_get_with_a_warning_first() {
     let f = fixture(true, false);
     let t = f.tmp.path().display();
     f.stub(
         "claude",
-        &format!("echo \"$@\" >> {t}/claude.log\necho 'error: something else' >&2\nexit 1"),
+        &format!(
+            "echo \"$@\" >> {t}/claude.log\n[ \"$2\" = get ] || exit 0\necho 'warning: a newer version is available' >&2\necho 'No MCP server named \"kalka\".' >&2\nexit 1"
+        ),
     );
-    let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
-    let o = out(&a);
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
     assert!(
-        o.contains("skipped Claude Code local kalka server: `claude mcp get` failed: error: something else"),
-        "{o}"
+        out(&a).contains("wrote Claude Code local kalka server"),
+        "{}",
+        out(&a)
     );
-    assert!(!f.claude_log().contains("add-json"), "{}", f.claude_log());
+    assert!(
+        f.claude_log().contains("mcp add-json kalka"),
+        "{}",
+        f.claude_log()
+    );
 }
 
 /// A `codex` that logs its argv and answers `mcp get kalka` with the server `mcp add` added.

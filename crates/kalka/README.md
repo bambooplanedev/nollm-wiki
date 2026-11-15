@@ -261,8 +261,7 @@ file or block that differs from what `wiki` wrote; the prose of `CLAUDE.md` and 
 that name the old tool are listed); permission rules and `enabledMcpjsonServers` in Claude
 settings; the machine-wide Codex server `wiki`; the `.wiki/` folder and its ignore lines; the old
 binary; and anything reached through a link or outside the project. `kalka setup --remove` removes
-only kalka's own entries. If `claude mcp get` fails for any reason other than no such server,
-setup skips Claude Code's local server and says so.
+only kalka's own entries.
 
 Every agent runs the server as plain `kalka`, so `kalka` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
