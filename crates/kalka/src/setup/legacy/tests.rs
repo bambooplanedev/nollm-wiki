@@ -59,20 +59,34 @@ fn edited_old_entries_are_reported_and_left() {
     }
 }
 
+/// No server `wiki` can be read from it, so it says nothing; setup meets it as it did before.
 #[test]
-fn a_config_that_is_not_a_json_object_is_reported_when_it_names_wiki() {
-    let (d, f) = found_in(&[
-        (".mcp.json", "{ \"wiki\": not json"),
-        (".cursor/mcp.json", "[1]"),
-        (".pi/mcp.json", "{ not json"),
-    ]);
-    assert_eq!(
-        f.differing,
-        [".mcp.json: wiki server differs from what wiki wrote; remove it by hand"]
-    );
-    assert_eq!(
-        fs::read_to_string(d.path().join(".mcp.json")).unwrap(),
-        "{ \"wiki\": not json"
+fn a_config_that_is_not_a_json_object_is_left_silently() {
+    let bad = "{ \"wiki\": not json";
+    let (d, f) = found_in(&[(".mcp.json", bad), (".cursor/mcp.json", "[1]")]);
+    assert!(f.removed.is_empty() && f.differing.is_empty());
+    assert_eq!(fs::read_to_string(d.path().join(".mcp.json")).unwrap(), bad);
+}
+
+#[test]
+fn every_exact_hook_item_goes_in_one_run() {
+    let item = r#"{"hooks":[{"type":"command","command":"wiki hint --claude-hook"}]}"#;
+    let hooks = format!(r#"{{"hooks":{{"UserPromptSubmit":[{item},{item}]}}}}"#);
+    let (d, f) = found_in(&[(".claude/settings.json", &hooks)]);
+    let line = "removed old wiki hook from .claude/settings.json";
+    assert_eq!(f.removed, [line, line]);
+    assert!(f.differing.is_empty(), "{:?}", f.differing);
+    assert!(!d.path().join(".claude/settings.json").exists());
+}
+
+#[test]
+fn a_permission_rule_naming_the_hook_is_no_hook() {
+    let rule = r#"{"permissions":{"allow":["Bash(wiki hint --claude-hook)"]}}"#;
+    let (_d, f) = found_in(&[(".claude/settings.json", rule)]);
+    assert!(
+        f.removed.is_empty() && f.differing.is_empty(),
+        "{:?}",
+        f.differing
     );
 }
 

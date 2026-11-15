@@ -44,6 +44,7 @@ impl Fixture {
             .env("XDG_DATA_HOME", &home)
             .env("LOCALAPPDATA", &home)
             .env("CLAUDE_CONFIG_DIR", self.tmp.path().join("claude-config"))
+            .timeout(std::time::Duration::from_secs(120))
             .assert()
     }
     fn write(&self, file: &str, text: &str) {
@@ -659,4 +660,64 @@ fn a_linked_config_is_listed_only_with_an_old_server() {
         assert_eq!(err(&a), want);
         assert_eq!(read(&dotfiles), text);
     }
+}
+
+/// A fifo where a file is expected would block a read; it is left like a folder.
+#[test]
+fn a_fifo_is_left_alone() {
+    let f = fixture();
+    // Not `.gitignore`: the compile's own walk reads that one.
+    fs::create_dir_all(f.root().join(".claude")).unwrap();
+    let made = [".mcp.json", ".claude/settings.json"].iter().all(|n| {
+        std::process::Command::new("mkfifo")
+            .arg(f.root().join(n))
+            .status()
+            .is_ok_and(|s| s.success())
+    });
+    if !made {
+        eprintln!("skipped: no mkfifo");
+        return;
+    }
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+}
+
+/// A dangling link where the old skill folder was keeps its ignore line.
+#[test]
+fn a_dangling_skill_link_keeps_its_ignore_line() {
+    let f = fixture();
+    let r = f.root();
+    fs::create_dir_all(r.join(".agents/skills")).unwrap();
+    symlink(
+        f.tmp.path().join("gone"),
+        r.join(".agents/skills/wiki-navigation"),
+    )
+    .unwrap();
+    f.write(".git/info/exclude", "/.agents/skills/wiki-navigation/\n");
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+    let ex = read(&r.join(".git/info/exclude"));
+    assert!(ex.starts_with("/.agents/skills/wiki-navigation/\n"), "{ex}");
+}
+
+/// A hard-linked config is not edited: its other name would change too.
+#[test]
+fn a_hard_linked_config_is_left() {
+    let f = fixture();
+    let other = f.tmp.path().join("team-mcp.json");
+    let text = pretty(&json!({"mcpServers": {"wiki": old_entry()}}));
+    fs::write(&other, &text).unwrap();
+    fs::hard_link(&other, f.root().join(".mcp.json")).unwrap();
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(read(&other), text);
+    assert!(
+        err(&a).contains(
+            "\n  .mcp.json: reached through a link; the old wiki server there was left\n"
+        ),
+        "{}",
+        err(&a)
+    );
 }

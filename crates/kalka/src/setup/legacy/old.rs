@@ -62,17 +62,17 @@ pub(super) fn block(text: &str) -> Option<&str> {
 
 /// Whether text (`None`: there, but not readable) holds the old tool's server `wiki`.
 pub(super) fn old_server(t: Option<&str>) -> bool {
-    t.is_some_and(|t| match serde_json::from_str::<Value>(t) {
-        Ok(v) => v.pointer("/mcpServers/wiki").is_some(),
-        Err(_) => t.contains("\"wiki\""),
-    })
+    let v = t.and_then(|t| serde_json::from_str::<Value>(t).ok());
+    v.as_ref()
+        .and_then(|v| v.get("mcpServers")?.as_object())
+        .is_some_and(|m| m.contains_key("wiki"))
 }
 
 /// Whether a settings text holds a prompt hook item running `wiki hint`.
 pub(super) fn old_hook(t: Option<&str>) -> bool {
     let Some(t) = t else { return false };
     let Ok(v) = serde_json::from_str::<Value>(t) else {
-        return t.contains("wiki hint");
+        return false;
     };
     let items = v
         .pointer("/hooks/UserPromptSubmit")

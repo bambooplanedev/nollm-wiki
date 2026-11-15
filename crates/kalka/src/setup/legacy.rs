@@ -8,7 +8,7 @@ mod report;
 pub(super) use report::report;
 
 use super::{claude, claude_local_mcp, edit, exclude_file, find_on_path, worktree_prefix};
-use edit::Outcome;
+use edit::{inside, other_names, Outcome};
 use old::{
     block, known, old_block, old_entry, old_hook, old_server, NAV_BEGIN, OLD_BLOCK_DIGESTS,
     OLD_HOOK, OLD_HOOK_DIGESTS, OLD_SKILL, OLD_SKILL_DIGESTS,
@@ -23,24 +23,6 @@ use std::path::{Path, PathBuf};
 pub(super) struct Found {
     pub removed: Vec<String>,
     pub differing: Vec<String>,
-}
-
-/// Why `base/rel` may not be touched: a link on the way below `base` (the project, or for the
-/// exclude file the git folder git named), or a path that resolves outside `base`.
-fn unsafe_path(base: &Path, rel: &Path) -> Option<&'static str> {
-    let mut p = base.to_path_buf();
-    for c in rel.components() {
-        p.push(c);
-        match std::fs::symlink_metadata(&p) {
-            Ok(m) if m.file_type().is_symlink() => return Some("is a symbolic link; left"),
-            Ok(_) => {}
-            Err(_) => return None, // missing: nothing to remove
-        }
-    }
-    match (p.canonicalize(), base.canonicalize()) {
-        (Ok(a), Ok(b)) if a.starts_with(&b) => None,
-        _ => Some("lies outside the project; left"),
-    }
 }
 
 /// Drops every line of `text` equal to `line`; `None` when there is none.
@@ -89,12 +71,21 @@ impl Takeover<'_> {
         Ok(())
     }
 
-    /// `base/rel`'s text, after the link check. Only writes fail the takeover.
+    /// `base/rel`'s text, after the link check; only a regular file with one name is read (a
+    /// fifo would block, a hard link would edit its other names too). Only writes fail the
+    /// takeover.
     fn probe(base: &Path, rel: &Path) -> std::result::Result<Option<String>, Left> {
-        if unsafe_path(base, rel).is_some() {
+        if !inside(base, rel) {
             return Err(Left::Link);
         }
-        match std::fs::read(base.join(rel)) {
+        let path = base.join(rel);
+        match std::fs::symlink_metadata(&path) {
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Ok(m) if m.is_file() && other_names(&m) => return Err(Left::Link),
+            Ok(m) if m.is_file() => {}
+            _ => return Err(Left::Unreadable),
+        }
+        match std::fs::read(path) {
             Ok(b) => String::from_utf8(b).map(Some).map_err(|_| Left::Unreadable),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
             Err(_) => Err(Left::Unreadable),
@@ -116,13 +107,15 @@ impl Takeover<'_> {
                 Outcome::Foreign(_) if !old(Some(&t)) => Outcome::AlreadyThere,
                 o => o,
             },
-            Err(Left::Link) if path.exists() => {
-                let t = std::fs::read(&path).ok();
-                if old(t.as_deref().map(String::from_utf8_lossy).as_deref()) {
-                    Outcome::Foreign(LINK.into())
-                } else {
-                    Outcome::AlreadyThere
-                }
+            // Read only, and only a regular UTF-8 file at the end of the link.
+            Err(Left::Link)
+                if std::fs::metadata(&path).is_ok_and(|m| m.is_file())
+                    && std::fs::read(&path)
+                        .ok()
+                        .and_then(|b| String::from_utf8(b).ok())
+                        .is_some_and(|t| old(Some(&t))) =>
+            {
+                Outcome::Foreign(LINK.into())
             }
             Err(Left::Unreadable) if old(None) => Outcome::Foreign(String::new()),
             Ok(None) | Err(_) => Outcome::AlreadyThere,
@@ -159,15 +152,22 @@ impl Takeover<'_> {
         let item = json!({"hooks": [{"type": "command", "command": "wiki hint --claude-hook"}]}); // mod.rs:553
         for file in [".claude/settings.json", ".claude/settings.local.json"] {
             let parents = ["hooks", "UserPromptSubmit"];
-            let o = self.check(file, old_hook, |p, _| {
-                edit::remove_item(root, p, &parents, &item)
-            })?;
-            // Another `wiki hint` item, left beside the removed one or alone.
-            let other = !matches!(o, Outcome::Foreign(_))
-                && Self::probe(root, Path::new(file)).is_ok_and(|t| old_hook(t.as_deref()));
-            self.note("hook", file, o)?;
-            if other {
-                self.note("hook", file, Outcome::Foreign(String::new()))?;
+            // Every exact item (one line each), then another `wiki hint` item is listed.
+            loop {
+                let o = self.check(file, old_hook, |p, _| {
+                    edit::remove_item(root, p, &parents, &item)
+                })?;
+                let (done, foreign) = (o == Outcome::Done, matches!(o, Outcome::Foreign(_)));
+                self.note("hook", file, o)?;
+                if done {
+                    continue;
+                }
+                if !foreign
+                    && Self::probe(root, Path::new(file)).is_ok_and(|t| old_hook(t.as_deref()))
+                {
+                    self.note("hook", file, Outcome::Foreign(String::new()))?;
+                }
+                break;
             }
         }
 
@@ -216,7 +216,8 @@ impl Takeover<'_> {
         let prefix = worktree_prefix(root);
         for dir in [".agents/skills/wiki-navigation", ".pi/extensions/wiki-hint"] {
             let line = format!("/{prefix}{dir}/");
-            if root.join(dir).exists() {
+            // Not `exists()`: a dangling link is still the folder's place.
+            if std::fs::symlink_metadata(root.join(dir)).is_ok() {
                 continue;
             }
             let what = format!("ignore line {line}");

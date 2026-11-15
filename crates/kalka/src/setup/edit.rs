@@ -285,5 +285,32 @@ pub fn ensure_line(path: &Path, line: &str) -> Result<Outcome> {
     Ok(Outcome::Done)
 }
 
+/// Whether `base/rel` may be touched: no link on the way below `base` (dangling ones count),
+/// and, when it exists, it resolves inside `base`. Missing is fine: there is nothing to edit.
+pub fn inside(base: &Path, rel: &Path) -> bool {
+    let mut p = base.to_path_buf();
+    for c in rel.components() {
+        p.push(c);
+        match std::fs::symlink_metadata(&p) {
+            Ok(m) if m.file_type().is_symlink() => return false,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+    }
+    matches!((p.canonicalize(), base.canonicalize()), (Ok(a), Ok(b)) if a.starts_with(&b))
+}
+
+/// A file with more than one name: editing it edits them all.
+#[cfg(unix)]
+pub fn other_names(m: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    m.nlink() > 1
+}
+
+#[cfg(not(unix))]
+pub fn other_names(_: &std::fs::Metadata) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests;

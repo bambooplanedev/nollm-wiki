@@ -12,6 +12,14 @@ const MAX_MENTIONS: usize = 20;
 /// A bigger instructions file is not read.
 const MAX_SIZE: u64 = 1 << 20;
 
+/// `path`'s text when it is a regular file (through a link too): a fifo would block the read.
+fn text(path: &Path) -> Option<String> {
+    let regular = std::fs::metadata(path).is_ok_and(|m| m.is_file());
+    regular
+        .then(|| std::fs::read_to_string(path).ok())
+        .flatten()
+}
+
 /// The block's lines (stderr), empty when there is nothing to say.
 pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
     let mut items: Vec<String> = found.differing.iter().map(|l| format!("  {l}")).collect();
@@ -30,7 +38,7 @@ pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
         (".gitignore", Some(root.join(".gitignore"))),
         (".git/info/exclude", exclude_file(root)),
     ] {
-        let Some(text) = path.and_then(|p| std::fs::read_to_string(p).ok()) else {
+        let Some(text) = path.and_then(|p| text(&p)) else {
             continue;
         };
         for (i, l) in text.lines().enumerate() {
@@ -76,9 +84,7 @@ fn codex_has_wiki(root: &Path) -> bool {
 /// Settings Claude Code or the person wrote for the old server: permission rules and the
 /// `.mcp.json` approvals.
 fn claude_settings(root: &Path, file: &str) -> Vec<String> {
-    let Some(v) = std::fs::read_to_string(root.join(file))
-        .ok()
-        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    let Some(v) = text(&root.join(file)).and_then(|t| serde_json::from_str::<Value>(&t).ok())
     else {
         return Vec::new();
     };
