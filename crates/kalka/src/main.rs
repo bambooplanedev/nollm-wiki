@@ -173,7 +173,7 @@ enum Command {
     },
     /// Install the MCP server and what tells each agent to use it (Claude Code, pi, Cursor, Codex) in this project, plus the prompt hook for Claude Code and pi.
     Setup {
-        /// Agents to set up (default: the ones found, asked at a terminal when none is; Codex only when named, its config is global).
+        /// Agents to set up (default: the ones found, asked at a terminal when none is; Cursor and Codex by their project folder).
         #[arg(long, value_delimiter = ',')]
         agent: Option<Vec<Agent>>,
         /// Where the files go (asked when omitted and stdin and stdout are terminals).
