@@ -24,8 +24,6 @@ pub mod walk;
 pub mod watch;
 
 use crate::formats::Registry;
-#[cfg(test)]
-use crate::ids::{assign_free_ids, discriminator, discriminator_is_redundant, LadderState};
 use crate::ids::{disambiguate_ids, disambiguate_taken, remap_reserved_names};
 use crate::model::{slugify, Entity, LintReport, Origin};
 use rayon::prelude::*;

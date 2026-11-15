@@ -68,7 +68,7 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
 /// distinguishes it — `v1`, not `v1_md`, which would name nothing. A
 /// directory-module page (`pkg/__init__.py`) discarded no tail and uses the
 /// stem for the same reason.
-pub(crate) fn discriminator(entity: &Entity) -> String {
+fn discriminator(entity: &Entity) -> String {
     let base = basename(&entity.source_path);
     let stem = base.split('.').next().unwrap_or(base);
     let named_after_stem =
@@ -121,7 +121,7 @@ fn strict_winner(group: &[usize], key: &[(u8, usize)]) -> Option<usize> {
 /// trailing words of `current`, not just the last one — comparing only the
 /// last token would miss "Foo Test Spec" + `test_spec`, which renders "Foo
 /// Test Spec Test Spec".
-pub(crate) fn discriminator_is_redundant(current: &str, disc: &str) -> bool {
+fn discriminator_is_redundant(current: &str, disc: &str) -> bool {
     let disc_words: Vec<String> = disc
         .split('_')
         .filter(|s| !s.is_empty())
@@ -143,11 +143,11 @@ pub(crate) fn discriminator_is_redundant(current: &str, disc: &str) -> bool {
 /// depth, and whether that entity has actually used its discriminator.
 /// Bundled so the function stays under clippy's argument-count lint instead
 /// of taking four parallel slices.
-pub(crate) struct LadderState<'a> {
-    pub(crate) base: &'a [String],
-    pub(crate) disc: &'a [String],
-    pub(crate) depth: &'a [usize],
-    pub(crate) used_disc: &'a [bool],
+struct LadderState<'a> {
+    base: &'a [String],
+    disc: &'a [String],
+    depth: &'a [usize],
+    used_disc: &'a [bool],
 }
 
 /// Assign every member of `group` a distinct, previously-unclaimed id: the
@@ -163,7 +163,7 @@ pub(crate) struct LadderState<'a> {
 /// moved. `claimed` is threaded through the whole round (not reset per
 /// group), so two groups processed in the same round never land on the same
 /// id by both computing from the round's starting snapshot.
-pub(crate) fn assign_free_ids(
+fn assign_free_ids(
     group: &[usize],
     extracted: &[Entity],
     state: &LadderState<'_>,
@@ -418,3 +418,6 @@ pub(crate) fn remap_reserved_names(entities: BTreeMap<String, Entity>) -> BTreeM
     }
     result
 }
+
+#[cfg(test)]
+mod tests;

@@ -980,11 +980,9 @@ unknown; and the names of one multi-declarator statement share its range.
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
   the source file they test when small (e.g. `src/cache.rs`, `src/hash.rs`),
-  and in `<module>/tests.rs` when large (e.g. `src/tests.rs` for
-  `src/lib.rs`, `crates/wiki-code/src/formats/code.rs`, `crates/wiki-code/src/formats/extract_rust.rs`,
-  `crates/wiki-code/src/formats/extract_python.rs`) — colocated with the code, not in a
-  separate tree. Language-specific extraction tests moved with their
-  language when `code.rs` was split (§ Module map).
+  and in `<module>/tests.rs` next to the module when large (e.g.
+  `src/query/tests.rs`, `src/ids/tests.rs`; `src/tests.rs` for `src/lib.rs`)
+  — colocated with the code, not in a separate tree.
 - **Integration tests** live in `tests/`:
   - `tests/end_to_end.rs` — full `compile()` runs against small in-memory
     corpora: artifact presence, cross-linking, reserved-name remapping,
