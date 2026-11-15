@@ -28,7 +28,7 @@ jobs:
     - name: Check install.sh syntax
       run: sh -n install.sh
     - name: Shellcheck the release scripts
-      run: shellcheck install.sh scripts/release-assemble.sh scripts/install-check.sh
+      run: shellcheck install.sh scripts/release-assemble.sh scripts/install-check.sh scripts/quartz-publish.sh scripts/selfhost.sh scripts/test-strip-chrome.sh
     - name: Docs
       run: cargo doc --no-deps
       env:

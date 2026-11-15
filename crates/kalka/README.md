@@ -86,8 +86,8 @@ it from source. The static Linux build uses a different allocator, and its peak 
 projects is higher than a glibc build's.
 
 Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
-folder was `.wiki/`. From 0.7.0 the binary is `kalka` and the folder `.kulman/`. The agent configs
-an old setup wrote start a server named `wiki`, which 0.7.0 does not have, so remove that setup
+folder was `.wiki/`. From 0.7.1 the binary is `kalka` and the folder `.kulman/`. The agent configs
+an old setup wrote start a server named `wiki`, which 0.7.1 does not have, so remove that setup
 first with the old binary: `wiki setup --remove` with the same `--scope`.
 
 ### With kulman

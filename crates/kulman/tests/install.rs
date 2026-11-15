@@ -398,6 +398,33 @@ fn install_refuses_a_malformed_state() {
 }
 
 #[test]
+fn an_unknown_module_is_usage_even_when_the_installed_version_differs() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    fs::write(
+        home.join("state.json"),
+        r#"{"version":"0.8.0","modules":["kalka"]}"#,
+    )
+    .unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--yes", "--modules", "nope"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("unknown module \"nope\""),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
 fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     let (t, base) = setup();
     let rel = t.path().join("release");
@@ -752,13 +779,20 @@ fn install_says_how_to_add_to_path() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let bin = home.join("bin");
-    let hint = format!("add to PATH: {}", bin.display());
+    let hint = [
+        format!("{} is not on PATH; add it:", bin.display()),
+        format!("    export PATH=\"{}:$PATH\"", bin.display()),
+    ];
     let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
+    let full = format!(
+        "next: run \"{}/kulman setup --scope repo\" (or local) in a project",
+        bin.display()
+    );
     let out = kulman(&home, &base).arg("install").output().unwrap();
     let text = stdout(&out);
     assert_eq!(
-        text.lines().rev().take(2).collect::<Vec<_>>(),
-        [next, hint.as_str()],
+        text.lines().rev().take(3).collect::<Vec<_>>(),
+        [full.as_str(), hint[1].as_str(), hint[0].as_str()],
         "{text}"
     );
 
@@ -775,7 +809,7 @@ fn install_says_how_to_add_to_path() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("add to PATH"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("not on PATH"), "{}", stdout(&out));
     assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
 }
 

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 
-use crate::{ask_choose, ask_yes, is_installed, on_path, release, store, Usage};
+use crate::{ask_choose, ask_yes, is_installed, on_path, path_hint, release, store, Usage};
 use release::Manifest;
 use store::{Home, State};
 
@@ -70,6 +70,22 @@ fn choose(manifest: &Manifest, wanted: Option<Vec<String>>) -> Result<BTreeSet<S
     Ok(chosen)
 }
 
+/// Refuses an installed version that differs from the release's.
+fn check_version(state: &State, manifest: &Manifest) -> Result<()> {
+    let (have, want) = (&state.version, &manifest.version);
+    let order = release::version_key(have).cmp(&release::version_key(want));
+    if order.is_lt() {
+        bail!("version {have} is installed; run kulman update");
+    }
+    if order.is_gt() {
+        bail!(
+            "version {have} is installed, newer than {want}; \
+             run kulman remove, then kulman install --version {want}"
+        );
+    }
+    Ok(())
+}
+
 pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: bool) -> Result<()> {
     let base = release_base()?;
     let home_path = store::home_path()?;
@@ -84,10 +100,13 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
         }
     }
     let bin = home.path.join("bin");
-    if !on_path(&bin) {
-        println!("add to PATH: {}", bin.display());
-    }
-    println!("next: run \"kulman setup --scope repo\" (or local) in a project");
+    let kulman = if on_path(&bin) {
+        "kulman".to_string()
+    } else {
+        println!("{}", path_hint(&bin));
+        bin.join("kulman").display().to_string()
+    };
+    println!("next: run \"{kulman} setup --scope repo\" (or local) in a project");
     Ok(())
 }
 
@@ -133,6 +152,10 @@ fn place(
     };
     let wanted = match wanted {
         None if ask => {
+            // A terminal run that will be refused on the version is refused before the question.
+            if let Some(state) = &state {
+                check_version(state, &manifest)?;
+            }
             let items: Vec<_> = (manifest.modules.iter())
                 .map(|m| (m.name.as_str(), m.summary.as_str(), m.default))
                 .collect();
@@ -145,17 +168,7 @@ fn place(
     // At the same version, an installed kulman is the release's already.
     let kulman_too = state.is_none() || !home.path.join("bin/kulman").is_file();
     if let Some(state) = state {
-        let (have, want) = (&state.version, &manifest.version);
-        let order = release::version_key(have).cmp(&release::version_key(want));
-        if order.is_lt() {
-            bail!("version {have} is installed; run kulman update");
-        }
-        if order.is_gt() {
-            bail!(
-                "version {have} is installed, newer than {want}; \
-                 run kulman remove, then kulman install --version {want}"
-            );
-        }
+        check_version(&state, &manifest)?;
         modules.extend(state.modules);
     }
     let bin = home.path.join("bin");

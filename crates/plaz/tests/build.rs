@@ -2476,12 +2476,30 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
 #[test]
 fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
     let usage = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup [--source DIR] --scope repo|local [--remove]\n";
-    for flag in ["--help", "-h"] {
+    let help = format!(
+        "{usage}\n{}\n",
+        "\
+build   write the vault of flowchart pages for the source tree
+setup   build, then keep .kulman/ out of git (--remove: delete the map's pages instead)
+
+--source DIR          the source tree (default .)
+--vault DIR           build only: the vault (default <source>/.kulman, pages in its map/)
+--scope repo|local    setup only, required unless --remove: ignore .kulman/ in .gitignore or in this clone's info/exclude
+--remove              setup only: delete the map's own pages instead of building
+--help, -h, help      print this text"
+    );
+    for args in [
+        &["--help"][..],
+        &["-h"],
+        &["help"],
+        &["build", "--help"],
+        &["setup", "--help"],
+    ] {
         assert_cmd::cargo_bin_cmd!()
-            .arg(flag)
+            .args(args)
             .assert()
             .success()
-            .stdout(usage)
+            .stdout(help.clone())
             .stderr("");
     }
     assert_cmd::cargo_bin_cmd!()

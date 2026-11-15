@@ -1,9 +1,11 @@
 //! `kulman remove`: deletes the named modules, or everything kulman installed.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{bail, Result};
 
+use crate::release::Manifest;
 use crate::{ask_yes, asks, is_installed, store, Usage};
 use store::{Home, State};
 
@@ -67,11 +69,34 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
         if let Some(name) = names.iter().find(|n| !state.modules.contains(n)) {
             bail!("{name} is not installed");
         }
+        // What stays must not lose a module it requires (no readable manifest: no check).
+        let manifest = std::fs::read(home.path.join("manifest.json"))
+            .ok()
+            .and_then(|b| Manifest::parse(&b).ok());
+        let stays = state
+            .modules
+            .iter()
+            .filter_map(|m| manifest.as_ref()?.module(m));
+        let blocked: BTreeMap<&String, &String> = stays
+            .filter(|m| !names.contains(&m.name))
+            .flat_map(|m| {
+                m.requires
+                    .iter()
+                    .filter(|r| names.contains(r))
+                    .map(|r| (r, &m.name))
+            })
+            .collect();
+        if !blocked.is_empty() {
+            let lines: Vec<_> = (blocked.iter())
+                .map(|(a, b)| format!("cannot remove {a}: {b} requires it"))
+                .collect();
+            bail!("{}", lines.join("\nkulman: "));
+        }
     }
     // Removing everything leaves kalka's name in the agent configs of set-up projects.
     let projects = (names.is_none() && state.modules.iter().any(|m| m == "kalka")).then_some(
         "projects set up with kulman still name \"kalka\" in their agent configs: \
-         run kulman setup --remove in each first",
+         run \"kulman setup --scope repo --remove\" (or local) in each first",
     );
     if ask {
         if let Some(line) = projects {

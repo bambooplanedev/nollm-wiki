@@ -297,11 +297,11 @@ fn setup_warns_when_bin_is_not_on_path_and_still_runs() {
     let out = f.setup(&["--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let warning = [
-        format!("kulman: {} is not on PATH", bin.display()),
+        format!("kulman: {} is not on PATH; add it:", bin.display()),
+        format!("    export PATH=\"{}:$PATH\"", bin.display()),
         "kulman: the agent configs written now start \"kalka\"; an agent started without it on \
          PATH will not find it"
             .to_string(),
-        format!("kulman: add to PATH: {}", bin.display()),
     ];
     assert_eq!(stderr(&out).lines().collect::<Vec<_>>(), warning);
     assert_eq!(f.logged().len(), 2);
@@ -355,7 +355,10 @@ fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
         fs::read_to_string(&log).unwrap(),
         format!("{}\n", own.display())
     );
-    let first = format!("kulman: {} is not on PATH", home.join("bin").display());
+    let first = format!(
+        "kulman: {} is not on PATH; add it:",
+        home.join("bin").display()
+    );
     assert_eq!(stderr(&out).lines().next(), Some(first.as_str()));
 }
 

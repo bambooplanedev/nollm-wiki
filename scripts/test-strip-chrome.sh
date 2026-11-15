@@ -8,7 +8,9 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 fail=0
 ok()  { echo "  ok: $1"; }
 bad() { echo "  FAIL: $1"; fail=1; }
+# shellcheck disable=SC2015 # ok and bad only echo and set a variable, so they cannot fail
 present() { printf '%s\n' "$1" | grep -Fxq -- "$2" && ok "present: $2" || bad "MISSING: $2"; }
+# shellcheck disable=SC2015 # ok and bad only echo and set a variable, so they cannot fail
 absent()  { printf '%s\n' "$1" | grep -Fxq -- "$2" && bad "LEAKED: $2"  || ok "absent: $2"; }
 strip()   { awk -f "$AWK" "$tmp/out/$1"; }
 
@@ -28,6 +30,7 @@ if [ -n "${KALKA_BIN:-}" ]; then
 else
     cargo run --quiet --manifest-path "$SCRIPT_DIR/../Cargo.toml" -p kalka -- compile "$tmp/src" "$tmp/out" > /dev/null
 fi
+# shellcheck disable=SC2015 # the `||` branch is meant to run when either check fails
 grep -Fxq '## Imported by' "$tmp/out/b.md" && grep -Fxq '## Mentioned in' "$tmp/out/b.md" \
     || { echo "fixture: b.md lacks the backlink sections; update this test"; exit 1; }
 
@@ -60,11 +63,13 @@ absent  "$out" "_(add your own notes here — preserved on recompile)_"
 sed 's/^_(add your own notes here.*/my hand note/' "$tmp/out/guide.md" > "$tmp/out/noted.md"
 out="$(strip noted.md)"
 absent  "$out" "my hand note"
+# shellcheck disable=SC2015 # ok and bad only echo and set a variable, so they cannot fail
 [ "$(printf '%s\n' "$out" | grep -Fxc '## Notes')" -eq 1 ] && ok "one Notes heading left" || bad "trailing Notes kept"
 present "$out" "Author notes inside the body."
 
 # Idempotent (on a page whose body has no Notes heading).
 once="$(strip b.md)"
+# shellcheck disable=SC2015 # ok and bad only echo and set a variable, so they cannot fail
 [ "$once" = "$(printf '%s\n' "$once" | awk -f "$AWK")" ] && ok "idempotent" || bad "not idempotent"
 
 if [ "$fail" -eq 0 ]; then echo "strip-chrome: ALL PASS"; else echo "strip-chrome: FAILURES"; exit 1; fi

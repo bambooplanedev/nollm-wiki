@@ -16,6 +16,7 @@ usage() {
 }
 
 WIKI_DIR=""; TITLE=""; SERVE=0
+# shellcheck disable=SC2015 # the || branch is meant to run when any of the checks fails
 while [ $# -gt 0 ]; do
     case "$1" in
         --title) [ $# -ge 2 ] && [ -n "$2" ] && [ "${2#-}" = "$2" ] || { echo "error: --title needs a value" >&2; usage; }
@@ -30,6 +31,7 @@ done
 
 [ -n "$WIKI_DIR" ] || usage
 [ -d "$WIKI_DIR" ] || { echo "error: not a directory: $WIKI_DIR" >&2; exit 1; }
+# shellcheck disable=SC2015 # the || branch is meant to run when either check fails
 [ -f "$WIKI_DIR/index.md" ] && [ -f "$WIKI_DIR/index.json" ] \
     || { echo "error: $WIKI_DIR lacks index.md or index.json — is it a compiled wiki?" >&2; exit 1; }
 for tool in git node npm npx perl; do
@@ -59,6 +61,7 @@ fi
 [ -f "$BUILD_DIR/node_modules/.package-lock.json" ] || ( cd "$BUILD_DIR" && npm install )
 
 # 2. Patch pageTitle (value-agnostic; " and \ would break the TS string).
+# shellcheck disable=SC1003 # a double quote and two backslashes in single quotes, not an escaped quote
 SAFE_TITLE="$(printf '%s' "$TITLE" | tr '"\\' "'/")"
 TITLE="$SAFE_TITLE" perl -i -pe 's/pageTitle: "[^"]*"/pageTitle: "$ENV{TITLE}"/' "$BUILD_DIR/quartz.config.ts"
 grep -Fq "pageTitle: \"$SAFE_TITLE\"" "$BUILD_DIR/quartz.config.ts" \

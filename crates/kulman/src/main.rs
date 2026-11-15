@@ -21,15 +21,16 @@ use setup::setup;
 use status::status;
 
 #[derive(Parser)]
-#[command(version, about, color = ColorChoice::Never)]
+#[command(version, about, after_help = "With no command, shows status.", color = ColorChoice::Never)]
 struct Cli {
-    /// With no command: what is installed, and whether a newer release exists.
     #[command(subcommand)]
     command: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Show what is installed and whether a newer release exists (the same as no command).
+    Status,
     /// Install modules of a release into ~/.kulman-home/bin (with kulman itself).
     Install {
         /// Modules to install, comma separated (default: the release's defaults).
@@ -114,7 +115,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let changes = matches!(cli.command, Some(Cmd::Install { .. } | Cmd::Update { .. }));
     let result = match cli.command {
-        None => status(),
+        None | Some(Cmd::Status) => status(),
         Some(Cmd::Install {
             modules,
             version,
@@ -181,9 +182,25 @@ fn ask_choose(title: &str, items: &[(&str, &str, bool)], one: bool) -> Result<Ve
     )?)
 }
 
-/// `dir` is on this process's `PATH`.
+/// `dir` is on this process's `PATH`, by real path: an entry reaching it through a symlink counts.
+/// A relative entry, or one that cannot be resolved (and every entry, when `dir` cannot), is
+/// compared as text.
 fn on_path(dir: &Path) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == dir))
+    let real = dir.canonicalize().ok();
+    std::env::var_os("PATH").is_some_and(|p| {
+        std::env::split_paths(&p).any(|d| {
+            d == dir
+                || real.as_ref().is_some_and(|real| {
+                    d.is_absolute() && d.canonicalize().is_ok_and(|d| d == *real)
+                })
+        })
+    })
+}
+
+/// What kulman says when `bin` is not on `PATH`: two lines, the second one to copy.
+fn path_hint(bin: &Path) -> String {
+    let bin = bin.display();
+    format!("{bin} is not on PATH; add it:\n    export PATH=\"{bin}:$PATH\"")
 }
 
 /// `state.json` exists under `home`: checked before anything is created.

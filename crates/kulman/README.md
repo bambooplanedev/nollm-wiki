@@ -6,7 +6,7 @@
 the tools, sets up a project.
 
 `kulman` installs, updates and sets up the modules of the kulman set: `kalka` (the project wiki for
-coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.7.0 is
+coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.7.1 is
 the first to carry it; the [repository README](../../README.md) describes the whole set.
 
 ## Getting it
@@ -54,13 +54,14 @@ symlink or not a directory is refused. No shell profile is edited.
 
 ## Commands
 
-    kulman
+    kulman [status]
 
-With no command: the installed version and modules (a module whose binary is missing is marked
-`(missing: run kulman update)`), the line `PATH: <home>/bin is not on PATH (add it)` when it is not,
-and whether a newer release exists. It only reads: nothing is created. The release host gets 5 s to
-connect and 8 s in all; past that, or on any error, the last line says what could not be reached,
-and why.
+With no command, or `status`: the installed version and modules (a module whose binary is missing is
+marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; add it:` and
+`export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry that reaches `bin/`
+through a symlink counts), and whether a newer release exists. It only reads: nothing is created.
+The release host gets 5 s to connect and 8 s in all; past that, or on any error, the last line says
+what could not be reached, and why.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
@@ -76,9 +77,10 @@ it says that instead (`could not check for a newer release (<base>: <reason>)`).
 version is read once `.lock` is held. If the installed version differs from `--version`, or is newer
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
 update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
-install ends with the next steps: adding `bin/` to `PATH` if it is not there, then `kulman setup` in
-a project. With nothing to do it writes nothing and says `already installed: <names> (<version>)`
-instead (and, as above, a newer release).
+install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman
+setup` in a project (named by its full path in `bin/` while `bin/` is not on `PATH`). With nothing
+to do it writes nothing and says `already installed: <names> (<version>)` instead (and, as above, a
+newer release).
 
     kulman update [--yes]
 
@@ -92,11 +94,13 @@ lock, then `bin/` and the home directory if they are empty. Only what `state.jso
 any other file stays (with no `state.json`, nothing at all is, and a `bin/kulman` that `install.sh`
 put there is named for you to delete). Every path is checked before the first is deleted: a
 directory in place of a binary, or anything but a regular file in place of `manifest.json` or
-`state.json`, stops it with nothing deleted (exit 1). `kulman` is not a module: `--modules kulman`
-is a usage error. At a terminal it asks first (default: no); without one it needs `--yes`, and
-otherwise changes nothing and exits 2. Removing everything while kalka is installed also says that
-projects set up with kulman still name `kalka` in their agent configs and need `kulman setup
---remove` first: before the question at a terminal, as the last line otherwise.
+`state.json`, stops it with nothing deleted (exit 1), as does a module that another installed module
+requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both). `kulman` is not a
+module: `--modules kulman` is a usage error. At a terminal it asks first (default: no); without one
+it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while kalka is
+installed also says that projects set up with kulman still name `kalka` in their agent configs and
+need `kulman setup --scope repo --remove` (or `--scope local`) first: before the question at a
+terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
@@ -112,8 +116,8 @@ the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run whe
 kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`, the modules
 run with it put first on their own `PATH` (kulman's own environment and your shell are not changed;
 a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
-kalka first says on stderr that `bin/` is not on `PATH`, that the agent configs it writes start
-`kalka` by name, and what to add to `PATH`.
+kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
+then that the agent configs it writes start `kalka` by name.
 
 ## Asking and not asking
 
@@ -152,7 +156,9 @@ A command that changes `~/.kulman-home` holds `.lock`, questions included; a sec
 it and says so once on stderr: `kulman: waiting for another kulman run (<home>/.lock)`.
 Downloads are checked and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in
 `bin/` changes; then the binaries are renamed into `bin/` (kulman last), then `manifest.json`, then
-`state.json`.
+`state.json`. `install.sh` takes no lock, and its temp dir (`.tmp-install.…`) is one of the `.tmp-*`
+entries that `kulman install`, `update` and `remove` delete in a home with a `state.json`: do not
+start one of them while `install.sh` runs, or `install.sh` fails.
 
 - Interrupted before that point, an install or update leaves only its temp dir, which the next run
   that finds `state.json` deletes (a home without one is never cleaned).
@@ -182,7 +188,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.7.0",
+  "version": "0.7.1",
   "modules": [
     {
       "name": "kalka",
@@ -191,13 +197,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "kalka-v0.7.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "kalka-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.7.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
