@@ -328,6 +328,8 @@ fn run() -> Result<()> {
                 memory,
                 repo_memory,
             };
+            // Before the lock, which creates the output folder.
+            kalka::check_source(&input)?;
             let r = kalka::dirlock::exclusive(&output, || compile(&input, &output, &opts))
                 .context("compile failed")?;
             println!(
