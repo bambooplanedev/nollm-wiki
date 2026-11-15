@@ -87,7 +87,8 @@ setup` in a project (named by its full path in `bin/` while neither `bin/` nor e
     kulman update [--yes]
 
 Updates kulman and every installed module to the latest release, all or none. A release older
-than the installed one is not installed: nothing changes. Each module it moves is named with both
+than the installed one is not installed: nothing changes. At the installed version with every file
+in place it says `up to date` and does nothing. Each module it moves is named with both
 versions (`updated <name> <old> -> <new>`), and the last line, when the version changed, is
 `restart running agent sessions; they keep the old binaries until then`. At the same version, files
 put back are named `repaired <name> <version>`, with no restart line.
@@ -123,7 +124,9 @@ run with it put first on their own `PATH` (kulman's own environment and your she
 a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
 kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
 then that the agent configs it writes start `kalka` by name; that is left unsaid when
-`kalka` itself is linked into a `PATH` folder as described under status.
+`kalka` itself is linked into a `PATH` folder as described under status. In a project that the old
+`wiki` (releases up to 0.6.13) set up, kalka's setup first removes the entries `wiki` wrote and
+lists the rest, as described in [kalka's README](../kalka/README.md#kalka-setup).
 
 ## Asking and not asking
 
