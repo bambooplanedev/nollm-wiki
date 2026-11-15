@@ -129,6 +129,8 @@ fn largest_fit_finds_the_boundary() {
 #[test]
 fn token_estimate_is_chars_over_four() {
     assert_eq!(token_estimate("abcdefgh"), 2);
+    // Four characters, eight bytes: characters are counted, not bytes.
+    assert_eq!(token_estimate("абвг"), 1);
 }
 
 #[test]

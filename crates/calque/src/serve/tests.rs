@@ -101,7 +101,9 @@ fn search_lines_prints_a_memory_hit_as_a_hook_line() {
 #[test]
 fn load_fails_without_index_json() {
     let tmp = tempfile::tempdir().unwrap();
-    assert!(WikiState::load(tmp.path()).is_err());
+    // The missing index.json is reported as missing (its text names no file; the caller adds the dir).
+    let e = WikiState::load(tmp.path()).err().unwrap();
+    assert_eq!(e.kind(), std::io::ErrorKind::NotFound, "{e}");
 }
 
 #[test]

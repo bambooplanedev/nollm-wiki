@@ -39,9 +39,11 @@ mod tests {
     }
 
     #[test]
-    fn combine_is_order_sensitive() {
+    fn combine_depends_on_order_and_on_where_the_parts_split() {
         let a = combine(&[b"x", b"y"]);
         let b = combine(&[b"y", b"x"]);
         assert_ne!(a, b);
+        // The length prefix keeps the same bytes cut elsewhere apart.
+        assert_ne!(combine(&[b"ab", b"c"]), combine(&[b"a", b"bc"]));
     }
 }

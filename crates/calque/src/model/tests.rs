@@ -153,4 +153,14 @@ fn sourcekind_label_and_parse_roundtrip() {
         "code:rust"
     );
     assert_eq!(SourceKind::parse("markdown"), Some(SourceKind::Markdown));
+    for k in [
+        SourceKind::Text,
+        SourceKind::Markdown,
+        SourceKind::Code {
+            lang: "rust".into(),
+        },
+    ] {
+        assert_eq!(SourceKind::parse(&k.label()), Some(k));
+    }
+    assert_eq!(SourceKind::parse("pdf"), None);
 }
