@@ -42,8 +42,8 @@ pub enum Scope {
 }
 
 pub struct SetupOptions {
-    /// `None`: detect. Empty: no agent, only what is not agent-specific.
-    pub agents: Option<Vec<Agent>>,
+    /// Empty: no agent, only what is not agent-specific.
+    pub agents: Vec<Agent>,
     pub scope: Scope,
     pub hook: bool,
     pub remove: bool,
@@ -360,7 +360,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         wrote_pi: false,
         guard_tracked: local && !opts.remove,
     };
-    let agents = opts.agents.clone().unwrap_or_else(|| detect(root));
 
     if let Some(top) = git(root, &["rev-parse", "--show-toplevel"]) {
         if std::fs::canonicalize(top).ok() != root.canonicalize().ok() {
@@ -423,7 +422,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    if !opts.remove && !agents.is_empty() && find_on_path("calque").is_none() {
+    if !opts.remove && !opts.agents.is_empty() && find_on_path("calque").is_none() {
         r.line("warning: calque is not on PATH; the agents will not find it until it is")?;
     }
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
@@ -433,7 +432,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     let (mut cursor_added, mut codex_added) = (false, false);
 
-    for agent in agents {
+    for agent in opts.agents.clone() {
         let wrote = r.wrote;
         let pi = match agent {
             Agent::Claude => false,
