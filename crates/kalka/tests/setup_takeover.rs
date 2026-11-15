@@ -58,7 +58,7 @@ impl Fixture {
     /// Plants a local-scope server `name` running `cmd serve --source .` in the stub `claude`.
     fn claude_local(&self, name: &str, cmd: &str, scope: &str) {
         let text = format!(
-            "{name}:\n  Scope: {scope}\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n"
+            "{name}:\n  Scope: {scope}\n  Status: ✔ Connected\n  Type: stdio\n  Command: {cmd}\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove {name} -s local\n"
         );
         fs::write(self.tmp.path().join(format!("get-{name}")), text).unwrap();
     }
@@ -66,7 +66,7 @@ impl Fixture {
 
 /// A git repo with a `kalka` and a `pi` on PATH, and a `claude` that keeps one `mcp get` answer
 /// per server name (`get-<name>`), as Claude Code does, and shows a `wiki` in `.mcp.json` as a
-/// project-scope server.
+/// project-scope server, pending approval. Shapes as the real CLI prints them (2.1.325).
 fn fixture() -> Fixture {
     let f = Fixture {
         tmp: tempdir().unwrap(),
@@ -90,9 +90,10 @@ fn fixture() -> Fixture {
 case "$1 $2" in
 "mcp get") if [ -f {t}/get-$3 ]; then /bin/cat {t}/get-$3
   elif [ "$3" = wiki ] && [ -f .mcp.json ] && /usr/bin/grep -q '"wiki"' .mcp.json; then
-    printf 'wiki:\n  Scope: Project config (shared via .mcp.json)\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n'
-  else echo "No MCP server named \"$3\"."; exit 1; fi ;;
-"mcp add-json") printf '%s:\n  Scope: Local config\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n' "$3" > {t}/get-$3 ;;
+    c=$(/usr/bin/sed -n 's/.*"command": "\([^"]*\)".*/\1/p' .mcp.json | /usr/bin/head -n 1)
+    printf 'wiki:\n  Scope: Project config (shared via .mcp.json)\n  Status: ⏸ Pending approval (run `claude` to approve)\n  Type: stdio\n  Command: %s\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove wiki -s project\n' "$c"
+  else echo "No MCP server named \"$3\". Configured servers: claude.ai Gmail" >&2; exit 1; fi ;;
+"mcp add-json") printf '%s:\n  Scope: Local config (private to you in this project)\n  Status: ✔ Connected\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove %s -s local\n' "$3" "$3" > {t}/get-$3 ;;
 "mcp remove") /bin/rm -f {t}/get-$3 ;;
 esac"#
         ),
@@ -616,7 +617,7 @@ fn an_old_local_claude_server_with_other_settings_stays() {
     let f = fixture();
     fs::write(
         f.tmp.path().join("get-wiki"),
-        "wiki:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n  Environment:\n    TOKEN=x\n",
+        "wiki:\n  Scope: Local config (private to you in this project)\n  Status: ✔ Connected\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n  Environment:\n    TOKEN=x\n\nTo remove this server, run: claude mcp remove wiki -s local\n",
     )
     .unwrap();
     let a = f.setup(&["--scope", "repo", "--agent", "claude"]).success();
@@ -720,4 +721,21 @@ fn a_hard_linked_config_is_left() {
         "{}",
         err(&a)
     );
+}
+
+/// With the old binary gone, Claude Code's health check fails: the entry is still the old one.
+#[test]
+fn an_old_local_claude_server_that_fails_to_connect_is_removed() {
+    let f = fixture();
+    fs::write(
+        f.tmp.path().join("get-wiki"),
+        "wiki:\n  Scope: Local config (private to you in this project)\n  Status: ✘ Failed to connect\n  Issue: CONNECTION_CLOSED: Connection closed\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove wiki -s local\n",
+    )
+    .unwrap();
+    let a = f.setup(&["--scope", "repo", "--agent", "claude"]).success();
+    assert_eq!(
+        takeover_lines(&out(&a)),
+        ["removed old wiki server from claude (local scope)"]
+    );
+    assert!(f.claude_log().contains("mcp remove wiki --scope local"));
 }

@@ -81,7 +81,9 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
 }
 
 /// A `claude` that logs its argv and answers `mcp get kalka` (and no other name) as a local
-/// server running `cmd` once `add-json` has been called (the state file).
+/// server running `cmd` once `add-json` has been called (the state file), in the shape the real
+/// CLI prints (2.1.325): fields indented by two, a blank line, the remove hint; not found is
+/// exit 1 with the message on stderr.
 fn claude_stub(f: &Fixture, cmd: &str) {
     claude_stub_args(f, cmd, "serve --source .");
 }
@@ -94,8 +96,8 @@ fn claude_stub_args(f: &Fixture, cmd: &str, args: &str) {
             &format!(
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
-"mcp get") [ "$3" = kalka ] && [ -f {t}/state ] || {{ echo "No MCP server named \"$3\"."; exit 1; }}
-  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n' ;;
+"mcp get") [ "$3" = kalka ] && [ -f {t}/state ] || {{ echo "No MCP server named \"$3\". Configured servers: claude.ai Gmail" >&2; exit 1; }}
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✔ Connected\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;
 esac"#
@@ -510,7 +512,7 @@ fn setup_local_reports_a_failed_claude_add() {
     let f = fixture(true, false);
     f.stub(
         "claude",
-        "[ \"$2\" = get ] && exit 1\necho boom >&2\nexit 2",
+        "[ \"$2\" = get ] && { echo 'No MCP server named \"kalka\". Configured servers: ' >&2; exit 1; }\necho boom >&2\nexit 2",
     );
     let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
     let o = out(&a);
