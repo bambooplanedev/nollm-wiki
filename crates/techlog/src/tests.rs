@@ -155,14 +155,6 @@ fn display_path_uses_forward_slashes() {
     );
 }
 
-fn have_git() -> bool {
-    let ok = Command::new("git").arg("--version").output().is_ok();
-    if !ok {
-        eprintln!("git not on PATH; skipping");
-    }
-    ok
-}
-
 fn run(dir: &Path, args: &[&str]) {
     let st = Command::new("git")
         .arg("-C")
@@ -195,7 +187,7 @@ fn claude_slug_matches_the_cli() {
         claude_slug("/srv/shared/my-app(v2)"),
         "-srv-shared-my-app-v2-"
     );
-    assert_eq!(claude_slug("/home/u/проєкт"), "-home-u-------");
+    assert_eq!(claude_slug("/srv/u/проєкт"), "-srv-u-------");
     assert_eq!(claude_slug("/srv/é"), "-srv--");
     assert_eq!(claude_slug(r"C:\Users\a\repo"), "C--Users-a-repo");
     let long = format!("/p/{}/{}/x", "a1".repeat(60), "b".repeat(85));
@@ -227,9 +219,10 @@ fn claude_memory_dir_uses_config_dir_then_home() {
 
 #[test]
 fn claude_memory_dir_keys_on_the_main_worktree() {
-    if !have_git() {
-        return;
-    }
+    assert!(
+        Command::new("git").arg("--version").output().is_ok(),
+        "needs git on PATH"
+    );
     let d = tempfile::tempdir().unwrap();
     let env = env_of(&[("CLAUDE_CONFIG_DIR", "/c")]);
     let repo = d.path().join("r");
