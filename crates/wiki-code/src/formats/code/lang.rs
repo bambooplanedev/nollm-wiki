@@ -187,17 +187,17 @@ pub(crate) enum Placement {
 
 pub(super) fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     Some(match ext {
-        "rs" => super::extract_rust::rust_spec(),
-        "py" => super::extract_python::python_spec(),
-        "js" | "mjs" | "cjs" => super::extract_simple::js_spec(),
-        "ts" => super::extract_simple::ts_spec(),
-        "jsx" => super::extract_jsx::jsx_spec(),
-        "tsx" => super::extract_jsx::tsx_spec(),
-        "vue" => super::extract_vue::vue_spec(),
-        "svelte" => super::extract_svelte::svelte_spec(),
-        "go" => super::extract_simple::go_spec(),
-        "sh" | "bash" => super::extract_shell::shell_spec(),
-        _ if is_cpp(ext) => super::extract_cpp::cpp_spec(),
+        "rs" => crate::formats::extract_rust::rust_spec(),
+        "py" => crate::formats::extract_python::python_spec(),
+        "js" | "mjs" | "cjs" => crate::formats::extract_simple::js_spec(),
+        "ts" => crate::formats::extract_simple::ts_spec(),
+        "jsx" => crate::formats::extract_jsx::jsx_spec(),
+        "tsx" => crate::formats::extract_jsx::tsx_spec(),
+        "vue" => crate::formats::extract_vue::vue_spec(),
+        "svelte" => crate::formats::extract_svelte::svelte_spec(),
+        "go" => crate::formats::extract_simple::go_spec(),
+        "sh" | "bash" => crate::formats::extract_shell::shell_spec(),
+        _ if is_cpp(ext) => crate::formats::extract_cpp::cpp_spec(),
         _ => return None,
     })
 }
@@ -293,8 +293,8 @@ pub(super) static QUERIES: LazyLock<HashMap<Language, Query>> = LazyLock::new(||
 /// parallel run, with output already committed for other files.
 pub fn validate_queries() {
     LazyLock::force(&QUERIES);
-    super::extract_python::validate_queries();
-    super::extract_rust::validate_queries();
+    crate::formats::extract_python::validate_queries();
+    crate::formats::extract_rust::validate_queries();
 }
 
 /// Whether `extract` claims `rel_path`: its lowercased extension is in

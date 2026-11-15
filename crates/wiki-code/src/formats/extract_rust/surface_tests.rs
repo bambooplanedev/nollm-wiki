@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `extract_rust`: which items the exported surface lists, and signature rendering.
 
 fn syms(src: &str) -> Vec<String> {
     crate::extract("t.rs", src).symbols

@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `extract_cpp`.
 use crate::formats::code::testutil::{assert_lacks, doc_of, item_lines};
 
 fn syms(path: &str, src: &str) -> Vec<String> {

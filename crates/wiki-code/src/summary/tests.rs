@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `summary`.
 use super::*;
 
 #[test]

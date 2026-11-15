@@ -179,7 +179,7 @@ pub(super) fn leading_doc(text: &str, ext: &str) -> Option<String> {
                 line.strip_prefix("//").or_else(|| line.strip_prefix("/*"))
             }
             _ if cpp => {
-                return super::extract_cpp::cpp_doc_step(line, &mut in_doxygen_block);
+                return crate::formats::extract_cpp::cpp_doc_step(line, &mut in_doxygen_block);
             }
             _ => None,
         };
@@ -201,7 +201,9 @@ pub(super) fn leading_doc(text: &str, ext: &str) -> Option<String> {
             // "skip past a license header" apart from "skip past
             // `#include`, a class's opening brace, or a whole member's
             // body" — none of which documents the FILE.
-            None if collected.is_empty() && cpp && super::extract_cpp::is_banner_shaped(line) => {}
+            None if collected.is_empty()
+                && cpp
+                && crate::formats::extract_cpp::is_banner_shaped(line) => {}
             // Every other language, and C++ once real code appears: no doc
             // comment opens this file. Past the first doc line, a non-doc
             // line ends the paragraph.

@@ -1,4 +1,4 @@
-//! Tree-sitter code extraction: per-language specs, the process-wide query cache, and the signature pipeline behind `## Exports` and `## Imports`.
+//! Tree-sitter code extraction: the entry points `extract` and `extract_file`, and item collection and classification. Children: `lang` (language specs and query cache), `calls` (call sites), `signature` (signature rendering), `doc` (doc extraction).
 
 use crate::analyze::{Def, Source};
 use crate::index::Family;
@@ -6,11 +6,6 @@ use crate::model::{CodeItem, CodeItemKind, PairRole};
 use crate::support::{basename, summarize, title_from_slug};
 use std::collections::{BTreeMap, BTreeSet};
 use tree_sitter::{Node, Parser, QueryCursor, QueryMatch, StreamingIterator, Tree};
-
-use super::{
-    extract_cpp, extract_jsx, extract_python, extract_rust, extract_shell, extract_simple,
-    extract_svelte, extract_vue,
-};
 
 #[cfg(test)]
 use crate::model::CallVia;

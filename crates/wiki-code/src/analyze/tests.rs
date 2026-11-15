@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `analyze`.
 use super::*;
 
 fn def_text(a: &Analyzed, name: &str) -> String {

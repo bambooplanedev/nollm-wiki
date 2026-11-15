@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `extract_python`.
 use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
 
 #[test]

@@ -42,7 +42,7 @@ pub(super) fn attach_call_sites(items: &mut Vec<CodeItem>, source: &Source) {
     }
     if !top_level.is_empty() {
         let lines = source.text().lines().count();
-        let mut item = super::extract_shell::top_level_item(lines.max(1));
+        let mut item = crate::formats::extract_shell::top_level_item(lines.max(1));
         item.call_sites = top_level;
         items.push(item);
     }
@@ -595,7 +595,7 @@ pub(crate) fn is_function(def: Node) -> bool {
         | "method_declaration" => true,
         "field_declaration" | "declaration" => def
             .child_by_field_name("declarator")
-            .is_some_and(super::extract_cpp::is_function_declarator),
+            .is_some_and(crate::formats::extract_cpp::is_function_declarator),
         "variable_declarator" => def
             .child_by_field_name("value")
             .is_some_and(|v| matches!(v.kind(), "arrow_function" | "function_expression")),

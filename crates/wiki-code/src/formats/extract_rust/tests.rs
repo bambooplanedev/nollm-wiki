@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `extract_rust`: qualification, test-module stripping, summaries, placement and docs.
 use crate::formats::code::testutil::{assert_has, assert_lacks, item_lines};
 
 #[test]

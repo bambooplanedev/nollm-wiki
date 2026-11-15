@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `code`.
 use super::testutil::{assert_has, assert_lacks};
 use super::*;
 use std::collections::HashSet;
