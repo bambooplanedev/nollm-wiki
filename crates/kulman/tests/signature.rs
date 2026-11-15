@@ -175,3 +175,27 @@ fn status_says_a_bad_signature_as_a_failed_check() {
         assert_eq!(snapshot(t.path()), before);
     }
 }
+
+#[test]
+fn a_signature_that_cannot_be_read_is_said_with_its_cause() {
+    let (t, base) = tree();
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    let dir = t.path().join("release");
+    // A directory where the signature belongs: there, but not readable as a file.
+    for at in [dir.join("latest/download"), version_dir(&dir, "0.7.0")] {
+        fs::create_dir(at.join("manifest.json.minisig")).unwrap();
+    }
+    let cause = "manifest.json: signature could not be fetched: Is a directory (os error 21)";
+    let out = kulman(&home, &base).output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out).lines().last().unwrap(),
+        format!("could not check for a newer release ({base}: {cause})")
+    );
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(stderr(&out), format!("kulman: {cause}\nnothing changed\n"));
+    assert_eq!(snapshot(t.path()), before);
+}

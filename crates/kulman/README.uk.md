@@ -247,14 +247,15 @@ RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
 У `kulman` ключ вкомпільовано; жоден прапорець чи змінна його не змінює. До кожного `manifest.json`,
 який він читає, він завантажує `manifest.json.minisig`, що лежить поруч, і перевіряє його, перш ніж
 використати будь-що з маніфесту. Приймається лише форма, яку minisign робить за замовчуванням
-(prehashed), а не застаріла (`minisign -S -l`). Через `https://` підпис обовʼязковий, і маніфест
-без доброго підпису не використовується: `install` і `update` зупиняються з `kulman:
-manifest.json: signature is missing: <url>: <cause>` (адреса `.minisig` і причина, чому його не
-вдалося прочитати) або `kulman: manifest.json: signature does not verify`, далі `nothing changed`,
-код виходу 1. Там, де команда лише дивиться, чи є новіший реліз (`kulman status` та `install`
-поверх установленої версії), причину натомість наводить її рядок `could not check for a newer
-release (…)`. У дереві `file://` наявний підпис теж мусить пройти перевірку; відсутній дозволено,
-і `kulman` один раз каже `signature not checked: local release tree`.
+(prehashed), а не застаріла (`minisign -S -l`). Через `https://` підпис обовʼязковий, і маніфест без
+доброго підпису не використовується: `install` і `update` зупиняються з `kulman: manifest.json:
+signature is missing` (хост релізів відповідає 404), `kulman: manifest.json: signature could not be
+fetched: <cause>` (будь-яка інша помилка: тайм-аут, TLS, помилка сервера; у дереві `file://` —
+`.minisig`, який не вдається прочитати) або `kulman: manifest.json: signature does not verify`, далі
+`nothing changed`, код виходу 1. Там, де команда лише дивиться, чи є новіший реліз (`kulman status`
+та `install` поверх установленої версії), причину натомість наводить її рядок `could not check for a
+newer release (…)`. У дереві `file://` наявний підпис теж мусить пройти перевірку; відсутній
+дозволено, і `kulman` один раз каже `signature not checked: local release tree`.
 
 `install.sh` містить той самий ключ. Якщо `minisign` є в `PATH`, він завантажує
 `SHA256SUMS.minisig` і перевіряє ним `SHA256SUMS`, перш ніж прочитати з нього бодай рядок; він

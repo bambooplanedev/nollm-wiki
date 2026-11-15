@@ -255,11 +255,21 @@ pub fn verify(public_key: &str, file: &[u8], signature: &str) -> Result<()> {
         .map_err(|e| anyhow!("{e}"))
 }
 
+/// Why a signature was not fetched: absent (a 404), or any other failure, said with its cause
+/// only (the callers' lines already name the release base).
+fn unfetched(e: &anyhow::Error) -> anyhow::Error {
+    match e.downcast_ref::<ureq::Error>() {
+        Some(ureq::Error::StatusCode(404)) => anyhow!("manifest.json: signature is missing"),
+        _ => anyhow!("manifest.json: signature could not be fetched: {e:#}"),
+    }
+}
+
 /// Said once per run, however many manifests come from an unsigned local tree.
 static UNCHECKED: std::sync::Once = std::sync::Once::new();
 
 /// Checks `bytes`, fetched from `url`, against `<url>.minisig` and the release key. Over https
-/// the signature is required; in a `file://` tree an absent one is allowed and said once.
+/// the signature is required (a 404 is "missing", any other failure "could not be fetched"); in a
+/// `file://` tree an absent one is allowed and said once.
 fn check_signature(url: &str, bytes: &[u8], wait: Wait) -> Result<()> {
     let url = format!("{url}.minisig");
     if let Some(Ok(false)) = local_path(&url).map(|p| p.try_exists()) {
@@ -279,7 +289,7 @@ fn check_signature(url: &str, bytes: &[u8], wait: Wait) -> Result<()> {
         if sig.len() as u64 > SIGNATURE_LIMIT {
             return Err(bad());
         }
-        bail!("manifest.json: signature is missing: {url}: {e:#}");
+        return Err(unfetched(&e));
     }
     let sig = String::from_utf8(sig).map_err(|_| bad())?;
     verify(PUBLIC_KEY, bytes, &sig).map_err(|_| bad())
@@ -449,11 +459,42 @@ mod tests {
     const FILE: &[u8] = include_bytes!("../tests/data/signing/file.txt");
     const SIGNATURE: &str = include_str!("../tests/data/signing/file.txt.minisig");
 
+    /// The key id in a minisign key line (bytes 2..10 of the base64, little-endian), as minisign
+    /// prints it.
+    fn key_id(key_line: &str) -> String {
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut bits = 0u32;
+        let mut n = 0;
+        let mut bytes = Vec::new();
+        for c in key_line.bytes().take(16) {
+            bits = bits << 6 | ALPHABET.iter().position(|&a| a == c).unwrap() as u32;
+            n += 6;
+            if n >= 8 {
+                n -= 8;
+                bytes.push((bits >> n) as u8);
+            }
+        }
+        format!(
+            "{:016X}",
+            u64::from_le_bytes(bytes[2..10].try_into().unwrap())
+        )
+    }
+
     #[test]
     fn the_compiled_in_key_parses() {
+        // Its id is the one its comment line names.
+        let (comment, key_line) = PUBLIC_KEY.split_once('\n').unwrap();
+        let named = comment
+            .strip_prefix("untrusted comment: minisign public key ")
+            .unwrap();
+        assert_eq!(key_id(key_line.trim_end()), named);
+        assert_eq!(key_id(TEST_KEY.lines().nth(1).unwrap()), "C2C112C21D5877E9");
+        // Parsed and compared by id: the test key's signature is refused as another key's.
         let err = verify(PUBLIC_KEY, FILE, SIGNATURE).unwrap_err();
-        // Parsed: refused for the key id, not for the key itself.
-        assert!(!err.to_string().starts_with("bad public key"), "{err}");
+        assert_eq!(
+            err.to_string(),
+            "The signature was created with a different key than the one provided"
+        );
     }
 
     #[test]
@@ -506,13 +547,41 @@ mod tests {
     }
 
     #[test]
-    fn over_https_a_signature_that_cannot_be_fetched_is_missing() {
+    fn over_https_a_signature_that_cannot_be_reached_could_not_be_fetched() {
         // Nothing listens on the loopback discard port: refused at once, no network used.
         let url = "https://127.0.0.1:9/latest/download/manifest.json";
         let err = check_signature(url, b"{}", STATUS_WAIT).unwrap_err();
         let text = format!("{err:#}");
-        let start = format!("manifest.json: signature is missing: {url}.minisig: ");
-        assert!(text.starts_with(&start), "{text}");
+        let start = "manifest.json: signature could not be fetched: ";
+        assert!(text.starts_with(start), "{text}");
+        assert!(!text.contains("127.0.0.1"), "{text}");
+    }
+
+    #[test]
+    fn only_a_404_is_a_missing_signature() {
+        let said = |e: ureq::Error| unfetched(&e.into()).to_string();
+        assert_eq!(
+            said(ureq::Error::StatusCode(404)),
+            "manifest.json: signature is missing"
+        );
+        assert_eq!(
+            said(ureq::Error::StatusCode(500)),
+            "manifest.json: signature could not be fetched: http status: 500"
+        );
+    }
+
+    #[test]
+    fn a_signature_that_is_a_directory_could_not_be_fetched() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("manifest.json.minisig")).unwrap();
+        let url = format!("file://{}/manifest.json", dir.path().display());
+        let err = check_signature(&url, b"{}", WAIT).unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.starts_with("manifest.json: signature could not be fetched: "),
+            "{text}"
+        );
+        assert!(!text.contains(&dir.path().display().to_string()), "{text}");
     }
 
     #[test]

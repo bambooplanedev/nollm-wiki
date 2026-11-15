@@ -242,13 +242,14 @@ RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
 reads it fetches `manifest.json.minisig` from beside it and checks it before anything in the
 manifest is used. Only the form minisign makes by default (prehashed) is taken, not the legacy one
 (`minisign -S -l`). Over `https://` the signature is required, and a manifest without a good one is
-not used: `install` and `update` stop with `kulman: manifest.json: signature is missing: <url>:
-<cause>` (the address of the `.minisig` and why it could not be read) or `kulman: manifest.json:
-signature does not verify`, then `nothing changed`, exit 1. Where a command only looks at the
-latest release for a newer one (`kulman status`, and `install` over an installed version), its
-`could not check for a newer release (…)` line gives the reason instead. In a `file://` tree a
-signature that is there must verify too; one that is absent is allowed, and `kulman` says
-`signature not checked: local release tree` once.
+not used: `install` and `update` stop with `kulman: manifest.json: signature is missing` (the
+release host answers 404), `kulman: manifest.json: signature could not be fetched: <cause>` (any
+other failure: a timeout, TLS, a server error; in a `file://` tree, a `.minisig` that cannot be
+read) or `kulman: manifest.json: signature does not verify`, then `nothing changed`, exit 1. Where a
+command only looks at the latest release for a newer one (`kulman status`, and `install` over an
+installed version), its `could not check for a newer release (…)` line gives the reason instead. In
+a `file://` tree a signature that is there must verify too; one that is absent is allowed, and
+`kulman` says `signature not checked: local release tree` once.
 
 `install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
 checks `SHA256SUMS` with it before it reads a line of it; it stops (exit 1) with `install.sh:
