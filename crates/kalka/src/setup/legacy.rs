@@ -23,6 +23,8 @@ use std::path::{Path, PathBuf};
 pub(super) struct Found {
     pub removed: Vec<String>,
     pub differing: Vec<String>,
+    /// A listed server or hook the old tool's: an agent may still run the old server.
+    pub running: bool,
 }
 
 /// Drops every line of `text` equal to `line`; `None` when there is none.
@@ -61,12 +63,14 @@ impl Takeover<'_> {
                 self.found.removed.push(line);
             }
             Outcome::AlreadyThere => {}
-            Outcome::Foreign(why) if why == LINK => self.found.differing.push(format!(
-                "{from}: reached through a link; the old wiki {what} there was left"
-            )),
-            Outcome::Foreign(_) => self.found.differing.push(format!(
-                "{from}: wiki {what} differs from what wiki wrote; remove it by hand"
-            )),
+            Outcome::Foreign(why) => {
+                self.found.running |= what == "server" || what == "hook";
+                self.found.differing.push(if why == LINK {
+                    format!("{from}: reached through a link; the old wiki {what} there was left")
+                } else {
+                    format!("{from}: wiki {what} differs from what wiki wrote; remove it by hand")
+                });
+            }
         }
         Ok(())
     }

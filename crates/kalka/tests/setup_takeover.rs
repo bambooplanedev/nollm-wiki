@@ -246,6 +246,8 @@ fn setup_local_removes_a_mixed_old_setup() {
     f.write(".pi/extensions/wiki-hint/index.ts", OLD_HOOK);
     f.write(".agents/memory/.keep", "");
     f.write(".wiki/index.json", "{}\n");
+    // The old compile's cache: the old tool's own output.
+    f.write(".wiki/.wiki/cache.json", "{}\n");
     let gitignore = ".claude/\n.mcp.json\n.wiki/\n";
     f.write(".gitignore", gitignore);
     let exclude = "# git ls-files --others --exclude-from=.git/info/exclude\n.wiki/\n/.agents/memory/\n/.pi/mcp.json\n/.agents/skills/wiki-navigation/\n/.pi/extensions/wiki-hint/\n/.claude/settings.local.json\n";
@@ -389,6 +391,8 @@ fn mentions_stop_at_twenty_lines() {
     f.write("AGENTS.md", &text);
     // Prose is listed only beside another trace.
     f.write(".wiki/index.json", "{}\n");
+    // The old compile's cache: the old tool's own output.
+    f.write(".wiki/.wiki/cache.json", "{}\n");
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     let e = err(&a);
     let mentions: Vec<&str> = e.lines().filter(|l| l.contains("mentions")).collect();
@@ -420,14 +424,12 @@ fn setup_leaves_an_edited_old_skill_and_its_ignore_line() {
     let ex = read(&r.join(".git/info/exclude"));
     assert!(ex.starts_with("/.agents/skills/wiki-navigation/\n"), "{ex}");
     // After the compile's own warning about the AGENTS.md page.
-    let want = format!(
-            "kalka: left from the old wiki (not changed):
+    let want = "kalka: left from the old wiki (not changed):
   .agents/skills/wiki-navigation/SKILL.md: wiki skill differs from what wiki wrote; remove it by hand
   AGENTS.md: wiki navigation block differs from what wiki wrote; remove it by hand
   rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
-{RESTART}"
-    );
-    assert!(err(&a).ends_with(&want), "{}", err(&a));
+";
+    assert!(err(&a).ends_with(want), "{}", err(&a));
 }
 
 /// No old traces: the output is what setup printed before the takeover existed.
@@ -829,14 +831,52 @@ fn a_wiki_alias_of_kalka_is_no_old_binary() {
     let f = fixture();
     symlink(env!("CARGO_BIN_EXE_kalka"), f.bin().join("wiki")).unwrap();
     f.write(".wiki/index.json", "{}\n");
+    // The old compile's cache: the old tool's own output.
+    f.write(".wiki/.wiki/cache.json", "{}\n");
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(
         err(&a),
-        format!(
-            "kalka: left from the old wiki (not changed):
+        "kalka: left from the old wiki (not changed):
   .wiki/: old compiled output (the new one is .kulman/); delete it when you no longer need it
   rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
-{RESTART}"
-        )
+"
     );
+}
+
+/// Plants one trace in a fixture.
+type Plant = fn(&Fixture);
+
+/// What may be anyone's is no evidence of the old tool: alone, each says nothing.
+#[test]
+fn traces_that_may_be_anyones_say_nothing() {
+    let clean = {
+        let f = fixture();
+        let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+        assert_eq!(err(&a), "");
+        takeover_lines(&out(&a)).len()
+    };
+    let cases: [(&str, Plant); 4] = [
+        ("an own .wiki/ folder", |f| {
+            f.write(".wiki/Home.md", "# Home\n");
+        }),
+        ("another tool named wiki", |f| f.stub("wiki", "exit 0")),
+        ("a .wiki/ ignore line", |f| {
+            f.write(".gitignore", ".wiki/\n");
+        }),
+        ("an own wiki server with its rules", |f| {
+            let own = json!({"mcpServers": {"wiki": {"command": "node", "args": ["wiki.js"]}}});
+            f.write(".mcp.json", &pretty(&own));
+            f.write(
+                ".claude/settings.json",
+                &pretty(&json!({"permissions": {"allow": ["mcp__wiki__search"]}, "enabledMcpjsonServers": ["wiki"]})),
+            );
+        }),
+    ];
+    for (case, plant) in cases {
+        let f = fixture();
+        plant(&f);
+        let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+        assert_eq!(err(&a), "", "{case}");
+        assert_eq!(takeover_lines(&out(&a)).len(), clean, "{case}");
+    }
 }

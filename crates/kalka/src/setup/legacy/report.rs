@@ -21,13 +21,24 @@ fn text(path: &Path) -> Option<String> {
         .flatten()
 }
 
-/// The block's lines (stderr), empty when there is nothing to say.
+/// The block's lines (stderr), empty when there is nothing to say. Only the old tool's own
+/// marks are evidence that it set this project up: a removal, an old-looking entry, Codex's old
+/// server, the old output with its cache. A `.wiki/` folder, a `wiki` binary, `mcp__wiki__`
+/// rules or prose are listed beside evidence only: alone they may be anyone's.
 pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
+    let codex = codex_has_wiki(root);
+    // The old compile's own cache (`.wiki/.wiki/cache.json`), not just a folder of that name.
+    let old_out = std::fs::symlink_metadata(root.join(".wiki/.wiki/cache.json")).is_ok();
+    if found.removed.is_empty() && found.differing.is_empty() && !codex && !old_out {
+        return Vec::new();
+    }
     let mut items: Vec<String> = found.differing.iter().map(|l| format!("  {l}")).collect();
-    if codex_has_wiki(root) {
+    let mut renamed = !items.is_empty();
+    if codex {
         items.push("  codex: server \"wiki\" is registered machine-wide; when no project uses it: codex mcp remove wiki".into());
     }
-    if root.join(".wiki").is_dir() {
+    let before = items.len();
+    if old_out {
         items.push("  .wiki/: old compiled output (the new one is .kulman/); delete it when you no longer need it".into());
     }
     // As the old setup wrote it: `.wiki/` at the top, `/<prefix>.wiki/` below it (mod.rs:573-590).
@@ -48,6 +59,7 @@ pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
             }
         }
     }
+    renamed |= items.len() > before;
     // A `wiki` that is kalka itself (a person's alias) is not the old binary.
     let kalka = |p: &Path| {
         let Ok(p) = p.canonicalize() else {
@@ -59,24 +71,25 @@ pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
     if let Some(p) = find_on_path("wiki").filter(|p| !kalka(p)) {
         items.push(format!("  {}: an old wiki binary is on PATH", p.display()));
     }
+    let before = items.len();
     for file in [".claude/settings.json", ".claude/settings.local.json"] {
         items.extend(claude_settings(root, file));
     }
-    // Prose names the old tool only beside another trace of it: a project that writes about
-    // "wiki pages" and has no other trace hears nothing.
-    if !items.is_empty() || !found.removed.is_empty() {
-        items.extend(mentions(root));
-    }
+    items.extend(mentions(root));
+    renamed |= items.len() > before;
 
     let mut lines = Vec::new();
     if !items.is_empty() {
         lines.push("kalka: left from the old wiki (not changed):".to_string());
         lines.append(&mut items);
+    }
+    if renamed {
         lines.push(
             "  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/".into(),
         );
     }
-    if !lines.is_empty() || !found.removed.is_empty() {
+    // Only where an agent may still be running the old server.
+    if !found.removed.is_empty() || found.running || codex {
         lines.push(
             "kalka: restart running agent sessions; they keep the old server until then".into(),
         );
