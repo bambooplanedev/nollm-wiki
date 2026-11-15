@@ -450,37 +450,6 @@ fn read_corpus_file(path: &str) -> String {
         .unwrap_or_else(|e| panic!("corpus file `{path}` unreadable: {e}"))
 }
 
-/// Split an identifier like `Wiki::name_words`: on `_`/`-` and camel
-/// boundaries, acronym runs kept together.
-/// Deliberate copy of the private `Wiki::name_words`; drift would silently
-/// weaken the `DocOnly` guard.
-fn name_words(name: &str) -> Vec<String> {
-    let chars: Vec<char> = name.chars().collect();
-    let mut words = Vec::new();
-    let mut cur = String::new();
-    for (i, &c) in chars.iter().enumerate() {
-        if c == '_' || c == '-' {
-            if !cur.is_empty() {
-                words.push(std::mem::take(&mut cur));
-            }
-            continue;
-        }
-        let boundary = c.is_uppercase()
-            && i > 0
-            && (chars[i - 1].is_lowercase()
-                || (chars[i - 1].is_uppercase()
-                    && chars.get(i + 1).is_some_and(|n| n.is_lowercase())));
-        if boundary && !cur.is_empty() {
-            words.push(std::mem::take(&mut cur));
-        }
-        cur.extend(c.to_lowercase());
-    }
-    if !cur.is_empty() {
-        words.push(cur);
-    }
-    words
-}
-
 /// Matches a Rust definition of `symbol`: the check that a label's symbol
 /// really is defined in its file, and the line an item must cover.
 fn definition_re(symbol: &str) -> Regex {
@@ -518,7 +487,7 @@ fn doc_only_queries_do_not_match_the_symbol_name() {
     let mut seen = 0;
     for c in CASES.iter().filter(|c| c.class == Class::DocOnly) {
         seen += 1;
-        let words = name_words(c.symbol);
+        let words = wiki_code::support::name_words(c.symbol);
         let parts: Vec<String> = c
             .query
             .to_lowercase()
