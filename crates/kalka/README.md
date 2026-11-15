@@ -186,7 +186,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
 | pi | `.pi/mcp.json`, the `kalka-navigation` skill | the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
-| Codex | `codex mcp add` (global), the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
+| Codex | `.codex/config.toml`, the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
 
 #### `kalka setup`
@@ -201,8 +201,8 @@ Claude Code gets no skill: it shows the server's instructions, which carry the s
 steps, and the server marks its tools to load up front instead of behind a `ToolSearch` call; its
 own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- kalka:navigation -->` markers. Agents are detected (`.claude/`,
-`CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` folder) unless `--agent`
-names them. Codex is set up only when named: its MCP config is global. When none is found and
+`CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` or `.codex/` folder, but
+not a `.codex/` that is Codex's own home) unless `--agent` names them. When none is found and
 `--agent` is not given, setup asks at a terminal which to set up (numbers or names, an empty line
 for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
 ignore lines and the memory folder, sets up no agent, says
@@ -212,20 +212,21 @@ ignore lines and the memory folder, sets up no agent, says
 stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `AGENTS.md`,
+  `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
   `.agents/skills/kalka-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json kalka … --scope local`, the other files are written and the ones setup
-  created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on. A file git already tracks is skipped; use
-  `--scope repo` for it.
+  created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on; a
+  `.codex/config.toml` that was already there is edited and not listed. A file git already tracks
+  is skipped; use `--scope repo` for it.
 - Agent memory is on by default: either scope creates `.agents/memory/`. `--no-memory` creates no
   `.agents/memory/`, compiles without memory and registers the server as
   `kalka serve --source . --memory none`. Running setup again with the other choice switches the
-  registered server; a server added through the `codex` or `claude` CLI that carries settings of
-  your own is left alone and reported, for you to remove and set up again.
-- Either scope adds Codex's server with `codex mcp add kalka -- kalka serve --source .`, which writes
-  `~/.codex/config.toml`: Codex has no per-project MCP config, and it starts the server in the
-  directory it runs in, so the one entry serves every project.
+  registered server; a server added through the `claude` CLI, or a `kalka` table in
+  `.codex/config.toml`, that carries settings of your own is left alone and reported, for you to
+  remove and set up again.
+- Either scope writes Codex's server into the project's own `.codex/config.toml`, and needs no
+  `codex` CLI for it; see [Codex](#codex).
 - Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
   stdout are both terminals.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
@@ -233,8 +234,9 @@ stderr and exits 0.
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
   hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
   prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`.
-- `--remove` deletes exactly what setup wrote, hooks included, and Codex's server only when it is
-  the one setup added. Ignore lines, `.kulman/` and memory notes stay.
+- `--remove` deletes exactly what setup wrote, hooks included, and Codex's block only when it is
+  exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`
+  after it). Ignore lines, `.kulman/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
@@ -340,13 +342,44 @@ the editor's MCP list, so switching it on from the editor is not confirmed.
 
 #### Codex
 
-By hand, `codex mcp add kalka -- kalka serve --source .` writes this to `~/.codex/config.toml`:
+`kalka setup --agent codex` appends this to the project's own `.codex/config.toml`, and creates the
+file when it is not there; with `--no-memory`, `args` also has `"--memory", "none"`:
 
 ```toml
 [mcp_servers.kalka]
 command = "kalka"
 args = ["serve", "--source", "."]
 ```
+
+The server then exists only in this project, with either `--scope`: Codex starts it where setup ran,
+not in every session. Codex reads a project's `.codex/config.toml` only in a project it trusts, so
+setup ends with `Codex loads the server only in a project it trusts: open the project in Codex and
+accept the trust question.` Setup itself never edits Codex's own `~/.codex/config.toml`, and does
+not treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1;
+which earlier version first reads the project file, and whether the Codex desktop app does, is not
+checked.
+
+Setup appends the block only to what it can recognise. The block is its own when the header
+`[mcp_servers.kalka]` is followed by exactly the `command` line and one of the two `args` lines;
+setup then switches memory by rewriting only `args`, and `--remove` deletes it. Anything else that
+may define the server (extra keys such as `env` or `cwd`, a quoted or dotted key, an inline
+`mcp_servers = { … }`, a file reached through a link, or one git tracks in local scope) is left as
+it is and reported as `skipped .codex/config.toml kalka server: …` (exit 1), because a second
+definition would make the file invalid; add the server by hand then. Other tables in the file are
+never changed.
+
+Earlier versions of setup ran `codex mcp add kalka -- kalka serve --source .`, one machine-wide
+entry that started the server in every Codex session, in folders that are no project too. When
+`codex` is on `PATH`, every setup and `--remove` run that can edit the project's file asks Codex for
+its machine-wide entry (`codex mcp get kalka`, run outside any project, so that a parent project's
+file does not answer). An entry that is exactly what the old setup wrote is removed with `codex mcp
+remove kalka` once the project's block is in place (with `--remove`: once it is gone), with the line
+`removed the machine-wide Codex kalka server (it ran in every Codex session)`; a removal that fails
+is tried again on the next run. That entry served every project on the machine: other projects set
+up with an older kalka have no Codex server until `kalka setup` is run in each of them. An entry
+with other settings is left: setup reports it, with the command that removes it, on the run that
+finds the project without a `kalka` server of its own (exit 1); `--remove` notes it on every run,
+without changing the exit code. Without `codex` on `PATH` setup does not look.
 
 The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
 Codex does not reach for them on its own, though: it needs the

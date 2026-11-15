@@ -97,8 +97,8 @@ pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
     lines
 }
 
-/// Codex's machine-wide `wiki`, read as `codex_mcp` reads its own entry (mod.rs:227-231), with
-/// the old command and args. Never removed: other projects may still use it.
+/// Codex's machine-wide `wiki`, recognised by its command and args, as `codex::old_entry`
+/// recognises kalka's old entry. Never removed: other projects may still use it.
 fn codex_has_wiki(root: &Path) -> bool {
     let Ok((true, text)) = cli("codex", root, &["mcp", "get", "wiki"]) else {
         return false;

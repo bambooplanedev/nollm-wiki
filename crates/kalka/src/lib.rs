@@ -33,6 +33,7 @@ use std::time::Instant;
 pub(crate) use wiki_code::support::is_under;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum WikiError {
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -42,6 +43,19 @@ pub enum WikiError {
     Watch(String),
     #[error("serve failed: {0}")]
     Serve(String),
+    #[error("{0}")]
+    Source(String),
+}
+
+/// Fails, naming the path and the reason, unless `source` is a folder: a typo in the source path
+/// must not give an empty wiki. Checked before anything is created.
+pub fn check_source(source: &Path) -> Result<(), WikiError> {
+    let named = |e: &dyn std::fmt::Display| WikiError::Source(format!("{}: {e}", source.display()));
+    if std::fs::metadata(source).map_err(|e| named(&e))?.is_dir() {
+        Ok(())
+    } else {
+        Err(named(&"not a directory"))
+    }
 }
 
 #[allow(clippy::struct_excessive_bools)] // independent switches, not states
@@ -91,6 +105,7 @@ pub fn compile(
     output: &Path,
     opts: &CompileOptions,
 ) -> Result<CompileResult, WikiError> {
+    check_source(input)?;
     let run = || compile_inner(input, output, opts);
     match opts.jobs {
         Some(n) => {
