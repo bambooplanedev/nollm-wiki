@@ -979,7 +979,8 @@ unknown; and the names of one multi-declarator statement share its range.
 ## Testing
 
 - **Unit tests** live in `#[cfg(test)] mod tests` blocks at the bottom of
-  the source file they test (e.g. `src/cache.rs`, `src/hash.rs`,
+  the source file they test when small (e.g. `src/cache.rs`, `src/hash.rs`),
+  and in `<module>/tests.rs` when large (e.g. `src/tests.rs` for
   `src/lib.rs`, `crates/wiki-code/src/formats/code.rs`, `crates/wiki-code/src/formats/extract_rust.rs`,
   `crates/wiki-code/src/formats/extract_python.rs`) — colocated with the code, not in a
   separate tree. Language-specific extraction tests moved with their
