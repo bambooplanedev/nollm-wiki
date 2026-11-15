@@ -844,3 +844,21 @@ fn status_command_equals_the_plain_form() {
     let help = kulman(&home, &base).arg("--help").output().unwrap();
     assert!(stdout(&help).contains("status"), "{}", stdout(&help));
 }
+
+#[test]
+fn status_finds_bin_on_path_through_a_symlink() {
+    let (t, base, home) = installed();
+    let link = t.path().join("bin-link");
+    std::os::unix::fs::symlink(home.join("bin"), &link).unwrap();
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    // A missing and a relative entry come first: neither is an error.
+    let entries = [t.path().join("missing"), "relative".into(), link]
+        .into_iter()
+        .chain(std::env::split_paths(&own));
+    let out = kulman(&home, &base)
+        .env("PATH", std::env::join_paths(entries).unwrap())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stdout(&out).contains("PATH:"), "{}", stdout(&out));
+}

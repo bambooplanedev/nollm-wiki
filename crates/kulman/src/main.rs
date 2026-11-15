@@ -183,9 +183,19 @@ fn ask_choose(title: &str, items: &[(&str, &str, bool)], one: bool) -> Result<Ve
     )?)
 }
 
-/// `dir` is on this process's `PATH`.
+/// `dir` is on this process's `PATH`, by real path: an entry reaching it through a symlink counts.
+/// A relative entry, or one that cannot be resolved (and every entry, when `dir` cannot), is
+/// compared as text.
 fn on_path(dir: &Path) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d == dir))
+    let real = dir.canonicalize().ok();
+    std::env::var_os("PATH").is_some_and(|p| {
+        std::env::split_paths(&p).any(|d| {
+            d == dir
+                || real.as_ref().is_some_and(|real| {
+                    d.is_absolute() && d.canonicalize().is_ok_and(|d| d == *real)
+                })
+        })
+    })
 }
 
 /// `state.json` exists under `home`: checked before anything is created.
