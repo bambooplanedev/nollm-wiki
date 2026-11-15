@@ -133,14 +133,53 @@ fn append_and_remove_item_keep_other_items() {
     let (a, b) = (json!({"hooks": "A"}), json!({"hooks": "B"}));
     let path = ["hooks", "UserPromptSubmit"];
     fs::write(&p, pretty(&json!({"hooks": {"UserPromptSubmit": [a]}}))).unwrap();
-    assert_eq!(append_item(&p, &path, &b).unwrap(), Outcome::Done);
+    assert_eq!(
+        append_item(&p, &path, std::slice::from_ref(&b)).unwrap(),
+        Outcome::Done
+    );
     let read = || serde_json::from_str::<Value>(&fs::read_to_string(&p).unwrap()).unwrap();
     assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([a, b]));
-    assert_eq!(append_item(&p, &path, &b).unwrap(), Outcome::AlreadyThere);
-    assert_eq!(remove_item(d.path(), &p, &path, &b).unwrap(), Outcome::Done);
+    assert_eq!(
+        append_item(&p, &path, std::slice::from_ref(&b)).unwrap(),
+        Outcome::AlreadyThere
+    );
+    assert_eq!(
+        remove_item(d.path(), &p, &path, std::slice::from_ref(&b)).unwrap(),
+        Outcome::Done
+    );
     assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([a]));
-    assert_eq!(remove_item(d.path(), &p, &path, &a).unwrap(), Outcome::Done);
+    assert_eq!(
+        remove_item(d.path(), &p, &path, std::slice::from_ref(&a)).unwrap(),
+        Outcome::Done
+    );
     assert!(!p.exists());
+}
+
+#[test]
+fn another_own_item_is_replaced_in_its_place_and_removed() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("s.json");
+    let (old, new, other) = (json!("old"), json!("new"), json!("other"));
+    let path = ["hooks", "UserPromptSubmit"];
+    let own = [new.clone(), old.clone()];
+    fs::write(
+        &p,
+        pretty(&json!({"hooks": {"UserPromptSubmit": [old, other]}})),
+    )
+    .unwrap();
+    assert_eq!(append_item(&p, &path, &own).unwrap(), Outcome::Done);
+    let read = || serde_json::from_str::<Value>(&fs::read_to_string(&p).unwrap()).unwrap();
+    assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([new, other]));
+    fs::write(
+        &p,
+        pretty(&json!({"hooks": {"UserPromptSubmit": [other, old]}})),
+    )
+    .unwrap();
+    assert_eq!(
+        remove_item(d.path(), &p, &path, &own).unwrap(),
+        Outcome::Done
+    );
+    assert_eq!(read()["hooks"]["UserPromptSubmit"], json!([other]));
 }
 
 #[test]

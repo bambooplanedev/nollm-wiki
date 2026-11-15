@@ -34,7 +34,8 @@
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Далі самі додайте `~/.kulman-home/bin` у `PATH` (агенти запускають `calque` за назвою) і виконайте:
+Додати `~/.kulman-home/bin` у `PATH` необов'язково, це для набору `kulman` у терміналі (агенти
+знаходять `calque` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). Далі виконайте:
 
     ~/.kulman-home/bin/kulman install       # kulman і модулі релізу за замовчуванням
     cd your-project
@@ -61,13 +62,13 @@
     kulman [status]
 
 Без команди або з `status`: установлена версія й модулі (модуль, бінарника якого немає, позначено
-`(missing: run kulman update)`), два рядки `<home>/bin is not on PATH; add it:` і `export
-PATH="<home>/bin:$PATH"` (з відступом), коли теки там немає (запис у `PATH`, що веде до `bin/` через
-символічне посилання, зараховується; так само зараховується посилання в теці з `PATH` для kulman і
-кожного встановленого модуля, коли воно перше з такою назвою в `PATH`), і чи є новіший реліз (`newer
-release: <X.Y.Z> (kulman update)` або `up to date`). Команда лише читає: нічого не створюється.
-Хост релізів має 5 с на зʼєднання й 8 с загалом; якщо їх забракло або сталася будь-яка помилка,
-останній рядок каже, до чого не вдалося достукатися і чому.
+`(missing: run kulman update)`), два рядки `<home>/bin is not on PATH; to type kulman in a terminal,
+add it:` і `export PATH="<home>/bin:$PATH"` (з відступом), коли теки там немає (запис у `PATH`, що
+веде до `bin/` через символічне посилання, зараховується; так само зараховується посилання в теці з
+`PATH` для kulman і кожного встановленого модуля, коли воно перше з такою назвою в `PATH`), і чи є
+новіший реліз (`newer release: <X.Y.Z> (kulman update)` або `up to date`). Команда лише читає:
+нічого не створюється. Хост релізів має 5 с на зʼєднання й 8 с загалом; якщо їх забракло або сталася
+будь-яка помилка, останній рядок каже, до чого не вдалося достукатися і чому.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
@@ -83,11 +84,14 @@ update`); коли останній реліз не вдається прочи�
 release (<base>: <reason>)`). Установлену версію читає, коли вже тримає `.lock`. Якщо встановлена
 версія відрізняється від `--version` або новіша за останній реліз, команда нічого не змінює й
 виходить з кодом 1: для старішої радить запустити `kulman update`; для новішої — `kulman remove`, а
-потім `kulman install --version <X.Y.Z>`. Успішне встановлення закінчується наступними кроками: ті
-самі два рядки для `bin/`, якщо її немає в `PATH`, а потім `kulman setup` у проєкті (поки в `PATH`
-немає `bin/` і не кожен бінарник у ньому досяжний, команда названа повним шляхом у `bin/`). Коли
-робити нічого, команда нічого не записує й натомість каже `already installed: <names>
-(<version>)` (і, як вище, про новіший реліз).
+потім `kulman install --version <X.Y.Z>`. Коли `$HOME/.local/bin` є текою в `PATH`, install і update
+кладуть туди посилання на кожен установлений бінарник у `bin/<name>` (`kulman: linked <names> into
+<dir>`); усе, що там не є посиланням у `bin/`, лишається як є (`kulman: left <path> as it is (not a
+kulman link)`), а `kulman remove` видаляє лише власні посилання. Успішне встановлення закінчується
+наступними кроками: ті самі два рядки для `bin/`, якщо її немає в `PATH`, а потім `kulman setup` у
+проєкті (поки в `PATH` немає `bin/` і не кожен бінарник у ньому досяжний, команда названа повним
+шляхом у `bin/`). Коли робити нічого, команда нічого не записує й натомість каже `already installed:
+<names> (<version>)` (і, як вище, про новіший реліз).
 
     kulman update [--yes]
 
@@ -129,10 +133,8 @@ release (<base>: <reason>)`). Установлену версію читає, к
 виходу 1) працювати там, де ця тека — домашня тека kulman (`KULMAN_HOME`, заданий як
 `<project>/.kulman`). Коли `bin/` немає в `PATH`, модулі запускаються з нею першою у власному `PATH`
 (середовище самого kulman і ваша оболонка не змінюються; шлях `bin/` із `:` не може стояти в `PATH`,
-тож тоді їхній `PATH` лишається як є), а setup для calque спершу пише в stderr тими самими двома
-рядками, що `bin/` немає в `PATH` і що додати, а потім, що конфіги агентів, які він пише, запускають
-`calque` за назвою; цього не сказано, коли на сам
-`calque` є посилання в теці з `PATH`, як описано в status.
+тож тоді їхній `PATH` лишається як є). Конфіги агентів, які пише calque, запускають його з
+домашньої теки kulman, тож їм нічого не треба в `PATH`.
 
 ## Коли kulman питає, а коли ні
 
@@ -162,7 +164,8 @@ errors: <modules>` і виходить з кодом першого модуля
 ## Змінні середовища
 
 - `KULMAN_HOME` — домашня тека (за замовчуванням `$HOME/.kulman-home`; порожнє значення — те саме,
-  що не задане).
+  що не задане; шлях із `"`, `$`, зворотним апострофом чи `\` не підтримується рядком запуску
+  агентів, який пише calque).
 - `KULMAN_RELEASE_URL` — де лежать релізи (за замовчуванням
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` або `file://…`, і більше нічого.
 
@@ -206,7 +209,7 @@ errors: <modules>` і виходить з кодом першого модуля
 
 ```json
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "modules": [
     {
       "name": "calque",
@@ -215,13 +218,13 @@ errors: <modules>` і виходить з кодом першого модуля
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
@@ -266,8 +269,9 @@ is missing` (через `https://` нічого не завантажено: п�
 з версією, яка не знає, перевірка не проходить і `install.sh` зупиняється. У дереві `file://`
 відсутній підпис дозволено, з рядком `install.sh: signature not checked: local release tree`. Без
 `minisign` він іде далі лише за SHA-256 і каже про це: `install.sh: signature not checked (minisign
-not found); kulman checks it on every install and update`. Обидва рядки йдуть у stderr, тож скрипт,
-що перехоплює вивід, їх не отримує.
+not found); kulman checks it on every install and update`. Коли підпис підтверджено, він друкує
+`install.sh: signature checked`. Усі три рядки йдуть у stderr, тож скрипт, що перехоплює вивід, їх
+не отримує.
 
 Вручну, коли кожен файл і його `.minisig` лежать в одній теці:
 

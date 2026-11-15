@@ -166,21 +166,24 @@ fn item_edit(
     })
 }
 
-pub fn append_item(path: &Path, parents: &[&str], item: &Value) -> Result<Outcome> {
+/// Appends `own[0]`, or puts it in the place of one of the other `own` items.
+pub fn append_item(path: &Path, parents: &[&str], own: &[Value]) -> Result<Outcome> {
     item_edit(path, parents, true, |items| {
-        if items.contains(item) {
-            Outcome::AlreadyThere
-        } else {
-            items.push(item.clone());
-            Outcome::Done
+        if items.contains(&own[0]) {
+            return Outcome::AlreadyThere;
         }
+        match items.iter().position(|v| own.contains(v)) {
+            Some(i) => items[i] = own[0].clone(),
+            None => items.push(own[0].clone()),
+        }
+        Outcome::Done
     })
 }
 
-/// Like [`remove_entry`], for an array item.
-pub fn remove_item(root: &Path, path: &Path, parents: &[&str], item: &Value) -> Result<Outcome> {
+/// Like [`remove_entry`], for an array item: the first of the `own` items found.
+pub fn remove_item(root: &Path, path: &Path, parents: &[&str], own: &[Value]) -> Result<Outcome> {
     let out = item_edit(path, parents, false, |items| {
-        match items.iter().position(|v| v == item) {
+        match items.iter().position(|v| own.contains(v)) {
             Some(i) => {
                 items.remove(i);
                 Outcome::Done

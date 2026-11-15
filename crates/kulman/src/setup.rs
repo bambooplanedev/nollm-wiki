@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::install::unknown_module;
 use crate::release::Manifest;
-use crate::{ask_choose, ask_yes, asks, on_path, path_hint, reachable, store, SetupArgs, Usage};
+use crate::{ask_choose, ask_yes, asks, on_path, store, SetupArgs, Usage};
 use store::State;
 
 /// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
@@ -128,9 +128,8 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
             Some(_) => {}
         }
     }
-    // The modules find each other (calque its own name) on PATH: `bin/` first when it is not on
-    // it, in their environment only; one that cannot be on a PATH (a `:` in it) leaves PATH as
-    // it is.
+    // The modules find each other on PATH: `bin/` first when it is not on it, in their
+    // environment only; one that cannot be on a PATH (a `:` in it) leaves PATH as it is.
     let off_path = !on_path(&bin);
     let own = std::env::var_os("PATH").unwrap_or_default();
     let modules_path = if off_path {
@@ -138,13 +137,6 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     } else {
         None
     };
-    if calque && !a.remove && !reachable(&bin, ["calque"]) {
-        eprintln!("kulman: {}", path_hint(&bin));
-        eprintln!(
-            "kulman: the agent configs written now start \"calque\"; an agent started without it \
-             on PATH will not find it"
-        );
-    }
     // Names of the modules that failed, and the first failure's status.
     let mut failures: Vec<&str> = Vec::new();
     let mut first_code = None;

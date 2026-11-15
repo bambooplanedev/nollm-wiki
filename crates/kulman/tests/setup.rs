@@ -283,62 +283,15 @@ fn setup_memory_without_calque_is_usage() {
     assert_eq!(f.logged(), NONE);
 }
 
-/// `PATH` with `dir` first, then the test's own.
-fn path_with(dir: &std::path::Path) -> std::ffi::OsString {
-    let own = std::env::var_os("PATH").unwrap_or_default();
-    let dirs = std::iter::once(dir.to_path_buf()).chain(std::env::split_paths(&own));
-    std::env::join_paths(dirs).unwrap()
-}
-
+/// calque, started from the kulman home, starts itself from there in the agent configs; the
+/// terminal's `PATH` is no matter of setup's.
 #[test]
-fn setup_warns_when_bin_is_not_on_path_and_still_runs() {
+fn setup_says_nothing_about_path_when_bin_is_not_on_it() {
     let f = installed(LOGS, "calque,plaz");
-    let bin = f.home.join("bin");
     let out = f.setup(&["--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    let warning = [
-        format!("kulman: {} is not on PATH; add it:", bin.display()),
-        format!("    export PATH=\"{}:$PATH\"", bin.display()),
-        "kulman: the agent configs written now start \"calque\"; an agent started without it on \
-         PATH will not find it"
-            .to_string(),
-    ];
-    assert_eq!(stderr(&out).lines().collect::<Vec<_>>(), warning);
-    assert_eq!(f.logged().len(), 2);
-    // On PATH: nothing said.
-    let out = kulman(&f.home, &f.base)
-        .args(["setup", "--scope", "repo"])
-        .current_dir(f.t.path().join("project"))
-        .env("KULMAN_TEST_LOG", f.log())
-        .env("PATH", path_with(&bin))
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
-    assert_eq!(f.logged().len(), 4);
-}
-
-#[test]
-fn setup_takes_binaries_linked_into_path_as_on_path() {
-    let f = installed(LOGS, "calque,plaz");
-    let (bin, links) = (f.home.join("bin"), f.t.path().join("links"));
-    let run = |names: &[&str]| {
-        let _ = fs::remove_dir_all(&links);
-        let path = common::path_linking(&links, &bin, names);
-        let out = kulman(&f.home, &f.base)
-            .args(["setup", "--scope", "repo"])
-            .current_dir(f.t.path().join("project"))
-            .env("KULMAN_TEST_LOG", f.log())
-            .env("PATH", path)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{}", stderr(&out));
-        stderr(&out)
-    };
-    // Only calque is named in the agent configs: calque linked, nothing said (plaz or kulman not).
-    assert_eq!(run(&["calque"]), "");
-    // calque is not linked: said.
-    assert!(run(&["plaz"]).contains("is not on PATH"));
+    assert_eq!(f.logged().len(), 2);
 }
 
 #[test]
@@ -378,11 +331,6 @@ fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
         fs::read_to_string(&log).unwrap(),
         format!("{}\n", own.display())
     );
-    let first = format!(
-        "kulman: {} is not on PATH; add it:",
-        home.join("bin").display()
-    );
-    assert_eq!(stderr(&out).lines().next(), Some(first.as_str()));
 }
 
 #[test]

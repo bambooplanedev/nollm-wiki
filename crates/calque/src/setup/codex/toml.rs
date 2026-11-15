@@ -2,7 +2,7 @@
 //! turn "append" into "refuse": any line that could define the server or an `mcp_servers` that a
 //! `[mcp_servers.calque]` table cannot join is read as doing so, whatever table it seems to be in.
 
-use crate::setup::{serve_args, CMD};
+use serde_json::Value;
 
 const HEADER: &str = "[mcp_servers.calque]";
 /// Another definition of the server (the words of the machine-wide report).
@@ -13,26 +13,29 @@ pub(super) const UNEXTENDABLE: &str =
 /// Refused, not stripped: the header behind it would not be found again.
 pub(super) const BOM: &str = "starts with a byte order mark; left as it is";
 
-fn command_line() -> String {
-    format!("command = \"{CMD}\"")
+/// The block's `command` and `args` lines for an MCP `entry`, its strings quoted as JSON quotes
+/// them, which TOML reads alike.
+fn body(entry: &Value) -> [String; 2] {
+    let args: Vec<String> = (entry["args"].as_array().into_iter().flatten())
+        .map(Value::to_string)
+        .collect();
+    [
+        format!("command = {}", entry["command"]),
+        format!("args = [{}]", args.join(", ")),
+    ]
 }
 
-fn args_line(memory: bool) -> String {
-    format!("args = [\"{}\"]", serve_args(memory).join("\", \""))
-}
-
-pub(super) fn block(memory: bool, eol: &str) -> String {
-    [HEADER, &command_line(), &args_line(memory)]
-        .map(|l| format!("{l}{eol}"))
-        .concat()
+pub(super) fn block(entry: &Value, eol: &str) -> String {
+    let [c, a] = body(entry);
+    [HEADER, &c, &a].map(|l| format!("{l}{eol}")).concat()
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum State {
-    /// The exact block, in this run's memory variant.
+    /// The exact block of the first own entry.
     Ours,
-    /// The exact block, in the other one.
-    OursOtherArgs,
+    /// The exact block of another one.
+    OursOther,
     /// Anything else that defines the server, or an `mcp_servers` it cannot join.
     Other(&'static str),
     Absent,
@@ -82,14 +85,15 @@ fn servers(s: &str, table: bool) -> Option<&'static str> {
     joins.then_some(UNEXTENDABLE)
 }
 
-pub(super) fn state(text: &str, memory: bool) -> State {
+/// What `text` holds, `own` being calque's own entries, this run's first.
+pub(super) fn state(text: &str, own: &[Value]) -> State {
     if text.starts_with('\u{feff}') {
         return State::Other(BOM);
     }
     // No table is trusted for a refusal: a `[` line inside a multi-line string or array looks
     // like a header. Only the body of our own header is set apart, and it must then be exact.
     let (mut in_ours, mut servers_seen) = (false, false);
-    let (mut headers, mut body, mut other) = (0, Vec::new(), None);
+    let (mut headers, mut lines, mut other) = (0, Vec::new(), None);
     for l in text.split_inclusive('\n').map(bare) {
         let t = l.trim();
         if t.is_empty() || (t.starts_with('#') && !in_ours) {
@@ -105,7 +109,7 @@ pub(super) fn state(text: &str, memory: bool) -> State {
             servers_seen |= key.is_some_and(|rest| rest.starts_with([']', '.']));
             in_ours = false;
         } else if in_ours {
-            body.push(l.trim_end());
+            lines.push(l.trim_end());
         } else {
             other = other.or(servers(&s, false));
             // After any `[mcp_servers…]` header, a `calque` key may be the server's. Squeezed, a
@@ -121,12 +125,13 @@ pub(super) fn state(text: &str, memory: bool) -> State {
     if let Some(why) = other {
         return State::Other(why);
     }
-    match (headers, body.as_slice()) {
+    let at = |c: &str, a: &str| own.iter().position(|e| body(e) == [c, a]);
+    match (headers, lines.as_slice()) {
         (0, _) => State::Absent,
-        (1, [c, a]) if *c == command_line() => match *a {
-            a if a == args_line(memory) => State::Ours,
-            a if a == args_line(!memory) => State::OursOtherArgs,
-            _ => State::Other(ANOTHER),
+        (1, [c, a]) => match at(c, a) {
+            Some(0) => State::Ours,
+            Some(_) => State::OursOther,
+            None => State::Other(ANOTHER),
         },
         _ => State::Other(ANOTHER),
     }
@@ -134,7 +139,7 @@ pub(super) fn state(text: &str, memory: bool) -> State {
 
 /// `text` with the block at the end, after one blank line when there is text, in the ending of
 /// the last line that has one (`\n` when none has).
-pub(super) fn with_block(text: &str, memory: bool) -> String {
+pub(super) fn with_block(text: &str, entry: &Value) -> String {
     let eol = text
         .split_inclusive('\n')
         .rfind(|l| l.ends_with('\n'))
@@ -146,18 +151,22 @@ pub(super) fn with_block(text: &str, memory: bool) -> String {
         }
         out.push_str(eol);
     }
-    out + &block(memory, eol)
+    out + &block(entry, eol)
 }
 
-/// An exact block's `args` line in `memory`'s variant, its line ending kept.
-pub(super) fn with_args(text: &str, memory: bool) -> String {
+/// An exact block's `command` and `args` lines as `entry`'s, their line endings kept.
+pub(super) fn with_body(text: &str, entry: &Value) -> String {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some([_, _, a]) = block_lines(&lines) else {
+    let Some([_, c, a]) = block_lines(&lines) else {
         return text.into();
     };
-    let eol = &lines[a][bare(lines[a]).len()..];
-    let (before, after) = (lines[..a].concat(), lines[a + 1..].concat());
-    format!("{before}{}{eol}{after}", args_line(memory))
+    let [new_c, new_a] = body(entry);
+    let new = |i: usize, l: &str| match i {
+        i if i == c => new_c.clone() + &l[bare(l).len()..],
+        i if i == a => new_a.clone() + &l[bare(l).len()..],
+        _ => l.to_string(),
+    };
+    lines.iter().enumerate().map(|(i, l)| new(i, l)).collect()
 }
 
 /// `text` without an exact block and the one blank line before it.

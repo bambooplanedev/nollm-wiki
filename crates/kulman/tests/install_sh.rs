@@ -240,6 +240,7 @@ fn install_sh_checks_the_signature_with_minisign() {
     let home = t.path().join("home");
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "install.sh: signature checked\n");
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
     let bin = home.join("bin");

@@ -113,6 +113,7 @@ main() {
             # -H: only the prehashed form minisign makes by default, as kulman takes it.
             minisign -VHm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
                 die "SHA256SUMS: signature does not verify"
+            printf 'install.sh: signature checked\n' >&2
         elif [ -e "$ki_sig" ]; then
             # A file was left past the limit (a local tree, or a server that sends no length):
             # there, but no signature. curl makes no file for one that is absent, nor for one

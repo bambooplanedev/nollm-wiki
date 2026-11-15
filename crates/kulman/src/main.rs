@@ -219,10 +219,11 @@ fn reachable<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) -> bool {
     on_path(bin) || names.into_iter().all(|n| resolves_on_path(bin, n))
 }
 
-/// What kulman says when `bin` is not on `PATH`: two lines, the second one to copy.
+/// What kulman says when `bin` is not on `PATH`, a convenience for the terminal only (agents
+/// need no `PATH`): two lines, the second one to copy.
 fn path_hint(bin: &Path) -> String {
     let bin = bin.display();
-    format!("{bin} is not on PATH; add it:\n    export PATH=\"{bin}:$PATH\"")
+    format!("{bin} is not on PATH; to type kulman in a terminal, add it:\n    export PATH=\"{bin}:$PATH\"")
 }
 
 /// `state.json` exists under `home`: checked before anything is created.

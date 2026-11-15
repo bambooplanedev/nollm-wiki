@@ -22,7 +22,7 @@ each.
 | Name | Say it | The word |
 |---|---|---|
 | kulman | KOOL-mahn (кульман) | a design bureau's drawing board — the front door: installs the tools, sets up a project |
-| calque | /kalk/ | French for tracing paper (Ukrainian «калька») — an exact tracing of your project that agents read |
+| calque | kahlk (калька) | a drafter's tracing paper — an exact tracing of your project that agents read |
 | plaz | plahz (плаз) | the loft floor where a bureau draws the airframe's real lines full size — the real decisions of each function |
 | techlog | TEK-log | an aircraft's technical log — the agent's memory of the project |
 | wiki-code | — | plain name: the shared library that walks, parses and indexes code |
@@ -36,8 +36,9 @@ One line fetches `kulman` itself:
 The script downloads the `kulman` archive for your system, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
 `~/.kulman-home/bin/kulman`. It writes nothing else and edits no shell profile. Add
-`~/.kulman-home/bin` to your `PATH` yourself: agents start `calque` by its name. Releases are
-signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `kulman`
+`~/.kulman-home/bin` to your `PATH` yourself if you want to type `kulman` in a terminal; agents
+find `calque` without it, and when `~/.local/bin` is already on your `PATH`, `kulman install` links
+the tools there. Releases are signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `kulman`
 checks every release it reads (see [Checking a release](#checking-a-release)).
 
 Then install the modules:

@@ -35,17 +35,26 @@ impl Fixture {
         fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default()
     }
     fn setup(&self, args: &[&str]) -> assert_cmd::assert::Assert {
-        Command::cargo_bin("calque")
-            .unwrap()
-            .arg("setup")
+        self.run(Path::new(env!("CARGO_BIN_EXE_calque")), args)
+            .assert()
+    }
+    /// `exe setup args` in the fixture's environment.
+    fn run(&self, exe: &Path, args: &[&str]) -> Command {
+        let mut c = Command::new(exe);
+        c.arg("setup")
             .args(args)
             .current_dir(self.root())
             .env("PATH", self.bin())
             .env("HOME", self.home())
+            .env_remove("KULMAN_HOME")
             .env("XDG_DATA_HOME", self.home())
             .env("LOCALAPPDATA", self.home())
-            .env("CLAUDE_CONFIG_DIR", self.claude_config())
-            .assert()
+            .env("CLAUDE_CONFIG_DIR", self.claude_config());
+        c
+    }
+    /// calque in the default kulman home, `$HOME/.kulman-home`.
+    fn home_calque(&self) -> PathBuf {
+        calque_in(&self.home().join(".kulman-home"))
     }
     fn home(&self) -> PathBuf {
         self.tmp.path().join("home")
@@ -53,6 +62,14 @@ impl Fixture {
     fn claude_config(&self) -> PathBuf {
         self.tmp.path().join("claude-config")
     }
+}
+
+/// A copy of calque at `home/bin/calque`, where a kulman install puts it.
+fn calque_in(home: &Path) -> PathBuf {
+    let exe = home.join("bin/calque");
+    fs::create_dir_all(exe.parent().unwrap()).unwrap();
+    fs::copy(env!("CARGO_BIN_EXE_calque"), &exe).unwrap();
+    exe
 }
 
 /// `with_wiki`: a `calque` symlink on PATH; `with_claude`: the stub `claude`.
@@ -1804,4 +1821,334 @@ fn setup_remove_ignores_the_memory_flags() {
     assert_eq!(run(&ALL_AGENTS, "--no-memory"), want);
     assert_eq!(run(&no, "--memory"), want);
     assert_eq!(run(&no, "--no-memory"), want);
+}
+
+// Run from the kulman home, setup starts calque through the launch line: no `PATH`, and no one's
+// home path in a file the team shares. These texts are what the agents run, pinned exactly.
+
+const LAUNCH_ENTRY: &str = r#"{
+  "command": "sh",
+  "args": [
+    "-c",
+    "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."
+  ]
+}"#;
+/// The `Args:` line of `claude mcp get` for the launch entry: as stored, and as Claude Code
+/// (2026-11-15) shows it, with `${VAR:-default}` printed as `${VAR}`.
+const LAUNCH_ARGS: &str =
+    r#"-c exec "${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque" serve --source ."#;
+const LAUNCH_SHOWN: &str = r#"-c exec "${KULMAN_HOME}/bin/calque" serve --source ."#;
+/// The launch entry as `claude mcp add-json` gets it.
+const LAUNCH_JSON: &str = r#"{"command":"sh","args":["-c","exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]}"#;
+const LAUNCH_HOOK: &str = r#""${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque" hint --claude-hook"#;
+const LAUNCH_CODEX_BLOCK: &str = r#"[mcp_servers.calque]
+command = "sh"
+args = ["-c", "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]
+"#;
+const LAUNCH_PI_HOOK: &str = r#"// Adds the project wiki's code lines for the prompt before the model runs (installed by calque setup unless --no-hook).
+import { execFileSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.on("before_agent_start", (event, ctx) => {
+    if (event.messageType !== "user" || !event.prompt.trim()) return;
+    let text = "";
+    try {
+      text = execFileSync(path.join(process.env.KULMAN_HOME || path.join(os.homedir(), ".kulman-home"), "bin/calque"), ["hint", "--dir", path.join(ctx.cwd, ".kulman"), "--", event.prompt], {
+        encoding: "utf8",
+        timeout: 3000,
+      });
+    } catch {
+      return;
+    }
+    if (!text.trim()) return;
+    return { message: { customType: "calque-hint", content: text, display: false } };
+  });
+}
+"#;
+const PI_EXT: &str = ".pi/extensions/calque-hint/index.ts";
+const KULMAN_HOME_WARNING: &str =
+    "warning: the agents find calque through KULMAN_HOME; set it in their environment";
+
+/// An `mcpServers` file holding only `entry`, as setup writes it.
+fn mcp_json(entry: &str) -> String {
+    format!(
+        "{{\n  \"mcpServers\": {{\n    \"calque\": {}\n  }}\n}}\n",
+        entry.replace('\n', "\n    ")
+    )
+}
+
+fn launch_hook_item() -> serde_json::Value {
+    serde_json::json!({"hooks": [{"type": "command", "command": LAUNCH_HOOK}]})
+}
+
+/// Every file of a repo-scope setup for all agents holds exactly the launch-line form, once.
+fn assert_launch_files(r: &Path) {
+    assert_eq!(read(&r.join(".mcp.json")), mcp_json(LAUNCH_ENTRY));
+    let pi = LAUNCH_ENTRY.replace("\n}", ",\n  \"exposure\": \"direct\"\n}");
+    assert_eq!(read(&r.join(".pi/mcp.json")), mcp_json(&pi));
+    assert_eq!(read(&r.join(".cursor/mcp.json")), mcp_json(LAUNCH_ENTRY));
+    assert_eq!(read(&r.join(".codex/config.toml")), LAUNCH_CODEX_BLOCK);
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([launch_hook_item()])
+    );
+    assert_eq!(read(&r.join(PI_EXT)), LAUNCH_PI_HOOK);
+}
+
+#[test]
+fn setup_from_the_kulman_home_writes_the_launch_line_and_no_path_warning() {
+    let f = fixture(false, true);
+    codex_stub(&f);
+    let a = f.run(&f.home_calque(), &ALL_AGENTS).assert().success();
+    assert_launch_files(&f.root());
+    let o = out(&a);
+    assert!(o.contains("wrote .mcp.json calque server"), "{o}");
+    assert!(!o.contains("warning:"), "{o}");
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_adds_the_launch_line_through_claude() {
+    for shown in [LAUNCH_SHOWN, LAUNCH_ARGS] {
+        let f = fixture(false, true);
+        claude_stub_args(&f, "sh", shown);
+        let exe = f.home_calque();
+        let args = ["--agent", "claude", "--scope", "local"];
+        f.run(&exe, &args).assert().success();
+        let added = format!("mcp get calque\nmcp add-json calque {LAUNCH_JSON} --scope local\n");
+        assert_eq!(f.claude_log(), added);
+        assert_eq!(
+            prompt_hooks(&f.root().join(".claude/settings.local.json")),
+            serde_json::json!([launch_hook_item()])
+        );
+        let a = f.run(&exe, &args).assert().success();
+        assert!(
+            out(&a).contains("already set up: Claude Code local calque server"),
+            "{shown}: {}",
+            out(&a)
+        );
+        assert_eq!(f.claude_log(), format!("{added}mcp get calque\n"));
+        let a = f
+            .run(&exe, &[&["--remove"], &args[..]].concat())
+            .assert()
+            .success();
+        assert!(
+            out(&a).contains("removed Claude Code local calque server"),
+            "{shown}: {}",
+            out(&a)
+        );
+        assert_eq!(
+            f.claude_log(),
+            format!("{added}mcp get calque\nmcp get calque\nmcp remove calque --scope local\n")
+        );
+        assert!(!f.root().join(".claude/settings.local.json").exists());
+    }
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_switches_memory_on_the_shown_entry() {
+    let f = fixture(false, true);
+    claude_stub_args(&f, "sh", &format!("{LAUNCH_SHOWN} --memory none"));
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    f.run(&f.home_calque(), &args).assert().success();
+    assert_eq!(
+        f.claude_log(),
+        format!(
+            "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque {LAUNCH_JSON} --scope local\n"
+        )
+    );
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_leaves_another_sh_server_alone() {
+    let f = fixture(false, true);
+    claude_stub_args(&f, "sh", r#"-c exec "/other/calque" serve --source ."#);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let exe = f.home_calque();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    let a = f.run(&exe, &args).assert().code(1);
+    assert!(
+        out(&a).contains(
+            "skipped Claude Code local calque server: another \"calque\" server is configured"
+        ),
+        "{}",
+        out(&a)
+    );
+    f.run(&exe, &[&["--remove"], &args[..]].concat())
+        .assert()
+        .code(1);
+    assert_eq!(f.claude_log(), "mcp get calque\nmcp get calque\n");
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_replaces_a_bare_claude_entry() {
+    let f = fixture(false, true);
+    claude_stub(&f, "calque");
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    f.run(&f.home_calque(), &args).assert().success();
+    assert_eq!(
+        f.claude_log(),
+        format!(
+            "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque {LAUNCH_JSON} --scope local\n"
+        )
+    );
+}
+
+#[test]
+fn setup_from_the_kulman_home_rewrites_a_bare_project_in_place_and_remove_takes_either_form() {
+    let f = fixture(true, true);
+    codex_stub(&f);
+    let (r, exe) = (f.root(), f.home_calque());
+    let home = |args: &[&str]| f.run(&exe, args).assert().success();
+    let remove = [&["--remove"], &ALL_AGENTS[..]].concat();
+    // What a removal leaves: the project before setup, plus `.gitignore` and the memory folder.
+    f.setup(&ALL_AGENTS).success();
+    f.setup(&remove).success();
+    let removed = tree(&r);
+    // The bare form, from a calque outside the home (one is in it), taken out from the home.
+    f.setup(&ALL_AGENTS).success();
+    assert_eq!(read(&r.join(".mcp.json")), mcp_json(ENTRY));
+    home(&remove);
+    assert_eq!(tree(&r), removed);
+    // The bare form rewritten, one entry per file; then the launch form taken out.
+    f.setup(&ALL_AGENTS).success();
+    home(&ALL_AGENTS);
+    assert_launch_files(&r);
+    home(&remove);
+    assert_eq!(tree(&r), removed);
+}
+
+#[test]
+fn setup_outside_the_kulman_home_rewrites_a_launch_project_in_place_and_remove_takes_it() {
+    let f = fixture(true, true);
+    codex_stub(&f);
+    let (r, exe) = (f.root(), f.home_calque());
+    let home = |args: &[&str]| f.run(&exe, args).assert().success();
+    let remove = [&["--remove"], &ALL_AGENTS[..]].concat();
+    f.setup(&ALL_AGENTS).success();
+    let bare = tree(&r);
+    f.setup(&remove).success();
+    let removed = tree(&r);
+    // The launch form, from a calque outside the home: rewritten, one entry and one hook per file.
+    home(&ALL_AGENTS);
+    assert_launch_files(&r);
+    f.setup(&ALL_AGENTS).success();
+    assert_eq!(read(&r.join(".mcp.json")), mcp_json(ENTRY));
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([hook_item()])
+    );
+    assert_eq!(tree(&r), bare);
+    // The launch form taken out from outside the home.
+    home(&ALL_AGENTS);
+    f.setup(&remove).success();
+    assert_eq!(tree(&r), removed);
+}
+
+#[test]
+fn setup_local_outside_the_kulman_home_replaces_a_launch_claude_entry_and_remove_takes_it() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "sh", LAUNCH_SHOWN);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    f.setup(&args).success();
+    let set = "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque";
+    assert_eq!(
+        f.claude_log(),
+        format!("{set} {{\"command\":\"calque\",\"args\":[\"serve\",\"--source\",\".\"]}} --scope local\n")
+    );
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(f
+        .claude_log()
+        .ends_with("mcp get calque\nmcp remove calque --scope local\n"));
+}
+
+#[test]
+fn setup_from_a_kulman_home_elsewhere_says_the_agents_need_kulman_home() {
+    let f = fixture(false, true);
+    let elsewhere = f.tmp.path().join("my \"kulman\" $home: x");
+    let exe = calque_in(&elsewhere);
+    let args = ["--agent", "claude", "--scope", "repo"];
+    let a = f
+        .run(&exe, &args)
+        .env("KULMAN_HOME", &elsewhere)
+        .assert()
+        .success();
+    assert!(
+        out(&a).lines().any(|l| l == KULMAN_HOME_WARNING),
+        "{}",
+        out(&a)
+    );
+    assert!(!out(&a).contains("not on PATH"), "{}", out(&a));
+    assert_eq!(read(&f.root().join(".mcp.json")), mcp_json(LAUNCH_ENTRY));
+    // `KULMAN_HOME` naming the default home: the agents find it without it.
+    let default = f.home().join(".kulman-home");
+    let a = f
+        .run(&calque_in(&default), &args)
+        .env("KULMAN_HOME", &default)
+        .assert()
+        .success();
+    let o = out(&a);
+    assert!(o.contains("already set up: .mcp.json calque server"), "{o}");
+    assert!(!o.contains("warning:"), "{o}");
+}
+
+/// The `is ignored by git` lines of a setup report.
+fn ignored_warnings(a: &assert_cmd::assert::Assert) -> Vec<String> {
+    out(a)
+        .lines()
+        .filter(|l| l.contains("is ignored by git"))
+        .map(String::from)
+        .collect()
+}
+
+/// A project whose `.git/info/exclude` ignores `.claude/`.
+fn ignoring_claude() -> Fixture {
+    let f = fixture(true, true);
+    fs::write(f.root().join(".git/info/exclude"), ".claude/\n").unwrap();
+    f
+}
+
+const IGNORED: &str = "warning: .claude/settings.json is ignored by git; teammates will not get it";
+
+#[test]
+fn setup_repo_warns_for_each_written_file_git_ignores() {
+    let f = ignoring_claude();
+    real_git(&f);
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    // `.mcp.json` and the pi files are written too and not ignored: no warning for them.
+    assert_eq!(ignored_warnings(&a), [IGNORED]);
+    // Nothing written the second time, so nothing to warn about.
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+#[test]
+fn setup_does_not_warn_about_ignored_files_outside_a_repository() {
+    // Not a repository: git exits 128.
+    let f = ignoring_claude();
+    real_git(&f);
+    fs::remove_dir_all(f.root().join(".git")).unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+#[test]
+fn setup_local_does_not_warn_about_the_files_it_excludes_itself() {
+    let f = ignoring_claude();
+    real_git(&f);
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(out(&a).contains("wrote .claude/settings.local.json prompt hook"));
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
 }

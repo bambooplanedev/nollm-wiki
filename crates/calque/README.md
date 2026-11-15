@@ -2,8 +2,8 @@
 
 # calque
 
-**calque** is French for tracing paper, read /kalk/ (Ukrainian «калька») — an exact tracing of your
-project that agents read.
+**calque**, said kahlk (калька): a drafter's tracing paper — an exact tracing of your project that
+agents read.
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
@@ -96,8 +96,8 @@ the [repository README](../../README.md#install). In short, once `kulman` is on 
     kulman setup --scope local         # runs calque setup and plaz setup here
     kulman update                      # later: everything to the latest release
 
-Add `~/.kulman-home/bin` to your `PATH` (agents start `calque` by its name; `kulman` and
-`kulman setup` say when it is missing). Everything is on by default; turn things off with flags
+Adding `~/.kulman-home/bin` to your `PATH` is optional, for typing `kulman` in a terminal (agents
+find `calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
 (`kulman install --modules calque`, `kulman setup --no-memory`). `kulman setup` runs every chosen
 module even when one fails, and names the ones that failed at the end. `kulman remove` deletes what
 kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `calque` in
@@ -210,7 +210,8 @@ stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/calque-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
+  `.agents/skills/calque-navigation/SKILL.md`, and `.kulman/` in `.gitignore`. For a file it wrote
+  that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json calque … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on; a
@@ -243,8 +244,15 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-Every agent runs the server as plain `calque`, so `calque` must be on `PATH`; setup warns when it is
-not. Safe to run twice. An entry, file or block at the same place with other content is left alone
+A `calque` installed by kulman (run as `~/.kulman-home/bin/calque`, or from `$KULMAN_HOME/bin`)
+has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` through `sh -c` (the
+prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
+`PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
+`~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"`,
+`$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
+own and is rewritten to the form this `calque` writes. Any other `calque` (built from source, installed
+elsewhere) has every agent run the server as plain `calque`, so `calque` must be on `PATH`; setup
+warns when it is not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
 pretty JSON with its keys and their order kept.
 

@@ -3,7 +3,7 @@
 use std::env;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Write};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -255,7 +255,8 @@ pub static COMMITTING: AtomicBool = AtomicBool::new(false);
 
 /// Renames each staged binary (already synced) into `bin/` in the given order (the caller
 /// puts kulman last), then writes `manifest.json`, then `state.json`, each through a synced
-/// temp file. Removing the temp dir afterwards is best effort: the install is done.
+/// temp file. Removing the temp dir and linking every installed binary for the terminal
+/// (`link`) afterwards are best effort: the install is done.
 pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) -> Result<()> {
     let bin = home.path.join("bin");
     let dests: Vec<PathBuf> = staged.iter().map(|s| bin.join(&s.name)).collect();
@@ -273,7 +274,98 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     write(home, "state.json", &serde_json::to_vec(state)?)?;
     sync_dir(&home.path);
     let _ = fs::remove_dir_all(home.tmp());
+    link(
+        &bin,
+        state.modules.iter().map(String::as_str).chain(["kulman"]),
+    );
     Ok(())
+}
+
+/// When `$HOME/.local/bin` is a directory on `PATH`, points `<it>/<name>` at `bin/<name>` for
+/// each of `names`. A link already pointing there is left; another symlink directly into `bin/`
+/// (by `bin` as given or its real path) is replaced; anything else is left and said. Only what
+/// was made or replaced is named. A failure is a warning: the binaries are installed.
+fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
+    let Some(user) = env::var_os("HOME").filter(|h| !h.is_empty()) else {
+        return;
+    };
+    let dir = Path::new(&user).join(".local/bin");
+    if !dir.is_dir() || !crate::on_path(&dir) {
+        return;
+    }
+    let real = bin.canonicalize().ok();
+    let ours = |old: &Path| {
+        old.file_name().is_some()
+            && old
+                .parent()
+                .is_some_and(|p| p == bin || Some(p) == real.as_deref())
+    };
+    let mut linked = Vec::new();
+    for name in names {
+        let at = dir.join(name);
+        let target = bin.join(name);
+        let left = || eprintln!("kulman: left {} as it is (not a kulman link)", at.display());
+        let made = match fs::read_link(&at) {
+            Ok(old) if old == target => continue,
+            // Only an own link with a different spelling is renamed over: through a temp link
+            // that is removed only once this run has made it; a file put at `at` between the
+            // read and the rename would be replaced.
+            Ok(old) if ours(&old) => {
+                let tmp = dir.join(format!(".{name}.kulman-{}", std::process::id()));
+                symlink(&target, &tmp).and_then(|()| {
+                    fs::rename(&tmp, &at).inspect_err(|_| {
+                        let _ = fs::remove_file(&tmp);
+                    })
+                })
+            }
+            // Nothing there: made in place, so a file that appears meanwhile is never replaced.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => match symlink(&target, &at) {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    left();
+                    continue;
+                }
+                made => made,
+            },
+            // A symlink elsewhere, or not a symlink.
+            Ok(_) => {
+                left();
+                continue;
+            }
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+                left();
+                continue;
+            }
+            Err(e) => Err(e),
+        };
+        match made {
+            Ok(()) => linked.push(name),
+            Err(e) => eprintln!("kulman: warning: cannot link {}: {e}", at.display()),
+        }
+    }
+    if !linked.is_empty() {
+        eprintln!("kulman: linked {} into {}", linked.join(" "), dir.display());
+    }
+}
+
+/// Deletes each `$HOME/.local/bin/<name>` that is a symlink to `bin/<name>` (by `bin` as given
+/// or its real path); anything else there is left. A failure is a warning.
+fn unlink<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
+    let Some(user) = env::var_os("HOME").filter(|h| !h.is_empty()) else {
+        return;
+    };
+    let dir = Path::new(&user).join(".local/bin");
+    let real = bin.canonicalize().ok();
+    for name in names {
+        let at = dir.join(name);
+        let ours = fs::read_link(&at).is_ok_and(|old| {
+            old == bin.join(name) || real.as_ref().is_some_and(|r| old == r.join(name))
+        });
+        if ours {
+            if let Err(e) = delete(&at) {
+                eprintln!("kulman: warning: {e}");
+            }
+        }
+    }
 }
 
 /// Makes the renames and deletions in `dir` durable. A failure is only a warning: the files are
@@ -313,12 +405,13 @@ pub fn remove_lock(home: &Home) -> Result<bool> {
     Ok(fs::read_dir(&home.path).is_ok_and(|mut d| d.next().is_some()))
 }
 
-/// Deletes `bin/<name>` for each of `names`, then writes `state` (a crash in between leaves a
-/// listed binary missing, which `kulman update` puts back).
+/// Deletes `bin/<name>` and its link for the terminal (`unlink`) for each of `names`, then writes
+/// `state` (a crash in between leaves a listed binary missing, which `kulman update` puts back).
 pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()> {
     let bin = home.path.join("bin");
     let paths: Vec<PathBuf> = names.iter().map(|n| bin.join(n)).collect();
     check_files(&paths)?;
+    unlink(&bin, names.iter().map(String::as_str));
     for path in &paths {
         delete(path)?;
     }
@@ -331,7 +424,8 @@ pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()
 
 /// Deletes `bin/<module>` for each of `modules` and `bin/kulman`, then `manifest.json`,
 /// `state.json` and `.lock` last (a run that arrives after the lock is gone finds no state);
-/// then `bin/` and home if empty. Nothing else is touched: any other file keeps its directory.
+/// then `bin/` and home if empty; first, their links for the terminal (`unlink`). Nothing else is
+/// touched: any other file keeps its directory.
 pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
     let bin = home.path.join("bin");
     let mut paths: Vec<PathBuf> = modules.iter().map(|n| bin.join(n)).collect();
@@ -346,6 +440,7 @@ pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
             _ => bail!("{} is not a file kulman wrote", path.display()),
         }
     }
+    unlink(&bin, modules.iter().map(String::as_str).chain(["kulman"]));
     for path in &paths {
         delete(path)?;
     }

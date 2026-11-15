@@ -33,7 +33,8 @@ By hand, the same: download `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` an
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Then add `~/.kulman-home/bin` to `PATH` yourself (agents start `calque` by its name) and run:
+Adding `~/.kulman-home/bin` to `PATH` is optional, for typing `kulman` in a terminal (agents find
+`calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Then run:
 
     ~/.kulman-home/bin/kulman install       # kulman and the release's default modules
     cd your-project
@@ -59,13 +60,13 @@ symlink or not a directory is refused. No shell profile is edited.
     kulman [status]
 
 With no command, or `status`: the installed version and modules (a module whose binary is missing is
-marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; add it:` and
-`export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry that reaches `bin/`
-through a symlink counts, and so does a link in a `PATH` folder for each of kulman and the
-installed modules, when it is the first of its name on `PATH`), and whether a newer release exists
-(`newer release: <X.Y.Z> (kulman update)`, or `up to date`). It only reads: nothing is created. The
-release host gets 5 s to connect and 8 s in all; past that, or on any error, the last line says
-what could not be reached, and why.
+marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; to type kulman in
+a terminal, add it:` and `export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry
+that reaches `bin/` through a symlink counts, and so does a link in a `PATH` folder for each of
+kulman and the installed modules, when it is the first of its name on `PATH`), and whether a newer
+release exists (`newer release: <X.Y.Z> (kulman update)`, or `up to date`). It only reads: nothing
+is created. The release host gets 5 s to connect and 8 s in all; past that, or on any error, the
+last line says what could not be reached, and why.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
@@ -80,11 +81,14 @@ version and says so (`newer release X.Y.Z: kulman update`); when the latest rele
 it says that instead (`could not check for a newer release (<base>: <reason>)`). The installed
 version is read once `.lock` is held. If the installed version differs from `--version`, or is newer
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
-update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
-install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman
-setup` in a project (named by its full path in `bin/` while neither `bin/` nor every binary is on
-`PATH`, as above). With nothing to do it writes nothing and says `already installed: <names>
-(<version>)` instead (and, as above, a newer release).
+update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. When
+`$HOME/.local/bin` is a directory on `PATH`, install and update link each installed binary there to
+`bin/<name>` (`kulman: linked <names> into <dir>`); anything there that is not a link into `bin/` is
+left as it is (`kulman: left <path> as it is (not a kulman link)`), and `kulman remove` deletes only
+its own links. A successful install ends with the next steps: the same two lines for `bin/` if it is
+not on `PATH`, then `kulman setup` in a project (named by its full path in `bin/` while neither
+`bin/` nor every binary is on `PATH`, as above). With nothing to do it writes nothing and says
+`already installed: <names> (<version>)` instead (and, as above, a newer release).
 
     kulman update [--yes]
 
@@ -124,10 +128,8 @@ undoes each module's setup. Before the first module runs, every chosen module's 
 write into the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that
 folder is kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`,
 the modules run with it put first on their own `PATH` (kulman's own environment and your shell are
-not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is),
-and a setup of calque first says on stderr, in the same two lines, that `bin/` is not on `PATH` and
-what to add, and then that the agent configs it writes start `calque` by name; that is left unsaid
-when `calque` itself is linked into a `PATH` folder as described under status.
+not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is).
+The agent configs calque writes start it from the kulman home, so they need nothing on `PATH`.
 
 ## Asking and not asking
 
@@ -156,7 +158,8 @@ by a signal).
 
 ## Environment
 
-- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset).
+- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset; a path containing `"`,
+  `$`, a backtick or `\` is not supported by the agent launch line calque writes).
 - `KULMAN_RELEASE_URL` — where releases are (default
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` or `file://…`, nothing else.
 
@@ -200,7 +203,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.8.0",
+  "version": "0.8.1",
   "modules": [
     {
       "name": "calque",
@@ -209,13 +212,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
@@ -260,7 +263,8 @@ minisign that knows `-H`; 0.11 and 0.12 do, and with one that does not, the chec
 `install.sh` stops. In a `file://` tree an absent signature is allowed, with the line `install.sh:
 signature not checked: local release tree`. Without `minisign` it goes on by SHA-256 alone and says
 so: `install.sh: signature not checked (minisign not found); kulman checks it on every install and
-update`. Both lines go to stderr, so a script that captures the output does not get them.
+update`. When the signature verified, it prints `install.sh: signature checked`. All three lines
+go to stderr, so a script that captures the output does not get them.
 
 By hand, with each file and its `.minisig` in one folder:
 

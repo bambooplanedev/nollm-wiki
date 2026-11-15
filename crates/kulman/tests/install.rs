@@ -4,8 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    archive_path, assert_binary, edit_manifest, kulman, no_tmp_left, pack, read_manifest, release,
-    replace_archive, set_sha256, snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
+    archive_path, assert_binary, edit_manifest, kulman, local_bin, no_tmp_left, pack, path_first,
+    read_manifest, release, replace_archive, set_sha256, snapshot, state, stderr, stdout,
+    version_dir, KULMAN_BYTES,
 };
 use serde_json::{json, Value};
 
@@ -757,7 +758,10 @@ fn install_says_how_to_add_to_path() {
     let home = t.path().join("home");
     let bin = home.join("bin");
     let hint = [
-        format!("{} is not on PATH; add it:", bin.display()),
+        format!(
+            "{} is not on PATH; to type kulman in a terminal, add it:",
+            bin.display()
+        ),
         format!("    export PATH=\"{}:$PATH\"", bin.display()),
     ];
     let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
@@ -1091,4 +1095,208 @@ fn state_and_manifest_end_with_one_newline() {
     fs::remove_file(home.join("manifest.json")).unwrap();
     kulman(&home, &base).arg("update").assert().success();
     assert_eq!(fs::read(home.join("manifest.json")).unwrap(), manifest);
+}
+
+const UNSIGNED: &str = "signature not checked: local release tree\n";
+
+#[test]
+fn install_links_each_binary_into_local_bin_on_path() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    // `.local/bin` is a symlink to a folder, and PATH names it with a trailing slash.
+    let (dir, real) = (local_bin(&home), t.path().join("real-bin"));
+    fs::create_dir_all(&real).unwrap();
+    fs::create_dir_all(dir.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real, &dir).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(format!("{}/", dir.display())))
+        .arg("install")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let linked = format!("kulman: linked calque plaz kulman into {}\n", dir.display());
+    assert_eq!(stderr(&out), format!("{UNSIGNED}{linked}"));
+    for name in ["calque", "plaz", "kulman"] {
+        assert_eq!(
+            fs::read_link(real.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+    // kulman is reached through its link: named plainly, with no PATH hint before it.
+    let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
+    assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
+}
+
+#[test]
+fn install_leaves_what_is_not_a_kulman_link() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("calque"), "mine").unwrap();
+    fs::write(t.path().join("plaz"), "mine").unwrap();
+    std::os::unix::fs::symlink(t.path().join("plaz"), dir.join("plaz")).unwrap();
+    // Dangling, into another kulman home.
+    let other = t.path().join("other-home/bin/kulman");
+    std::os::unix::fs::symlink(&other, dir.join("kulman")).unwrap();
+    let before = snapshot(&dir);
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .arg("install")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let left = |n: &str| {
+        let at = dir.join(n);
+        format!(
+            "kulman: left {} as it is (not a kulman link)\n",
+            at.display()
+        )
+    };
+    let expect = format!(
+        "{UNSIGNED}{}{}{}",
+        left("calque"),
+        left("plaz"),
+        left("kulman")
+    );
+    assert_eq!(stderr(&out), expect);
+    assert_eq!(snapshot(&dir), before);
+}
+
+#[test]
+fn install_replaces_its_own_links_by_the_home_as_given_or_its_real_path() {
+    let (t, base) = setup();
+    // KULMAN_HOME reaches the home through a symlink.
+    let real = t.path().join("home");
+    fs::create_dir(&real).unwrap();
+    let home = t.path().join("home-link");
+    std::os::unix::fs::symlink(&real, &home).unwrap();
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    // One by the home as given, one by its real path.
+    std::os::unix::fs::symlink(home.join("bin/calque"), dir.join("calque")).unwrap();
+    let real_bin = real.canonicalize().unwrap().join("bin");
+    std::os::unix::fs::symlink(real_bin.join("plaz"), dir.join("plaz")).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .arg("install")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    // calque's link is already the one kulman makes: left, not named.
+    let linked = format!("kulman: linked plaz kulman into {}\n", dir.display());
+    assert_eq!(stderr(&out), format!("{UNSIGNED}{linked}"));
+    for name in ["calque", "plaz", "kulman"] {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}
+
+#[test]
+fn install_again_leaves_links_that_are_already_right() {
+    use std::os::unix::fs::MetadataExt;
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    let run = || {
+        kulman(&home, &base)
+            .env("PATH", path_first(&dir))
+            .arg("install")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let names = ["calque", "plaz", "kulman"];
+    let inodes = || names.map(|n| fs::symlink_metadata(dir.join(n)).unwrap().ino());
+    let before = inodes();
+    // A listed binary missing: this install commits again.
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    let out = run();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), UNSIGNED);
+    assert_eq!(inodes(), before);
+    for name in names {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}
+
+#[test]
+fn install_links_nothing_without_local_bin_as_a_folder_on_path() {
+    // Absent though PATH names it: nothing is created.
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    let hint = format!(
+        "{} is not on PATH; to type kulman in a terminal, add it:",
+        home.join("bin").display()
+    );
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .arg("install")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), UNSIGNED);
+    assert!(stdout(&out).lines().any(|l| l == hint), "{}", stdout(&out));
+    assert!(!dir.parent().unwrap().exists());
+
+    // A folder, but not on PATH: no link in it.
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    let hint = format!(
+        "{} is not on PATH; to type kulman in a terminal, add it:",
+        home.join("bin").display()
+    );
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), UNSIGNED);
+    assert!(stdout(&out).lines().any(|l| l == hint), "{}", stdout(&out));
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
+}
+
+#[test]
+fn a_link_that_cannot_be_made_is_a_warning() {
+    use std::os::unix::fs::PermissionsExt;
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    let mode = |m| fs::set_permissions(&dir, fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if fs::write(dir.join("probe"), "").is_ok() {
+        fs::remove_file(dir.join("probe")).unwrap();
+        mode(0o755);
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
+    }
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .arg("install")
+        .output()
+        .unwrap();
+    mode(0o755);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let warn = |n: &str| {
+        let at = dir.join(n);
+        format!(
+            "kulman: warning: cannot link {}: Permission denied (os error 13)\n",
+            at.display()
+        )
+    };
+    let expect = format!(
+        "{UNSIGNED}{}{}{}",
+        warn("calque"),
+        warn("plaz"),
+        warn("kulman")
+    );
+    assert_eq!(stderr(&out), expect);
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
 }
