@@ -555,6 +555,27 @@ mod tests {
     }
 
     #[test]
+    fn a_host_that_never_answers_ends_the_check_within_the_given_wait() {
+        // Accepts the connection and stays silent: only the wait can end the fetch.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("https://{}", listener.local_addr().unwrap());
+        let wait = Wait {
+            connect: Duration::from_millis(300),
+            whole: Duration::from_millis(400),
+        };
+        let start = std::time::Instant::now();
+        let err = manifest(&base, None, wait)
+            .err()
+            .expect("no answer, no manifest");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+        assert_eq!(err.root_cause().to_string(), "timeout: connect");
+    }
+
+    #[test]
     fn only_a_404_is_a_missing_signature() {
         let said = |e: ureq::Error| unfetched(&e.into()).to_string();
         assert_eq!(
