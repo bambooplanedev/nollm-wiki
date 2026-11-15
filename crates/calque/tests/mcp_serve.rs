@@ -250,7 +250,7 @@ fn serve_tools_flag_picks_the_tools() {
     let resp = call(&mut stdin, &stdout, 3, "lint", &json!({}));
     let text = text_of(&resp);
     let report: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
+    assert_eq!(report["broken_links"], json!([]));
     assert_eq!(report["large"], json!([]));
 
     // A tool left out is not callable.
@@ -465,7 +465,16 @@ fn serve_refuses_non_wiki_dir() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("compile"), "stderr: {stderr}");
+    let dir = tmp.path().display();
+    // It says what is wrong and which command fixes it, for this very dir.
+    assert!(
+        stderr.contains(&format!("{dir} is not a compiled wiki")),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("run `calque compile <input> {dir}` first")),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -485,7 +494,10 @@ fn search_hits_include_snippet_field() {
     let arr = hits.as_array().expect("hits array");
     assert_ne!(*arr, [] as [Value; 0]);
     for h in arr {
-        assert!(h.get("snippet").is_some(), "hit missing snippet key: {h}");
+        let snippet = h["snippet"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no snippet: {h}"));
+        assert!(snippet.to_lowercase().contains("gradient"), "{h}");
     }
     child.kill().ok();
 }
@@ -552,8 +564,13 @@ fn mcp_search_json_on_request() {
     let text = search_text(&json!({"query": "add", "format": "json"}));
     let hits: Value = serde_json::from_str(&text).unwrap();
     let hit = &hits.as_array().unwrap()[0];
-    assert!(
-        hit["symbols"].is_array() && hit["path"].is_string(),
+    assert_eq!(hit["path"], "src/lib.rs", "{hit}");
+    let symbol = &hit["symbols"][0];
+    assert_eq!(symbol["name"], "add", "{hit}");
+    assert_eq!(symbol["signature"], "pub fn add()", "{hit}");
+    assert_eq!(
+        (&symbol["start_line"], &symbol["end_line"]),
+        (&json!(1), &json!(2)),
         "{hit}"
     );
 }
@@ -1713,4 +1730,49 @@ fn serve_says_on_stderr_when_it_compiles_a_wiki_made_by_another_version() {
         .unwrap();
     assert!(!rest.contains("compiled by"), "{rest}");
     let _ = writer.wait();
+}
+
+/// A text page with a link to a page that does not exist, and a Rust function
+/// with one caller, compiled into `<tmp>/out`.
+fn broken_link_and_caller_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+    let (tmp, _, out) = common::compiled(&[
+        ("notes.txt", "See [[Ghost]] for details.\n"),
+        (
+            "src/util.rs",
+            "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+        ),
+        ("src/app.rs", "pub fn total() -> i32 {\n    add(1, 2)\n}\n"),
+    ]);
+    (tmp, out)
+}
+
+#[test]
+fn mcp_lint_reports_a_broken_link_and_callers_names_its_caller() {
+    let (_tmp, out) = broken_link_and_caller_fixture();
+    let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "callers,lint"]);
+    initialize(&mut stdin, &stdout);
+
+    let resp = call(&mut stdin, &stdout, 2, "lint", &json!({}));
+    let report: Value = serde_json::from_str(text_of(&resp)).unwrap();
+    // The page `notes` links to `Ghost`, which is no page.
+    assert_eq!(
+        report["broken_links"],
+        json!([["notes", "Ghost"]]),
+        "{report}"
+    );
+    assert_eq!(report["large"], json!([]));
+
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        3,
+        "callers",
+        &json!({"id": "util", "symbol": "add"}),
+    );
+    // After the header line: the one caller, `total` (lines 1-3 of
+    // src/app.rs), which calls `add` on its line 2.
+    let (_header, callers) = text_of(&resp).split_once('\n').unwrap();
+    assert_eq!(callers, "src/app.rs\n  1-3  fn  total  calls add at 2\n");
+    drop(stdin);
+    let _ = child.wait();
 }
