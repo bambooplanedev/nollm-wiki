@@ -18,7 +18,7 @@
 set -eu
 
 targets='aarch64-apple-darwin x86_64-unknown-linux-musl'
-binaries='kalka plaz kulman'
+binaries='calque plaz kulman'
 
 die() {
     printf 'release-assemble.sh: %s\n' "$1" >&2

@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "kalka": {
-      "command": "./target/release/kalka",
+    "calque": {
+      "command": "./target/release/calque",
       "args": ["serve", "--source", "."]
     }
   }

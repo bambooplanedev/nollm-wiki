@@ -68,19 +68,19 @@ struct SetupArgs {
     /// Modules to set up, comma separated (default: every installed module).
     #[arg(long, value_delimiter = ',')]
     modules: Option<Vec<String>>,
-    /// kalka: agent memory on (default: the release's choice, on unless it says off).
+    /// calque: agent memory on (default: the release's choice, on unless it says off).
     #[arg(long, conflicts_with = "no_memory")]
     memory: bool,
-    /// kalka: agent memory off.
+    /// calque: agent memory off.
     #[arg(long)]
     no_memory: bool,
-    /// kalka: the agents to wire, passed through as given.
+    /// calque: the agents to wire, passed through as given.
     #[arg(long, value_name = "LIST")]
     agent: Option<String>,
     /// repo (committed, for the whole team) or local (this checkout only).
     #[arg(long, value_parser = ["repo", "local"])]
     scope: Option<String>,
-    /// kalka: no hook.
+    /// calque: no hook.
     #[arg(long)]
     no_hook: bool,
     /// Undo each module's setup.

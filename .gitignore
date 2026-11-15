@@ -1,7 +1,7 @@
 /target
 /target-musl
-/crates/kalka/demo_raw/
-/crates/kalka/demo_wiki/
+/crates/calque/demo_raw/
+/crates/calque/demo_wiki/
 .quartz-build/
 docs/superpowers/
 docs/dogfood/

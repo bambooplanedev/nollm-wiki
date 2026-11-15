@@ -5,8 +5,8 @@
 **kulman**, said KOOL-mahn (кульман): a design bureau's drawing board — the front door: installs
 the tools, sets up a project.
 
-`kulman` installs, updates and sets up the modules of the kulman set: `kalka` (the project wiki for
-coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.7.2 is
+`kulman` installs, updates and sets up the modules of the kulman set: `calque` (the project wiki for
+coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.8.0 is
 the first to carry it; the [repository README](../../README.md) describes the whole set.
 
 ## Getting it
@@ -33,7 +33,7 @@ By hand, the same: download `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` an
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Then add `~/.kulman-home/bin` to `PATH` yourself (agents start `kalka` by its name) and run:
+Then add `~/.kulman-home/bin` to `PATH` yourself (agents start `calque` by its name) and run:
 
     ~/.kulman-home/bin/kulman install       # kulman and the release's default modules
     cd your-project
@@ -106,8 +106,8 @@ directory in place of a binary, or anything but a regular file in place of `mani
 `state.json`, stops it with nothing deleted (exit 1), as does a module that another installed module
 requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both). `kulman` is not a
 module: `--modules kulman` is a usage error. At a terminal it asks first (default: no); without one
-it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while kalka is
-installed also says that projects set up with kulman still name `kalka` in their agent configs and
+it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while calque is
+installed also says that projects set up with kulman still name `calque` in their agent configs and
 need `kulman setup --scope repo --remove` (or `--scope local`) first: before the question at a
 terminal, as the last line otherwise.
 
@@ -117,19 +117,19 @@ terminal, as the last line otherwise.
 Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current
 directory, in the release's order: every chosen module runs, whatever the earlier ones returned.
 Without `--modules` every installed module is set up. `--scope` goes to every module; `--agent`,
-`--no-hook` and `--memory`/`--no-memory` are kalka's and are a usage error when kalka is not chosen.
-Agent memory is on unless `--no-memory` is given (or the release turns it off). `--remove` undoes
-each module's setup. Before the first module runs, every chosen module's binary must be in `bin/`
-and executable; with no module installed there is nothing to set up (exit 1). The modules write into
-the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that folder is
-kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`, the modules
-run with it put first on their own `PATH` (kulman's own environment and your shell are not changed;
-a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
-kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
-then that the agent configs it writes start `kalka` by name; that is left unsaid when
-`kalka` itself is linked into a `PATH` folder as described under status. In a project that the old
-`wiki` (releases up to 0.6.13) set up, kalka's setup first removes the entries `wiki` wrote and
-lists the rest, as described in [kalka's README](../kalka/README.md#kalka-setup).
+`--no-hook` and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
+chosen. Agent memory is on unless `--no-memory` is given (or the release turns it off). `--remove`
+undoes each module's setup. Before the first module runs, every chosen module's binary must be in
+`bin/` and executable; with no module installed there is nothing to set up (exit 1). The modules
+write into the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that
+folder is kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`,
+the modules run with it put first on their own `PATH` (kulman's own environment and your shell are
+not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is),
+and a setup of calque first says on stderr, in the same two lines, that `bin/` is not on `PATH` and
+what to add, and then that the agent configs it writes start `calque` by name; that is left unsaid
+when `calque` itself is linked into a `PATH` folder as described under status. In a project that the
+old `wiki` (releases up to 0.6.13) set up, calque's setup first removes the entries `wiki` wrote and
+lists the rest, as described in [calque's README](../calque/README.md#calque-setup).
 
 ## Asking and not asking
 
@@ -202,22 +202,22 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.7.2",
+  "version": "0.8.0",
   "modules": [
     {
-      "name": "kalka",
+      "name": "calque",
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "kalka-v0.7.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.7.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }

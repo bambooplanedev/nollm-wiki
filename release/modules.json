@@ -1,5 +1,5 @@
 [
-  { "name": "kalka", "summary": "wiki of a project: compile, search, MCP server",
+  { "name": "calque", "summary": "wiki of a project: compile, search, MCP server",
     "default": true, "requires": [],
     "options": [ { "name": "memory", "summary": "agent memory pages", "default": true } ] },
   { "name": "plaz", "summary": "decision charts and call targets (preview: Rust and Python)",
