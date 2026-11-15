@@ -1,7 +1,7 @@
 //! The `Wiki` text pipeline: tokenizing, stemming and field-word matching.
 
 use super::{Field, Wiki};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 type StemMemo = std::sync::RwLock<HashMap<String, String>>;
 /// Stems of corpus words (`Wiki::with_stem`).
@@ -37,7 +37,7 @@ impl Wiki {
     /// Query tokenization for search: lowercase, split on whitespace, trim
     /// each piece's leading/trailing non-alphanumeric chars (interior chars
     /// like `_` and `:` survive), drop empties, dedupe keeping first order.
-    pub(super) fn tokenize(query: &str) -> Vec<String> {
+    pub(crate) fn tokenize(query: &str) -> Vec<String> {
         let mut tokens: Vec<String> = Vec::new();
         for raw in query.to_lowercase().split_whitespace() {
             let t = raw.trim_matches(|c: char| !c.is_alphanumeric());
@@ -126,15 +126,6 @@ impl Wiki {
         let mut tokens = Self::tokenize(text);
         tokens.retain(|t| t.chars().count() > 1);
         tokens
-    }
-
-    /// `tokenize`, with the query's word set as typed, each token split
-    /// like a name: (tokens, words). Word forms meet in `field_tier`, not
-    /// here: a token stays as typed so an exact hit keeps its full weight.
-    pub(crate) fn query_tokens(query: &str) -> (Vec<String>, BTreeSet<String>) {
-        let tokens = Self::tokenize(query);
-        let words = tokens.iter().flat_map(|t| Self::field_words(t)).collect();
-        (tokens, words)
     }
 
     /// The words of an identifier, lowercased: `wiki_code::support::name_words`.

@@ -39,8 +39,7 @@ impl Wiki {
             .chain(e.summary.as_deref())
             .map(|f| Field::new(&f.to_lowercase()))
             .collect::<Vec<_>>();
-        Self::query_tokens(q)
-            .0
+        Self::tokenize(q)
             .iter()
             .filter(|t| t.chars().count() >= min_len)
             .any(|t| fields.iter().any(|w| Self::field_tier(w, t) > 0.0))

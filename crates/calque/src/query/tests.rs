@@ -97,18 +97,10 @@ fn body_counts_match_match_indices_and_find() {
 
 #[test]
 fn query_tokens_keep_the_words_as_typed() {
-    let owned = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
-    let set = |v: &[&str]| v.iter().map(ToString::to_string).collect::<BTreeSet<_>>();
+    assert_eq!(Wiki::tokenize("агента агентом"), ["агента", "агентом"]);
     assert_eq!(
-        Wiki::query_tokens("агента агентом"),
-        (owned(&["агента", "агентом"]), set(&["агента", "агентом"]))
-    );
-    assert_eq!(
-        Wiki::query_tokens("MCP token_estimate"),
-        (
-            owned(&["mcp", "token_estimate"]),
-            set(&["estimate", "mcp", "token"])
-        )
+        Wiki::tokenize("MCP token_estimate"),
+        ["mcp", "token_estimate"]
     );
 }
 
