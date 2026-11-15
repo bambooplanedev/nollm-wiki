@@ -96,8 +96,6 @@ pub enum NotDrawn {
     Closure,
     Ternary,
     TryBlock,
-    Goto,
-    IfDef,
     ShortCircuit,
 }
 
@@ -109,8 +107,6 @@ impl NotDrawn {
             NotDrawn::Closure => "closure",
             NotDrawn::Ternary => "ternary",
             NotDrawn::TryBlock => "try",
-            NotDrawn::Goto => "goto",
-            NotDrawn::IfDef => "#if",
             NotDrawn::ShortCircuit => "&&/||",
         }
     }
@@ -159,11 +155,6 @@ pub enum Step {
         text: String,
         line: usize,
         kind: ExitKind,
-    },
-    Assign {
-        target: String,
-        value: String,
-        line: usize,
     },
     Nested {
         name: String,

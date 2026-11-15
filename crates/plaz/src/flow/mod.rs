@@ -39,11 +39,6 @@ pub(crate) enum FlowNode<'a> {
     /// A `finally` clause: its children are the body.
     Finally,
     Exit(ExitKind),
-    #[expect(dead_code, reason = "no language draws an assignment yet")]
-    Assign {
-        target: Node<'a>,
-        value: Node<'a>,
-    },
     /// `body` is the node whose children form the nested flow and whose
     /// bindings are the nested flow's own; `None` names it `closure L<n>`.
     Nested {
@@ -52,9 +47,6 @@ pub(crate) enum FlowNode<'a> {
     },
     /// Counted, then walked as `Plain`.
     NotDrawn(NotDrawn),
-    /// Belongs to no step of this flow.
-    #[expect(dead_code, reason = "Rust and Python draw every node")]
-    Skip,
 }
 
 pub(crate) struct ArmNode<'a> {
@@ -240,7 +232,6 @@ impl<'s> Walker<'s> {
 
     fn walk(&self, n: Node, flow: &mut Flow, out: &mut Vec<Step>) {
         match (self.hooks.flow_node)(n, self.source.text()) {
-            FlowNode::Skip => {}
             FlowNode::Plain => {
                 self.children(n, flow, out);
                 self.calls(n, out);
@@ -257,14 +248,6 @@ impl<'s> Walker<'s> {
                     text: one_line(self.text(n)),
                     line: line(n),
                     kind,
-                });
-            }
-            FlowNode::Assign { target, value } => {
-                self.walk(value, flow, out);
-                out.push(Step::Assign {
-                    target: one_line(self.text(target)),
-                    value: one_line(self.text(value)),
-                    line: line(n),
                 });
             }
             FlowNode::Finally => {
@@ -459,7 +442,7 @@ impl Flow {
                         walk(&flow.steps, chain, f);
                         chain.pop();
                     }
-                    Step::Exit { .. } | Step::Assign { .. } => {}
+                    Step::Exit { .. } => {}
                 }
             }
         }
@@ -494,7 +477,7 @@ impl Flow {
                     }
                     Step::Finally { body, .. } => walk(body, chain, f),
                     Step::Nested { flow, .. } => scoped(flow, chain, f),
-                    Step::Exit { .. } | Step::Assign { .. } => {}
+                    Step::Exit { .. } => {}
                 }
             }
         }
@@ -591,11 +574,6 @@ pub(crate) mod testutil {
                     }
                     Step::Call(c) => out.push(format!("{pad}call {} @{}", c.text, c.site.line)),
                     Step::Exit { text, line, .. } => out.push(format!("{pad}exit {text} @{line}")),
-                    Step::Assign {
-                        target,
-                        value,
-                        line,
-                    } => out.push(format!("{pad}assign {target} = {value} @{line}")),
                     Step::Nested { name, line, flow } => {
                         out.push(format!("{pad}nested {name} @{line}"));
                         lines(&flow.steps, depth + 1, out);

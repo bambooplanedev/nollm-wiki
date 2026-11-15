@@ -188,12 +188,6 @@ impl Chart<'_> {
                 }
                 Vec::new()
             }
-            Step::Assign { target, value, .. } => {
-                vec![(
-                    self.node(("[", "]"), &format!("{target} = {value}"), &ends),
-                    None,
-                )]
-            }
             Step::Loop {
                 header,
                 comment,
@@ -334,7 +328,7 @@ pub(crate) fn coverage(flow: &Flow) -> String {
                     not_drawn(orelse, into);
                 }
                 Step::Finally { body, .. } => not_drawn(body, into),
-                Step::Call(_) | Step::Exit { .. } | Step::Assign { .. } => {}
+                Step::Call(_) | Step::Exit { .. } => {}
             }
         }
     }
