@@ -99,7 +99,8 @@ requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both
 module: `--modules kulman` is a usage error. At a terminal it asks first (default: no); without one
 it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while kalka is
 installed also says that projects set up with kulman still name `kalka` in their agent configs and
-need `kulman setup --remove` first: before the question at a terminal, as the last line otherwise.
+need `kulman setup --scope repo --remove` (or `--scope local`) first: before the question at a
+terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]
@@ -155,7 +156,9 @@ A command that changes `~/.kulman-home` holds `.lock`, questions included; a sec
 it and says so once on stderr: `kulman: waiting for another kulman run (<home>/.lock)`.
 Downloads are checked and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in
 `bin/` changes; then the binaries are renamed into `bin/` (kulman last), then `manifest.json`, then
-`state.json`.
+`state.json`. `install.sh` takes no lock, and its temp dir (`.tmp-install.…`) is one of the `.tmp-*`
+entries that `kulman install`, `update` and `remove` delete in a home with a `state.json`: do not
+start one of them while `install.sh` runs, or `install.sh` fails.
 
 - Interrupted before that point, an install or update leaves only its temp dir, which the next run
   that finds `state.json` deletes (a home without one is never cleaned).
