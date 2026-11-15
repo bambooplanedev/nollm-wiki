@@ -36,11 +36,9 @@ fn manifest_has_sorted_entries_with_degrees() {
 }
 
 #[test]
-fn index_json_is_valid_json_and_llms_txt_has_h1() {
+fn llms_txt_has_h1_and_agents_md_names_the_files() {
     let (ents, g) = setup();
     let m = build_manifest("My Project", "", &ents, &g);
-    let json = render_index_json(&m);
-    let _v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert!(render_llms_txt(&m).starts_with("# My Project"));
     let agents = render_agents_md("My Project");
     assert!(agents.contains("index.json"));
@@ -129,6 +127,8 @@ fn largest_fit_finds_the_boundary() {
 #[test]
 fn token_estimate_is_chars_over_four() {
     assert_eq!(token_estimate("abcdefgh"), 2);
+    // Four characters, eight bytes: characters are counted, not bytes.
+    assert_eq!(token_estimate("абвг"), 1);
 }
 
 #[test]

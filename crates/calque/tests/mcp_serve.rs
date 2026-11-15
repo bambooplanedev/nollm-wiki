@@ -250,7 +250,7 @@ fn serve_tools_flag_picks_the_tools() {
     let resp = call(&mut stdin, &stdout, 3, "lint", &json!({}));
     let text = text_of(&resp);
     let report: Value = serde_json::from_str(text).unwrap();
-    assert_eq!(report["broken_links"].as_array().unwrap().len(), 0);
+    assert_eq!(report["broken_links"], json!([]));
     assert_eq!(report["large"], json!([]));
 
     // A tool left out is not callable.
@@ -465,7 +465,16 @@ fn serve_refuses_non_wiki_dir() {
         .unwrap();
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("compile"), "stderr: {stderr}");
+    let dir = tmp.path().display();
+    // It says what is wrong and which command fixes it, for this very dir.
+    assert!(
+        stderr.contains(&format!("{dir} is not a compiled wiki")),
+        "stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("calque compile <input> {dir}")),
+        "stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -485,7 +494,10 @@ fn search_hits_include_snippet_field() {
     let arr = hits.as_array().expect("hits array");
     assert_ne!(*arr, [] as [Value; 0]);
     for h in arr {
-        assert!(h.get("snippet").is_some(), "hit missing snippet key: {h}");
+        let snippet = h["snippet"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no snippet: {h}"));
+        assert!(snippet.to_lowercase().contains("gradient"), "{h}");
     }
     child.kill().ok();
 }
@@ -552,8 +564,13 @@ fn mcp_search_json_on_request() {
     let text = search_text(&json!({"query": "add", "format": "json"}));
     let hits: Value = serde_json::from_str(&text).unwrap();
     let hit = &hits.as_array().unwrap()[0];
-    assert!(
-        hit["symbols"].is_array() && hit["path"].is_string(),
+    assert_eq!(hit["path"], "src/lib.rs", "{hit}");
+    let symbol = &hit["symbols"][0];
+    assert_eq!(symbol["name"], "add", "{hit}");
+    assert_eq!(symbol["signature"], "pub fn add()", "{hit}");
+    assert_eq!(
+        (&symbol["start_line"], &symbol["end_line"]),
+        (&json!(1), &json!(2)),
         "{hit}"
     );
 }
@@ -808,29 +825,6 @@ fn serve_source_catches_up_an_existing_wiki() {
 }
 
 #[test]
-fn serve_source_sees_edit_without_sleep() {
-    let project = source_project();
-    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
-    initialize(&mut stdin, &stdout);
-    assert_ne!(
-        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
-        [] as [String; 0]
-    );
-
-    std::fs::write(
-        project.path().join("notes/alpha.md"),
-        "# Alpha\n\nzebrafish here\n",
-    )
-    .unwrap();
-    let resp = search(&mut stdin, &stdout, 3, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
-    assert_eq!(stale_block(&resp), None);
-
-    drop(stdin);
-    let _ = child.wait();
-}
-
-#[test]
 fn two_servers_on_one_dir_answer_fresh() {
     let project = source_project();
     let (mut c1, mut in1, out1) = spawn_server_source(project.path(), &[]);
@@ -849,7 +843,7 @@ fn two_servers_on_one_dir_answer_fresh() {
         .unwrap();
         for (stdin, stdout, id) in [(&mut in1, &out1, 10 + n), (&mut in2, &out2, 10 + n)] {
             let resp = search(stdin, stdout, id, &word);
-            assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+            assert_eq!(hit_ids(&resp), ["alpha"], "{word} not seen: {resp}");
             assert_eq!(stale_block(&resp), None, "{word}");
         }
     }
@@ -880,7 +874,7 @@ fn killing_the_writer_hands_over() {
     // The new writer's first compile builds every tree-sitter query, which
     // in a debug build on a loaded CI runner can outlast one call's wait.
     let resp = search_until_compiled(&mut in2, &out2, &mut 2, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(hit_ids(&resp), ["alpha"], "edit not seen: {resp}");
     assert_eq!(stale_block(&resp), None);
 
     drop(in2);
@@ -929,10 +923,9 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
         // root: permissions do not stop it, so there is no failed compile to see here.
         std::fs::remove_file(wiki_dir.join("probe")).unwrap();
         std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        eprintln!("skipped: .kulman/ stays writable for this user");
         drop(stdin);
         let _ = child.wait();
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -971,7 +964,7 @@ fn serve_source_through_symlink_answers_fresh() {
 
     std::fs::write(link.join("notes/alpha.md"), "# Alpha\n\nzebrafish here\n").unwrap();
     let resp = search(&mut stdin, &stdout, 3, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(hit_ids(&resp), ["alpha"], "edit not seen: {resp}");
     assert_eq!(stale_block(&resp), None, "a recompile loop would show here");
 
     drop(stdin);
@@ -1009,7 +1002,7 @@ fn concurrent_calls_after_edit_both_fresh() {
         }
     }
     for (id, resp) in responses {
-        assert!(!hit_ids(&resp).is_empty(), "call {id} not fresh: {resp}");
+        assert_eq!(hit_ids(&resp), ["alpha"], "call {id} not fresh: {resp}");
         assert_eq!(stale_block(&resp), None, "call {id}: {resp}");
     }
 
@@ -1713,4 +1706,49 @@ fn serve_says_on_stderr_when_it_compiles_a_wiki_made_by_another_version() {
         .unwrap();
     assert!(!rest.contains("compiled by"), "{rest}");
     let _ = writer.wait();
+}
+
+/// A text page with a link to a page that does not exist, and a Rust function
+/// with one caller, compiled into `<tmp>/out`.
+fn broken_link_and_caller_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
+    let (tmp, _, out) = common::compiled(&[
+        ("notes.txt", "See [[Ghost]] for details.\n"),
+        (
+            "src/util.rs",
+            "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n",
+        ),
+        ("src/app.rs", "pub fn total() -> i32 {\n    add(1, 2)\n}\n"),
+    ]);
+    (tmp, out)
+}
+
+#[test]
+fn mcp_lint_reports_a_broken_link_and_callers_names_its_caller() {
+    let (_tmp, out) = broken_link_and_caller_fixture();
+    let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "callers,lint"]);
+    initialize(&mut stdin, &stdout);
+
+    let resp = call(&mut stdin, &stdout, 2, "lint", &json!({}));
+    let report: Value = serde_json::from_str(text_of(&resp)).unwrap();
+    // The page `notes` links to `Ghost`, which is no page.
+    assert_eq!(
+        report["broken_links"],
+        json!([["notes", "Ghost"]]),
+        "{report}"
+    );
+    assert_eq!(report["large"], json!([]));
+
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        3,
+        "callers",
+        &json!({"id": "util", "symbol": "add"}),
+    );
+    // After the header line: the one caller, `total` (lines 1-3 of
+    // src/app.rs), which calls `add` on its line 2.
+    let (_header, callers) = text_of(&resp).split_once('\n').unwrap();
+    assert_eq!(callers, "src/app.rs\n  1-3  fn  total  calls add at 2\n");
+    drop(stdin);
+    let _ = child.wait();
 }

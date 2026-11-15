@@ -43,14 +43,6 @@ fn build_hub_corpus() -> tempfile::TempDir {
 }
 
 #[test]
-fn search_finds_by_name_and_body() {
-    let dir = build();
-    let w = Wiki::load(&dir.path().join("out")).unwrap();
-    let hits = w.search("beta", None, 10);
-    assert!(hits.iter().any(|h| h.id == "beta"));
-}
-
-#[test]
 fn page_is_served_from_the_loaded_snapshot() {
     let dir = build();
     let out = dir.path().join("out");
@@ -71,7 +63,7 @@ fn neighbors_pack_includes_target_first_and_respects_max_nodes() {
     };
     let pack = w.neighbors("alpha", 1, &budget).unwrap();
     assert_eq!(pack.included.first().map(String::as_str), Some("alpha"));
-    assert!(pack.included.len() <= 2);
+    assert_eq!(pack.included.len(), 2, "{:?}", pack.included);
     assert!(pack.text.contains("# Alpha"));
 }
 
@@ -473,7 +465,7 @@ fn kind_docs_group_returns_only_docs() {
 }
 
 #[test]
-fn kind_exact_code_rust_still_works() {
+fn kind_exact_code_rust_and_markdown_select_their_pages() {
     let (_d, w) = kind_fixture();
     assert_eq!(ids_for(&w, "code:rust"), ["a"]);
     assert_eq!(ids_for(&w, "markdown"), ["c"]);
@@ -1041,22 +1033,22 @@ fn absolute_and_normalised_paths_resolve() {
     for arg in [
         "./docs/README.md",
         "docs\\README.md",
-        "/home/u/raw/docs/README.md",
+        "/srv/u/raw/docs/README.md",
     ] {
         assert_eq!(w.resolve_id(arg), Ok(docs.clone()), "{arg}");
     }
-    assert_eq!(w.resolve_id("/home/u/raw/src/lib.rs"), Ok("lib".into()));
-    assert_eq!(w.resolve_id("/home/u/raw/README.md"), Ok(root));
-    assert!(w.resolve_id("/home/u/other.rs").is_err());
+    assert_eq!(w.resolve_id("/srv/u/raw/src/lib.rs"), Ok("lib".into()));
+    assert_eq!(w.resolve_id("/srv/u/raw/README.md"), Ok(root));
+    assert!(w.resolve_id("/srv/u/other.rs").is_err());
 }
 
 #[test]
 fn a_path_under_another_root_does_not_resolve() {
     let (_d, w) = readme_fixture();
     for arg in [
-        "/home/u/proj/src/lib.rs",
+        "/srv/u/proj/src/lib.rs",
         "/some/other/proj/README.md",
-        "/home/u/raw/x/src/lib.rs",
+        "/srv/u/raw/x/src/lib.rs",
     ] {
         assert!(w.resolve_id(arg).is_err(), "{arg}");
     }
@@ -1382,7 +1374,7 @@ fn a_header_declaration_stands_for_its_definition() {
 }
 
 #[test]
-fn index_json_without_updated_still_loads() {
+fn an_index_with_no_updated_key_loads_and_its_hits_have_no_date() {
     let dir = build();
     let path = dir.path().join("out").join("index.json");
     let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -1778,7 +1770,7 @@ fn memory_flag_shows_in_json_only_on_memory_hits() {
 }
 
 #[test]
-fn index_json_without_memory_still_loads() {
+fn an_index_with_no_memory_key_loads_and_its_hits_are_not_memory() {
     let (d, _w) = code_fixture(&[("a.md", "# A\n\nzebra\n")]);
     let out = d.path().join("out");
     assert!(common::index(&out)["entries"][0].get("memory").is_none());

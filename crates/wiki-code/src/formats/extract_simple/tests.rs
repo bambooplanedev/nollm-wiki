@@ -37,11 +37,7 @@ fn js_export_gated_signatures() {
 fn js_import_source_captured() {
     let src = "import { thing } from \"./thing.js\";\nexport function foo() {}\n";
     let e = crate::extract("mod.js", src);
-    assert!(
-        e.imports.iter().any(|i| i.contains("thing.js")),
-        "imports: {:?}",
-        e.imports
-    );
+    assert_eq!(e.imports, ["./thing.js"], "{:?}", e.imports);
 }
 
 #[test]
@@ -65,7 +61,7 @@ fn go_exported_gated_signatures_and_imports() {
     let e = crate::extract("main.go", src);
     assert_has(&e.symbols, "func Foo(a int) string");
     assert_lacks(&e.symbols, "bar");
-    assert!(e.imports.iter().any(|i| i.contains("fmt")));
+    assert_eq!(e.imports, ["fmt"], "{:?}", e.imports);
 }
 
 #[test]

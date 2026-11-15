@@ -15,16 +15,9 @@ fn a_const_only_module_without_docs_prefers_an_impl_header_to_the_const() {
 }
 
 #[test]
-fn an_associated_const_in_a_trait_impl_is_a_member_not_a_free_value() {
-    // Classification must run AFTER `placement`, so an associated item
-    // inside a trait impl is a Member rather than a free value.
-    //
-    // Note what this test does NOT prove, despite its name: it cannot fail
-    // by misclassification alone. `pick_summary_fallback` ranks Header
-    // above FreeValue, so the impl header wins this summary either way.
-    // Mutating the precedence in `classify` leaves the whole suite green —
-    // see the note there for why the distinction is unobservable in
-    // current output. What this pins is the summary itself.
+fn a_trait_impl_with_an_associated_const_summarizes_as_its_impl_header() {
+    // An associated const and type inside a trait impl do not displace the impl
+    // header as the summary.
     let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
     let e = crate::extract("c.rs", src);
     assert_eq!(
@@ -40,11 +33,7 @@ fn rust_restricted_visibility_is_not_an_export() {
     let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
     let e = crate::extract("t.rs", src);
     assert_has(&e.symbols, "pub fn public_one()");
-    assert!(
-        e.symbols.iter().any(|s| s.contains("kept")),
-        "a bare-pub inherent method must survive: {:?}",
-        e.symbols
-    );
+    assert_has(&e.symbols, "pub fn Holder::kept(&self)");
     for leaked in ["crate_only", "super_only", "CrateType", "impl_crate_only"] {
         // each name is not exported outside the crate
         assert_lacks(&e.symbols, leaked);
@@ -244,28 +233,15 @@ fn symbols_and_imports_come_from_the_test_stripped_source() {
 }
 
 #[test]
-fn trait_impl_emits_header_and_qualified_methods() {
-    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
-    let e = crate::extract("text.rs", src);
-    assert_has(&e.symbols, "impl Extractor for TextExtractor");
-    // Methods in a trait impl carry no visibility modifier — they are
-    // public through the trait — so they must not be visibility-gated.
-    assert_has(
-        &e.symbols,
-        "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity",
-    );
-}
-
-#[test]
 fn a_trait_impl_header_leads_its_own_methods() {
-    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self) -> u8 { 0 }\n}\n";
+    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
     let e = crate::extract("text.rs", src);
     assert_eq!(
         e.symbols,
         vec![
             "impl Extractor for TextExtractor".to_string(),
             "fn <TextExtractor as Extractor>::extensions(&self) -> &[&str]".to_string(),
-            "fn <TextExtractor as Extractor>::extract(&self) -> u8".to_string(),
+            "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity".to_string(),
             "pub struct TextExtractor".to_string(),
         ],
         "the header must lead its methods: {:?}",
@@ -396,15 +372,6 @@ fn summary_fallback_uses_an_unsafe_impl_header() {
     let e = crate::extract("t.rs", src);
     assert_eq!(e.symbols, vec!["unsafe impl Send for Foo".to_string()]);
     assert_eq!(e.summary.as_deref(), Some("unsafe impl Send for Foo"));
-}
-
-#[test]
-fn placement_reproduces_the_module_level_guard_and_owner() {
-    let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
-    let e = crate::extract("q.rs", src);
-    assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
-    // function-local item leaked
-    assert_lacks(&e.symbols, "hidden");
 }
 
 #[test]

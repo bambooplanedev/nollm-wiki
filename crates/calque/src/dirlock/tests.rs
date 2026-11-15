@@ -29,11 +29,16 @@ fn shared_runs_without_lock_file_when_readonly() {
     std::fs::create_dir(&serve).unwrap();
     std::fs::set_permissions(&serve, std::fs::Permissions::from_mode(0o555)).unwrap();
     // Root writes anyway: nothing to test.
-    if std::fs::write(serve.join("probe"), "").is_err() {
+    let unwritable = std::fs::write(serve.join("probe"), "").is_err();
+    if unwritable {
         assert_eq!(shared(t.path(), || 7), 7);
         assert!(!serve.join("compile.lock").exists());
     }
     std::fs::set_permissions(&serve, std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        unwritable,
+        "needs a user that cannot write to a mode 555 directory (not root)"
+    );
 }
 
 #[test]

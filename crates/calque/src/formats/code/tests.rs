@@ -134,7 +134,7 @@ fn rust_signatures_gated_and_imports() {
     }
     assert_has(&e.symbols, "pub fn render_page(x: i32) -> String");
     assert_lacks(&e.symbols, "private_helper");
-    assert!(e.imports.iter().any(|i| i.contains("graph")));
+    assert_eq!(e.imports, vec!["crate::graph::build"]);
     assert_eq!(e.summary.as_deref(), Some("Module docs."));
 }
 

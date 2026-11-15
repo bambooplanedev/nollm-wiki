@@ -183,22 +183,34 @@ fn compile_dot_records_the_directory_name_as_root() {
         .stdout(contains("src/alpha.rs  code:rust"));
 }
 
-#[test]
-fn generate_cli_creates_files() {
+/// `calque generate <dir> --files 5 --seed <seed>`, then every file in `dir`.
+fn generated(seed: &str) -> std::collections::BTreeMap<String, Vec<u8>> {
     let dir = tempdir().unwrap();
     Command::cargo_bin("calque")
         .unwrap()
-        .args([
-            "generate",
-            dir.path().to_str().unwrap(),
-            "--files",
-            "5",
-            "--seed",
-            "1",
-        ])
+        .args(["generate", dir.path().to_str().unwrap(), "--files", "5"])
+        .args(["--seed", seed])
         .assert()
         .success();
-    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 5);
+    fs::read_dir(dir.path())
+        .unwrap()
+        .map(|e| e.unwrap())
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                fs::read(e.path()).unwrap(),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn generate_cli_creates_files() {
+    let one = generated("1");
+    assert_eq!(one.len(), 5);
+    // The seed decides the content: the same seed gives the same bytes, another seed does not.
+    assert_eq!(generated("1"), one);
+    assert_ne!(generated("2"), one);
 }
 
 #[test]
@@ -388,6 +400,13 @@ fn cli_search_prints_the_same_lines_as_mcp() {
         run(&[]),
         calque::serve::search_lines(&w.search("add", None, 10))
     );
+    // And the lines say where the function is (the comparison above would
+    // hold for any output both sides share).
+    assert!(
+        run(&[]).contains("  lib.rs:1-2  add  pub fn add()"),
+        "{}",
+        run(&[])
+    );
     let json = run(&["--format", "json"]);
     assert!(serde_json::from_str::<serde_json::Value>(&json)
         .unwrap()
@@ -438,6 +457,11 @@ fn cli_page_prints_the_same_text_as_page_text() {
         String::from_utf8(o.get_output().stdout.clone()).unwrap()
     };
     assert_eq!(run(&["lib"]), w.page_text("lib", false, None).unwrap());
+    assert!(
+        run(&["lib"]).contains("\n1-2  fn  pub fn add()"),
+        "{}",
+        run(&["lib"])
+    );
     assert_eq!(
         run(&["./src/lib.rs", "--full"]),
         w.page_text("lib", true, None).unwrap()
@@ -634,7 +658,8 @@ fn serve_memory_requires_source() {
         .unwrap()
         .args(["serve", "--memory", "none"])
         .assert()
-        .failure();
+        .code(2)
+        .stderr(contains("--source"));
 }
 
 #[test]
@@ -775,7 +800,7 @@ fn the_default_wiki_is_dot_kulman() {
 }
 
 #[test]
-fn read_commands_default_to_dot_wiki_then_out() {
+fn read_commands_default_to_dot_kulman_then_out() {
     let dir = tempdir().unwrap();
     let cwd = dir.path();
     fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();
@@ -983,14 +1008,4 @@ fn compile_prints_stage_timings_only_with_calque_timings() {
     let s1 = snapshot(&out1);
     assert_eq!(s1, snapshot(&out2));
     assert_eq!(s1, snapshot(&out3));
-}
-
-#[test]
-fn the_binary_is_called_calque() {
-    Command::cargo_bin("calque")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(contains("Usage: calque"));
 }

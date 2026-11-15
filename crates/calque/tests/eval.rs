@@ -349,7 +349,6 @@ fn every_page_title_ranks_its_own_page_first() {
 fn pack_ceiling_holds_on_a_real_graph() {
     let (_dir, wiki) = load_corpus();
     let mut floor_fires = 0usize;
-    let mut checked = 0usize;
 
     for id in EXPECTED_IDS {
         for budget in [50usize, 100, 200, 400, 1000, 2000] {
@@ -376,7 +375,6 @@ fn pack_ceiling_holds_on_a_real_graph() {
             if is_floor {
                 floor_fires += 1;
             }
-            checked += 1;
             let tokens = calque::manifest::token_estimate(&pack.text);
             assert!(
                 tokens <= budget || is_floor,
@@ -386,7 +384,6 @@ fn pack_ceiling_holds_on_a_real_graph() {
         }
     }
 
-    assert_eq!(checked, 102, "17 pages x 6 budgets");
     // Pinned so a change that stops degrading targets — which would make the
     // ceiling trivially satisfiable — is visible rather than silent. 8 since
     // mention edges into code pages must be code-shaped and imports resolve

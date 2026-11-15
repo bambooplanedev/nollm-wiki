@@ -86,32 +86,6 @@ fn map(v: Vec<Entity>) -> BTreeMap<String, Entity> {
 }
 
 #[test]
-fn related_and_mentioned_in_rendered() {
-    let ents = map(vec![
-        ent("alpha", "Alpha", "mentions Beta"),
-        ent("beta", "Beta", "nothing"),
-    ]);
-    let g = build_graph(&ents);
-    let a = render_page(
-        &ents["alpha"],
-        &g.edges["alpha"],
-        &ents,
-        &path_index(&ents),
-        "",
-    );
-    let b = render_page(
-        &ents["beta"],
-        &g.edges["beta"],
-        &ents,
-        &path_index(&ents),
-        "",
-    );
-    assert!(a.contains("## Related") && a.contains("[[beta|Beta]]"));
-    assert!(b.contains("## Mentioned in") && b.contains("[[alpha|Alpha]]"));
-    assert!(a.contains("generated"));
-}
-
-#[test]
 fn importers_and_mentions_render_apart() {
     let mut text = ent("text", "Text", "");
     text.source_path = "pkg/text.py".into();

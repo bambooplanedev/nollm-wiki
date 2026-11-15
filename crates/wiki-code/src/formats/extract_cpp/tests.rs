@@ -1,5 +1,5 @@
 //! Tests for `extract_cpp`.
-use crate::formats::code::testutil::{assert_lacks, doc_of, item_lines};
+use crate::formats::code::testutil::{doc_of, item_lines};
 
 fn syms(path: &str, src: &str) -> Vec<String> {
     crate::extract(path, src).symbols
@@ -9,18 +9,25 @@ fn summary(path: &str, src: &str) -> Option<String> {
     crate::extract(path, src).summary
 }
 
+// Source order; the class first, then each declaration with its return type and
+// trailing `const` kept and the owner spliced in; the constructor has no return
+// type; the private member is kept.
 #[test]
-fn declaration_only_header_yields_one_signature_per_member() {
+fn declaration_only_header_yields_the_class_and_a_signature_for_each_method() {
     let s = syms(
             "src/orderbook.h",
             "class OrderBook {\npublic:\n  OrderBook(int cap);\n  void apply(const Order& o);\n  int best_bid() const;\nprivate:\n  void rebuild_();\n};\n",
         );
-    assert!(s.iter().any(|x| x == "class OrderBook"), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("OrderBook::apply")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("OrderBook::best_bid")), "{s:?}");
-    assert!(
-        s.iter().any(|x| x.contains("OrderBook::rebuild_")),
-        "private members are kept: {s:?}"
+    assert_eq!(
+        s,
+        [
+            "class OrderBook",
+            "OrderBook::OrderBook(int cap)",
+            "void OrderBook::apply(const Order& o)",
+            "int OrderBook::best_bid() const",
+            "void OrderBook::rebuild_()",
+        ],
+        "{s:?}"
     );
 }
 
@@ -30,22 +37,14 @@ fn out_of_line_definition_renders_the_owner_exactly_once() {
         "src/orderbook.cpp",
         "void OrderBook::apply(const Order& o) { (void)o; }\n",
     );
-    assert!(
-        s.iter()
-            .any(|x| x == "void OrderBook::apply(const Order& o)"),
-        "{s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("OrderBook::OrderBook::")),
-        "owner spliced twice, or a duplicate match survived: {s:?}"
-    );
-    assert_eq!(s.iter().filter(|x| x.contains("apply")).count(), 1, "{s:?}");
+    // Exactly one entry: the owner is spliced once and no duplicate match survives.
+    assert_eq!(s, ["void OrderBook::apply(const Order& o)"], "{s:?}");
 }
 
 #[test]
 fn namespace_qualifier_is_stripped_so_both_forms_index_alike() {
     let s = syms("src/ob.cpp", "void trading::OrderBook::apply() {}\n");
-    assert!(s.iter().any(|x| x == "void OrderBook::apply()"), "{s:?}");
+    assert_eq!(s, ["void OrderBook::apply()"], "{s:?}");
 }
 
 #[test]
@@ -54,12 +53,9 @@ fn constructor_cuts_before_the_member_initializer_list() {
         "src/ob.cpp",
         "OrderBook::OrderBook(int cap)\n    : cap_(cap), bids_(cap), seq_(0) { }\n",
     );
-    assert!(
-        s.iter().any(|x| x == "OrderBook::OrderBook(int cap)"),
-        "{s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("cap_(cap)")),
+    assert_eq!(
+        s,
+        ["OrderBook::OrderBook(int cap)"],
         "init list leaked: {s:?}"
     );
 }
@@ -70,8 +66,9 @@ fn template_head_is_retained() {
         "src/ring.h",
         "template<typename T>\nclass RingBuffer { };\n",
     );
-    assert!(
-        s.iter().any(|x| x.starts_with("template<typename T>")),
+    assert_eq!(
+        s,
+        ["template<typename T> class RingBuffer"],
         "template head amputated: {s:?}"
     );
 }
@@ -82,18 +79,17 @@ fn destructor_operator_and_defaulted_members() {
             "src/ob.h",
             "class OrderBook {\npublic:\n  OrderBook() = default;\n  ~OrderBook();\n  bool operator<(const OrderBook& o) const;\n};\n",
         );
-    assert!(s.iter().any(|x| x.contains("= default")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("~OrderBook")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("operator<")), "{s:?}");
-}
-
-#[test]
-fn pointer_return_type_is_captured() {
-    let s = syms(
-        "src/ob.cpp",
-        "Level* OrderBook::top() { return nullptr; }\n",
+    // Sorted by member name: `OrderBook` < `operator<` < `~OrderBook`.
+    assert_eq!(
+        s,
+        [
+            "class OrderBook",
+            "OrderBook::OrderBook() = default",
+            "bool OrderBook::operator<(const OrderBook& o) const",
+            "OrderBook::~OrderBook()",
+        ],
+        "{s:?}"
     );
-    assert!(s.iter().any(|x| x.contains("OrderBook::top")), "{s:?}");
 }
 
 #[test]
@@ -108,9 +104,16 @@ fn pointer_and_reference_returning_member_declarations_are_captured() {
             "src/b.h",
             "class B {\npublic:\n  Level* top();\n  static B* make();\n  B& operator=(const B& o);\n};\n",
         );
-    assert!(s.iter().any(|x| x.contains("B::top")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("B::make")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("operator=")), "{s:?}");
+    assert_eq!(
+        s,
+        [
+            "class B",
+            "static B* B::make()",
+            "B& B::operator=(const B& o)",
+            "Level* B::top()",
+        ],
+        "{s:?}"
+    );
 }
 
 #[test]
@@ -120,16 +123,18 @@ fn pointer_and_reference_returning_in_class_definitions_are_captured() {
     // @name` there compiles but silently drops these in-class definitions.
     let src = "class B {\npublic:\n  const Stats& stats() const { return s_; }\n  Stats* sp() { return nullptr; }\n};\n";
     let s = syms("src/b.h", src);
-    assert!(s.iter().any(|x| x.contains("B::stats")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("B::sp")), "{s:?}");
+    assert_eq!(
+        s,
+        ["class B", "Stats* B::sp()", "const Stats& B::stats() const"],
+        "{s:?}"
+    );
     let methods: Vec<String> = crate::extract("src/b.h", src)
         .items
         .into_iter()
         .filter(|i| i.kind == crate::model::CodeItemKind::Method)
         .map(|i| i.name)
         .collect();
-    assert!(methods.iter().any(|m| m == "stats"), "{methods:?}");
-    assert!(methods.iter().any(|m| m == "sp"), "{methods:?}");
+    assert_eq!(methods, ["stats", "sp"], "{methods:?}");
 }
 
 #[test]
@@ -139,18 +144,17 @@ fn a_pointer_returning_out_of_line_definition_renders_its_owner_once() {
     // name segment: a general `(_)` capture would also take the whole
     // `qualified_identifier` and splice the owner AHEAD of the qualifier
     // the source already wrote. Asserting presence alone would not catch
-    // it — a doubled entry would sit beside a correct one — so the
-    // absence is asserted too.
+    // it — a doubled entry would sit beside a correct one — so the whole
+    // list is compared exactly.
     let s = syms(
         "src/ob.cpp",
         "Level* OrderBook::top() { return nullptr; }\n",
     );
-    assert!(s.iter().any(|x| x.contains("OrderBook::top")), "{s:?}");
-    assert!(
-        !s.iter().any(|x| x.contains("OrderBook::OrderBook::")),
-        "owner spliced ahead of the source's own qualifier: {s:?}"
+    assert_eq!(
+        s,
+        ["Level* OrderBook::top()"],
+        "owner spliced ahead of the source's own qualifier, or doubled: {s:?}"
     );
-    assert_eq!(s.iter().filter(|x| x.contains("top")).count(), 1, "{s:?}");
 }
 
 #[test]
@@ -159,7 +163,7 @@ fn member_inside_ifdef_is_still_extracted() {
         "src/ob.h",
         "class B {\npublic:\n#ifdef NDEBUG\n  void fast();\n#endif\n};\n",
     );
-    assert!(s.iter().any(|x| x.contains("B::fast")), "{s:?}");
+    assert_eq!(s, ["class B", "void B::fast()"], "{s:?}");
 }
 
 #[test]
@@ -168,7 +172,15 @@ fn nested_class_carries_both_owners() {
         "src/ob.h",
         "class Outer {\n  class Inner {\n    void f();\n  };\n};\n",
     );
-    assert!(s.iter().any(|x| x.contains("Outer::Inner::f")), "{s:?}");
+    assert_eq!(
+        s,
+        [
+            "class Outer",
+            "class Outer::Inner",
+            "void Outer::Inner::f()"
+        ],
+        "{s:?}"
+    );
 }
 
 #[test]
@@ -177,15 +189,8 @@ fn function_local_declarations_are_not_exported() {
         "src/ob.cpp",
         "void go() {\n  std::lock_guard<std::mutex> g(mtx_);\n  struct Tmp { int x; };\n}\n",
     );
-    assert!(
-        !s.iter().any(|x| x.contains("lock_guard")),
-        "most-vexing-parse local exported: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("Tmp")),
-        "function-local type exported: {s:?}"
-    );
-    assert!(s.iter().any(|x| x.contains("go")), "{s:?}");
+    // Only `go` itself: neither the most-vexing-parse local nor the local type.
+    assert_eq!(s, ["void go()"], "{s:?}");
 }
 
 #[test]
@@ -194,8 +199,14 @@ fn type_aliases_are_captured() {
         "src/t.h",
         "using OrderId = unsigned long;\ntypedef unsigned long SeqNo;\n",
     );
-    assert!(s.iter().any(|x| x.contains("OrderId")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("SeqNo")), "{s:?}");
+    assert_eq!(
+        s,
+        [
+            "using OrderId = unsigned long",
+            "typedef unsigned long SeqNo"
+        ],
+        "{s:?}"
+    );
 }
 
 #[test]
@@ -204,46 +215,15 @@ fn data_members_and_globals_are_not_exported() {
             "src/ob.h",
             "class B {\n  int a, b, c;\n  Level bids_[4096];\n  Level* head_;\n  int& r_;\n};\nint g_count;\nint* g_ptr;\n",
         );
-    assert!(
-        !s.iter().any(|x| x.contains("a, b, c")),
-        "data members leaked: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("bids_")),
-        "array field leaked: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("head_")),
-        "pointer field leaked: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("r_")),
-        "reference field leaked: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("g_count")),
-        "global leaked: {s:?}"
-    );
-    assert!(
-        !s.iter().any(|x| x.contains("g_ptr")),
-        "pointer global leaked: {s:?}"
-    );
-    assert!(s.iter().any(|x| x == "class B"), "{s:?}");
+    // Only the class: no data member, array, pointer, reference or global.
+    assert_eq!(s, ["class B"], "{s:?}");
 }
 
 #[test]
 fn includes_are_captured_in_both_forms() {
-    let e = crate::extract("src/ob.cpp", "#include <vector>\n#include \"ring.h\"\n");
-    assert!(
-        e.imports.iter().any(|i| i.contains("ring.h")),
-        "{:?}",
-        e.imports
-    );
-    assert!(
-        e.imports.iter().any(|i| i.contains("vector")),
-        "{:?}",
-        e.imports
-    );
+    let e = crate::extract("src/ob.cpp", "#include \"ring.h\"\n#include <vector>\n");
+    // Sorted (not in source order): the system form keeps its angle brackets, the quoted form its bare path.
+    assert_eq!(e.imports, ["<vector>", "ring.h"], "{:?}", e.imports);
 }
 
 #[test]
@@ -252,16 +232,7 @@ fn header_members_reach_the_methods_index() {
         "src/orderbook.h",
         "class OrderBook {\npublic:\n  void apply(const Order& o);\n  int best_bid() const;\n};\n",
     );
-    assert!(
-        e.methods.iter().any(|m| m == "apply"),
-        "methods: {:?}",
-        e.methods
-    );
-    assert!(
-        e.methods.iter().any(|m| m == "best_bid"),
-        "methods: {:?}",
-        e.methods
-    );
+    assert_eq!(e.methods, ["apply", "best_bid"], "methods: {:?}", e.methods);
 }
 
 #[test]
@@ -275,27 +246,21 @@ fn pointer_and_reference_returning_header_members_reach_the_methods_index() {
         "src/orderbook.h",
         "class OrderBook {\npublic:\n  Level* top();\n  Level& front();\n  Level** grid();\n};\n",
     );
-    for m in ["top", "front"] {
-        assert!(
-            e.methods.iter().any(|x| x == m),
-            "{m} missing from methods: {:?}",
-            e.methods
-        );
-        assert!(
-            e.symbols.iter().any(|s| s.contains(m)),
-            "{m} missing from symbols: {:?}",
-            e.symbols
-        );
-    }
+    assert_eq!(
+        e.symbols,
+        [
+            "class OrderBook",
+            "Level& OrderBook::front()",
+            "Level* OrderBook::top()"
+        ],
+        "{:?}",
+        e.symbols
+    );
+    assert_eq!(e.methods, ["front", "top"], "{:?}", e.methods);
     // `Level** grid()` nests two wrappers, which `QUERY` knowingly does
     // not reach. The two indexes must agree about that: a method the
     // query never captures must not appear in `methods` either.
-    assert_lacks(&e.symbols, "grid");
-    assert!(
-        !e.methods.iter().any(|x| x == "grid"),
-        "methods must not outrun what `## Exports` captures: {:?}",
-        e.methods
-    );
+    // (Both lists above are exact and have no `grid`.)
 }
 
 #[test]

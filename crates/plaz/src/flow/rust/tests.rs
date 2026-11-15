@@ -89,16 +89,19 @@ fn tests_and_broken_functions_are_handled_not_guessed() {
 
 #[test]
 fn two_functions_on_one_line_get_their_own_flows() {
-    let f = file("src/a.rs", "fn a() { x(); } fn a2() { if c() { y(); } }\n");
+    let src = "fn a() { x(); } fn a2() { if c() { y(); } }\n";
+    assert_eq!(file("src/a.rs", src).flows.len(), 2);
+    assert_eq!(flow_lines("src/a.rs", src, "a"), ["call x() @1"]);
+    // `a2` holds only its own `if`: the condition call, then the one arm; no `x()` of `a`.
     assert_eq!(
-        flow_lines(
-            "src/a.rs",
-            "fn a() { x(); } fn a2() { if c() { y(); } }\n",
-            "a"
-        ),
-        ["call x() @1"]
+        flow_lines("src/a.rs", src, "a2"),
+        [
+            "branch @1",
+            "  pre call c() @1",
+            "  arm c() @1",
+            "    call y() @1"
+        ]
     );
-    assert_eq!(f.flows.len(), 2);
 }
 
 #[test]

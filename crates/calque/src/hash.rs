@@ -27,11 +27,11 @@ pub fn combine(parts: &[&[u8]]) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    /// Format contract: every page's `source_hash` and every cache key is this
+    /// hash, so changing it invalidates them all.
     #[test]
-    fn hash_is_stable_and_hex_is_64_chars() {
+    fn hash_bytes_gives_the_blake3_vector_in_hex() {
         let h = hash_bytes(b"hello");
-        assert_eq!(to_hex(&h).len(), 64);
-        // BLAKE3("hello") known vector.
         assert_eq!(
             to_hex(&h),
             "ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f"
@@ -39,9 +39,11 @@ mod tests {
     }
 
     #[test]
-    fn combine_is_order_sensitive() {
+    fn combine_depends_on_order_and_on_where_the_parts_split() {
         let a = combine(&[b"x", b"y"]);
         let b = combine(&[b"y", b"x"]);
         assert_ne!(a, b);
+        // The length prefix keeps the same bytes cut elsewhere apart.
+        assert_ne!(combine(&[b"ab", b"c"]), combine(&[b"a", b"bc"]));
     }
 }

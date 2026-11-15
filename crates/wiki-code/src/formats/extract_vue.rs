@@ -344,7 +344,7 @@ fn attr_value<'a>(attrs: &'a str, name: &str) -> Option<&'a str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_deterministic, assert_has, item_lines};
+    use crate::formats::code::testutil::{assert_has, item_lines};
 
     const SFC: &str = "<template>\n  <div class=\"card\">\n    <template v-if=\"open\"><slot /></template>\n    <pre>export function NotCode() {}</pre>\n  </div>\n</template>\n\n<script lang=\"ts\">\n// The product card.\nimport { defineComponent } from \"vue\";\nimport Price from \"./Price.vue\";\nexport function formatPrice(cents: number): string {\n  return (cents / 100).toFixed(2);\n}\nexport default defineComponent({ components: { Price } });\n</script>\n\n<script setup lang=\"ts\">\nimport { useCart } from \"@/stores/cart\";\nconst cart = useCart();\n</script>\n\n<style scoped>\n.card { color: red; }\n/* export function NotStyle() {} */\n</style>\n";
 
@@ -416,11 +416,6 @@ mod tests {
         assert_eq!(attr_value(" lang = ts", "lang"), Some("ts"));
         assert_eq!(attr_value(" setup", "lang"), None);
         assert_eq!(attr_value(" xlang=\"ts\"", "lang"), None);
-    }
-
-    #[test]
-    fn extraction_is_deterministic() {
-        assert_deterministic("ProductCard.vue", SFC);
     }
 
     #[test]

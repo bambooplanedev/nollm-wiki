@@ -45,13 +45,6 @@ fn origin_trust_scores() {
 }
 
 #[test]
-fn slugify_lowercases_and_replaces_separators() {
-    assert_eq!(slugify("Gradient Descent"), "gradient_descent");
-    assert_eq!(slugify("Top-K Sampling"), "top_k_sampling");
-    assert_eq!(slugify("KV Cache"), "kv_cache");
-}
-
-#[test]
 fn slugify_folds_punctuation_and_unicode() {
     assert_eq!(
         slugify("AI News RSS Aggregator → Telegram"),
@@ -115,16 +108,13 @@ fn slugify_folds_latin_diacritics() {
 }
 
 #[test]
-fn slugify_without_letters_falls_back_to_hash() {
-    assert!(slugify("—").starts_with("page_"));
-    assert!(slugify("ьъ").starts_with("page_"));
-}
-
-#[test]
 fn slugify_all_non_alnum_falls_back_to_hash() {
+    for name in ["→→→", "—", "ьъ"] {
+        let s = slugify(name);
+        assert!(s.starts_with("page_"), "{name}: got {s}");
+        assert_eq!(s.len(), "page_".len() + 16, "{name}");
+    }
     let s = slugify("→→→");
-    assert!(s.starts_with("page_"), "got {s}");
-    assert_eq!(s.len(), "page_".len() + 16);
     assert_eq!(s, slugify("→→→")); // deterministic
     assert_ne!(slugify("→→→"), slugify("★★★")); // distinct names → distinct slugs
 }
@@ -153,4 +143,14 @@ fn sourcekind_label_and_parse_roundtrip() {
         "code:rust"
     );
     assert_eq!(SourceKind::parse("markdown"), Some(SourceKind::Markdown));
+    for k in [
+        SourceKind::Text,
+        SourceKind::Markdown,
+        SourceKind::Code {
+            lang: "rust".into(),
+        },
+    ] {
+        assert_eq!(SourceKind::parse(&k.label()), Some(k));
+    }
+    assert_eq!(SourceKind::parse("pdf"), None);
 }

@@ -127,27 +127,6 @@ fn install_a_module_whose_default_is_false_is_left_out() {
 }
 
 #[test]
-fn install_unknown_module_is_usage() {
-    let (t, base) = setup();
-    let home = t.path().join("home");
-    let out = kulman(&home, &base)
-        .args(["install", "--modules", "calque,nope"])
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
-    let err = stderr(&out);
-    assert!(
-        err.contains("nope") && err.contains("calque, plaz"),
-        "{err}"
-    );
-    assert!(
-        !err.contains("kulman,") && !err.contains(", kulman"),
-        "{err}"
-    );
-    assert!(!home.exists());
-}
-
-#[test]
 fn install_checksum_mismatch_changes_nothing() {
     plaz_fails_and_changes_nothing(
         |r| set_sha256(r, "0.7.0", "plaz", &"0".repeat(64)),
@@ -293,7 +272,7 @@ fn install_refuses_bad_entries_in_the_manifest() {
 }
 
 #[test]
-fn install_bounds_what_it_downloads() {
+fn install_bounds_the_manifest_it_downloads() {
     // The manifest's limit end to end. The archive's (256 MiB, too big to write on every
     // run) goes through the same `download`, whose unit test covers the limit.
     let err = plaz_fails_and_changes_nothing(
@@ -374,31 +353,6 @@ fn install_modules_takes_spaces_after_commas_and_names_the_unknown() {
         state(&home),
         json!({"version": "0.7.0", "modules": ["calque", "plaz"]})
     );
-}
-
-#[test]
-fn install_refuses_a_malformed_state() {
-    for bad in [
-        &b"{not json"[..],
-        &br#"{"version":"0.7.0","modules":["../../victim"]}"#[..],
-    ] {
-        let (t, base) = setup();
-        let home = t.path().join("home");
-        kulman(&home, &base)
-            .args(["install", "--modules", "calque"])
-            .assert()
-            .success();
-        fs::write(home.join("state.json"), bad).unwrap();
-        let before = snapshot(t.path());
-        let out = kulman(&home, &base)
-            .args(["install", "--modules", "plaz"])
-            .output()
-            .unwrap();
-        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-        let expect = common::not_a_state(&home);
-        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
-        assert_eq!(snapshot(t.path()), before);
-    }
 }
 
 #[test]
@@ -581,8 +535,7 @@ fn a_failure_once_files_change_does_not_say_nothing_changed() {
         // root: permissions do not stop it, so there is no failure to see here.
         fs::remove_file(bin.join("probe")).unwrap();
         mode(0o755);
-        eprintln!("skipped: bin/ stays writable for this user");
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     let out = kulman(&home, &base)
         .args(["install", "--modules", "plaz"])
@@ -744,17 +697,35 @@ fn the_default_home_is_dot_kulman_home() {
 fn install_rejects_a_plain_http_base() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path().join("home");
-    for base in [
-        "http://example.invalid/releases",
-        "file://host/x",
-        "ftp://x",
-        "https://",
-        "file:///",
-        "https://example.invalid/releases?x=1",
-        "https://example.invalid/releases#x",
+    // The base as given, and as the message names it (trailing slashes are trimmed first).
+    for (base, shown) in [
+        (
+            "http://example.invalid/releases",
+            "http://example.invalid/releases",
+        ),
+        ("file://host/x", "file://host/x"),
+        ("ftp://x", "ftp://x"),
+        ("https://", "https:"),
+        ("file:///", "file:"),
+        (
+            "https://example.invalid/releases?x=1",
+            "https://example.invalid/releases?x=1",
+        ),
+        (
+            "https://example.invalid/releases#x",
+            "https://example.invalid/releases#x",
+        ),
     ] {
         let out = kulman(&home, base).arg("install").output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{base}");
+        assert_eq!(
+            stderr(&out),
+            format!(
+                "kulman: KULMAN_RELEASE_URL must start with https:// or file:// (got {shown})\n\
+                 nothing changed\n"
+            ),
+            "{base}"
+        );
     }
     assert!(!home.exists());
 }

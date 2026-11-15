@@ -212,11 +212,6 @@ fn updated_of(fm: &str) -> String {
 }
 
 #[test]
-fn updated_key_is_read() {
-    assert_eq!(updated_of("updated: 2026-10-23"), "2026-10-23");
-}
-
-#[test]
 fn key_order_updated_then_modified_then_date() {
     let all = "date: 2026-01-01\nmodified: 2026-01-02\nupdated: 2026-01-03";
     assert_eq!(updated_of(all), "2026-01-03");

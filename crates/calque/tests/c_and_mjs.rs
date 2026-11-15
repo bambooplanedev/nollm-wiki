@@ -30,7 +30,10 @@ fn c_files_get_callers_and_include_edges_with_their_headers() {
         ),
     ]);
     let out = w.callers("util_c", "add", None, None).unwrap();
-    assert!(out.contains("main"), "{out}");
+    assert!(
+        out.contains("src/main.c\n  2-4  fn  main  calls add at 3"),
+        "{out}"
+    );
     let (_d, _, out) = common::compiled(&[
         ("src/util.h", "int add(int a, int b);\n"),
         (

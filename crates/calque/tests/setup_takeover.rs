@@ -437,7 +437,7 @@ fn setup_leaves_an_edited_old_skill_and_its_ignore_line() {
 
 /// No old traces: the output is what setup printed before the takeover existed.
 #[test]
-fn setup_without_old_traces_prints_what_it_printed_before() {
+fn setup_without_old_traces_prints_only_the_setup_lines() {
     let f = fixture();
     let a = f
         .setup(&["--scope", "local", "--agent", "claude,pi"])
@@ -495,8 +495,8 @@ fn a_failed_removal_still_prints_the_removals_before_it() {
     mode(&claude, 0o555);
     if fs::write(claude.join("settings.json"), "x").is_ok() {
         // root: permissions do not stop it, so there is no failed removal to see here.
-        eprintln!("skipped: .claude/ stays writable for this user");
-        return;
+        mode(&claude, 0o755);
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     let a = f.setup(&["--scope", "repo", "--agent", "claude"]).code(1);
     mode(&claude, 0o755);
@@ -682,10 +682,7 @@ fn a_fifo_is_left_alone() {
             .status()
             .is_ok_and(|s| s.success())
     });
-    if !made {
-        eprintln!("skipped: no mkfifo");
-        return;
-    }
+    assert!(made, "needs mkfifo on PATH");
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert_eq!(err(&a), "");

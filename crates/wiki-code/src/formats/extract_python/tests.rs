@@ -27,8 +27,7 @@ fn python_signatures_gated_docstring_and_imports() {
     let e = crate::extract("extractor.py", src);
     assert_has(&e.symbols, "def extract_all(d)");
     assert_lacks(&e.symbols, "_private");
-    assert!(e.imports.iter().any(|i| i.contains("graph")));
-    assert!(e.imports.iter().any(|i| i.contains("os")));
+    assert_eq!(e.imports, vec!["graph", "os"]);
     assert_eq!(e.summary.as_deref(), Some("Top docstring."));
 }
 
@@ -40,6 +39,15 @@ fn a_docstring_sentence_wrapped_across_lines_summarizes_whole() {
         e.summary.as_deref(),
         Some("Fetch feeds over HTTP with retries and a bounded cache.")
     );
+}
+
+#[test]
+fn a_boilerplate_first_paragraph_is_not_replaced_by_the_second() {
+    // The opening paragraph is boilerplate, so the docstring gives no
+    // summary; the second paragraph must not stand in for it.
+    let src = "\"\"\"\nThis module fetches feeds.\n\nIt retries on failure.\n\"\"\"\ndef fetch():\n    pass\n";
+    let e = crate::extract("fetch.py", src);
+    assert_eq!(e.summary.as_deref(), Some("def fetch()"));
 }
 
 #[test]
@@ -88,18 +96,6 @@ fn python_relative_and_aliased_imports_are_captured() {
 }
 
 #[test]
-fn python_from_import_does_not_capture_symbol_names() {
-    let src = "from .models import Article, FeedSource\n";
-    let e = crate::extract("m.py", src);
-    assert_eq!(
-        e.imports,
-        vec![".models".to_string()],
-        "imports: {:?}",
-        e.imports
-    );
-}
-
-#[test]
 fn python_methods_are_qualified_by_their_class() {
     let src = "class Wiki:\n    def search(self, q: str) -> list:\n        return []\n    async def fetch(self) -> bytes:\n        return b\"\"\n\ndef free_function() -> int:\n    return 1\n";
     let e = crate::extract("q.py", src);
@@ -142,6 +138,13 @@ fn python_private_class_takes_its_methods_with_it() {
     // extraction must still be happening at all
     assert_has(&e.symbols, "class Public");
     assert_has(&e.symbols, "def Public.run(self) -> None");
+}
+
+#[test]
+fn a_private_class_nested_in_a_public_class_is_hidden_with_its_methods() {
+    let src = "class Outer:\n    class _Inner:\n        def run(self) -> None:\n            pass\n    class Open:\n        pass\n";
+    let e = crate::extract("m.py", src);
+    assert_eq!(e.symbols, vec!["class Outer", "class Outer.Open"]);
 }
 
 #[test]
@@ -276,11 +279,8 @@ fn a_second_module_level_all_assignment_wins() {
     let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = [\"b\"]\n";
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "def b()");
-    assert!(
-        !e.symbols.iter().any(|s| s == "def a()"),
-        "the second, later __all__ must win over the first: {:?}",
-        e.symbols
-    );
+    // the second, later __all__ must win over the first
+    assert_lacks(&e.symbols, "def a()");
 }
 
 #[test]
@@ -351,12 +351,8 @@ fn python_class_fields_are_qualified_and_gated() {
 fn python_class_fields_are_emitted_once_not_twice() {
     let src = "class Article:\n    title: str\n";
     let e = crate::extract("m.py", src);
-    let hits = e
-        .symbols
-        .iter()
-        .filter(|s| *s == "Article.title: str")
-        .count();
-    assert_eq!(hits, 1, "one pattern, one emission: {:?}", e.symbols);
+    // one pattern, one emission
+    assert_eq!(e.symbols, vec!["class Article", "Article.title: str"]);
 }
 
 #[test]
@@ -364,13 +360,11 @@ fn python_long_values_are_truncated_on_a_character_boundary() {
     // Multibyte characters: a byte-indexed cut panics here.
     let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
     let e = crate::extract("judge.py", &src);
-    let sig = e
-        .symbols
-        .iter()
-        .find(|s| s.starts_with("SYSTEM_PROMPT"))
-        .unwrap_or_else(|| panic!("no SYSTEM_PROMPT in {:?}", e.symbols));
-    assert!(sig.ends_with('…'), "must be truncated: {sig}");
-    assert!(sig.chars().count() < 80, "budget not applied: {sig}");
+    // 48 characters of value, then the ellipsis
+    assert_has(
+        &e.symbols,
+        "SYSTEM_PROMPT = \"naïve café — naïve café — naïve café — naïve ca…",
+    );
 }
 
 #[test]
@@ -464,17 +458,19 @@ fn python_conditionally_defined_module_functions_are_kept() {
 }
 
 #[test]
+fn equal_signatures_are_listed_once() {
+    let src = "if NEW:\n    def parse(text: str) -> int:\n        return 1\nelse:\n    def parse(text: str) -> int:\n        return 2\n";
+    let e = crate::extract("m.py", src);
+    assert_eq!(e.symbols, vec!["def parse(text: str) -> int"]);
+}
+
+#[test]
 fn python_unannotated_assignment_renders_its_value_once() {
     // `signature_cut` leaves an unannotated value to the join, so the
     // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
     let src = "MAX_IDS = 2000\n";
     let e = crate::extract("state.py", src);
-    assert_has(&e.symbols, "MAX_IDS = 2000");
-    assert!(
-        !e.symbols.iter().any(|s| s.matches(" = ").count() > 1),
-        "value appended twice: {:?}",
-        e.symbols
-    );
+    assert_eq!(e.symbols, vec!["MAX_IDS = 2000"]);
 }
 
 #[test]
@@ -486,13 +482,17 @@ fn python_assignment_without_spaces_is_normalized_and_budgeted() {
     let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
     let e = crate::extract("state.py", &src);
     assert_has(&e.symbols, "CACHE_DIR = \"/var/cache/store\"");
-    let big = e
-        .symbols
-        .iter()
-        .find(|s| s.starts_with("BIG"))
-        .unwrap_or_else(|| panic!("no BIG in {:?}", e.symbols));
-    assert!(big.starts_with("BIG = "), "normalized spacing: {big}");
-    assert!(big.ends_with('…'), "budget must apply: {big}");
+    assert_has(&e.symbols, &format!("BIG = \"{}…", "y".repeat(47)));
+}
+
+#[test]
+fn a_value_of_exactly_48_characters_is_kept_whole_and_one_more_is_cut() {
+    // Characters, not bytes: 46 `é` and two quotes are 48 characters, 94 bytes.
+    let at = format!("X = \"{}\"", "é".repeat(46));
+    let e = crate::extract("m.py", &format!("{at}\n"));
+    assert_eq!(e.symbols, vec![at]);
+    let e = crate::extract("m.py", &format!("X = \"{}\"\n", "é".repeat(47)));
+    assert_eq!(e.symbols, vec![format!("X = \"{}…", "é".repeat(47))]);
 }
 
 #[test]
@@ -502,9 +502,8 @@ fn python_annotated_over_budget_omits_the_value() {
     let long = "z".repeat(200);
     let src = format!("BIG: str = \"{long}\"\n");
     let e = crate::extract("state.py", &src);
-    assert_has(&e.symbols, "BIG: str");
     // annotated must omit, not truncate
-    assert_lacks(&e.symbols, "…");
+    assert_eq!(e.symbols, vec!["BIG: str"]);
 }
 
 #[test]
@@ -541,11 +540,7 @@ fn a_const_only_module_does_not_summarize_as_a_truncated_value() {
     let long = "q".repeat(200);
     let src = format!("TOPICS: list[str] = [\"{long}\"]\n");
     let e = crate::extract("settings.py", &src);
-    let summary = e.summary.unwrap_or_default();
-    assert!(
-        !summary.contains('…'),
-        "summary must not be a truncated value: {summary}"
-    );
+    assert_eq!(e.summary.as_deref(), Some("TOPICS: list[str]"));
 }
 
 #[test]
@@ -571,6 +566,27 @@ fn python_hash_comment_is_a_doc() {
     assert_eq!(
         doc_of("a.py", src, "W_MIN_DEFAULT_S"),
         (Some("Wait longer than w_min counts as a stall.".into()), 2)
+    );
+}
+
+#[test]
+fn a_multi_line_hash_doc_extends_the_range_over_every_comment_line() {
+    let src = "x = 1\n# Builds the frame\n# for each caller.\ndef f():\n    pass\n";
+    let e = crate::extract("a.py", src);
+    let f = e.items.iter().find(|i| i.name == "f").unwrap();
+    assert_eq!(
+        (f.doc.as_deref(), f.start_line, f.end_line),
+        (Some("Builds the frame for each caller."), 2, 5)
+    );
+}
+
+#[test]
+fn a_blank_line_between_a_comment_and_its_item_leaves_the_item_undocumented() {
+    let src = "x = 1\n# Stray note about nothing.\n\ndef f():\n    pass\n# Builds the frame for each caller.\ndef g():\n    pass\n";
+    assert_eq!(doc_of("a.py", src, "f"), (None, 4));
+    assert_eq!(
+        doc_of("a.py", src, "g"),
+        (Some("Builds the frame for each caller.".into()), 6)
     );
 }
 

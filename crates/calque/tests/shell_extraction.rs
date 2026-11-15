@@ -60,16 +60,6 @@ fn comment_above_function_is_its_doc() {
 }
 
 #[test]
-fn leading_comment_is_page_summary() {
-    let src = "#!/usr/bin/env bash\n# Builds and ships the release.\n\nfoo() { :; }\n";
-    let (_d, _, out_dir) = compiled(&[("ship.sh", src)]);
-    assert_eq!(
-        entry(&out_dir, "ship")["summary"],
-        "Builds and ships the release."
-    );
-}
-
-#[test]
 fn broken_file_keeps_its_functions() {
     let src = "#!/bin/bash\nif [ -z \"$X\" ; then\n  echo (\nfi\n\nnvm() {\n  echo nvm\n}\n\nfunction other {\n  echo o\n";
     let (_d, wiki) = compiled_wiki(&[("nvm.sh", src)]);
@@ -147,7 +137,7 @@ fn shell_page_in_another_directory_does_not_rename_the_existing_page() {
 
 #[test]
 fn summary_is_the_header_comment_only() {
-    let src = "#!/bin/sh\n# Ships the release.\n\nfoo() {\n  # inner note\n  :\n}\n";
+    let src = "#!/usr/bin/env bash\n# Ships the release.\n\nfoo() {\n  # inner note\n  :\n}\n";
     let (_d, _, out) = compiled(&[("ship.sh", src)]);
     assert_eq!(entry(&out, "ship")["summary"], "Ships the release.");
 }
@@ -156,7 +146,9 @@ fn summary_is_the_header_comment_only() {
 fn a_comment_inside_a_function_body_is_no_summary() {
     let src = "foo() {\n  # inner note about things\n  :\n}\n";
     let (_d, _, out) = compiled(&[("ship.sh", src)]);
-    assert_ne!(entry(&out, "ship")["summary"], "inner note about things");
+    // No header comment, so the summary falls back to the first function's
+    // signature; the comment inside its body is not a summary.
+    assert_eq!(entry(&out, "ship")["summary"], "foo()");
 }
 
 fn callers_text(

@@ -146,11 +146,4 @@ mod tests {
             assert_eq!(ca, cb);
         }
     }
-
-    #[test]
-    fn file_count_matches_request() {
-        let d = tempdir().unwrap();
-        let paths = generate_corpus(d.path(), 37, 7).unwrap();
-        assert_eq!(paths.len(), 37);
-    }
 }

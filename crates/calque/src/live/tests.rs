@@ -194,15 +194,6 @@ fn reader_sees_writer_edit() {
     assert_eq!(b.compiles.load(Ordering::Relaxed), 0);
 }
 
-#[test]
-fn reader_call_without_edits_is_fresh_and_fast() {
-    let (_src, _out, a, b) = pair();
-    let _ = a.fresh();
-    let t = Instant::now();
-    assert_eq!(b.fresh().1, None);
-    assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
-}
-
 #[cfg(unix)]
 #[test]
 fn reader_gets_writer_compile_error() {
@@ -213,7 +204,7 @@ fn reader_gets_writer_compile_error() {
     if std::fs::write(out.path().join("probe"), "").is_ok() {
         // Root writes anyway: no compile error to share.
         std::fs::set_permissions(out.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     std::fs::write(src.path().join("a.md"), "# A\n\nzebrafish\n").unwrap();
     let from_b = b.fresh().1;
@@ -371,7 +362,8 @@ fn start_does_not_wait_for_a_cli_compile() {
     let t = Instant::now();
     let a = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
     let b = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
-    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    // Well below the 10-second hold, loose enough for a loaded parallel run.
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
     assert!(a.is_writer() && !b.is_writer());
     release.send(()).unwrap();
     cli.join().unwrap();
