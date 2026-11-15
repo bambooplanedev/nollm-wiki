@@ -251,7 +251,15 @@ fn update_repairs_a_half_finished_update() {
     fs::write(home.join("bin/kulman"), "old").unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out).len(), 4, "{}", stdout(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "updated calque 0.7.0 -> 0.8.0",
+            "updated plaz 0.7.0 -> 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
@@ -291,8 +299,15 @@ fn update_when_current_says_up_to_date() {
     fs::remove_file(home.join("manifest.json")).unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_ne!(lines(&out), ["up to date"]);
-    assert!(!stdout(&out).contains("restart"), "{}", stdout(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "repaired calque 0.7.0",
+            "repaired plaz 0.7.0",
+            "repaired kulman 0.7.0"
+        ]
+    );
+    assert!(home.join("manifest.json").is_file());
     assert_eq!(snapshot(t.path()), before);
 }
 
@@ -533,6 +548,10 @@ fn remove_kulman_by_name_is_usage() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        "kulman: kulman is not a module; kulman remove without --modules removes everything\n"
+    );
     assert_eq!(snapshot(t.path()), before);
 
     let out = kulman(&home, &base)
@@ -822,13 +841,25 @@ fn remove_without_a_terminal_needs_yes() {
     for args in [&["remove"][..], &["remove", "--modules", "plaz"]] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
-        assert!(
-            stderr(&out).contains("kulman: remove needs --yes when there is no terminal"),
-            "{}",
-            stderr(&out)
+        assert_eq!(
+            stderr(&out),
+            "kulman: remove needs --yes when there is no terminal\n",
+            "{args:?}"
         );
+        assert_eq!(stdout(&out), "", "{args:?}");
         assert_eq!(snapshot(t.path()), before, "{args:?}");
     }
+    // The same command with --yes goes through: that is all --yes changes without a terminal.
+    let out = kulman(&home, &base)
+        .args(["remove", "--modules", "plaz", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.7.0", "modules": ["calque"]})
+    );
+    assert!(!home.join("bin/plaz").exists());
 }
 
 #[test]
