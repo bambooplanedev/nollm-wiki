@@ -1,68 +1,190 @@
 name: Release
 
-# A `v*` tag builds the release binary for Linux and both macOS targets and
-# attaches the tarballs and their SHA256SUMS to a GitHub Release whose notes
-# are generated from the commits since the previous tag.
+# Builds kalka, plaz and kulman for aarch64-apple-darwin and x86_64-unknown-linux-musl, assembles
+# the release (scripts/release-assemble.sh) and installs it the way a user does on Alpine, Debian
+# and macOS (scripts/install-check.sh). On a pull request that touches the build, that is all.
+# On a `v*` tag, which must equal the workspace version, it then makes a DRAFT release: nothing
+# is "latest" until the owner publishes it, so a failed upload never leaves a broken latest one.
 on:
   push:
     tags:
       - "v*"
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/release-assemble.sh
+      - scripts/install-check.sh
+      - release/**
+      - install.sh
+      - crates/**
+      - Cargo.toml
+      - Cargo.lock
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
-    runs-on: ${{ matrix.os }}
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: Check the tag matches Cargo.toml
+      - name: Read the workspace version; a tag must equal it
+        id: read
         env:
+          REF_TYPE: ${{ github.ref_type }}
           TAG: ${{ github.ref_name }}
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)"
-          [ "v$version" = "$TAG" ] || { echo "tag $TAG does not match v$version in Cargo.toml"; exit 1; }
-      - uses: Swatinem/rust-cache@v2
-      - run: rustup target add ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
-      - run: >
-          tar -C target/${{ matrix.target }}/release
-          -czf kalka-${{ github.ref_name }}-${{ matrix.target }}.tar.gz kalka
+          if [ "$REF_TYPE" = tag ] && [ "v$version" != "$TAG" ]; then
+            echo "tag $TAG does not match v$version in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            arch: arm64
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            arch: x86-64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build on macOS with the rust-version toolchain
+        if: runner.os == 'macOS'
+        run: |
+          rustup toolchain install 1.90 --profile minimal
+          rustup default 1.90
+          cargo build --release --locked -p kalka -p plaz -p kulman
+          echo "BIN_DIR=target/release" >> "$GITHUB_ENV"
+      # Static musl, built in Alpine into its own target dir; the container writes as root.
+      - name: Build on Linux in rust:1.90-alpine
+        if: runner.os == 'Linux'
+        run: |
+          docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-musl rust:1.90-alpine \
+            sh -c 'apk add --no-cache build-base && cargo build --release --locked -p kalka -p plaz -p kulman'
+          sudo chown -R "$(id -u):$(id -g)" target-musl
+          echo "BIN_DIR=target-musl/release" >> "$GITHUB_ENV"
+      - name: Check the architecture and pack one archive per binary
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          for b in kalka plaz kulman; do
+            file "$BIN_DIR/$b"
+            file "$BIN_DIR/$b" | grep -q "$ARCH" || { echo "$b is not $ARCH"; exit 1; }
+            a="$b-v$VERSION-$TARGET.tar.gz"
+            COPYFILE_DISABLE=1 tar -C "$BIN_DIR" -czf "$a" "$b"
+            [ "$(tar -tzf "$a")" = "$b" ] || { echo "$a must hold only $b:"; tar -tzf "$a"; exit 1; }
+          done
       - uses: actions/upload-artifact@v7
         with:
-          name: kalka-${{ matrix.target }}
-          path: kalka-*.tar.gz
+          name: ${{ matrix.target }}
+          path: "*.tar.gz"
+          if-no-files-found: error
 
-  release:
-    needs: build
+  assemble:
+    needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      # Download each artifact by name: a name that is not listed yet fails the
-      # step, whereas a pattern or merge-multiple download silently takes a short list.
+      - uses: actions/checkout@v7
+      # Each artifact by name: a name that is not there fails the step, whereas a pattern
+      # download silently takes a short list.
       - uses: actions/download-artifact@v8
         with:
-          name: kalka-x86_64-unknown-linux-gnu
+          name: aarch64-apple-darwin
+          path: dist
       - uses: actions/download-artifact@v8
         with:
-          name: kalka-aarch64-apple-darwin
+          name: x86_64-unknown-linux-musl
+          path: dist
+      - run: sh scripts/release-assemble.sh "$VERSION" dist --tree tree
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tree
+          path: tree
+          if-no-files-found: error
+
+  install-check:
+    needs: [version, assemble]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            image: alpine:3
+          - os: ubuntu-latest
+            image: debian:bookworm-slim
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: kalka-x86_64-apple-darwin
-      - name: Check all three tarballs are present
-        run: '[ "$(ls kalka-*.tar.gz | wc -l)" -eq 3 ] || { echo "expected 3 tarballs"; ls; exit 1; }'
-      - run: sha256sum kalka-*.tar.gz > SHA256SUMS
-      - uses: softprops/action-gh-release@v3
+          name: tree
+          path: tree
+      - name: Install in ${{ matrix.image }}
+        if: matrix.image
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: >
+          docker run --rm -v "$PWD/tree":/release:ro -v "$PWD/scripts":/scripts:ro "$IMAGE"
+          sh /scripts/install-check.sh "$VERSION"
+      - name: Install on macOS
+        if: runner.os == 'macOS'
+        run: sh scripts/install-check.sh "$VERSION" tree
+
+  publish:
+    needs: install-check
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
         with:
-          generate_release_notes: true
-          files: |
-            kalka-*.tar.gz
-            SHA256SUMS
+          name: dist
+          path: dist
+      - name: Check dist holds the 6 archives, SHA256SUMS, manifest.json and install.sh
+        run: |
+          ls -l dist
+          [ "$(find dist -mindepth 1 | wc -l)" -eq 9 ] || { echo "dist must hold 9 files"; exit 1; }
+          [ "$(find dist -maxdepth 1 -type f -name '*.tar.gz' | wc -l)" -eq 6 ] ||
+            { echo "dist must hold 6 archives"; exit 1; }
+          for f in SHA256SUMS manifest.json install.sh; do
+            [ -f "dist/$f" ] || { echo "dist/$f is missing"; exit 1; }
+          done
+      # The runner's own gh, so the one job that can write runs no third-party action. A release
+      # for the tag that already exists, draft or published, fails the step: no second draft, no
+      # overwrite. The listing includes drafts, which gh release create alone does not promise.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # This job has no checkout, so gh is told the repository.
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq '.[].tag_name')
+          if printf '%s\n' "$tags" | grep -qxF -- "$TAG"; then
+            echo "a release for $TAG already exists"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --generate-notes --verify-tag --title "$TAG" \
+            dist/*.tar.gz dist/SHA256SUMS dist/manifest.json dist/install.sh

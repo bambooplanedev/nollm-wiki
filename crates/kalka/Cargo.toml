@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Deterministic wiki compiler for agent-navigable knowledge bases"
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [lints]
@@ -36,6 +37,9 @@ rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemar
 tokio = { version = "1", features = ["rt"] }
 frostem = { version = "=2.20261016.3", default-features = false, features = ["english", "ukrainian"] }
 sentry = { version = "0.49.5", default-features = false, features = ["backtrace", "contexts", "panic", "anyhow", "ureq", "rustls"] }
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = { version = "0.1.52", features = ["override"] }
 
 [dev-dependencies]
 insta = "1"

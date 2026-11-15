@@ -104,8 +104,20 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 `selfhost.sh` — compiles this repository into its own wiki at `.kulman/`
 (always rebuilds the release binary first) and fails on a broken wikilink
-(`kalka lint`). See the repo root
-[`README.md`](../README.md#self-hosting).
+(`kalka lint`). See Self-hosting in
+[kalka's README](../crates/kalka/README.md#self-hosting).
+
+`release-assemble.sh <version> <dir> [--tree <out>]` — checks that `<dir>` holds the six release
+archives (`kalka`, `plaz`, `kulman` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`, each
+with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.json` (modules from
+[`release/modules.json`](../release/modules.json)) and a copy of `install.sh` into it; `--tree` also
+lays out the `latest/download/` and `download/v<version>/` paths a `file://` `KULMAN_RELEASE_URL`
+reads. Needs `jq`, `tar` and `sha256sum` or `shasum`; tested in `crates/kulman/tests/release_assemble.rs`.
+
+`install-check.sh <version> [<tree>]` — installs the release laid out at `<tree>` (default `/release`)
+the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `kulman install --yes`,
+checks each binary's `--version` and sets up a throwaway git project. The release workflow runs it
+in Alpine and Debian containers and on macOS.
 
 Search-quality measurement now lives in `crates/kalka/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI

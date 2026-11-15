@@ -432,6 +432,48 @@ fn setup_with_the_real_kalka_and_plaz() {
 }
 
 #[test]
+fn install_sh_does_not_look_for_glibc() {
+    let script = fs::read_to_string(SCRIPT).unwrap();
+    assert!(!script.contains("ld-linux"));
+    assert!(!script.contains("libc.so"));
+}
+
+#[test]
+fn install_sh_has_no_build_for_an_intel_mac() {
+    use std::os::unix::fs::PermissionsExt;
+    let (t, base) = setup(KULMAN_BYTES);
+    let home = t.path().join("home");
+    let user = t.path().join("user-home");
+    fs::create_dir_all(&user).unwrap();
+    let bin = t.path().join("path");
+    fs::create_dir_all(&bin).unwrap();
+    let uname = bin.join("uname");
+    fs::write(
+        &uname,
+        "#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo x86_64 ;; esac\n",
+    )
+    .unwrap();
+    fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
+        .arg(SCRIPT)
+        .env("PATH", path)
+        .env("KULMAN_HOME", &home)
+        .env("KULMAN_RELEASE_URL", &base)
+        .env("HOME", &user)
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("no build for Darwin/x86_64"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!home.exists());
+    nothing_in_user_home(t.path());
+}
+
+#[test]
 fn install_sh_is_executable() {
     use std::os::unix::fs::PermissionsExt;
     let mode = fs::metadata(SCRIPT).unwrap().permissions().mode();

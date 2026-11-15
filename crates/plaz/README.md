@@ -1,10 +1,15 @@
+**English** · [Українська](README.uk.md)
+
 # plaz
 
-A plaz is the full-size loft floor where a design bureau draws the real lines of an airframe. `plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
+**plaz**, said plahz (плаз): the loft floor where a bureau draws the airframe's real lines full
+size — the real decisions of each function.
 
-It is the second tool of the kulman set, beside [kalka](../../README.md). It depends on `wiki-code` of this workspace by path and nothing of kalka's wiki. Its version is the workspace's.
+`plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
 
-**Preview.** Rust and Python are charted; other languages get a "not covered yet" note. Built from source until the next release.
+It is a module of the [kulman set](../../README.md), beside [kalka](../kalka/README.md). It depends on `wiki-code` of this workspace by path and nothing of kalka's wiki. Its version is the workspace's.
+
+**Preview.** Rust and Python are charted; other languages get a "not covered yet" note. `kulman install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
 
 ## Build
 

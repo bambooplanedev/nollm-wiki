@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description = "Code layer shared by the wiki compiler and its sibling tools: the item model, source tree walk, tree-sitter extraction, call-site index and import resolution"
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]

@@ -10,11 +10,7 @@ use assert_cmd::Command;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-pub const TARGETS: [&str; 3] = [
-    "aarch64-apple-darwin",
-    "x86_64-apple-darwin",
-    "x86_64-unknown-linux-gnu",
-];
+pub const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-unknown-linux-musl"];
 
 /// The bytes the helper packs as kulman's own binary.
 pub const KULMAN_BYTES: &[u8] = b"#!/bin/sh\necho kulman\n";
@@ -115,9 +111,10 @@ pub fn replace_archive(dir: &Path, version: &str, name: &str, bytes: &[u8]) {
     set_sha256(dir, version, name, &sha256(&path));
 }
 
-/// `tar -czf out -C dir members…` with the system tar.
+/// `tar -czf out -C dir members…` with the system tar (on macOS without `._` members).
 pub fn pack(dir: &Path, members: &[&str], out: &Path) {
     let status = std::process::Command::new("tar")
+        .env("COPYFILE_DISABLE", "1")
         .arg("-czf")
         .arg(out)
         .arg("-C")

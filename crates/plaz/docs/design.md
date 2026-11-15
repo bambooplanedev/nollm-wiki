@@ -2,7 +2,7 @@
 
 Approved 2026-11-13.
 
-Status: function charts for Rust and Python, call targets, `plaz build` and `plaz setup` exist (a preview, built from source). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
+Status: function charts for Rust and Python, call targets, `plaz build` and `plaz setup` exist (a preview, installed with kulman). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
 
 ## Why
 

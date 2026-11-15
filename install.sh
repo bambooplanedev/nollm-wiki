@@ -59,15 +59,9 @@ main() {
     ki_arch=$(uname -m)
     case $ki_os/$ki_arch in
         Darwin/arm64) ki_target=aarch64-apple-darwin ;;
-        Darwin/x86_64) ki_target=x86_64-apple-darwin ;;
-        Linux/x86_64) ki_target=x86_64-unknown-linux-gnu ;;
+        Linux/x86_64) ki_target=x86_64-unknown-linux-musl ;;
         *) die "no build for $ki_os/$ki_arch" ;;
     esac
-    # The Linux build needs glibc: its loader, or its libc where Debian or Fedora keep it.
-    if [ "$ki_os" = Linux ] && [ ! -e /lib64/ld-linux-x86-64.so.2 ] &&
-        [ ! -e /lib/x86_64-linux-gnu/libc.so.6 ] && [ ! -e /lib64/libc.so.6 ]; then
-        die "no build for this system (the Linux build needs glibc at the standard paths)"
-    fi
 
     for ki_tool in curl tar mktemp; do
         command -v "$ki_tool" >/dev/null 2>&1 || die "$ki_tool is required"

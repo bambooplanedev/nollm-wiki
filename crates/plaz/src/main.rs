@@ -1,4 +1,9 @@
 #![warn(clippy::wildcard_enum_match_arm)]
+// musl's own malloc serialises threads; this also replaces it for the C code of the grammars.
+#[cfg(target_env = "musl")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use plaz::setup::{self, Scope};
 use std::ffi::OsStr;
 use std::path::PathBuf;
