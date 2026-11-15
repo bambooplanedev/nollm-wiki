@@ -155,14 +155,16 @@ pub fn check_file(name: &str, place: &str) -> Result<()> {
     }
 }
 
-/// Checks a release base (trailing slashes already trimmed): `https://…`, or `file://` with no
-/// host or `localhost`; no `?` or `#`, which would garble the paths appended to it.
-pub fn check_base(base: &str) -> Result<()> {
+/// Checks a release base as given and returns it without trailing slashes: `https://…`, or
+/// `file://` with no host or `localhost`; no `?` or `#`, which would garble the paths appended
+/// to it. A refusal shows the base as given.
+pub fn check_base(given: &str) -> Result<&str> {
+    let base = given.trim_end_matches('/');
     let https = base.strip_prefix("https://").is_some_and(|h| !h.is_empty());
     if !base.contains(['?', '#']) && (https || local_path(base).is_some()) {
-        Ok(())
+        Ok(base)
     } else {
-        bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {base})")
+        bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {given})")
     }
 }
 
