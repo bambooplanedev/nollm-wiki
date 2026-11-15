@@ -367,12 +367,14 @@ never changed.
 
 Earlier versions of setup ran `codex mcp add kalka -- kalka serve --source .`, one machine-wide
 entry that started the server in every Codex session, in folders that are no project too. When
-`codex` is on `PATH` and the project's file has no `kalka` server yet, setup asks Codex once (`codex
-mcp get kalka`). An entry that is exactly what the old setup wrote is removed with `codex mcp remove
-kalka`, after the block is written, with the line `removed the machine-wide Codex kalka server (it
-ran in every Codex session)`; `--remove` does the same while the project has no block. An entry with
-other settings is left and reported, with the command that removes it. Without `codex` on `PATH`
-setup does not look.
+`codex` is on `PATH`, every setup and `--remove` run that can edit the project's file asks Codex for
+its machine-wide entry (`codex mcp get kalka`, run outside any project, so that a parent project's
+file does not answer). An entry that is exactly what the old setup wrote is removed with `codex mcp
+remove kalka` once the project's block is in place (with `--remove`: once it is gone), with the line
+`removed the machine-wide Codex kalka server (it ran in every Codex session)`; a removal that fails
+is tried again on the next run. An entry with other settings is left and reported, with the command
+that removes it, on the run that finds the project without a `kalka` server of its own. Without
+`codex` on `PATH` setup does not look.
 
 The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
 Codex does not reach for them on its own, though: it needs the

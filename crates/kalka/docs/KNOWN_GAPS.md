@@ -388,7 +388,8 @@ per question is noise-level: treat single results as anecdotes.
   checked with codex-cli 0.169 only: the first version that reads it is unknown, and the Codex
   desktop app is not checked. The Cursor editor is not checked, only `cursor-agent`.
 - The `.codex/config.toml` block is recognised as lines of text, not parsed: a multi-line string
-  that holds exactly kalka's block is taken for it, and a key written with escapes inside quotes
+  value that holds exactly kalka's block is treated as kalka's own (setup says it is set up, and a
+  memory switch or `--remove` edits the string), and a key written with escapes inside quotes
   (`"mcp_servers"`) is not recognised as `mcp_servers`.
 - With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
   not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
