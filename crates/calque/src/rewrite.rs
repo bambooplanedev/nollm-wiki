@@ -556,7 +556,14 @@ pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
         Ok(()) | Err(_) => {}
     }
-    std::fs::write(&tmp, content)?;
+    // Exclusive create: a link planted since the removal makes this fail.
+    std::io::Write::write_all(
+        &mut std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?,
+        content.as_bytes(),
+    )?;
     std::fs::rename(&tmp, path)
 }
 
