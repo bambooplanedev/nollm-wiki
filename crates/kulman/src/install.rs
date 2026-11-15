@@ -306,17 +306,18 @@ fn renew(
         modules: modules.into_iter().collect(),
     };
     store::commit(home, &staged, raw, &state)?;
-    let mut updated = false;
     for s in &staged {
-        // A module the release newly requires was not there before.
-        if s.name == "kulman" || old_modules.contains(&s.name) {
-            println!("updated {} {have} -> {latest}", s.name);
-            updated = true;
-        } else {
+        // A module the release newly requires was not there before; at the same version, files
+        // are only put back.
+        if s.name != "kulman" && !old_modules.contains(&s.name) {
             println!("installed {} {latest}", s.name);
+        } else if have == latest {
+            println!("repaired {} {latest}", s.name);
+        } else {
+            println!("updated {} {have} -> {latest}", s.name);
         }
     }
-    if updated {
+    if have != latest {
         println!("restart running agent sessions; they keep the old binaries until then");
     }
     Ok(())

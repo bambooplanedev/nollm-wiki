@@ -5,8 +5,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, kulman, no_tmp_left, path_linking, release, set_sha256, snapshot, state, stderr,
-    stdout, version_dir, KULMAN_BYTES,
+    assert_binary, edit_manifest, kulman, no_tmp_left, path_linking, release, set_sha256, snapshot,
+    state, stderr, stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::json;
 
@@ -273,6 +273,14 @@ fn update_when_current_says_up_to_date() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
+    assert_eq!(
+        lines(&out),
+        [
+            "repaired kalka 0.7.0",
+            "repaired plaz 0.7.0",
+            "repaired kulman 0.7.0"
+        ]
+    );
     assert_eq!(snapshot(t.path()), before);
 
     // So is manifest.json.
@@ -280,7 +288,39 @@ fn update_when_current_says_up_to_date() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_ne!(lines(&out), ["up to date"]);
+    assert!(!stdout(&out).contains("restart"), "{}", stdout(&out));
     assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn update_installs_a_module_the_new_release_requires() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("kalka", KALKA), ("plaz", PLAZ)],
+    );
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    publish_0_8(t.path());
+    edit_manifest(&t.path().join("release"), "0.8.0", |m| {
+        m["modules"][0]["requires"] = json!(["plaz"]);
+    });
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    // The version changed, so the restart line stays; the new module is not "updated".
+    assert_eq!(
+        lines(&out),
+        [
+            "updated kalka 0.7.0 -> 0.8.0",
+            "installed plaz 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
 }
 
 #[test]
