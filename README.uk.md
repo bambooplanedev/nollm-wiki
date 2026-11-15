@@ -65,6 +65,16 @@ CLI `claude`. Сервер для Codex за будь-якого `--scope` по�
 видаляє те, що встановив kulman. Команди, прапорці, коди виходу й будова релізу:
 [crates/kulman/README.uk.md](crates/kulman/README.uk.md).
 
+### Нехай це зробить ваш агент
+
+Якщо не хочете виконувати ці кроки вручну, вставте це у свій агент для коду:
+
+    Install or update kulman in this project by following
+    https://github.com/bambooplanedev/kulman/blob/main/docs/agent-setup.md
+    Ask me before installing, updating, or changing any file outside this agent's own configuration.
+
+Файл за посиланням — звичайний текст: прочитайте його наперед, щоб побачити, що скажуть агентові.
+
 ### Перевірка релізу
 
 `manifest.json` і `SHA256SUMS` релізу підписані через minisign ключем релізів,

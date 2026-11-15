@@ -65,6 +65,16 @@ undoes a project's setup (with the scope it was set up with) and `kulman remove`
 installed. Commands, flags, exit codes and the layout of a release:
 [crates/kulman/README.md](crates/kulman/README.md).
 
+### Let your agent do it
+
+If you would rather not run these steps by hand, paste this into your coding agent:
+
+    Install or update kulman in this project by following
+    https://github.com/bambooplanedev/kulman/blob/main/docs/agent-setup.md
+    Ask me before installing, updating, or changing any file outside this agent's own configuration.
+
+The linked file is plain text: read it first to see what the agent will be told.
+
 ### Checking a release
 
 A release's `manifest.json` and `SHA256SUMS` are signed with minisign by the release key,
