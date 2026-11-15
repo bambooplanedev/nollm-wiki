@@ -7,8 +7,9 @@
 # binary as its one member. The script checks them all, then writes <dir>/SHA256SUMS, and
 # <dir>/manifest.json from release/modules.json, and copies the repository's install.sh into
 # <dir>. With --tree it also lays out <out> as KULMAN_RELEASE_URL=file://<out> expects:
-# <out>/download/v<version>/ (archives, manifest.json) and <out>/latest/download/ (SHA256SUMS,
-# manifest.json, install.sh). <out> must not exist. Exit 0, or 1 with a line naming what is
+# <out>/download/v<version>/ (archives, SHA256SUMS, manifest.json, install.sh) and
+# <out>/latest/download/ (SHA256SUMS, manifest.json, install.sh). <out> must not exist. The three
+# files reach <dir> only after the tree is built. Exit 0, or 1 with a line naming what is
 # wrong; nothing is written unless every check passes.
 #
 # Needs jq, tar, and sha256sum or shasum.
@@ -79,7 +80,7 @@ for b in $binaries; do
     done
 done
 
-# Checked: write into the scratch directory, then move into <dir> once everything succeeded.
+# Checked: write into the scratch directory; <dir> gets the files last, after the tree is built.
 : >"$scratch/SHA256SUMS"
 for b in $binaries; do
     for t in $targets; do
@@ -99,8 +100,7 @@ jq --arg v "$version" --rawfile sums "$scratch/SHA256SUMS" '
      kulman: {archives: archives("kulman")}}
 ' "$modules" >"$scratch/manifest.json"
 
-cp -- "$repo/install.sh" "$dir/install.sh"
-mv -- "$scratch/SHA256SUMS" "$scratch/manifest.json" "$dir/"
+cp -- "$repo/install.sh" "$scratch/install.sh"
 
 if [ -n "$tree" ]; then
     mkdir -p -- "$tree/download/v$version" "$tree/latest/download"
@@ -109,6 +109,10 @@ if [ -n "$tree" ]; then
             cp -- "$dir/$b-v$version-$t.tar.gz" "$tree/download/v$version/"
         done
     done
-    cp -- "$dir/manifest.json" "$tree/download/v$version/"
-    cp -- "$dir/SHA256SUMS" "$dir/manifest.json" "$dir/install.sh" "$tree/latest/download/"
+    for at in "download/v$version" latest/download; do
+        cp -- "$scratch/SHA256SUMS" "$scratch/manifest.json" "$scratch/install.sh" "$tree/$at/"
+    done
 fi
+
+# Last: nothing above can fail any more.
+mv -- "$scratch/SHA256SUMS" "$scratch/manifest.json" "$scratch/install.sh" "$dir/"

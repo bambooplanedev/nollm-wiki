@@ -129,6 +129,56 @@ fn sha256sums_lists_every_archive_once() {
 }
 
 #[test]
+fn the_tree_holds_the_control_files_at_both_addresses() {
+    let (t, dir) = assets();
+    assembled(t.path(), &dir);
+    let tree = t.path().join("tree");
+    let names = |at: &str| {
+        let mut v: Vec<String> = fs::read_dir(tree.join(at))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().into_string().unwrap())
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    let mut versioned: Vec<String> = BINARIES
+        .iter()
+        .flat_map(|b| TARGETS.iter().map(move |t| file(b, t)))
+        .chain(["SHA256SUMS", "install.sh", "manifest.json"].map(String::from))
+        .collect();
+    versioned.sort_unstable();
+    assert_eq!(names("download/v0.7.0"), versioned);
+    assert_eq!(
+        names("latest/download"),
+        ["SHA256SUMS", "install.sh", "manifest.json"]
+    );
+    for f in ["SHA256SUMS", "install.sh", "manifest.json"] {
+        let want = fs::read(dir.join(f)).unwrap();
+        for at in ["latest/download", "download/v0.7.0"] {
+            assert_eq!(fs::read(tree.join(at).join(f)).unwrap(), want, "{at}/{f}");
+        }
+    }
+}
+
+#[test]
+fn a_failing_tree_leaves_the_directory_without_the_control_files() {
+    let (t, dir) = assets();
+    // A tree below a regular file cannot be made.
+    let blocker = t.path().join("blocker");
+    fs::write(&blocker, "").unwrap();
+    let out = assemble(&[
+        Path::new(VERSION),
+        &dir,
+        Path::new("--tree"),
+        &blocker.join("tree"),
+    ]);
+    assert!(!out.status.success());
+    for f in ["SHA256SUMS", "manifest.json", "install.sh"] {
+        assert!(!dir.join(f).exists(), "{f}");
+    }
+}
+
+#[test]
 fn cdpath_does_not_move_the_script_off_its_repository() {
     let (_t, dir) = assets();
     let repo = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
