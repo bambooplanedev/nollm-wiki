@@ -719,6 +719,24 @@ fn setup_local_twice_reports_everything_already_there() {
     assert!(!o.contains("skipped"), "{o}");
 }
 
+/// `mcp get` failing for another reason than "no such server" is not absence: no add follows.
+#[test]
+fn setup_local_reports_a_failed_claude_get() {
+    let f = fixture(true, false);
+    let t = f.tmp.path().display();
+    f.stub(
+        "claude",
+        &format!("echo \"$@\" >> {t}/claude.log\necho 'error: something else' >&2\nexit 1"),
+    );
+    let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
+    let o = out(&a);
+    assert!(
+        o.contains("skipped Claude Code local kalka server: `claude mcp get` failed: error: something else"),
+        "{o}"
+    );
+    assert!(!f.claude_log().contains("add-json"), "{}", f.claude_log());
+}
+
 /// A `codex` that logs its argv and answers `mcp get kalka` with the server `mcp add` added.
 fn codex_stub(f: &Fixture) {
     let t = f.tmp.path().display();

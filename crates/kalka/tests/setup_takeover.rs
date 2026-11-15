@@ -798,3 +798,13 @@ esac"#
         err(&a)
     );
 }
+
+/// A failed `claude mcp get wiki` (not "no such server") is no answer: nothing is said.
+#[test]
+fn a_failed_claude_get_says_nothing_about_the_old_server() {
+    let f = fixture();
+    f.stub("claude", "echo 'error: something else' >&2\nexit 1");
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+}

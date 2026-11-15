@@ -178,7 +178,8 @@ impl Report<'_> {
 }
 
 /// Runs the agent CLI `name` with `args` in `root`; the error is a short reason for the user.
-/// `mcp get` may fail: its status says whether the server exists.
+/// `mcp get` may fail: its status says whether the server exists. Claude Code says so on stderr
+/// (`No MCP server named "<name>"`), and any other failure of its `get` is an error.
 fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     let exe = find_on_path(name).ok_or(format!("{name} is not on PATH"))?;
     let o = Command::new(exe)
@@ -186,7 +187,9 @@ fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String>
         .current_dir(root)
         .output()
         .map_err(|e| format!("could not run {name}: {e}"))?;
-    if o.status.success() || args[1] == "get" {
+    let absent =
+        args[1] == "get" && (name != "claude" || o.stderr.starts_with(b"No MCP server named \""));
+    if o.status.success() || absent {
         return Ok((
             o.status.success(),
             String::from_utf8_lossy(&o.stdout).into_owned(),
