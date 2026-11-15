@@ -334,7 +334,9 @@ extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with
-`cursor-agent` 2026.10.22; the Cursor editor itself is not checked.
+`cursor-agent` 2026.10.22. The Cursor editor (3.30) reads the entry when the project opens and
+registers the server switched off, as its MCP log shows; in that run the server did not appear in
+the editor's MCP list, so switching it on from the editor is not confirmed.
 
 #### Codex
 
