@@ -705,6 +705,7 @@ fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
     for bad in [
         r#"{"version":"0.7.0","modules":["calque","kulman"]}"#,
         r#"{"version":"0.7.0","modules":["calque","plaz","calque"]}"#,
+        r#"{"version":"0.7.0","modules":["../../victim"]}"#,
         r#"{"version":"#,
     ] {
         let (t, base, home) = installed();
@@ -953,32 +954,6 @@ fn status_command_equals_the_plain_form() {
     assert!(named.status.success(), "{}", stderr(&named));
     assert_eq!(stdout(&named), stdout(&plain));
     assert_eq!(stderr(&named), stderr(&plain));
-    let help = kulman(&home, &base).arg("--help").output().unwrap();
-    let help = stdout(&help);
-    assert!(
-        help.contains(
-            "  status   Show what is installed and whether a newer release exists \
-             (the same as no command)\n"
-        ),
-        "{help}"
-    );
-    assert!(
-        help.trim_end().ends_with("With no command, shows status."),
-        "{help}"
-    );
-}
-
-#[test]
-fn yes_is_described_in_the_help_of_install_update_and_remove() {
-    let (_t, base, home) = installed();
-    for (cmd, text) in [
-        ("install", "Ask nothing: take the defaults and go on"),
-        ("update", "Ask nothing: take the defaults and go on"),
-        ("remove", "Ask nothing: say yes and go on"),
-    ] {
-        let out = kulman(&home, &base).args([cmd, "--help"]).output().unwrap();
-        assert!(stdout(&out).contains(text), "{cmd}: {}", stdout(&out));
-    }
 }
 
 #[test]

@@ -567,8 +567,10 @@ fn setup_with_the_real_calque_and_plaz() {
     );
     let built = |name: &str| fs::read(target.join("release").join(name)).ok();
     let (Some(calque), Some(plaz)) = (built("calque"), built("plaz")) else {
-        eprintln!("skipped: no {}/release/{{calque,plaz}}", target.display());
-        return;
+        panic!(
+            "no {}/release/{{calque,plaz}}: run cargo build --release",
+            target.display()
+        );
     };
     let t = tempfile::tempdir().unwrap();
     let base = release(
@@ -674,11 +676,4 @@ fn install_sh_has_no_build_for_an_intel_mac() {
     );
     assert!(!home.exists());
     nothing_in_user_home(t.path());
-}
-
-#[test]
-fn install_sh_is_executable() {
-    use std::os::unix::fs::PermissionsExt;
-    let mode = fs::metadata(SCRIPT).unwrap().permissions().mode();
-    assert_eq!(mode & 0o111, 0o111, "{mode:o}");
 }

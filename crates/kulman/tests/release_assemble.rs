@@ -210,8 +210,7 @@ fn a_read_only_directory_is_refused_before_the_tree_is_built() {
         // root: permissions do not stop it, so there is no refusal to see here.
         fs::remove_file(dir.join("probe")).unwrap();
         mode(0o755);
-        eprintln!("skipped: the directory stays writable for this user");
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     let tree = t.path().join("tree");
     let out = assemble(&[Path::new(VERSION), &dir, Path::new("--tree"), &tree]);

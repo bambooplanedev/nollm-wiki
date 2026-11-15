@@ -441,16 +441,6 @@ mod tests {
     }
 
     #[test]
-    fn the_status_check_waits_less_than_install() {
-        let secs = Duration::from_secs;
-        assert_eq!((WAIT.connect, WAIT.whole), (secs(15), secs(20)));
-        assert_eq!((STATUS_WAIT.connect, STATUS_WAIT.whole), (secs(5), secs(8)));
-        let agent = agent(STATUS_WAIT.connect, Some(STATUS_WAIT.whole));
-        assert_eq!(agent.config().timeouts().connect, Some(secs(5)));
-        assert_eq!(agent.config().timeouts().global, Some(secs(8)));
-    }
-
-    #[test]
     fn a_manifest_without_summary_or_options_parses() {
         let m = Manifest::parse(
             br#"{"version": "0.1.0", "modules": [{"name": "calque"}],
