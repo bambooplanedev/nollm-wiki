@@ -1256,3 +1256,33 @@ fn compile_leaves_the_map_folder_alone() {
 fn compile_leaves_the_map_folder_of_a_visible_output_folder_alone() {
     map_folder_survives("out");
 }
+
+/// The output folder is excluded by its path, not only by the hidden-folder
+/// rule: a `.gitignore` that whitelists `.kulman/`, or `--no-ignore`, still
+/// reads no page of an earlier run as a source.
+#[test]
+fn compile_never_reads_its_own_output_folder_as_a_source() {
+    for respect_ignore in [true, false] {
+        let dir = tempdir().unwrap();
+        let project = dir.path();
+        write(project, ".gitignore", "!.kulman/\n");
+        write(project, "src/a.rs", "pub fn f() {}\n");
+        write(project, "notes.txt", "# Notes\n\nAbout f.\n");
+        let out = project.join(".kulman");
+        let opts = CompileOptions {
+            respect_ignore,
+            ..Default::default()
+        };
+        compile(project, &out, &opts).unwrap();
+        let ids = |out: &Path| -> Vec<String> {
+            index_entries(out)
+                .iter()
+                .map(|e| e["id"].as_str().unwrap().to_string())
+                .collect()
+        };
+        let first = ids(&out);
+        assert!(first.contains(&"notes".to_string()), "{first:?}");
+        compile(project, &out, &opts).unwrap();
+        assert_eq!(ids(&out), first, "respect_ignore={respect_ignore}");
+    }
+}
