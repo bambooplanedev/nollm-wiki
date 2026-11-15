@@ -335,10 +335,10 @@ fn setup_takes_binaries_linked_into_path_as_on_path() {
         assert!(out.status.success(), "{}", stderr(&out));
         stderr(&out)
     };
-    // Each module set up is linked: nothing said (kulman itself is not launched by agents).
-    assert_eq!(run(&["kalka", "plaz"]), "");
-    // plaz is not: said.
-    assert!(run(&["kalka"]).contains("is not on PATH"));
+    // Only kalka is named in the agent configs: kalka linked, nothing said (plaz or kulman not).
+    assert_eq!(run(&["kalka"]), "");
+    // kalka is not linked: said.
+    assert!(run(&["plaz"]).contains("is not on PATH"));
 }
 
 #[test]

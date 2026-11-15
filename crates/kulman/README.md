@@ -122,8 +122,8 @@ kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on 
 run with it put first on their own `PATH` (kulman's own environment and your shell are not changed;
 a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
 kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
-then that the agent configs it writes start `kalka` by name; that is left unsaid when each module
-being set up is linked into a `PATH` folder as described under status.
+then that the agent configs it writes start `kalka` by name; that is left unsaid when
+`kalka` itself is linked into a `PATH` folder as described under status.
 
 ## Asking and not asking
 

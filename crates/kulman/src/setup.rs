@@ -138,8 +138,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     } else {
         None
     };
-    let names = chosen.iter().map(|n| n.as_str());
-    if kalka && !a.remove && !reachable(&bin, names) {
+    if kalka && !a.remove && !reachable(&bin, ["kalka"]) {
         eprintln!("kulman: {}", path_hint(&bin));
         eprintln!(
             "kulman: the agent configs written now start \"kalka\"; an agent started without it \
