@@ -890,6 +890,19 @@ fn status_command_equals_the_plain_form() {
 }
 
 #[test]
+fn yes_is_described_in_the_help_of_install_update_and_remove() {
+    let (_t, base, home) = installed();
+    for (cmd, text) in [
+        ("install", "Ask nothing: take the defaults and go on"),
+        ("update", "Ask nothing: take the defaults and go on"),
+        ("remove", "Ask nothing: say yes and go on"),
+    ] {
+        let out = kulman(&home, &base).args([cmd, "--help"]).output().unwrap();
+        assert!(stdout(&out).contains(text), "{cmd}: {}", stdout(&out));
+    }
+}
+
+#[test]
 fn status_finds_bin_on_path_through_a_symlink() {
     let (t, base, home) = installed();
     let link = t.path().join("bin-link");

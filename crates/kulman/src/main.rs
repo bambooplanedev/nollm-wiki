@@ -39,13 +39,13 @@ enum Cmd {
         /// Install this release instead of the latest one.
         #[arg(long, value_name = "X.Y.Z", value_parser = parse_version)]
         version: Option<String>,
-        /// Ask nothing; the release's defaults apply.
+        /// Ask nothing: take the defaults and go on.
         #[arg(long)]
         yes: bool,
     },
     /// Update kulman and every installed module to the latest release.
     Update {
-        /// Ask nothing.
+        /// Ask nothing: take the defaults and go on.
         #[arg(long)]
         yes: bool,
     },
@@ -54,7 +54,7 @@ enum Cmd {
         /// Modules to remove, comma separated (default: every module, kulman and its files).
         #[arg(long, value_delimiter = ',')]
         modules: Option<Vec<String>>,
-        /// Ask nothing.
+        /// Ask nothing: say yes and go on.
         #[arg(long)]
         yes: bool,
     },
