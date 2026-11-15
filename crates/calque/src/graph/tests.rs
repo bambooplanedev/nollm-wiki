@@ -199,8 +199,34 @@ fn pagerank_ignores_memory_pages() {
     assert_eq!(with.pagerank.get("m"), None);
 }
 
+// Hand-solved fixed point, independent of the code: damping d = 0.85, three
+// pages, b and c mention a, a mentions nobody (a is dangling and spreads its
+// rank evenly over all three). With r = (ra, rb, rc), rb = rc by symmetry:
+//   rb = (1-d)/3 + d*ra/3            = 0.05 + 0.85*ra/3
+//   ra = (1-d)/3 + d*ra/3 + d*2*rb   = 0.05 + 0.85*ra/3 + 1.7*rb
+// Substituting rb: ra = 0.05 + 0.28333*ra + 0.085 + 0.48167*ra = 0.135 + 0.765*ra
+//   => ra = 0.135/0.235 = 27/47 = 0.574468, rb = rc = 10/47 = 0.212766
+// (sum 27/47 + 20/47 = 1). The iteration contracts by about 0.85*2/3 per step,
+// so 40 steps are within 1e-9 of this. With d = 0.5 the same algebra gives
+// ra = 0.5, rb = 0.25, and one iteration from uniform gives ra = 0.711.
 #[test]
-fn pagerank_is_deterministic_and_sums_to_about_one() {
+fn pagerank_of_a_dangling_star_matches_the_hand_solved_values() {
+    let g = build_graph(&map(vec![
+        ent("a", "Alpha", "nothing"),
+        ent("b", "Beta", "mentions Alpha"),
+        ent("c", "Gamma", "mentions Alpha"),
+    ]));
+    for (id, want) in [("a", 27.0 / 47.0), ("b", 10.0 / 47.0), ("c", 10.0 / 47.0)] {
+        assert!(
+            (g.pagerank[id] - want).abs() < 1e-6,
+            "{id}: {} vs {want}",
+            g.pagerank[id]
+        );
+    }
+}
+
+#[test]
+fn pagerank_sums_to_about_one() {
     let g = build_graph(&map(vec![
         ent("a", "Alpha", "mentions Beta"),
         ent("b", "Beta", "mentions Alpha"),
