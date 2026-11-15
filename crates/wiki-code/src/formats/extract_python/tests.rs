@@ -42,6 +42,15 @@ fn a_docstring_sentence_wrapped_across_lines_summarizes_whole() {
 }
 
 #[test]
+fn a_module_docstring_is_its_first_paragraph_only() {
+    // The opening paragraph is boilerplate, so the docstring gives no
+    // summary; the second paragraph must not stand in for it.
+    let src = "\"\"\"\nThis module fetches feeds.\n\nIt retries on failure.\n\"\"\"\ndef fetch():\n    pass\n";
+    let e = crate::extract("fetch.py", src);
+    assert_eq!(e.summary.as_deref(), Some("def fetch()"));
+}
+
+#[test]
 fn summary_fallback_prefers_a_definition_over_a_constant() {
     let src =
         "USER_AGENT = \"Mozilla/5.0\"\n\ndef fetch_feed(url: str) -> bytes:\n    return b\"\"\n";
@@ -141,6 +150,13 @@ fn python_private_class_takes_its_methods_with_it() {
     // extraction must still be happening at all
     assert_has(&e.symbols, "class Public");
     assert_has(&e.symbols, "def Public.run(self) -> None");
+}
+
+#[test]
+fn a_private_class_nested_in_a_public_class_is_hidden_with_its_methods() {
+    let src = "class Outer:\n    class _Inner:\n        def run(self) -> None:\n            pass\n    class Open:\n        pass\n";
+    let e = crate::extract("m.py", src);
+    assert_eq!(e.symbols, vec!["class Outer", "class Outer.Open"]);
 }
 
 #[test]
@@ -454,6 +470,13 @@ fn python_conditionally_defined_module_functions_are_kept() {
 }
 
 #[test]
+fn equal_signatures_are_listed_once() {
+    let src = "if NEW:\n    def parse(text: str) -> int:\n        return 1\nelse:\n    def parse(text: str) -> int:\n        return 2\n";
+    let e = crate::extract("m.py", src);
+    assert_eq!(e.symbols, vec!["def parse(text: str) -> int"]);
+}
+
+#[test]
 fn python_unannotated_assignment_renders_its_value_once() {
     // `signature_cut` leaves an unannotated value to the join, so the
     // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
@@ -472,6 +495,16 @@ fn python_assignment_without_spaces_is_normalized_and_budgeted() {
     let e = crate::extract("state.py", &src);
     assert_has(&e.symbols, "CACHE_DIR = \"/var/cache/store\"");
     assert_has(&e.symbols, &format!("BIG = \"{}…", "y".repeat(47)));
+}
+
+#[test]
+fn a_value_of_exactly_48_characters_is_kept_whole_and_one_more_is_cut() {
+    // Characters, not bytes: 46 `é` and two quotes are 48 characters, 94 bytes.
+    let at = format!("X = \"{}\"", "é".repeat(46));
+    let e = crate::extract("m.py", &format!("{at}\n"));
+    assert_eq!(e.symbols, vec![at]);
+    let e = crate::extract("m.py", &format!("X = \"{}\"\n", "é".repeat(47)));
+    assert_eq!(e.symbols, vec![format!("X = \"{}…", "é".repeat(47))]);
 }
 
 #[test]
@@ -545,6 +578,27 @@ fn python_hash_comment_is_a_doc() {
     assert_eq!(
         doc_of("a.py", src, "W_MIN_DEFAULT_S"),
         (Some("Wait longer than w_min counts as a stall.".into()), 2)
+    );
+}
+
+#[test]
+fn a_multi_line_hash_doc_extends_the_range_over_every_comment_line() {
+    let src = "x = 1\n# Builds the frame\n# for each caller.\ndef f():\n    pass\n";
+    let e = crate::extract("a.py", src);
+    let f = e.items.iter().find(|i| i.name == "f").unwrap();
+    assert_eq!(
+        (f.doc.as_deref(), f.start_line, f.end_line),
+        (Some("Builds the frame for each caller."), 2, 5)
+    );
+}
+
+#[test]
+fn a_blank_line_between_a_comment_and_its_item_leaves_the_item_undocumented() {
+    let src = "x = 1\n# Stray note about nothing.\n\ndef f():\n    pass\n# Builds the frame for each caller.\ndef g():\n    pass\n";
+    assert_eq!(doc_of("a.py", src, "f"), (None, 4));
+    assert_eq!(
+        doc_of("a.py", src, "g"),
+        (Some("Builds the frame for each caller.".into()), 6)
     );
 }
 
