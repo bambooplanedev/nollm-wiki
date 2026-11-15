@@ -382,8 +382,14 @@ per question is noise-level: treat single results as anecdotes.
 ## `kalka setup`
 
 - Agents: Claude Code, pi, Cursor and Codex. Cursor is detected only by a `.cursor/` folder and
-  needs its approval after setup; Codex is set up only with `--agent codex`, and its server entry is
-  global (`~/.codex/config.toml`). The Cursor editor is not checked, only `cursor-agent`.
+  needs its approval after setup; Codex by a `.codex/` folder (not its own home), and its server
+  entry is in the project's `.codex/config.toml`. Codex loads that server only in a project it
+  trusts, which setup cannot grant (it never writes Codex's own config). The project file was
+  checked with codex-cli 0.169 only: the first version that reads it is unknown, and the Codex
+  desktop app is not checked. The Cursor editor is not checked, only `cursor-agent`.
+- The `.codex/config.toml` block is recognised as lines of text, not parsed: a multi-line string
+  that holds exactly kalka's block is taken for it, and a key written with escapes inside quotes
+  (`"mcp_servers"`) is not recognised as `mcp_servers`.
 - With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
   not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
   one an earlier setup created there with only the steps is removed. Seen

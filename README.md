@@ -55,8 +55,8 @@ they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.git
 repo` writes committed files for the whole team. `--scope local` writes its files into this checkout
 only and lists the ones it created in `.git/info/exclude` instead; the exception is Claude Code's
 kalka server, which goes through `claude mcp add-json … --scope local` into Claude Code's own
-configuration and needs the `claude` CLI. Codex keeps its server in `~/.codex/config.toml` with
-either scope.
+configuration and needs the `claude` CLI. Codex's server goes into the project's own
+`.codex/config.toml` with either scope, and Codex loads it only in a project it trusts.
 
 Later, `kulman update` brings everything to the latest release, `kulman setup --scope repo --remove`
 undoes a project's setup (with the scope it was set up with) and `kulman remove` deletes what kulman
