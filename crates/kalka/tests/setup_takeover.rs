@@ -372,3 +372,159 @@ fn setup_without_old_traces_prints_what_it_printed_before() {
         ]
     );
 }
+
+#[test]
+fn a_failed_removal_still_prints_the_removals_before_it() {
+    let f = fixture();
+    f.write(
+        ".mcp.json",
+        &pretty(&json!({"mcpServers": {"wiki": old_entry()}})),
+    );
+    f.write(
+        ".claude/settings.json",
+        &pretty(&json!({"hooks": {"UserPromptSubmit": [old_hook()]}})),
+    );
+    let claude = f.root().join(".claude");
+    let mode = |p: &Path, m| fs::set_permissions(p, fs::Permissions::from_mode(m)).unwrap();
+    mode(&claude.join("settings.json"), 0o444);
+    mode(&claude, 0o555);
+    if fs::write(claude.join("settings.json"), "x").is_ok() {
+        // root: permissions do not stop it, so there is no failed removal to see here.
+        eprintln!("skipped: .claude/ stays writable for this user");
+        return;
+    }
+    let a = f.setup(&["--scope", "repo", "--agent", "claude"]).code(1);
+    mode(&claude, 0o755);
+    assert!(!f.root().join(".mcp.json").exists());
+    assert_eq!(
+        takeover_lines(&out(&a)),
+        ["removed old wiki server from .mcp.json"]
+    );
+}
+
+#[test]
+fn the_takeover_never_follows_a_link_out_of_the_project() {
+    let f = fixture();
+    let shared = f.tmp.path().join("shared");
+    fs::create_dir_all(shared.join("wn")).unwrap();
+    fs::write(shared.join("wn/SKILL.md"), OLD_SKILL).unwrap();
+    let mcp = pretty(&json!({"mcpServers": {"wiki": old_entry()}}));
+    fs::write(shared.join("mcp.json"), &mcp).unwrap();
+    let r = f.root();
+    fs::create_dir_all(r.join(".agents/skills")).unwrap();
+    symlink(shared.join("wn"), r.join(".agents/skills/wiki-navigation")).unwrap();
+    symlink(shared.join("mcp.json"), r.join(".mcp.json")).unwrap();
+    let claude_md = format!("# Rules\n\n{}", old_block());
+    f.write("CLAUDE.md", &claude_md);
+    symlink("CLAUDE.md", r.join("AGENTS.md")).unwrap();
+
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new(), "{}", out(&a));
+    assert_eq!(read(&shared.join("wn/SKILL.md")), OLD_SKILL);
+    assert_eq!(read(&shared.join("mcp.json")), mcp);
+    assert_eq!(read(&r.join("CLAUDE.md")), claude_md);
+    assert!(r.join(".agents/skills/wiki-navigation").is_symlink());
+    assert!(r.join("AGENTS.md").is_symlink());
+}
+
+/// The exclude file of a linked worktree lives in the main checkout's git folder.
+#[test]
+fn setup_removes_the_old_ignore_lines_from_a_worktree_exclude() {
+    let f = fixture();
+    let git = String::from_utf8(
+        std::process::Command::new("which")
+            .arg("git")
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    symlink(git.trim(), f.bin().join("git")).unwrap();
+    let main = f.root();
+    let run = |args: &[&str]| {
+        let s = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(&main)
+            .status()
+            .unwrap();
+        assert!(s.success());
+    };
+    run(&["add", "."]);
+    run(&["commit", "-q", "-m", "x"]);
+    let wt = f.tmp.path().join("wt");
+    run(&["worktree", "add", "-q", wt.to_str().unwrap()]);
+    f.write(".git/info/exclude", "/.pi/extensions/wiki-hint/\n");
+    let a = Command::cargo_bin("kalka")
+        .unwrap()
+        .args(["setup", "--agent", "pi", "--scope", "local"])
+        .current_dir(&wt)
+        .env("PATH", f.bin())
+        .env("HOME", f.tmp.path().join("home"))
+        .env("XDG_DATA_HOME", f.tmp.path().join("home"))
+        .assert()
+        .success();
+    assert_eq!(
+        takeover_lines(&out(&a)),
+        ["removed old wiki ignore line /.pi/extensions/wiki-hint/ from .git/info/exclude"]
+    );
+    let ex = read(&main.join(".git/info/exclude"));
+    assert!(!ex.contains("wiki-hint"), "{ex}");
+}
+
+#[test]
+fn remove_leaves_the_old_entries_alone() {
+    let f = fixture();
+    f.stub("codex", "exit 1");
+    let files = [
+        (
+            ".mcp.json",
+            pretty(&json!({"mcpServers": {"wiki": old_entry()}})),
+        ),
+        ("AGENTS.md", old_block()),
+        (
+            ".agents/skills/wiki-navigation/SKILL.md",
+            OLD_SKILL.to_string(),
+        ),
+    ];
+    for (file, text) in &files {
+        f.write(file, text);
+    }
+    let a = f
+        .setup(&["--remove", "--scope", "repo", "--agent", "claude,pi,codex"])
+        .success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new(), "{}", out(&a));
+    for (file, text) in &files {
+        assert_eq!(&read(&f.root().join(file)), text, "{file}");
+    }
+}
+
+#[test]
+fn an_old_local_claude_server_with_other_settings_stays() {
+    let f = fixture();
+    fs::write(
+        f.tmp.path().join("get-wiki"),
+        "wiki:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: wiki\n  Args: serve --source .\n  Environment:\n    TOKEN=x\n",
+    )
+    .unwrap();
+    let a = f.setup(&["--scope", "repo", "--agent", "claude"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert!(!f.claude_log().contains("mcp remove wiki"));
+}
+
+/// A file the takeover cannot read fails nothing that did not fail before.
+#[test]
+fn an_unreadable_old_location_does_not_fail_setup() {
+    let f = fixture();
+    fs::create_dir_all(f.root().join(".mcp.json")).unwrap();
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert!(f.root().join(".mcp.json").is_dir());
+}

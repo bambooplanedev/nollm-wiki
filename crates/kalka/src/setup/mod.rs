@@ -278,8 +278,8 @@ fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
 /// (same command, other args) is ours; another one is replaced by `own[0]` only when `mcp get`
 /// shows nothing but what setup's own `add-json` yields (scope, status and its issue, type,
 /// command, args, the remove hint): an `Environment:`, `Timeout:` or any other line is a setting
-/// setup did not write.
-fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Outcome {
+/// setup did not write. `exact` asks the same of a removal.
+fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool, exact: bool) -> Outcome {
     let cmd = format!(
         "Command: {}",
         own[0]["command"].as_str().unwrap_or_default()
@@ -325,12 +325,16 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
                     || l == cmd
                     || args.iter().any(|a| a == l)
             };
-            if !remove
-                && !text
-                    .lines()
-                    .map(str::trim)
-                    .all(|l| l.is_empty() || own_line(l))
-            {
+            let other = !text
+                .lines()
+                .map(str::trim)
+                .all(|l| l.is_empty() || own_line(l));
+            if other && exact {
+                return Ok(Outcome::Foreign(format!(
+                    "the \"{name}\" server carries settings setup did not write"
+                )));
+            }
+            if other && !remove {
                 return Ok(other_settings(&format!(
                     "claude mcp remove {name} --scope local"
                 )));
@@ -421,9 +425,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
     if !opts.remove {
         // The old `wiki` setup's own entries go first, so that no run sees both.
-        for line in legacy::take_over(root)?.removed {
-            r.line(&line)?;
-        }
+        legacy::take_over(root, r.out)?;
         // As the registered server compiles: `--memory none` has no memory at all.
         let mut agent_dirs = Vec::new();
         if opts.memory {
@@ -565,7 +567,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, "kalka", &entries, opts.remove);
+            let o = claude_local_mcp(root, "kalka", &entries, opts.remove, false);
             r.item("Claude Code local kalka server", false, Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation

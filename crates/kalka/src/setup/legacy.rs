@@ -6,10 +6,11 @@ use super::{claude_local_mcp, edit, exclude_file, find_on_path, worktree_prefix}
 use crate::hash;
 use edit::Outcome;
 use serde_json::{json, Value};
-use std::io::{ErrorKind, Result};
-use std::path::Path;
+use std::io::{ErrorKind, Result, Write};
+use std::path::{Path, PathBuf};
 
-/// Human-readable lines: what was removed (printed by `run`), and what only looks old.
+/// Human-readable lines: what was removed (each also printed as it happens), and what only looks
+/// old.
 #[derive(Default)]
 pub(super) struct Found {
     pub removed: Vec<String>,
@@ -67,12 +68,21 @@ fn known(text: &str, digests: &[&str]) -> bool {
     digests.contains(&hash::to_hex(&hash::hash_str(text)).as_str())
 }
 
-/// `path`'s text; `None` when it is missing or not UTF-8 (no old text is either).
-fn read_text(path: &Path) -> Result<Option<String>> {
-    match std::fs::read(path) {
-        Ok(b) => Ok(String::from_utf8(b).ok()),
-        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e),
+/// Why `base/rel` may not be touched: a link on the way below `base` (the project, or for the
+/// exclude file the git folder git named), or a path that resolves outside `base`.
+fn unsafe_path(base: &Path, rel: &Path) -> Option<&'static str> {
+    let mut p = base.to_path_buf();
+    for c in rel.components() {
+        p.push(c);
+        match std::fs::symlink_metadata(&p) {
+            Ok(m) if m.file_type().is_symlink() => return Some("is a symbolic link; left"),
+            Ok(_) => {}
+            Err(_) => return None, // missing: nothing to remove
+        }
+    }
+    match (p.canonicalize(), base.canonicalize()) {
+        (Ok(a), Ok(b)) if a.starts_with(&b) => None,
+        _ => Some("lies outside the project; left"),
     }
 }
 
@@ -83,37 +93,70 @@ fn block(text: &str) -> Option<&str> {
     Some(&text[i..i + j + NAV_END.len()])
 }
 
-/// Drops every line equal to `line`; `true` when there was one.
-fn remove_line(path: &Path, line: &str) -> Result<bool> {
-    let Some(text) = read_text(path)? else {
-        return Ok(false);
-    };
+/// Drops every line of `text` equal to `line`; `None` when there is none.
+fn without_line(text: &str, line: &str) -> Option<String> {
     let kept: String = text
         .split_inclusive('\n')
         .filter(|l| l.lines().next() != Some(line))
         .collect();
-    if kept.len() == text.len() {
-        return Ok(false);
-    }
-    std::fs::write(path, kept)?;
-    Ok(true)
+    (kept.len() != text.len()).then_some(kept)
 }
 
-impl Found {
-    fn note(&mut self, what: &str, from: &str, o: Outcome) {
+struct Takeover<'a> {
+    root: &'a Path,
+    out: &'a mut dyn Write,
+    found: Found,
+}
+
+impl Takeover<'_> {
+    /// Prints a removal at once, so a later failure cannot hide it.
+    fn note(&mut self, what: &str, from: &str, o: Outcome) -> Result<()> {
         match o {
-            Outcome::Done => self
-                .removed
-                .push(format!("removed old wiki {what} from {from}")),
+            Outcome::Done => {
+                let line = format!("removed old wiki {what} from {from}");
+                writeln!(self.out, "{line}")?;
+                self.found.removed.push(line);
+            }
             Outcome::AlreadyThere => {}
             Outcome::Foreign(why) => self
+                .found
                 .differing
                 .push(format!("{from}: old wiki {what}: {why}")),
+        }
+        Ok(())
+    }
+
+    /// `base/rel`'s text, after the link check. `Err` is why it is left: a link, a read error,
+    /// not UTF-8 (no old text is). Only writes fail the takeover.
+    fn probe(base: &Path, rel: &Path) -> std::result::Result<Option<String>, String> {
+        if let Some(why) = unsafe_path(base, rel) {
+            return Err(why.into());
+        }
+        match std::fs::read(base.join(rel)) {
+            Ok(b) => String::from_utf8(b)
+                .map(Some)
+                .map_err(|_| "is not UTF-8 text".into()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("could not be read: {e}")),
+        }
+    }
+
+    /// Runs `remove` on `file` when it can be read safely and exists; `Foreign` otherwise.
+    fn check(
+        &self,
+        file: &str,
+        remove: impl FnOnce(&Path, String) -> Result<Outcome>,
+    ) -> Result<Outcome> {
+        match Self::probe(self.root, Path::new(file)) {
+            Err(why) => Ok(Outcome::Foreign(why)),
+            Ok(None) => Ok(Outcome::AlreadyThere),
+            Ok(Some(t)) => remove(&self.root.join(file), t),
         }
     }
 
     /// Everything but Claude Code's local scope, which needs its CLI.
-    fn in_files(&mut self, root: &Path) -> Result<()> {
+    fn in_files(&mut self) -> Result<()> {
+        let root = self.root;
         let entry = old_entry();
         let mut pi = entry.clone();
         pi["exposure"] = json!("direct"); // mod.rs:458-461
@@ -122,82 +165,106 @@ impl Found {
             (".pi/mcp.json", &pi),
             (".cursor/mcp.json", &entry),
         ] {
-            let path = root.join(file);
-            let o = edit::remove_entry(
-                root,
-                &path,
-                &["mcpServers"],
-                "wiki",
-                std::slice::from_ref(v),
-            )?;
-            self.note("server", file, o);
+            let own = std::slice::from_ref(v);
+            let o = self.check(file, |p, _| {
+                edit::remove_entry(root, p, &["mcpServers"], "wiki", own)
+            })?;
+            self.note("server", file, o)?;
         }
 
         let item = json!({"hooks": [{"type": "command", "command": "wiki hint --claude-hook"}]}); // mod.rs:553
         for file in [".claude/settings.json", ".claude/settings.local.json"] {
-            let path = root.join(file);
-            let mut o = edit::remove_item(root, &path, &["hooks", "UserPromptSubmit"], &item)?;
-            if o == Outcome::AlreadyThere
-                && read_text(&path)?.is_some_and(|t| t.contains("wiki hint --claude-hook"))
-            {
-                o = Outcome::Foreign("a hook running `wiki hint --claude-hook` differs".into());
+            let parents = ["hooks", "UserPromptSubmit"];
+            let o = self.check(file, |p, _| edit::remove_item(root, p, &parents, &item))?;
+            // Another `wiki hint` item, left beside the removed one or alone.
+            let other = !matches!(o, Outcome::Foreign(_))
+                && Self::probe(root, Path::new(file))
+                    .is_ok_and(|t| t.is_some_and(|t| t.contains("wiki hint --claude-hook")));
+            self.note("hook", file, o)?;
+            if other {
+                let why = "a hook running `wiki hint --claude-hook` differs".into();
+                self.note("hook", file, Outcome::Foreign(why))?;
             }
-            self.note("hook", file, o);
         }
 
         for (what, file, digests) in [
             ("skill", OLD_SKILL, &OLD_SKILL_DIGESTS[..]),
             ("extension", OLD_HOOK, &OLD_HOOK_DIGESTS[..]),
         ] {
-            let path = root.join(file);
-            let o = match read_text(&path)? {
-                Some(t) if known(&t, digests) => edit::remove_file(root, &path, &[&t])?,
-                None if !path.exists() => Outcome::AlreadyThere,
-                _ => Outcome::Foreign("file has other content".into()),
-            };
-            self.note(what, file, o);
+            let o = self.check(file, |p, t| {
+                if known(&t, digests) {
+                    edit::remove_file(root, p, &[&t])
+                } else {
+                    Ok(Outcome::Foreign("file has other content".into()))
+                }
+            })?;
+            self.note(what, file, o)?;
         }
 
-        let path = root.join("AGENTS.md");
-        let text = read_text(&path)?.unwrap_or_default();
-        let o = match block(&text) {
-            Some(b) if known(b, &OLD_BLOCK_DIGESTS) => edit::remove_block(root, &path, b)?,
+        let o = self.check("AGENTS.md", |p, text| match block(&text) {
+            Some(b) if known(b, &OLD_BLOCK_DIGESTS) => edit::remove_block(root, p, b),
             _ if text.lines().any(|l| l == NAV_BEGIN.trim_end()) => {
-                Outcome::Foreign("the block has other content".into())
+                Ok(Outcome::Foreign("the block has other content".into()))
             }
-            _ => Outcome::AlreadyThere,
-        };
-        self.note("navigation block", "AGENTS.md", o);
+            _ => Ok(Outcome::AlreadyThere),
+        })?;
+        self.note("navigation block", "AGENTS.md", o)?;
 
         // The lines local scope wrote for those two folders (mod.rs:494, 545, 579-590). One
-        // whose folder is still there (an edited file was left) keeps ignoring it.
-        if let Some(exclude) = exclude_file(root) {
-            let prefix = worktree_prefix(root);
-            for dir in [".agents/skills/wiki-navigation", ".pi/extensions/wiki-hint"] {
-                let line = format!("/{prefix}{dir}/");
-                if !root.join(dir).exists() && remove_line(&exclude, &line)? {
-                    let what = format!("ignore line {line}");
-                    self.note(&what, ".git/info/exclude", Outcome::Done);
-                }
+        // whose folder is still there (an edited file was left) keeps ignoring it. The file is
+        // where setup puts its own lines; git resolved the way to its git folder (outside the
+        // project in a linked worktree), so the link check covers `info/exclude` below that.
+        let Some(exclude) = exclude_file(root) else {
+            return Ok(());
+        };
+        let (base, rel): (PathBuf, PathBuf) = match exclude.strip_prefix(root) {
+            Ok(rel) if !rel.starts_with("..") => (root.into(), rel.into()),
+            _ => match exclude.parent().and_then(Path::parent) {
+                Some(git_dir) => (git_dir.into(), "info/exclude".into()),
+                None => return Ok(()),
+            },
+        };
+        let prefix = worktree_prefix(root);
+        for dir in [".agents/skills/wiki-navigation", ".pi/extensions/wiki-hint"] {
+            let line = format!("/{prefix}{dir}/");
+            if root.join(dir).exists() {
+                continue;
             }
+            let what = format!("ignore line {line}");
+            let o = match Self::probe(&base, &rel) {
+                Err(why) => Outcome::Foreign(why),
+                Ok(text) => match text.as_deref().and_then(|t| without_line(t, &line)) {
+                    Some(kept) => {
+                        std::fs::write(&exclude, kept)?;
+                        Outcome::Done
+                    }
+                    None => Outcome::AlreadyThere,
+                },
+            };
+            self.note(&what, ".git/info/exclude", o)?;
         }
         Ok(())
     }
 }
 
-/// Runs before setup writes anything, in every location whatever `--scope` and `--agent` say.
-pub(super) fn take_over(root: &Path) -> Result<Found> {
-    let mut f = Found::default();
-    f.in_files(root)?;
+/// Runs before setup writes anything, in every location whatever `--scope` and `--agent` say;
+/// prints each removal to `out` as it happens.
+pub(super) fn take_over(root: &Path, out: &mut dyn Write) -> Result<Found> {
+    let mut t = Takeover {
+        root,
+        out,
+        found: Found::default(),
+    };
+    t.in_files()?;
     // After `.mcp.json`, which Claude Code shows as a `wiki` of project scope. Only a local one
-    // is removed; another scope's (user, project) is reported. Without the CLI there is nothing
-    // to look through.
+    // is removed, and only with nothing but what the old `add-json` yields; another scope's
+    // (user, project) is reported. Without the CLI there is nothing to look through.
     if find_on_path("claude").is_some() {
-        // Recognised as the old one did (mod.rs:243-259).
-        let o = claude_local_mcp(root, "wiki", &[old_entry()], true);
-        f.note("server", "claude (local scope)", o);
+        // Recognised as the old one did (mod.rs:243-259), as strictly as kalka's own entry.
+        let o = claude_local_mcp(root, "wiki", &[old_entry()], true, true);
+        t.note("server", "claude (local scope)", o)?;
     }
-    Ok(f)
+    Ok(t.found)
 }
 
 #[cfg(test)]

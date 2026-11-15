@@ -9,8 +9,20 @@ fn found_in(files: &[(&str, &str)]) -> (tempfile::TempDir, Found) {
         fs::create_dir_all(p.parent().unwrap()).unwrap();
         fs::write(p, text).unwrap();
     }
-    let mut f = Found::default();
-    f.in_files(d.path()).unwrap();
+    let mut out = Vec::new();
+    let mut t = Takeover {
+        root: d.path(),
+        out: &mut out,
+        found: Found::default(),
+    };
+    t.in_files().unwrap();
+    let f = t.found;
+    let printed: Vec<String> = String::from_utf8(out)
+        .unwrap()
+        .lines()
+        .map(String::from)
+        .collect();
+    assert_eq!(printed, f.removed);
     (d, f)
 }
 
@@ -87,11 +99,41 @@ fn the_block_is_hashed_from_its_begin_line_through_its_end_line() {
 }
 
 #[test]
-fn remove_line_drops_only_the_exact_line() {
+fn without_line_drops_only_the_exact_line() {
+    let kept = without_line("/a/\n/a/b/\n/a/\r\n/a/", "/a/");
+    assert_eq!(kept.as_deref(), Some("/a/b/\n"));
+    assert_eq!(without_line("/a/b/\n", "/a/"), None);
+}
+
+#[test]
+fn a_differing_hook_beside_a_removed_one_is_reported() {
+    let hooks = r#"{"hooks":{"UserPromptSubmit":[
+        {"hooks":[{"type":"command","command":"wiki hint --claude-hook"}]},
+        {"matcher":"x","hooks":[{"type":"command","command":"wiki hint --claude-hook"}]}]}}"#;
+    let (d, f) = found_in(&[(".claude/settings.local.json", hooks)]);
+    assert_eq!(
+        f.removed,
+        ["removed old wiki hook from .claude/settings.local.json"]
+    );
+    assert_eq!(
+        f.differing,
+        [".claude/settings.local.json: old wiki hook: a hook running `wiki hint --claude-hook` differs"]
+    );
+    let left = fs::read_to_string(d.path().join(".claude/settings.local.json")).unwrap();
+    assert!(left.contains("\"matcher\": \"x\""), "{left}");
+}
+
+#[test]
+fn a_location_that_cannot_be_read_is_reported() {
     let d = tempfile::tempdir().unwrap();
-    let p = d.path().join("exclude");
-    fs::write(&p, "/a/\n/a/b/\n/a/\r\n/a/").unwrap();
-    assert!(remove_line(&p, "/a/").unwrap());
-    assert_eq!(fs::read_to_string(&p).unwrap(), "/a/b/\n");
-    assert!(!remove_line(&p, "/a/").unwrap());
+    fs::create_dir_all(d.path().join(".mcp.json")).unwrap();
+    let mut out = Vec::new();
+    let mut t = Takeover {
+        root: d.path(),
+        out: &mut out,
+        found: Found::default(),
+    };
+    t.in_files().unwrap();
+    assert_eq!(t.found.differing.len(), 1, "{:?}", t.found.differing);
+    assert!(t.found.differing[0].starts_with(".mcp.json: old wiki server: could not be read"));
 }
