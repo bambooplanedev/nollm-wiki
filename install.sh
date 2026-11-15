@@ -5,7 +5,8 @@
 #
 # It reads SHA256SUMS of the latest release, downloads the kulman archive for this machine,
 # checks it against that file, and moves the one binary to <home>/bin/kulman. It writes nothing
-# else and edits no shell profile; `kulman install` then installs the modules.
+# else and edits no shell profile; `kulman install` then installs the modules. With minisign
+# installed it first checks SHA256SUMS.minisig against the release key (release/kulman.pub).
 #
 # KULMAN_HOME     the home directory (default: $HOME/.kulman-home)
 # KULMAN_RELEASE_URL  where releases are (default: https://github.com/bambooplanedev/kulman/releases)
@@ -18,6 +19,8 @@ main() {
     LC_ALL=C
     export LC_ALL
 
+    # The key line of release/kulman.pub.
+    ki_key=RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
     ki_base=${KULMAN_RELEASE_URL:-https://github.com/bambooplanedev/kulman/releases}
     while :; do
         case $ki_base in
@@ -102,6 +105,25 @@ main() {
     ki_tmp=$(mktemp -d "$ki_home/.tmp-install.XXXXXX") || die "cannot create a temp dir in $ki_home"
 
     fetch "$ki_base/latest/download/SHA256SUMS" "$ki_tmp/SHA256SUMS" 1048576
+    # The file as downloaded is verified, before any line of it is read.
+    if command -v minisign >/dev/null 2>&1; then
+        ki_sig=$ki_tmp/SHA256SUMS.minisig
+        # In a subshell: fetch exits on failure, and in a local tree no signature is allowed.
+        if (fetch "$ki_base/latest/download/SHA256SUMS.minisig" "$ki_sig" 4096) 2>/dev/null; then
+            minisign -Vm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
+                die "SHA256SUMS: signature does not verify"
+        elif [ -n "$ki_https" ]; then
+            die "SHA256SUMS: signature is missing"
+        elif [ -e "$ki_sig" ]; then
+            # There, but past the limit: curl makes no file for one that is absent.
+            die "SHA256SUMS: signature does not verify"
+        else
+            printf 'install.sh: signature not checked: local release tree\n'
+        fi
+    else
+        printf '%s %s\n' 'install.sh: signature not checked (minisign not found); kulman checks it' \
+            'on every install and update'
+    fi
     # Without a carriage return at the end of each line, so a CRLF file reads the same.
     ki_cr=$(printf '\r')
     ki_sums=$ki_tmp/SHA256SUMS.lf

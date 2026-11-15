@@ -14,6 +14,33 @@ use serde_json::{json, Value};
 
 const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../install.sh");
 const KALKA: &[u8] = b"#!/bin/sh\necho kalka\n";
+const PUBLIC_KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/kulman.pub");
+/// The first line `install.sh` prints when there is no `minisign`.
+const NO_MINISIGN: &str = "install.sh: signature not checked (minisign not found); kulman checks \
+                           it on every install and update\n";
+/// What `install.sh` runs, linked from this `PATH`.
+const TOOLS: [&str; 20] = [
+    "sh",
+    "uname",
+    "curl",
+    "tar",
+    "gzip",
+    "mktemp",
+    "sha256sum",
+    "shasum",
+    "dirname",
+    "mkdir",
+    "rm",
+    "rmdir",
+    "sed",
+    "grep",
+    "tr",
+    "wc",
+    "chmod",
+    "mv",
+    "cat",
+    "printf",
+];
 
 /// A temp root holding `release/` (0.7.0: kalka, and kulman as `kulman_bytes` per target); the
 /// home `install.sh` is pointed at is `<root>/home`.
@@ -25,12 +52,47 @@ fn setup(kulman_bytes: &[u8]) -> (tempfile::TempDir, String) {
     (t, base)
 }
 
-/// `sh` reading `script` from stdin, with `KULMAN_HOME=home`, the release, and `HOME` a temp
-/// dir beside `home`.
+/// `dir` holding a link to each of `TOOLS` this `PATH` has: a `PATH` with no `minisign`, though
+/// this machine may have one, but for a fake one a test puts there.
+fn tools(dir: &Path) -> PathBuf {
+    if !dir.join("sh").exists() {
+        fs::create_dir_all(dir).unwrap();
+        for tool in TOOLS {
+            let found = Command::new("sh")
+                .args(["-c", &format!("command -v {tool}")])
+                .output()
+                .unwrap();
+            let real = String::from_utf8(found.stdout).unwrap();
+            // `printf` is a builtin in most shells; `sha256sum` or `shasum` may be missing.
+            if found.status.success() && real.starts_with('/') {
+                std::os::unix::fs::symlink(real.trim(), dir.join(tool)).unwrap();
+            }
+        }
+    }
+    dir.to_path_buf()
+}
+
+/// A fake `minisign` on the `PATH` of `sh`: it writes its arguments, one per line, to
+/// `<t>/minisign.args`, and the file named after `-Vm` to `<t>/minisign.file`, and exits `code`.
+fn fake_minisign(t: &Path, code: i32) {
+    use std::os::unix::fs::PermissionsExt;
+    let path = tools(&t.join("tools")).join("minisign");
+    let script = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" >'{}'\ncat -- \"$2\" >'{}'\nexit {code}\n",
+        t.join("minisign.args").display(),
+        t.join("minisign.file").display()
+    );
+    fs::write(&path, script).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// `sh` reading `script` from stdin, with `KULMAN_HOME=home`, the release, `HOME` a temp dir
+/// beside `home`, and `PATH` the `tools` beside it.
 fn sh(home: &Path, base: &str, script: &[u8]) -> Output {
     let user = home.with_file_name("user-home");
     fs::create_dir_all(&user).unwrap();
     let mut child = Command::new("sh")
+        .env("PATH", tools(&home.with_file_name("tools")))
         .env("KULMAN_HOME", home)
         .env("KULMAN_RELEASE_URL", base)
         .env("HOME", &user)
@@ -94,7 +156,7 @@ fn install_sh_puts_kulman_in_bin() {
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\nnext: {}/kulman install\n",
+            "{NO_MINISIGN}kulman installed in {}\nnext: {}/kulman install\n",
             bin.display(),
             bin.display()
         )
@@ -138,7 +200,7 @@ fn install_sh_over_an_installation_says_update() {
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
+            "{NO_MINISIGN}kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
              modules to the same version\n",
             bin.display(),
             bin.display()
@@ -156,6 +218,141 @@ fn install_sh_reads_a_crlf_sha256sums() {
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "kulman", KULMAN_BYTES);
+}
+
+/// The latest `SHA256SUMS` of the release under `t`, and where its signature goes.
+fn sums_and_signature(t: &Path) -> (PathBuf, PathBuf) {
+    let at = t.join("release/latest/download");
+    (at.join("SHA256SUMS"), at.join("SHA256SUMS.minisig"))
+}
+
+#[test]
+fn install_sh_checks_the_signature_with_minisign() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let (sums, sig) = sums_and_signature(t.path());
+    // CRLF: the file is verified as downloaded, not as read.
+    let crlf = fs::read_to_string(&sums).unwrap().replace('\n', "\r\n");
+    fs::write(&sums, &crlf).unwrap();
+    fs::write(&sig, "a signature\n").unwrap();
+    fake_minisign(t.path(), 0);
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+    let bin = home.join("bin");
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "kulman installed in {}\nnext: {}/kulman install\n",
+            bin.display(),
+            bin.display()
+        )
+    );
+    let args = fs::read_to_string(t.path().join("minisign.args")).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    let [vm, got_sums, x, got_sig, p, key] = args[..] else {
+        panic!("{args:?}");
+    };
+    assert_eq!((vm, x, p), ("-Vm", "-x", "-P"));
+    let got_sums = Path::new(got_sums);
+    assert_eq!(got_sums.parent().unwrap().parent().unwrap(), home);
+    let tmp = got_sums.parent().unwrap().file_name().unwrap();
+    assert!(
+        tmp.to_str().unwrap().starts_with(".tmp-install."),
+        "{tmp:?}"
+    );
+    assert_eq!(got_sums.file_name().unwrap(), "SHA256SUMS");
+    assert_eq!(
+        Path::new(got_sig),
+        got_sums.with_file_name("SHA256SUMS.minisig")
+    );
+    assert_eq!(
+        key,
+        fs::read_to_string(PUBLIC_KEY)
+            .unwrap()
+            .lines()
+            .nth(1)
+            .unwrap()
+    );
+    assert_eq!(
+        fs::read_to_string(t.path().join("minisign.file")).unwrap(),
+        crlf
+    );
+}
+
+#[test]
+fn install_sh_stops_when_the_signature_does_not_verify() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let (_, sig) = sums_and_signature(t.path());
+    fs::write(&sig, "a signature\n").unwrap();
+    fake_minisign(t.path(), 1);
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        "install.sh: SHA256SUMS: signature does not verify\n"
+    );
+    assert_eq!(stdout(&out), "");
+    assert!(!home.exists());
+    nothing_in_user_home(t.path());
+    fs::create_dir_all(home.join("bin")).unwrap();
+    fs::write(home.join("bin/kulman"), "old").unwrap();
+    let before = snapshot(&home);
+    let out = install_sh(&home, &base);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(snapshot(&home), before);
+}
+
+#[test]
+fn install_sh_takes_no_signature_past_4096_bytes() {
+    let (t, base) = setup(KULMAN_BYTES);
+    let (_, sig) = sums_and_signature(t.path());
+    fs::write(&sig, "x".repeat(4097)).unwrap();
+    fake_minisign(t.path(), 0);
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        "install.sh: SHA256SUMS: signature does not verify\n"
+    );
+    assert!(!t.path().join("minisign.args").exists());
+    assert!(!home.exists());
+}
+
+#[test]
+fn install_sh_goes_on_in_a_local_tree_without_a_signature() {
+    let (t, base) = setup(KULMAN_BYTES);
+    fake_minisign(t.path(), 1);
+    let home = t.path().join("home");
+    let out = install_sh(&home, &base);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
+    let bin = home.join("bin");
+    assert_eq!(
+        stdout(&out),
+        format!(
+            "install.sh: signature not checked: local release tree\nkulman installed in {}\n\
+             next: {}/kulman install\n",
+            bin.display(),
+            bin.display()
+        )
+    );
+    assert!(!t.path().join("minisign.args").exists());
+}
+
+#[test]
+fn install_sh_holds_the_release_key() {
+    let key = fs::read_to_string(PUBLIC_KEY).unwrap();
+    let key = key.lines().nth(1).unwrap();
+    let script = fs::read_to_string(SCRIPT).unwrap();
+    let held: Vec<&str> = script
+        .lines()
+        .filter_map(|l| l.trim_start().strip_prefix("ki_key="))
+        .collect();
+    assert_eq!(held, [key]);
 }
 
 #[test]
