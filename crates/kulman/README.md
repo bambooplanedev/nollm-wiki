@@ -249,7 +249,8 @@ read) or `kulman: manifest.json: signature does not verify`, then `nothing chang
 command only looks at the latest release for a newer one (`kulman status`, and `install` over an
 installed version), its `could not check for a newer release (…)` line gives the reason instead. In
 a `file://` tree a signature that is there must verify too; one that is absent is allowed, and
-`kulman` says `signature not checked: local release tree` once.
+`kulman` says `signature not checked: local release tree` once, on stderr: it is a notice, not a
+result.
 
 `install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
 checks `SHA256SUMS` with it (`minisign -VHm`: like `kulman`, only the prehashed form) before it
@@ -261,7 +262,7 @@ minisign that knows `-H`; 0.11 and 0.12 do, and with one that does not, the chec
 `install.sh` stops. In a `file://` tree an absent signature is allowed, with the line `install.sh:
 signature not checked: local release tree`. Without `minisign` it goes on by SHA-256 alone and says
 so: `install.sh: signature not checked (minisign not found); kulman checks it on every install and
-update`.
+update`. Both lines go to stderr, so a script that captures the output does not get them.
 
 By hand, with each file and its `.minisig` in one folder:
 

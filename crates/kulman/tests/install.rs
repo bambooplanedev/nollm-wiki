@@ -42,7 +42,8 @@ fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) ->
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
     assert_eq!(stderr(&out).lines().last(), Some("nothing changed"));
     assert_eq!(snapshot(t.path()), before);
-    stderr(&out)
+    // Without the notice that a local tree is unsigned, which comes first.
+    stderr(&out).replace("signature not checked: local release tree\n", "")
 }
 
 #[test]
@@ -627,11 +628,10 @@ fn install_with_nothing_to_do_says_so_and_changes_nothing() {
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+        assert_eq!(stderr(&out), "signature not checked: local release tree\n");
         assert_eq!(
             stdout(&out),
-            format!(
-                "signature not checked: local release tree\nalready installed: {names} (0.7.0)\n"
-            ),
+            format!("already installed: {names} (0.7.0)\n"),
             "{args:?}"
         );
         assert_eq!(snapshot(t.path()), before, "{args:?}");
