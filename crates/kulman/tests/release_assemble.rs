@@ -179,6 +179,26 @@ fn a_failing_tree_leaves_the_directory_without_the_control_files() {
 }
 
 #[test]
+fn a_read_only_directory_is_refused_before_the_tree_is_built() {
+    use std::os::unix::fs::PermissionsExt;
+    let (t, dir) = assets();
+    let mode = |m| fs::set_permissions(&dir, fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if fs::write(dir.join("probe"), "").is_ok() {
+        // root: permissions do not stop it, so there is no refusal to see here.
+        fs::remove_file(dir.join("probe")).unwrap();
+        mode(0o755);
+        eprintln!("skipped: the directory stays writable for this user");
+        return;
+    }
+    let tree = t.path().join("tree");
+    let out = assemble(&[Path::new(VERSION), &dir, Path::new("--tree"), &tree]);
+    mode(0o755);
+    fails(&out, "is not writable");
+    assert!(!tree.exists());
+}
+
+#[test]
 fn cdpath_does_not_move_the_script_off_its_repository() {
     let (_t, dir) = assets();
     let repo = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");

@@ -51,6 +51,7 @@ fi
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 modules=$repo/release/modules.json
 [ -d "$dir" ] || die "$dir is not a directory"
+[ -w "$dir" ] || die "$dir is not writable"
 if [ -n "$tree" ] && { [ -e "$tree" ] || [ -L "$tree" ]; }; then
     die "$tree already exists"
 fi
