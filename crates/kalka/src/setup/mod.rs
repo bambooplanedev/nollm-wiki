@@ -1,6 +1,7 @@
 //! `kalka setup`: writes MCP config, skills and hooks into a project, and undoes exactly what it wrote.
 
 pub mod edit;
+mod legacy;
 
 use crate::{compile, memory, CompileOptions, WikiError};
 use clap::ValueEnum;
@@ -273,25 +274,41 @@ fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
     run().unwrap_or_else(Outcome::Foreign)
 }
 
-/// Claude Code's own local-scope MCP config, through its CLI. Either memory variant is ours; the
-/// other one is replaced by `entry` only when `mcp get` shows nothing but what setup's own
-/// `add-json` yields (scope, status and its issue, type, command, args, the remove hint): an
-/// `Environment:`, `Timeout:` or any other line is a setting setup did not write.
-fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> Outcome {
+/// Claude Code's own local-scope MCP config for the server `name`, through its CLI. Each of `own`
+/// (same command, other args) is ours; another one is replaced by `own[0]` only when `mcp get`
+/// shows nothing but what setup's own `add-json` yields (scope, status and its issue, type,
+/// command, args, the remove hint): an `Environment:`, `Timeout:` or any other line is a setting
+/// setup did not write.
+fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Outcome {
+    let cmd = format!(
+        "Command: {}",
+        own[0]["command"].as_str().unwrap_or_default()
+    );
+    let args: Vec<String> = own
+        .iter()
+        .map(|v| {
+            let a: Vec<&str> = v["args"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            format!("Args: {}", a.join(" "))
+        })
+        .collect();
     let run = || -> Result<Outcome, String> {
-        let (found, text) = claude(root, &["mcp", "get", "kalka"])?;
+        let (found, text) = claude(root, &["mcp", "get", name])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
-            let args = |m| has(&format!("Args: {}", serve_args(m).join(" ")));
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
-                && has(&format!("Command: {CMD}"))
-                && (args(true) || args(false));
+                && has(&cmd)
+                && args.iter().any(|a| has(a));
             if !ours {
-                return Ok(Outcome::Foreign(
-                    "another \"kalka\" server is configured".into(),
-                ));
+                return Ok(Outcome::Foreign(format!(
+                    "another \"{name}\" server is configured"
+                )));
             }
-            if !remove && args(memory) {
+            if !remove && has(&args[0]) {
                 return Ok(Outcome::AlreadyThere);
             }
             let own_line = |l: &str| {
@@ -303,14 +320,10 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> O
                 ]
                 .iter()
                 .any(|k| l.starts_with(k))
-                    || [
-                        "kalka:",
-                        "Type: stdio",
-                        &format!("Command: {CMD}"),
-                        &format!("Args: {}", serve_args(true).join(" ")),
-                        &format!("Args: {}", serve_args(false).join(" ")),
-                    ]
-                    .contains(&l)
+                    || l == format!("{name}:")
+                    || l == "Type: stdio"
+                    || l == cmd
+                    || args.iter().any(|a| a == l)
             };
             if !remove
                 && !text
@@ -318,21 +331,25 @@ fn claude_local_mcp(root: &Path, entry: &Value, remove: bool, memory: bool) -> O
                     .map(str::trim)
                     .all(|l| l.is_empty() || own_line(l))
             {
-                return Ok(other_settings("claude mcp remove kalka --scope local"));
+                return Ok(other_settings(&format!(
+                    "claude mcp remove {name} --scope local"
+                )));
             }
-            claude(root, &["mcp", "remove", "kalka", "--scope", "local"])?;
+            claude(root, &["mcp", "remove", name, "--scope", "local"])?;
             if remove {
                 return Ok(Outcome::Done);
             }
         } else if remove {
             return Ok(Outcome::AlreadyThere);
         }
-        let json = entry.to_string();
-        claude(
-            root,
-            &["mcp", "add-json", "kalka", &json, "--scope", "local"],
-        )
-        .map_err(|e| if found { lost(&e) } else { e })?;
+        let json = own[0].to_string();
+        claude(root, &["mcp", "add-json", name, &json, "--scope", "local"]).map_err(|e| {
+            if found {
+                lost(&e)
+            } else {
+                e
+            }
+        })?;
         Ok(Outcome::Done)
     };
     run().unwrap_or_else(Outcome::Foreign)
@@ -403,6 +420,10 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let skills = skills.each_ref().map(String::as_str);
     let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
     if !opts.remove {
+        // The old `wiki` setup's own entries go first, so that no run sees both.
+        for line in legacy::take_over(root)?.removed {
+            r.line(&line)?;
+        }
         // As the registered server compiles: `--memory none` has no memory at all.
         let mut agent_dirs = Vec::new();
         if opts.memory {
@@ -544,7 +565,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, &entries[0], opts.remove, opts.memory);
+            let o = claude_local_mcp(root, "kalka", &entries, opts.remove);
             r.item("Claude Code local kalka server", false, Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation

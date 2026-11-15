@@ -960,12 +960,14 @@ fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     assert!(!f.root().join(".kulman/.serve").exists());
 }
 
-/// A project that `wiki setup` set up in an earlier life: its `wiki` server, skill and block.
+/// A project that `wiki setup` set up in an earlier life, edited by hand since: its `wiki`
+/// server, skill and block, none of them what the old tool wrote (that is taken over, see
+/// `setup_takeover.rs`).
 fn old_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
     let f = fixture(true, true);
     codex_stub(&f);
     let r = f.root();
-    let mcp = "{\n  \"mcpServers\": {\n    \"wiki\": {\n      \"command\": \"wiki\",\n      \"args\": [\n        \"serve\",\n        \"--source\",\n        \".\"\n      ]\n    }\n  }\n}\n";
+    let mcp = "{\n  \"mcpServers\": {\n    \"wiki\": {\n      \"command\": \"wiki\",\n      \"args\": [\n        \"serve\",\n        \"--source\",\n        \"src\"\n      ]\n    }\n  }\n}\n";
     let skill = "---\nname: wiki-navigation\n---\nold skill\n";
     let agents = "# Team\n\n<!-- wiki:navigation -->\nold steps\n<!-- /wiki:navigation -->\n";
     let old = [
