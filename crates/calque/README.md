@@ -243,8 +243,14 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-Every agent runs the server as plain `calque`, so `calque` must be on `PATH`; setup warns when it is
-not. Safe to run twice. An entry, file or block at the same place with other content is left alone
+A `calque` installed by kulman (run as `~/.kulman-home/bin/calque`, or from `$KULMAN_HOME/bin`)
+has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` through `sh -c` (the
+prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
+`PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
+`~/.kulman-home` setup warns that the agents need that variable too. An entry that starts plain
+`calque` counts as setup's own and is rewritten. Any other `calque` (built from source, installed
+elsewhere) has every agent run the server as plain `calque`, so `calque` must be on `PATH`; setup
+warns when it is not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
 pretty JSON with its keys and their order kept.
 

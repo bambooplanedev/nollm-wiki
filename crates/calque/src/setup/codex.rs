@@ -7,9 +7,10 @@ mod toml;
 use super::edit::{inside, other_names, prune_dirs, Outcome};
 use super::{cli, Report};
 use crate::{memory, WikiError};
+use serde_json::Value;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use toml::{state, with_args, with_block, without_block, State, ANOTHER};
+use toml::{state, with_block, with_body, without_block, State, ANOTHER};
 
 pub(super) const FILE: &str = ".codex/config.toml";
 const LINK: &str =
@@ -80,18 +81,18 @@ fn machine_wide(r: &mut Report, remove: bool) -> Result<(), WikiError> {
     r.skip(MACHINE, &format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove calque` removes it); this project's {FILE} entry was written and takes precedence here"))
 }
 
-/// Writes (or with `remove`, takes out) the block; `true` when it is in place. The machine-wide
-/// entry is looked at on every run that may edit the file, and reported only once the block is
-/// in place: by setup on the run that finds the project without a `calque` of its own, and as a
-/// note by every `--remove`.
+/// Writes (or with `remove`, takes out) the block of `own[0]`, over the block of another of the
+/// `own` entries; `true` when it is in place. The machine-wide entry is looked at on every run
+/// that may edit the file, and reported only once the block is in place: by setup on the run
+/// that finds the project without a `calque` of its own, and as a note by every `--remove`.
 pub(super) fn run(
     root: &Path,
     r: &mut Report,
     remove: bool,
-    memory: bool,
+    own: &[Value],
 ) -> Result<bool, WikiError> {
     let text = read(root);
-    let st = |t: &Option<String>| state(t.as_deref().unwrap_or_default(), memory);
+    let st = |t: &Option<String>| state(t.as_deref().unwrap_or_default(), own);
     let absent = text.as_ref().is_ok_and(|t| st(t) == State::Absent);
     let editable = text
         .as_ref()
@@ -107,8 +108,8 @@ pub(super) fn run(
         let new = match (st(&text), remove) {
             (State::Other(why), _) => return Ok(Outcome::Foreign(why.into())),
             (State::Absent, true) | (State::Ours, false) => return Ok(Outcome::AlreadyThere),
-            (State::Absent, false) => with_block(cur, memory),
-            (State::OursOtherArgs, false) => with_args(cur, memory),
+            (State::Absent, false) => with_block(cur, &own[0]),
+            (State::OursOther, false) => with_body(cur, &own[0]),
             (_, true) => without_block(cur),
         };
         if new.trim().is_empty() {

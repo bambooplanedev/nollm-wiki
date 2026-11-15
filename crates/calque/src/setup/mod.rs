@@ -16,8 +16,13 @@ const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
 const SKILL_DIR: &str = "skills/calque-navigation";
 const PI_HOOK: &str = include_str!("calque-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/calque-hint/index.ts";
-/// The command the agents run.
+/// The command the agents run, found on `PATH`.
 const CMD: &str = "calque";
+/// The command the agents run when this calque is the kulman home's: found without `PATH`, and
+/// with no one's home path in a file the team shares. Run by a shell.
+const LAUNCH: &str = "\"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\"";
+/// [`LAUNCH`] for pi, which starts calque without a shell.
+const PI_LAUNCH: &str = r#"path.join(process.env.KULMAN_HOME || path.join(os.homedir(), ".kulman-home"), "bin/calque")"#;
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
 /// `--remove` takes out exactly them.
 const NAV_RULES: &str = include_str!("navigation.md");
@@ -51,13 +56,44 @@ pub struct SetupOptions {
     pub memory: bool,
 }
 
-/// The server's arguments; without memory, `serve --memory none`'s.
-fn serve_args(memory: bool) -> Vec<&'static str> {
+/// The MCP entry that starts the server with `cmd` ([`CMD`] or, through `sh`, [`LAUNCH`]);
+/// without memory, `serve --memory none`.
+fn entry(cmd: &str, memory: bool) -> Value {
     let mut a = vec!["serve", "--source", "."];
     if !memory {
         a.extend(["--memory", "none"]);
     }
-    a
+    if cmd == CMD {
+        return json!({"command": CMD, "args": a});
+    }
+    json!({"command": "sh", "args": ["-c", format!("exec {cmd} {}", a.join(" "))]})
+}
+
+/// pi's extension starting `cmd`.
+fn pi_hook(cmd: &str) -> String {
+    let text = PI_HOOK.replace("<out>", OUT_DIR);
+    if cmd == CMD {
+        return text.replace("<cmd>", CMD);
+    }
+    text.replace("import path", "import os from \"node:os\";\nimport path")
+        .replace("\"<cmd>\"", PI_LAUNCH)
+}
+
+/// When this executable is the kulman home's `bin/calque` (the home is `KULMAN_HOME`, else
+/// `$HOME/.kulman-home`): whether that home is `$HOME/.kulman-home`, where [`LAUNCH`] looks
+/// without `KULMAN_HOME`.
+fn kulman_home() -> Option<bool> {
+    let var = |k| {
+        std::env::var_os(k)
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+    };
+    let default = var("HOME").map(|h| h.join(".kulman-home"));
+    let home = var("KULMAN_HOME").or_else(|| default.clone())?;
+    let real = |p: &Path| p.canonicalize().ok();
+    let exe = std::env::current_exe().ok()?;
+    (real(&exe)? == real(&home.join("bin/calque"))?)
+        .then(|| default.and_then(|d| real(&d)) == real(&home))
 }
 
 /// The skill, with its Memory section only when `memory`.
@@ -219,16 +255,12 @@ fn lost(e: &str) -> String {
 }
 
 /// Claude Code's own local-scope MCP config for the server `name`, through its CLI. Each of `own`
-/// (same command, other args) is ours; another one is replaced by `own[0]` only when `mcp get`
-/// shows nothing but what setup's own `add-json` yields (scope, status and its issue, type,
-/// command, args, the remove hint): an `Environment:`, `Timeout:` or any other line is a setting
-/// setup did not write.
+/// is ours; another one is replaced by `own[0]` only when `mcp get` shows nothing but what
+/// setup's own `add-json` yields (scope, status and its issue, type, command, args, the remove
+/// hint): an `Environment:`, `Timeout:` or any other line is a setting setup did not write.
 fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Outcome {
-    let cmd = format!(
-        "Command: {}",
-        own[0]["command"].as_str().unwrap_or_default()
-    );
-    let args: Vec<String> = own
+    // Each entry's `Command:` and `Args:` lines.
+    let lines: Vec<[String; 2]> = own
         .iter()
         .map(|v| {
             let a: Vec<&str> = v["args"]
@@ -237,22 +269,25 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
                 .flatten()
                 .filter_map(Value::as_str)
                 .collect();
-            format!("Args: {}", a.join(" "))
+            [
+                format!("Command: {}", v["command"].as_str().unwrap_or_default()),
+                format!("Args: {}", a.join(" ")),
+            ]
         })
         .collect();
     let run = || -> Result<Outcome, String> {
         let (found, text) = claude(root, &["mcp", "get", name])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
+            let shows = |[c, a]: &[String; 2]| has(c) && has(a);
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
-                && has(&cmd)
-                && args.iter().any(|a| has(a));
+                && lines.iter().any(shows);
             if !ours {
                 return Ok(Outcome::Foreign(format!(
                     "another \"{name}\" server is configured"
                 )));
             }
-            if !remove && has(&args[0]) {
+            if !remove && shows(&lines[0]) {
                 return Ok(Outcome::AlreadyThere);
             }
             let own_line = |l: &str| {
@@ -266,8 +301,7 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
                 .any(|k| l.starts_with(k))
                     || l == format!("{name}:")
                     || l == "Type: stdio"
-                    || l == cmd
-                    || args.iter().any(|a| a == l)
+                    || lines.iter().flatten().any(|o| o == l)
             };
             let other = !text
                 .lines()
@@ -361,11 +395,21 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    // Own variants, this run's choice first; `--remove` takes either.
+    // Own variants, this run's choice first; `--remove` takes any. From the kulman home, an
+    // entry that starts calque by name is calque's own too, and is rewritten.
+    let home = kulman_home();
+    let cmds: &[&str] = if home.is_some() {
+        &[LAUNCH, CMD]
+    } else {
+        &[CMD]
+    };
     let choice = [opts.memory, !opts.memory];
     let skills = choice.map(skill_text);
     let skills = skills.each_ref().map(String::as_str);
-    let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
+    let entries: Vec<Value> = cmds
+        .iter()
+        .flat_map(|c| choice.map(|m| entry(c, m)))
+        .collect();
     if !opts.remove {
         // As the registered server compiles: `--memory none` has no memory at all.
         let mut agent_dirs = Vec::new();
@@ -413,8 +457,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    if !opts.remove && !opts.agents.is_empty() && find_on_path("calque").is_none() {
-        r.line("warning: calque is not on PATH; the agents will not find it until it is")?;
+    let warning = match home {
+        None if find_on_path(CMD).is_none() => {
+            "warning: calque is not on PATH; the agents will not find it until it is"
+        }
+        Some(false) => {
+            "warning: the agents find calque through KULMAN_HOME; set it in their environment"
+        }
+        _ => "",
+    };
+    if !opts.remove && !opts.agents.is_empty() && !warning.is_empty() {
+        r.line(warning)?;
     }
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
     let mut ignore = vec![format!("{OUT_DIR}/")];
@@ -449,7 +502,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             }
             Agent::Codex => {
                 let before = root.join(codex::FILE).exists();
-                if codex::run(root, &mut r, opts.remove, opts.memory)? {
+                if codex::run(root, &mut r, opts.remove, &entries)? {
                     codex_added |= !opts.remove;
                     if !before {
                         ignore.push(format!("/{}", codex::FILE));
@@ -494,10 +547,10 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // MCP
         if pi || !local {
             let (file, value) = if pi {
-                let v = entries.clone().map(|mut v| {
-                    v["exposure"] = json!("direct");
-                    v
-                });
+                let mut v = entries.clone();
+                for e in &mut v {
+                    e["exposure"] = json!("direct");
+                }
                 (".pi/mcp.json", v)
             } else {
                 (".mcp.json", entries.clone())
@@ -538,13 +591,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         // Hook (`--remove` always looks, so it undoes a hook installed earlier)
         if opts.hook || opts.remove {
             if pi {
-                let content = PI_HOOK.replace("<cmd>", CMD).replace("<out>", OUT_DIR);
+                let own: Vec<String> = cmds.iter().map(|c| pi_hook(c)).collect();
+                let own: Vec<&str> = own.iter().map(String::as_str).collect();
                 let path = root.join(PI_HOOK_FILE);
                 let res = || {
                     if opts.remove {
-                        edit::remove_file(root, &path, &[&content])
+                        edit::remove_file(root, &path, &own)
                     } else {
-                        edit::write_file(&path, &[&content])
+                        edit::write_file(&path, &own)
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
@@ -557,14 +611,17 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 } else {
                     ".claude/settings.json"
                 };
-                let item = json!({"hooks": [{"type": "command", "command": format!("{CMD} hint --claude-hook")}]});
+                let own: Vec<Value> = cmds
+                    .iter()
+                    .map(|c| json!({"hooks": [{"type": "command", "command": format!("{c} hint --claude-hook")}]}))
+                    .collect();
                 let path = root.join(file);
                 let parents = ["hooks", "UserPromptSubmit"];
                 let res = || {
                     if opts.remove {
-                        edit::remove_item(root, &path, &parents, &item)
+                        edit::remove_item(root, &path, &parents, &own)
                     } else {
-                        edit::append_item(&path, &parents, &item)
+                        edit::append_item(&path, &parents, &own)
                     }
                 };
                 if r.file_item(root, file, &format!("{file} prompt hook"), res)? && local {
