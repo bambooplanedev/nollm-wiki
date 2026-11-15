@@ -262,9 +262,9 @@ impl Caller<'_, '_> {
         let sig = self.item.signature.as_str();
         let params = sig.split_once(&format!("def {}(", self.item.name));
         let first = params.and_then(|(_, p)| p.split([',', ')', ':', '=']).next());
-        self.family == Family::Python
+        self.file.family == Family::Python
             && x == "cls"
-            && self.owner.is_some()
+            && self.item.owner.is_some()
             && first.map(str::trim) == Some("cls")
             && !sig.contains("@staticmethod")
     }
@@ -358,7 +358,7 @@ impl Caller<'_, '_> {
     pub(super) fn rebinds_alias(&self, chain: &[FlowScope], call: &MapCall) -> bool {
         let written = call.text.split('(').next().unwrap_or("").trim();
         let bound = |f: &FlowScope| f.locals.contains(written) || f.rebound.contains(written);
-        self.family == Family::Python && written != call.site.name && chain.iter().any(bound)
+        self.file.family == Family::Python && written != call.site.name && chain.iter().any(bound)
     }
 
     /// Is the receiver written as an alias a project import binds, where
@@ -385,7 +385,7 @@ impl Caller<'_, '_> {
         let root = segs[0];
         let bound = |by: &dyn Fn(&FlowScope) -> bool| chain.iter().any(by);
         if call.text.starts_with(&format!("super().{name}(")) {
-            let own = self.owner.map_or("", owner_key);
+            let own = self.item.owner.as_deref().map_or("", owner_key);
             return self.py_on_self(call, own, Own::Super);
         }
         if segs.len() < 3 || !segs.iter().all(word) || segs.last() != Some(&name) {

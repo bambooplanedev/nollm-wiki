@@ -95,7 +95,7 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     for (row, ..) in &rows {
         push_line(&mut out, row);
     }
-    let short = Wiki::query_tokens(text).0.len() <= HINT_SHORT_WORDS;
+    let short = Wiki::tokenize(text).len() <= HINT_SHORT_WORDS;
     // The most trusted passing note; `min_by` keeps the first of equals.
     let note = wiki
         .search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Only)

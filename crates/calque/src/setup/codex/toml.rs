@@ -5,7 +5,7 @@
 use crate::setup::{serve_args, CMD};
 
 const HEADER: &str = "[mcp_servers.calque]";
-/// Another definition of the server (the words of the old machine-wide report).
+/// Another definition of the server (the words of the machine-wide report).
 pub(super) const ANOTHER: &str = "another \"calque\" server is configured";
 /// An `mcp_servers` a `[mcp_servers.calque]` table cannot be added to without breaking the file.
 pub(super) const UNEXTENDABLE: &str =

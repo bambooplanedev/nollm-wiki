@@ -453,25 +453,14 @@ fn compile_inner(
     let man = manifest::build_manifest(&project, &root, &entities, &graph);
     // Ahead of `index.json`, whose change is what tells `serve` to reload,
     // so a reload never pairs a new index with the previous items.
-    rewrite::write_atomic(
-        &output.join("items.json"),
-        &manifest::render_items_json(&entities),
-    )?;
-    rewrite::write_atomic(
-        &output.join("index.json"),
-        &manifest::render_index_json(&man),
-    )?;
-    rewrite::write_atomic(&output.join("index.md"), &manifest::render_index_md(&man))?;
-    rewrite::write_atomic(&output.join("llms.txt"), &manifest::render_llms_txt(&man))?;
-    rewrite::write_atomic(
-        &output.join("AGENTS.md"),
-        &manifest::render_agents_md(&project),
-    )?;
+    let put = |name: &str, text: String| rewrite::write_atomic(&output.join(name), &text);
+    put("items.json", manifest::render_items_json(&entities))?;
+    put("index.json", manifest::render_index_json(&man))?;
+    put("index.md", manifest::render_index_md(&man))?;
+    put("llms.txt", manifest::render_llms_txt(&man))?;
+    put("AGENTS.md", manifest::render_agents_md(&project))?;
     if opts.emit_json {
-        rewrite::write_atomic(
-            &output.join("graph.json"),
-            &manifest::render_graph_json(&entities, &graph),
-        )?;
+        put("graph.json", manifest::render_graph_json(&entities, &graph))?;
     }
 
     // 7. Lint (in-memory — no disk re-read).

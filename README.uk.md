@@ -62,10 +62,18 @@ CLI `claude`. Сервер для Codex за будь-якого `--scope` по�
 
 Згодом `kulman update` доводить усе до останнього релізу, `kulman setup --scope repo --remove`
 скасовує налаштування проєкту (з тим самим `--scope`, з яким його налаштовували), а `kulman remove`
-видаляє те, що встановив kulman. У проєкті, який налаштував старий `wiki` (релізи до 0.6.13
-включно), `kulman setup` спершу видаляє записи, які той написав, і перелічує решту, див.
-[calque setup](crates/calque/README.uk.md#calque-setup). Команди, прапорці, коди виходу й будова
-релізу: [crates/kulman/README.uk.md](crates/kulman/README.uk.md).
+видаляє те, що встановив kulman. Команди, прапорці, коди виходу й будова релізу:
+[crates/kulman/README.uk.md](crates/kulman/README.uk.md).
+
+### Нехай це зробить ваш агент
+
+Якщо не хочете виконувати ці кроки вручну, вставте це у чат свого агента для програмування:
+
+    Install or update kulman in this project by following
+    https://raw.githubusercontent.com/bambooplanedev/kulman/main/docs/agent-setup.md
+    Ask me before installing, updating, or changing any file outside this agent's own configuration.
+
+Заздалегідь прочитайте [docs/agent-setup.md](docs/agent-setup.md), щоб побачити, що скажуть агентові.
 
 ### Перевірка релізу
 
@@ -110,7 +118,8 @@ Python; інші мови отримують примітку «not covered yet�
 
 ## Збірка з коду
 
-Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `jq`.
+Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `git`, `jq` та
+користувач без прав root.
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman

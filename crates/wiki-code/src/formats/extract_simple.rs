@@ -18,7 +18,6 @@ fn ecma_spec(lang_name: &'static str, language: Language, query_src: &'static st
         // `const twice = …` is cut at its value, which leaves the `=`.
         strip_trailing: &['='],
         placement: ecma_placement,
-        owner_sep: ".",
         sig_start: ecma_sig_start,
         item_lead: ecma_lead,
         // The query has no per-member visibility, so a method of an exported

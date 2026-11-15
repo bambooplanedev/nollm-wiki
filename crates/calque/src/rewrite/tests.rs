@@ -517,3 +517,26 @@ fn render_page_applies_fixups_to_text_bodies_only() {
     );
     assert!(page.contains("// [[wiki-rig]]"), "{page}");
 }
+
+/// A link left at the temporary path (a dead run, or planted) must not make the
+/// write land in the file it points at.
+#[cfg(unix)] // unix: needs a symlink
+#[test]
+fn write_atomic_does_not_write_through_a_link_at_the_temporary_path() {
+    let out = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let victim = outside.path().join("victim.txt");
+    std::fs::write(&victim, "keep me").unwrap();
+    let target = out.path().join("index.md");
+    let tmp = out.path().join("index.md.tmp");
+    std::os::unix::fs::symlink(&victim, &tmp).unwrap();
+
+    write_atomic(&target, "new content").unwrap();
+
+    assert_eq!(std::fs::read_to_string(&victim).unwrap(), "keep me");
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "new content");
+    assert!(
+        std::fs::symlink_metadata(&tmp).is_err(),
+        "the temporary path is gone"
+    );
+}

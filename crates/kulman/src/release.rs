@@ -155,14 +155,16 @@ pub fn check_file(name: &str, place: &str) -> Result<()> {
     }
 }
 
-/// Checks a release base (trailing slashes already trimmed): `https://…`, or `file://` with no
-/// host or `localhost`; no `?` or `#`, which would garble the paths appended to it.
-pub fn check_base(base: &str) -> Result<()> {
+/// Checks a release base as given and returns it without trailing slashes: `https://…`, or
+/// `file://` with no host or `localhost`; no `?` or `#`, which would garble the paths appended
+/// to it. A refusal shows the base as given.
+pub fn check_base(given: &str) -> Result<&str> {
+    let base = given.trim_end_matches('/');
     let https = base.strip_prefix("https://").is_some_and(|h| !h.is_empty());
     if !base.contains(['?', '#']) && (https || local_path(base).is_some()) {
-        Ok(())
+        Ok(base)
     } else {
-        bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {base})")
+        bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {given})")
     }
 }
 
@@ -552,6 +554,33 @@ mod tests {
         let start = "manifest.json: signature could not be fetched: ";
         assert!(text.starts_with(start), "{text}");
         assert!(!text.contains("127.0.0.1"), "{text}");
+    }
+
+    #[test]
+    fn a_host_that_never_answers_ends_the_check_within_the_given_wait() {
+        // Accepts the connection and stays silent: only the wait can end the fetch.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("https://{}", listener.local_addr().unwrap());
+        let wait = Wait {
+            connect: Duration::from_millis(300),
+            whole: Duration::from_millis(400),
+        };
+        let start = std::time::Instant::now();
+        let result = manifest(&base, None, wait);
+        assert!(result.is_err(), "no answer, no manifest");
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn check_base_returns_the_base_without_trailing_slashes() {
+        assert_eq!(check_base("https://h/r//").unwrap(), "https://h/r");
+        assert_eq!(check_base("file:///x/").unwrap(), "file:///x");
+        assert_eq!(check_base("https://h/r").unwrap(), "https://h/r");
+        assert!(check_base("https://h/r/?x").is_err());
     }
 
     #[test]

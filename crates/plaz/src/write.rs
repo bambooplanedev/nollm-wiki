@@ -75,7 +75,7 @@ pub struct Written {
 /// path. The prune removes any such file a dead run left behind.
 const TMP: &str = ".plaz-tmp";
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
+pub(crate) fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
     move |source| Error::Io {
         path: path.to_path_buf(),
         source,
@@ -128,7 +128,13 @@ pub fn write(vault: &Path, pages: &[Page]) -> Result<Written, Error> {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io(&tmp)(e)),
                 Ok(()) | Err(_) => {}
             }
-            std::fs::write(&tmp, &page.content).map_err(io(&tmp))?;
+            // Exclusive create: a link planted since the removal makes this fail.
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+                .map_err(io(&tmp))?;
+            std::io::Write::write_all(&mut file, page.content.as_ref()).map_err(io(&tmp))?;
             std::fs::rename(&tmp, &path).map_err(io(&path))?;
             n.written += 1;
         }

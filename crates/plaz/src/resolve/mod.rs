@@ -100,9 +100,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
-                        owner: file.code.items[item].owner.as_deref(),
                         in_trait: in_trait(file, item),
-                        family: file.family,
                         names: &in_scope,
                         types: &types,
                         crates: &project.crates,
@@ -126,13 +124,11 @@ struct Caller<'i, 'a> {
     page: usize,
     py: &'i Python<'a>,
     scope: Scope<'i, 'a, File>,
-    /// The caller's file and item, and its owner as written (`S`, `<S as Tr>`).
+    /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,
     item: &'a CodeItem,
-    owner: Option<&'a str>,
     /// The caller is a trait's default method: `self` is any implementor.
     in_trait: bool,
-    family: Family,
     names: &'i InScope,
     types: &'i BTreeMap<&'a str, (usize, bool)>,
     crates: &'a BTreeSet<(String, String)>,
@@ -219,7 +215,7 @@ impl Caller<'_, '_> {
         let binder = |x: &str| chain.iter().rev().find(|f| f.locals.contains(x));
         // A generic parameter, or an item declared in a body.
         let rebound = |x: &str| chain.iter().any(|f| f.rebound.contains(x));
-        let python = self.family == Family::Python;
+        let python = self.file.family == Family::Python;
         match &site.via {
             CallVia::Bare
                 if binder(&site.name).is_some()
@@ -302,13 +298,13 @@ impl Caller<'_, '_> {
     /// `self.f()` (`dot`) and `Self::f()`: a call on the caller's own
     /// type, the `S` of an owner `S` or `<S as Tr>`.
     fn on_self(&self, call: &MapCall, rebound: &dyn Fn(&str) -> bool, dot: bool) -> Evidence {
-        let own = self.owner.map_or("", |o| {
+        let own = self.item.owner.as_deref().map_or("", |o| {
             owner_key(
                 o.strip_prefix('<')
                     .map_or(o, |o| o.split(" as ").next().unwrap_or("")),
             )
         });
-        let found = match self.family {
+        let found = match self.file.family {
             // In a trait's default method `self` is any implementor.
             Family::Rust if self.in_trait => return self.any_method(call),
             Family::Rust if own.is_empty() || rebound(own) => Evidence::Hidden,
@@ -367,11 +363,11 @@ impl Caller<'_, '_> {
             match found {
                 // A value of a Python class may be a subclass's, and
                 // may call a method it inherits.
-                Evidence::Found { mut fns, open } if self.family == Family::Python => {
+                Evidence::Found { mut fns, open } if self.file.family == Family::Python => {
                     fns.extend(self.ids(self.overrides(name, call)));
                     Evidence::Found { fns, open }
                 }
-                Evidence::Hidden if self.family == Family::Python => self.any_method(call),
+                Evidence::Hidden if self.file.family == Family::Python => self.any_method(call),
                 Evidence::Hidden | Evidence::Outside | Evidence::Found { .. } => found,
             }
         } else {
@@ -420,7 +416,7 @@ impl Caller<'_, '_> {
 
     fn bare(&self, call: &MapCall) -> Evidence {
         let (s, site) = (&self.scope, &call.site);
-        let (cpp, shell) = match self.family {
+        let (cpp, shell) = match self.file.family {
             Family::Cpp => (true, false),
             Family::Shell => (false, true),
             Family::Rust | Family::Python | Family::Go | Family::Ecma => (false, false),
@@ -446,7 +442,7 @@ impl Caller<'_, '_> {
         let methods_seen = || if cpp { s.methods_seen(site) } else { none() };
         // A function of another file may be shadowed by an external glob's;
         // a Python name no import names may be a builtin.
-        let builtin = self.family == Family::Python && !imported;
+        let builtin = self.file.family == Family::Python && !imported;
         let found = self
             .first(&[&own, &|| s.fns_here(site)], false)
             .or_else(|| {

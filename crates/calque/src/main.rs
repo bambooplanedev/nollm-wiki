@@ -564,7 +564,7 @@ fn main() -> Result<()> {
             };
             let none = agents.is_empty();
             let opts = SetupOptions {
-                agents: Some(agents),
+                agents,
                 scope,
                 hook: !no_hook,
                 remove,

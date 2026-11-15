@@ -64,8 +64,10 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
-        if Self::query_tokens(q).0.is_empty() {
-            return self.search_scoped(q, kind, tag, limit, MemoryScope::With);
+        if Self::tokenize(q).is_empty() {
+            return self
+                .search_terms(q, kind, tag, limit, MemoryScope::With, None, None)
+                .0;
         }
         let (mut hits, stats) =
             self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
@@ -301,22 +303,6 @@ impl Wiki {
         notes
     }
 
-    /// `search_tagged` over the memory notes only, all but them, or both,
-    /// with no tail. A memory note passes the `code` and `docs` groups
-    /// whatever its real kind (agents filter by `code`); an exact kind
-    /// matches its real kind. With `MemoryScope::Only`, of two equal-scored
-    /// notes the later `updated` comes first (dated before undated).
-    pub(crate) fn search_scoped(
-        &self,
-        q: &str,
-        kind: Option<&KindFilter>,
-        tag: Option<&str>,
-        limit: Option<usize>,
-        scope: MemoryScope,
-    ) -> Vec<Hit> {
-        self.search_terms(q, kind, tag, limit, scope, None, None).0
-    }
-
     /// Code pages (or, with `MemoryScope::Only`, memory notes) for a prompt
     /// rather than a query: vendored pages are out, and only its `terms`
     /// rarest words that occur at all count, since most of a prompt's words
@@ -398,7 +384,12 @@ impl Wiki {
             .count()
     }
 
-    /// Hits for `q` and the pass-1 statistics they were scored with. With
+    /// Hits for `q` and the pass-1 statistics they were scored with: the
+    /// memory notes only, all but them, or both (`scope`). A memory note
+    /// passes the `code` and `docs` groups whatever its real kind (agents
+    /// filter by `code`); an exact kind matches its real kind. With
+    /// `MemoryScope::Only`, of two equal-scored notes the later `updated`
+    /// comes first (dated before undated). With
     /// `prior` (the project pages' statistics of a `Without` pass for the
     /// same `q`, `tag` and no kind), an `Only` pass counts just the notes.
     #[allow(clippy::too_many_arguments)]

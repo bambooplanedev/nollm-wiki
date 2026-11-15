@@ -150,6 +150,28 @@ fn status_announces_a_newer_release() {
     );
 }
 
+/// Status waits 5 s to connect (`release::STATUS_WAIT`), install and update 15 s (`release::WAIT`).
+/// A host that accepts and never answers must end the check by the status wait: well under 12 s,
+/// the middle between 5 and 15 plus margin for a loaded machine.
+#[test]
+fn status_gives_up_on_a_silent_host_by_its_own_wait() {
+    let (_t, _, home) = installed();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("https://{}", listener.local_addr().unwrap());
+    let start = std::time::Instant::now();
+    let out = kulman(&home, &base).output().unwrap();
+    let took = start.elapsed();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = lines(&out);
+    let last = text.last().unwrap();
+    assert!(
+        last.starts_with(&format!("could not check for a newer release ({base}: ")),
+        "{text:?}"
+    );
+    assert!(last.ends_with(')'), "{text:?}");
+    assert!(took < std::time::Duration::from_secs(12), "{took:?}");
+}
+
 #[test]
 fn status_survives_an_unreachable_release() {
     let (t, _, home) = installed();

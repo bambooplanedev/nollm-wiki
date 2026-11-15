@@ -777,9 +777,8 @@ fn setup_local_adds_the_server_after_a_get_with_a_warning_first() {
 }
 
 /// A `codex` that logs its argv and answers `mcp get calque` with the machine-wide server in
-/// `codex.state` (`<command> <args>`, as the old setup's `mcp add` left it; none until a test
-/// writes one), in the shape codex-cli 0.169 prints; `mcp remove` deletes it, and for a name it
-/// does not have says so and exits 0, as the real one does.
+/// `codex.state` (`<command> <args>`; none until a test writes one), in the shape codex-cli 0.169
+/// prints.
 fn codex_stub(f: &Fixture) {
     let t = f.tmp.path().display();
     f.stub(
@@ -790,7 +789,6 @@ case "$1 $2" in
 "mcp get") [ -f {t}/codex.state ] || {{ echo "Error: No MCP server named 'calque' found." >&2; exit 1; }}
   set -- $(/bin/cat {t}/codex.state); c=$1; shift
   printf 'calque\n  enabled: true\n  transport: stdio\n  command: %s\n  args: %s\n  cwd: -\n  env: -\n  remove: codex mcp remove calque\n' "$c" "$*" ;;
-"mcp remove") [ -f {t}/codex.state ] || echo "No MCP server named 'calque' found."; /bin/rm -f {t}/codex.state ;;
 esac"#
         ),
     );
@@ -804,15 +802,9 @@ const CODEX_BLOCK_NO_MEMORY: &str = "[mcp_servers.calque]\ncommand = \"calque\"\
 fn codex_hint(f: &Fixture) -> String {
     format!("Codex loads the server only in a project it trusts: run codex in the project and accept the question, or add [projects.\"{}\"] trust_level = \"trusted\" to ~/.codex/config.toml", f.root().canonicalize().unwrap().display())
 }
-const MACHINE_REMOVED: &str =
-    "removed the machine-wide Codex calque server (it ran in every Codex session)";
-
-/// The fake `codex`'s calls about `calque` (the takeover's report asks about `wiki`).
+/// The fake `codex`'s calls.
 fn codex_log(f: &Fixture) -> String {
-    let log = fs::read_to_string(f.tmp.path().join("codex.log")).unwrap_or_default();
-    log.split_inclusive('\n')
-        .filter(|l| !l.ends_with(" wiki\n"))
-        .collect()
+    fs::read_to_string(f.tmp.path().join("codex.log")).unwrap_or_default()
 }
 
 const NAV: &str = include_str!("../src/setup/navigation.md");
@@ -928,34 +920,6 @@ fn setup_codex_leaves_another_wiki_server_alone() {
 }
 
 #[test]
-fn setup_codex_removes_the_old_machine_wide_entry_once() {
-    let f = fixture(true, false);
-    codex_stub(&f);
-    fs::write(
-        f.tmp.path().join("codex.state"),
-        "calque serve --source .\n",
-    )
-    .unwrap();
-    let a = f.setup(&CODEX_ONLY).success();
-    let o = out(&a);
-    assert!(
-        o.contains(&format!(
-            "wrote .codex/config.toml calque server\n{MACHINE_REMOVED}\n"
-        )),
-        "{o}"
-    );
-    assert!(!f.tmp.path().join("codex.state").exists());
-    assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
-    // Asked again, gone: nothing to say.
-    let a = f.setup(&CODEX_ONLY).success();
-    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
-    assert_eq!(
-        codex_log(&f),
-        "mcp get calque\nmcp remove calque\nmcp get calque\n"
-    );
-}
-
-#[test]
 fn the_machine_wide_entry_is_asked_outside_the_project() {
     let f = fixture(true, false);
     let t = f.tmp.path().display();
@@ -976,26 +940,6 @@ case "$(/bin/pwd -P)" in "{}"*) printf '%s\n' '{}' ;;
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
     assert_eq!(codex_log(&f), "mcp get calque\n");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
-}
-
-#[test]
-fn a_remove_that_finds_nothing_says_nothing() {
-    let f = fixture(true, false);
-    codex_fixed(
-        &f,
-        &codex_get("serve --source .", "-"),
-        "echo \"No MCP server named 'calque' found.\"",
-    );
-    let remove = [&["--remove"], &CODEX_ONLY[..]].concat();
-    // Setup, then `--remove` twice: each tries the exact machine-wide entry, none says so.
-    for args in [&CODEX_ONLY[..], &remove[..], &remove[..]] {
-        let log = "mcp get calque\nmcp remove calque\n";
-        fs::remove_file(f.tmp.path().join("codex.log")).ok();
-        let a = f.setup(args).success();
-        assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
-        assert_eq!(codex_log(&f), log);
-    }
-    assert!(!f.root().join(".codex").exists());
 }
 
 /// `calque setup` run with `home` as the home folder and `env` set, in the project.
@@ -1063,84 +1007,6 @@ fn setup_codex_adds_its_table_beside_a_server_that_names_calque() {
 }
 
 #[test]
-fn a_remove_that_finds_nothing_says_nothing_on_stderr_too() {
-    let f = fixture(true, false);
-    codex_fixed(
-        &f,
-        &codex_get("serve --source .", "-"),
-        "echo \"No MCP server named 'calque' found.\" >&2",
-    );
-    let a = f.setup(&CODEX_ONLY).success();
-    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
-    assert_eq!(codex_log(&f), "mcp get calque\nmcp remove calque\n");
-}
-
-#[test]
-fn a_failed_machine_wide_remove_is_tried_again_on_the_next_run() {
-    let f = fixture(true, false);
-    let t = f.tmp.path().display();
-    fs::write(f.tmp.path().join("fail"), "").unwrap();
-    codex_fixed(
-        &f,
-        &codex_get("serve --source .", "-"),
-        &format!("[ -f {t}/fail ] && {{ /bin/rm {t}/fail; echo boom >&2; exit 1; }}; :"),
-    );
-    let a = f.setup(&CODEX_ONLY).code(1);
-    assert!(
-        out(&a).contains("`codex mcp remove` failed: boom"),
-        "{}",
-        out(&a)
-    );
-    let a = f.setup(&CODEX_ONLY).success();
-    assert!(
-        out(&a).contains(&format!(
-            "already set up: .codex/config.toml calque server\n{MACHINE_REMOVED}\n"
-        )),
-        "{}",
-        out(&a)
-    );
-}
-
-#[test]
-fn an_exact_machine_wide_entry_added_later_is_removed_by_the_next_run() {
-    let f = fixture(true, false);
-    codex_stub(&f);
-    f.setup(&CODEX_ONLY).success();
-    fs::write(
-        f.tmp.path().join("codex.state"),
-        "calque serve --source .\n",
-    )
-    .unwrap();
-    let a = f.setup(&CODEX_ONLY).success();
-    assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
-    assert!(!f.tmp.path().join("codex.state").exists());
-}
-
-#[test]
-fn remove_takes_an_exact_machine_wide_entry_beside_the_project_block() {
-    let f = fixture(true, false);
-    codex_stub(&f);
-    f.setup(&CODEX_ONLY).success();
-    fs::write(
-        f.tmp.path().join("codex.state"),
-        "calque serve --source .\n",
-    )
-    .unwrap();
-    let a = f
-        .setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
-        .success();
-    assert!(
-        out(&a).contains(&format!(
-            "removed .codex/config.toml calque server\n{MACHINE_REMOVED}\n"
-        )),
-        "{}",
-        out(&a)
-    );
-    assert!(!f.tmp.path().join("codex.state").exists());
-    assert!(!f.root().join(".codex").exists());
-}
-
-#[test]
 fn an_unwritable_project_file_keeps_the_machine_wide_entry() {
     let f = fixture(true, false);
     codex_stub(&f);
@@ -1163,7 +1029,6 @@ fn an_unwritable_project_file_keeps_the_machine_wide_entry() {
     mode(0o755);
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
     assert_eq!(codex_log(&f), "mcp get calque\n");
-    assert!(f.tmp.path().join("codex.state").exists());
     assert!(!dir.join("config.toml").exists());
 }
 
@@ -1198,10 +1063,16 @@ fn a_codex_found_through_a_relative_path_entry_is_the_one_that_runs() {
         .env("HOME", f.home())
         .env_remove("CODEX_HOME")
         .assert()
-        .success();
-    // The project's stub answered from the temp dir, and its exact entry was removed.
-    assert_eq!(codex_log(&f), "mcp get calque\nmcp remove calque\n");
-    assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
+        .code(1);
+    // The project's stub answered from the temp dir, and its entry is reported.
+    assert_eq!(codex_log(&f), "mcp get calque\n");
+    assert!(
+        out(&a).contains(
+            "skipped Codex calque server (machine-wide): another \"calque\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove calque` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"
+        ),
+        "{}",
+        out(&a)
+    );
 }
 
 #[test]
@@ -1317,7 +1188,6 @@ fn setup_codex_never_adds_a_second_calque_definition() {
     }
     // The project names a server: Codex would show that one, so the machine-wide one is left.
     assert_eq!(codex_log(&f), "");
-    assert!(f.tmp.path().join("codex.state").exists());
 }
 
 #[test]
@@ -1404,8 +1274,8 @@ fn setup_local_skips_a_codex_config_git_tracks() {
     // Nothing written in the project: the machine-wide entry stays too.
     assert_eq!(codex_log(&f), "mcp get calque\n");
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
-    let a = f.setup(&CODEX_ONLY).success();
-    assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
+    let a = f.setup(&CODEX_ONLY).code(1);
+    assert!(out(&a).contains("machine-wide"), "{}", out(&a));
 }
 
 #[test]
@@ -1590,10 +1460,9 @@ fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     assert!(!f.root().join(".kulman/.serve").exists());
 }
 
-/// A project that `wiki setup` set up in an earlier life, edited by hand since: its `wiki`
-/// server, skill and block, none of them what the old tool wrote (that is taken over, see
-/// `setup_takeover.rs`).
-fn old_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
+/// A project with a `wiki` server, skill and block of some other tool, which setup and `--remove`
+/// leave alone.
+fn foreign_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
     let f = fixture(true, true);
     codex_stub(&f);
     let r = f.root();
@@ -1618,8 +1487,8 @@ fn old_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
 const ALL_AGENTS: [&str; 4] = ["--agent", "claude,pi,cursor,codex", "--scope", "repo"];
 
 #[test]
-fn setup_leaves_the_old_wiki_entries_alone() {
-    let (f, old) = old_wiki_project();
+fn setup_leaves_other_tools_wiki_entries_alone() {
+    let (f, old) = foreign_wiki_project();
     let a = f.setup(&ALL_AGENTS).success();
     let r = f.root();
     assert_eq!(read(&old[1].0), old[1].1, "{}", out(&a));
@@ -1636,7 +1505,7 @@ fn setup_leaves_the_old_wiki_entries_alone() {
 
 #[test]
 fn remove_takes_only_calques_entries() {
-    let (f, old) = old_wiki_project();
+    let (f, old) = foreign_wiki_project();
     f.setup(&ALL_AGENTS).success();
     let a = f
         .setup(&[&["--remove"], &ALL_AGENTS[..]].concat())
@@ -1804,8 +1673,8 @@ fn setup_local_no_memory_then_default_goes_through_claude() {
 }
 
 /// A `codex` whose `mcp get calque` always prints `get` (as `codex mcp get` does: stdio lines,
-/// `cwd`, `env`, the remove hint) and whose `mcp remove` runs `remove`.
-fn codex_fixed(f: &Fixture, get: &str, remove: &str) {
+/// `cwd`, `env`, the remove hint).
+fn codex_fixed(f: &Fixture, get: &str) {
     let t = f.tmp.path().display();
     f.stub(
         "codex",
@@ -1813,7 +1682,6 @@ fn codex_fixed(f: &Fixture, get: &str, remove: &str) {
             r#"echo "$@" >> {t}/codex.log
 case "$1 $2" in
 "mcp get") printf '%s\n' '{get}' ;;
-"mcp remove") {remove} ;;
 esac"#
         ),
     );
@@ -1828,29 +1696,9 @@ fn codex_get(args: &str, env: &str) -> String {
 const CODEX_ONLY: [&str; 4] = ["--agent", "codex", "--scope", "repo"];
 
 #[test]
-fn setup_switches_a_fixed_codex_entry_without_memory_to_the_default() {
-    let f = fixture(true, false);
-    codex_fixed(
-        &f,
-        &codex_get("serve --source . --memory none", "-"),
-        "exit 0",
-    );
-    // The old setup's machine-wide entry, in either variant, goes once the project has the default.
-    let a = f.setup(&CODEX_ONLY).success();
-    let o = out(&a);
-    let (gone, wrote) = (
-        o.find(&format!("{MACHINE_REMOVED}\n")),
-        o.find("wrote .codex/config.toml calque server\n"),
-    );
-    assert!(wrote.is_some() && wrote < gone, "{o}");
-    assert_eq!(codex_log(&f), "mcp get calque\nmcp remove calque\n");
-    assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
-}
-
-#[test]
 fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
     let f = fixture(true, false);
-    codex_fixed(&f, &codex_get("serve --source .", "TOKEN=*****"), "exit 0");
+    codex_fixed(&f, &codex_get("serve --source .", "TOKEN=*****"));
     // calque's command and args with an `env`: not what setup wrote, so never removed.
     let a = f
         .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
@@ -1905,33 +1753,6 @@ fn a_switch_leaves_a_claude_entry_with_other_settings_alone() {
     assert!(
         !log.contains("mcp remove") && !log.contains("add-json"),
         "{log}"
-    );
-}
-
-#[test]
-fn a_failed_codex_mcp_remove_is_reported_and_the_project_block_still_written() {
-    let f = fixture(true, false);
-    codex_fixed(
-        &f,
-        &codex_get("serve --source .", "-"),
-        "echo boom >&2; exit 1",
-    );
-    let a = f
-        .setup(&[&CODEX_ONLY[..], &["--no-memory"]].concat())
-        .code(1);
-    let o = out(&a);
-    assert!(
-        o.contains("skipped Codex calque server (machine-wide): `codex mcp remove` failed: boom; run `codex mcp remove calque` by hand\n"),
-        "{o}"
-    );
-    assert!(!o.contains("removed the machine-wide"), "{o}");
-    assert!(
-        o.contains("wrote .codex/config.toml calque server\n"),
-        "{o}"
-    );
-    assert_eq!(
-        read(&f.root().join(".codex/config.toml")),
-        CODEX_BLOCK_NO_MEMORY
     );
 }
 

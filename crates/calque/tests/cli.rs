@@ -1009,3 +1009,46 @@ fn compile_prints_stage_timings_only_with_calque_timings() {
     assert_eq!(s1, snapshot(&out2));
     assert_eq!(s1, snapshot(&out3));
 }
+
+#[test]
+fn a_wiki_folder_without_index_json_names_the_file_and_the_compile_command() {
+    let dir = tempdir().unwrap();
+    let wiki = dir.path().join("w");
+    fs::create_dir(&wiki).unwrap();
+    let run = || {
+        Command::cargo_bin("calque")
+            .unwrap()
+            .args(["search", "alpha", "--dir", wiki.to_str().unwrap()])
+            .assert()
+            .code(1)
+    };
+    let w = wiki.display();
+    let want = format!("{w}/index.json not found — run `calque compile <input> {w}`");
+    run().stderr(contains(want).and(contains("os error").not()));
+
+    // Any other read error keeps its own cause and names the file too.
+    fs::create_dir(wiki.join("index.json")).unwrap();
+    run().stderr(contains(format!(
+        "{w}/index.json: Is a directory (os error 21)"
+    )));
+}
+
+#[test]
+fn a_malformed_index_json_names_the_file_and_the_compile_command() {
+    let dir = tempdir().unwrap();
+    let wiki = dir.path().join("w");
+    fs::create_dir(&wiki).unwrap();
+    fs::write(wiki.join("index.json"), "{1").unwrap();
+    let w = wiki.display();
+    Command::cargo_bin("calque")
+        .unwrap()
+        .args(["search", "alpha", "--dir", wiki.to_str().unwrap()])
+        .assert()
+        .code(1)
+        .stderr(
+            contains(format!(
+                "{w}/index.json: key must be a string at line 1 column 2"
+            ))
+            .and(contains(format!(" — run `calque compile <input> {w}`"))),
+        );
+}

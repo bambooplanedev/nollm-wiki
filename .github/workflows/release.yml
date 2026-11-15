@@ -66,10 +66,12 @@ jobs:
           cargo build --release --locked -p calque -p plaz -p kulman
           echo "BIN_DIR=target/release" >> "$GITHUB_ENV"
       # Static musl, built in Alpine into its own target dir; the container writes as root.
+      # The image is pinned by digest: rust:1.90-alpine (multi-arch index).
       - name: Build on Linux in rust:1.90-alpine
         if: runner.os == 'Linux'
         run: |
-          docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-musl rust:1.90-alpine \
+          docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-musl \
+            rust@sha256:b4b54b176a74db7e5c68fdfe6029be39a02ccbcfe72b6e5a3e18e2c61b57ae26 \
             sh -c 'apk add --no-cache build-base && cargo build --release --locked -p calque -p plaz -p kulman'
           sudo chown -R "$(id -u):$(id -g)" target-musl
           echo "BIN_DIR=target-musl/release" >> "$GITHUB_ENV"
@@ -121,6 +123,7 @@ jobs:
           path: tree
           if-no-files-found: error
 
+  # Floating image tags on purpose: the installer is checked on what users run today.
   install-check:
     needs: [version, assemble]
     strategy:

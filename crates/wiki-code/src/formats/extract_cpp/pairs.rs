@@ -7,23 +7,25 @@ use std::collections::BTreeMap;
 
 type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
 
-/// The `(owner, name, arity)` keys that occur exactly once among `items`,
-/// with the index of their item. Overloads with the same parameter count
-/// share a key, so they drop out here.
-fn unique_keys(items: &[CodeItem]) -> BTreeMap<Key<'_>, usize> {
-    let mut seen: BTreeMap<Key<'_>, Option<usize>> = BTreeMap::new();
-    for (i, it) in items.iter().enumerate() {
+/// The `(owner, name, arity)` keys that occur exactly once among the
+/// `Fn`/`Method` items given, each with the location `L` it was given with.
+/// Overloads with the same parameter count share a key, so they drop out here.
+fn unique_keys<'a, L>(items: impl IntoIterator<Item = (L, &'a CodeItem)>) -> BTreeMap<Key<'a>, L> {
+    let mut seen: BTreeMap<Key<'a>, Option<L>> = BTreeMap::new();
+    for (at, it) in items {
         if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
             let key = (
                 it.owner.as_deref(),
                 it.name.as_str(),
                 arity(&it.signature, &it.name),
             );
-            seen.entry(key).and_modify(|v| *v = None).or_insert(Some(i));
+            seen.entry(key)
+                .and_modify(|v| *v = None)
+                .or_insert(Some(at));
         }
     }
     seen.into_iter()
-        .filter_map(|(k, v)| v.map(|i| (k, i)))
+        .filter_map(|(k, v)| v.map(|at| (k, at)))
         .collect()
 }
 
@@ -83,8 +85,8 @@ pub fn pair_declarations<U: CodeUnit>(entities: &mut BTreeMap<String, U>) {
         );
         for (hdr, imp) in found {
             let (h, c) = (entities[hdr].items(), entities[imp].items());
-            let cu = unique_keys(c);
-            for (key, hi) in unique_keys(h) {
+            let cu = unique_keys(c.iter().enumerate());
+            for (key, hi) in unique_keys(h.iter().enumerate()) {
                 let Some(&ci) = cu.get(&key) else { continue };
                 if h[hi].pair_role == PairRole::Declaration
                     && c[ci].pair_role == PairRole::OutOfLineDefinition
@@ -127,35 +129,26 @@ fn pair_project<U: CodeUnit>(
     pairs: &mut Vec<(String, usize, String, usize)>,
 ) {
     let unique = |header: bool| {
-        let mut seen: BTreeMap<Key<'_>, Option<(&str, usize)>> = BTreeMap::new();
-        for (id, e) in entities {
-            let sp = e.path();
-            if !is_cpp(&ext_of(sp)) || (source_rank(sp) < 2) != header {
-                continue;
-            }
-            for (i, it) in e.items().iter().enumerate() {
-                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
-                    let key = (
-                        it.owner.as_deref(),
-                        it.name.as_str(),
-                        arity(&it.signature, &it.name),
-                    );
-                    seen.entry(key)
-                        .and_modify(|v| *v = None)
-                        .or_insert(Some((id.as_str(), i)));
-                }
-            }
-        }
-        seen
+        unique_keys(
+            entities
+                .iter()
+                .filter(|(_, e)| is_cpp(&ext_of(e.path())) && (source_rank(e.path()) < 2) == header)
+                .flat_map(|(id, e)| {
+                    e.items()
+                        .iter()
+                        .enumerate()
+                        .map(move |(i, it)| ((id.as_str(), i), it))
+                }),
+        )
     };
     let role = |id: &str, i: usize| entities[id].items()[i].pair_role;
     let impls = unique(false);
     for (key, h) in unique(true) {
-        if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
+        if let ((hid, hi), Some(&(cid, ci))) = (h, impls.get(&key)) {
             if role(hid, hi) == PairRole::Declaration
-                && role(cid, *ci) == PairRole::OutOfLineDefinition
+                && role(cid, ci) == PairRole::OutOfLineDefinition
             {
-                pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
+                pairs.push((hid.to_string(), hi, cid.to_string(), ci));
             }
         }
     }

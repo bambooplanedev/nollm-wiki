@@ -106,7 +106,11 @@ impl WikiState {
     /// the first call loads the wiki.
     pub fn load(dir: &Path) -> std::io::Result<Arc<WikiState>> {
         let loaded = crate::dirlock::try_shared(dir, || {
-            Ok::<_, std::io::Error>((fingerprint(dir)?, Wiki::load(dir)?))
+            // The fingerprint is taken first (a later change is then seen), but
+            // its error is reported after the load's, which names the file.
+            let fp = fingerprint(dir);
+            let wiki = Wiki::load(dir)?;
+            Ok::<_, std::io::Error>((fp?, wiki))
         })
         .transpose()?;
         let (wiki, fingerprint) = match loaded {
@@ -627,11 +631,7 @@ pub fn run(
             WikiState::live(Live::start(source, dir, opts)?)
         }
         None => WikiState::load(dir).map_err(|e| {
-            WikiError::Serve(format!(
-                "{} is not a compiled wiki ({e}) — run `calque compile <input> {}` first",
-                dir.display(),
-                dir.display()
-            ))
+            WikiError::Serve(format!("{} is not a compiled wiki ({e})", dir.display()))
         })?,
     };
     let root = match source {

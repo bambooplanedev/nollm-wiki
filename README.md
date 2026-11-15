@@ -62,10 +62,18 @@ own configuration and needs the `claude` CLI. Codex's server goes into the proje
 
 Later, `kulman update` brings everything to the latest release, `kulman setup --scope repo --remove`
 undoes a project's setup (with the scope it was set up with) and `kulman remove` deletes what kulman
-installed. In a project that the old `wiki` (releases up to 0.6.13) set up, `kulman setup` first
-removes the entries it wrote and lists the rest, see
-[calque setup](crates/calque/README.md#calque-setup). Commands, flags, exit codes and the layout of
-a release: [crates/kulman/README.md](crates/kulman/README.md).
+installed. Commands, flags, exit codes and the layout of a release:
+[crates/kulman/README.md](crates/kulman/README.md).
+
+### Let your agent do it
+
+If you would rather not run these steps by hand, paste this into your coding agent:
+
+    Install or update kulman in this project by following
+    https://raw.githubusercontent.com/bambooplanedev/kulman/main/docs/agent-setup.md
+    Ask me before installing, updating, or changing any file outside this agent's own configuration.
+
+Read [docs/agent-setup.md](docs/agent-setup.md) first to see what the agent will be told.
 
 ### Checking a release
 
@@ -110,7 +118,8 @@ tree, extracts functions and types with tree-sitter, and indexes calls and impor
 
 ## Building from source
 
-Building needs Rust 1.90 or later; the tests also need `jq`.
+Building needs Rust 1.90 or later; the tests also need `git`, `jq` and a
+non-root user.
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman

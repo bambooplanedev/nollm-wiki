@@ -697,7 +697,7 @@ fn the_default_home_is_dot_kulman_home() {
 fn install_rejects_a_plain_http_base() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path().join("home");
-    // The base as given, and as the message names it (trailing slashes are trimmed first).
+    // The base as given is what the message names, trailing slashes included.
     for (base, shown) in [
         (
             "http://example.invalid/releases",
@@ -705,8 +705,9 @@ fn install_rejects_a_plain_http_base() {
         ),
         ("file://host/x", "file://host/x"),
         ("ftp://x", "ftp://x"),
-        ("https://", "https:"),
-        ("file:///", "file:"),
+        ("https://", "https://"),
+        ("file:///", "file:///"),
+        ("ftp://x//", "ftp://x//"),
         (
             "https://example.invalid/releases?x=1",
             "https://example.invalid/releases?x=1",

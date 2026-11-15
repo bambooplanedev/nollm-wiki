@@ -115,7 +115,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let changes = matches!(cli.command, Some(Cmd::Install { .. } | Cmd::Update { .. }));
     let result = match cli.command {
-        None | Some(Cmd::Status) => status(),
+        None | Some(Cmd::Status) => status(release::STATUS_WAIT),
         Some(Cmd::Install {
             modules,
             version,

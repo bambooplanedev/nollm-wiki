@@ -456,6 +456,24 @@ fn serve_refuses_path_traversal_outside_index() {
 }
 
 #[test]
+fn serve_refusal_of_a_malformed_index_keeps_the_compile_hint() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("index.json"), "{1").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_calque"))
+        .args(["serve", "--dir"])
+        .arg(tmp.path())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let dir = tmp.path().display();
+    assert!(
+        stderr.contains(&format!("calque compile <input> {dir}`")),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn serve_refuses_non_wiki_dir() {
     let tmp = tempfile::tempdir().unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_calque"))

@@ -39,11 +39,6 @@ pub(crate) enum FlowNode<'a> {
     /// A `finally` clause: its children are the body.
     Finally,
     Exit(ExitKind),
-    #[expect(dead_code, reason = "no language draws an assignment yet")]
-    Assign {
-        target: Node<'a>,
-        value: Node<'a>,
-    },
     /// `body` is the node whose children form the nested flow and whose
     /// bindings are the nested flow's own; `None` names it `closure L<n>`.
     Nested {
@@ -52,9 +47,6 @@ pub(crate) enum FlowNode<'a> {
     },
     /// Counted, then walked as `Plain`.
     NotDrawn(NotDrawn),
-    /// Belongs to no step of this flow.
-    #[expect(dead_code, reason = "Rust and Python draw every node")]
-    Skip,
 }
 
 pub(crate) struct ArmNode<'a> {
@@ -181,13 +173,17 @@ struct Walker<'s> {
     comments: Vec<Note>,
 }
 
+fn text<'t>(n: Node, src: &'t str) -> &'t str {
+    &src[n.byte_range()]
+}
+
 fn line(n: Node) -> usize {
     n.start_position().row + 1
 }
 
 impl<'s> Walker<'s> {
     fn text(&self, n: Node) -> &'s str {
-        &self.source.text()[n.byte_range()]
+        text(n, self.source.text())
     }
 
     /// The flow of `root`'s children, with `root`'s bindings.
@@ -238,9 +234,17 @@ impl<'s> Walker<'s> {
         after
     }
 
+    /// The steps of `nodes`, each walked in order.
+    fn sub<'t>(&self, nodes: impl IntoIterator<Item = Node<'t>>, flow: &mut Flow) -> Vec<Step> {
+        let mut out = Vec::new();
+        for c in nodes {
+            self.walk(c, flow, &mut out);
+        }
+        out
+    }
+
     fn walk(&self, n: Node, flow: &mut Flow, out: &mut Vec<Step>) {
         match (self.hooks.flow_node)(n, self.source.text()) {
-            FlowNode::Skip => {}
             FlowNode::Plain => {
                 self.children(n, flow, out);
                 self.calls(n, out);
@@ -257,14 +261,6 @@ impl<'s> Walker<'s> {
                     text: one_line(self.text(n)),
                     line: line(n),
                     kind,
-                });
-            }
-            FlowNode::Assign { target, value } => {
-                self.walk(value, flow, out);
-                out.push(Step::Assign {
-                    target: one_line(self.text(target)),
-                    value: one_line(self.text(value)),
-                    line: line(n),
                 });
             }
             FlowNode::Finally => {
@@ -291,14 +287,9 @@ impl<'s> Walker<'s> {
             } => {
                 let except: Vec<Node> = each.into_iter().chain([body]).chain(orelse).collect();
                 let rest = self.around(n, &except, flow, out);
-                let (mut pre, mut steps, mut after) = (Vec::new(), Vec::new(), Vec::new());
-                if let Some(e) = each {
-                    self.walk(e, flow, &mut pre);
-                }
-                self.walk(body, flow, &mut steps);
-                if let Some(e) = orelse {
-                    self.walk(e, flow, &mut after);
-                }
+                let pre = self.sub(each, flow);
+                let steps = self.sub([body], flow);
+                let after = self.sub(orelse, flow);
                 out.push(Step::Loop {
                     header,
                     line: line(n),
@@ -310,9 +301,7 @@ impl<'s> Walker<'s> {
                     hidden_exit,
                     orelse: after,
                 });
-                for c in rest {
-                    self.walk(c, flow, out);
-                }
+                out.extend(self.sub(rest, flow));
             }
             FlowNode::Branch {
                 head,
@@ -335,16 +324,9 @@ impl<'s> Walker<'s> {
                             .last()
                             .or(a.cond_node.as_ref())
                             .map_or(after, Node::end_byte);
-                        let (mut pre, mut body, mut late) = (Vec::new(), Vec::new(), Vec::new());
-                        if let Some(c) = a.cond_node {
-                            self.walk(c, flow, &mut pre);
-                        }
-                        for b in a.body {
-                            self.walk(b, flow, &mut body);
-                        }
-                        if let Some(l) = a.after {
-                            self.walk(l, flow, &mut late);
-                        }
+                        let pre = self.sub(a.cond_node, flow);
+                        let body = self.sub(a.body, flow);
+                        let late = self.sub(a.after, flow);
                         Arm {
                             cond: a.cond,
                             line: line(a.at),
@@ -361,9 +343,7 @@ impl<'s> Walker<'s> {
                     arms,
                     exhaustive,
                 });
-                for c in rest {
-                    self.walk(c, flow, out);
-                }
+                out.extend(self.sub(rest, flow));
             }
         }
     }
@@ -459,7 +439,7 @@ impl Flow {
                         walk(&flow.steps, chain, f);
                         chain.pop();
                     }
-                    Step::Exit { .. } | Step::Assign { .. } => {}
+                    Step::Exit { .. } => {}
                 }
             }
         }
@@ -494,7 +474,7 @@ impl Flow {
                     }
                     Step::Finally { body, .. } => walk(body, chain, f),
                     Step::Nested { flow, .. } => scoped(flow, chain, f),
-                    Step::Exit { .. } | Step::Assign { .. } => {}
+                    Step::Exit { .. } => {}
                 }
             }
         }
@@ -591,11 +571,6 @@ pub(crate) mod testutil {
                     }
                     Step::Call(c) => out.push(format!("{pad}call {} @{}", c.text, c.site.line)),
                     Step::Exit { text, line, .. } => out.push(format!("{pad}exit {text} @{line}")),
-                    Step::Assign {
-                        target,
-                        value,
-                        line,
-                    } => out.push(format!("{pad}assign {target} = {value} @{line}")),
                     Step::Nested { name, line, flow } => {
                         out.push(format!("{pad}nested {name} @{line}"));
                         lines(&flow.steps, depth + 1, out);

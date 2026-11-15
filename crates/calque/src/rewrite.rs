@@ -550,7 +550,20 @@ pub(crate) fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, content)?;
+    // A leftover at the temporary path may be a link to anywhere: remove it,
+    // never write through it.
+    match std::fs::remove_file(&tmp) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        Ok(()) | Err(_) => {}
+    }
+    // Exclusive create: a link planted since the removal makes this fail.
+    std::io::Write::write_all(
+        &mut std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?,
+        content.as_bytes(),
+    )?;
     std::fs::rename(&tmp, path)
 }
 
