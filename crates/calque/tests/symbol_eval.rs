@@ -24,7 +24,7 @@
 //! of the expected `(path, symbol)` among the response's symbol lines in
 //! output order (what the agent reads first), `symbol_hit@3` that rank ≤ 3.
 //!
-//! The `tokens` column charges the MCP tool's default search response
+//! The footers' `tokens` charge the MCP tool's default search response
 //! (`search_lines` at `DEFAULT_SEARCH_LIMIT`, 5; it was 639.9 / 700.7
 //! tune / held at limit 10, and 431.6 / 439.6 before summaries, snippets
 //! and docs were cut at 160 characters); `tokens_json` in the footers charges the
@@ -625,11 +625,11 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
     let mut table = String::new();
     writeln!(
         table,
-        "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  top1_path",
-        "query", "class", "split", "file_rank", "symbol_rank", "tokens"
+        "{:<50}{:<13}{:<6}{:>10}{:>12}  top1_path",
+        "query", "class", "split", "file_rank", "symbol_rank"
     )
     .unwrap();
-    writeln!(table, "{}", "-".repeat(112)).unwrap();
+    writeln!(table, "{}", "-".repeat(104)).unwrap();
 
     let (mut tune, mut held) = (Agg::default(), Agg::default());
     let mut ranks: Vec<(Class, Option<usize>, Option<usize>)> = Vec::new();
@@ -656,13 +656,12 @@ fn score(out: &Path, wiki: &Wiki) -> (Agg, Agg, (usize, usize), String) {
         let show = |r: Option<usize>| r.map_or("-".to_string(), |r| r.to_string());
         writeln!(
             table,
-            "{:<50}{:<13}{:<6}{:>10}{:>12}{:>8}  {top1}",
+            "{:<50}{:<13}{:<6}{:>10}{:>12}  {top1}",
             c.query,
             format!("{:?}", c.class),
             split(c.held_out),
             show(rank),
             show(symbol_rank),
-            tokens,
         )
         .unwrap();
     }
