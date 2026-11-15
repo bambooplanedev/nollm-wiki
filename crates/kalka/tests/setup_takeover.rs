@@ -250,7 +250,7 @@ fn setup_local_removes_a_mixed_old_setup() {
     f.write(".wiki/.wiki/cache.json", "{}\n");
     let gitignore = ".claude/\n.mcp.json\n.wiki/\n";
     f.write(".gitignore", gitignore);
-    let exclude = "# git ls-files --others --exclude-from=.git/info/exclude\n.wiki/\n/.agents/memory/\n/.pi/mcp.json\n/.agents/skills/wiki-navigation/\n/.pi/extensions/wiki-hint/\n/.claude/settings.local.json\n";
+    let exclude = "# git ls-files --others --exclude-from=.git/info/exclude\n.wiki/\n/.agents/memory/\n/.pi/mcp.json\n/.agents/skills/wiki-navigation/\n/.pi/extensions/wiki-hint/\n/.claude/skills/wiki-navigation/\n/.claude/skills/wiki-memory/\n/.claude/settings.local.json\n";
     f.write(".git/info/exclude", exclude);
     // Read-only leftovers for the report.
     f.stub(
@@ -279,6 +279,7 @@ fn setup_local_removes_a_mixed_old_setup() {
   <bin>/wiki: an old wiki binary is on PATH
   .claude/settings.json: permission rules name mcp__wiki__*; the same rules for mcp__kalka__* are needed
   .claude/settings.local.json: enabledMcpjsonServers lists \"wiki\"
+  CLAUDE.md:2: mentions the old tool
   CLAUDE.md:3: mentions the old tool
   CLAUDE.md:4: mentions the old tool
   scripts/CLAUDE.md:1: mentions the old tool
@@ -297,6 +298,8 @@ kalka: restart running agent sessions; they keep the old server until then
             "removed old wiki extension from .pi/extensions/wiki-hint/index.ts",
             "removed old wiki ignore line /.agents/skills/wiki-navigation/ from .git/info/exclude",
             "removed old wiki ignore line /.pi/extensions/wiki-hint/ from .git/info/exclude",
+            "removed old wiki ignore line /.claude/skills/wiki-navigation/ from .git/info/exclude",
+            "removed old wiki ignore line /.claude/skills/wiki-memory/ from .git/info/exclude",
         ],
         "{o}"
     );
@@ -686,6 +689,25 @@ fn a_fifo_is_left_alone() {
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert_eq!(err(&a), "");
+}
+
+/// A `.claude/skills` folder that is still there keeps its old ignore line, silently.
+#[test]
+fn an_old_claude_skill_ignore_line_stays_while_its_folder_exists() {
+    let f = fixture();
+    f.write(".claude/skills/wiki-memory/SKILL.md", "mine\n");
+    f.write(
+        ".git/info/exclude",
+        "/.claude/skills/wiki-navigation/\n/.claude/skills/wiki-memory/\n",
+    );
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(
+        takeover_lines(&out(&a)),
+        ["removed old wiki ignore line /.claude/skills/wiki-navigation/ from .git/info/exclude"]
+    );
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.starts_with("/.claude/skills/wiki-memory/\n"), "{ex}");
+    assert!(!ex.contains("wiki-navigation"), "{ex}");
 }
 
 /// A dangling link where the old skill folder was keeps its ignore line.

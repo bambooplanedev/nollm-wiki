@@ -121,11 +121,11 @@ main() {
         elif [ -n "$ki_https" ]; then
             die "SHA256SUMS: signature is missing"
         else
-            printf 'install.sh: signature not checked: local release tree\n'
+            printf 'install.sh: signature not checked: local release tree\n' >&2
         fi
     else
         printf '%s %s\n' 'install.sh: signature not checked (minisign not found); kulman checks it' \
-            'on every install and update'
+            'on every install and update' >&2
     fi
     # Without a carriage return at the end of each line, so a CRLF file reads the same.
     ki_cr=$(printf '\r')

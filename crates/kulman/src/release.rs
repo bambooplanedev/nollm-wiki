@@ -273,7 +273,7 @@ static UNCHECKED: std::sync::Once = std::sync::Once::new();
 fn check_signature(url: &str, bytes: &[u8], wait: Wait) -> Result<()> {
     let url = format!("{url}.minisig");
     if let Some(Ok(false)) = local_path(&url).map(|p| p.try_exists()) {
-        UNCHECKED.call_once(|| println!("signature not checked: local release tree"));
+        UNCHECKED.call_once(|| eprintln!("signature not checked: local release tree"));
         return Ok(());
     }
     let bad = || anyhow!("manifest.json: signature does not verify");

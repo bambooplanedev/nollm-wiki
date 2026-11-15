@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../install.sh");
 const KALKA: &[u8] = b"#!/bin/sh\necho kalka\n";
 const PUBLIC_KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/kulman.pub");
-/// The first line `install.sh` prints when there is no `minisign`.
+/// The notice `install.sh` prints to stderr when there is no `minisign`.
 const NO_MINISIGN: &str = "install.sh: signature not checked (minisign not found); kulman checks \
                            it on every install and update\n";
 /// What `install.sh` runs, linked from this `PATH`.
@@ -153,10 +153,11 @@ fn install_sh_puts_kulman_in_bin() {
     assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
     nothing_in_user_home(t.path());
     let bin = home.join("bin");
+    assert_eq!(stderr(&out), NO_MINISIGN);
     assert_eq!(
         stdout(&out),
         format!(
-            "{NO_MINISIGN}kulman installed in {}\nnext: {}/kulman install\n",
+            "kulman installed in {}\nnext: {}/kulman install\n",
             bin.display(),
             bin.display()
         )
@@ -197,10 +198,11 @@ fn install_sh_over_an_installation_says_update() {
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
     let bin = home.join("bin");
+    assert_eq!(stderr(&out), NO_MINISIGN);
     assert_eq!(
         stdout(&out),
         format!(
-            "{NO_MINISIGN}kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
+            "kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
              modules to the same version\n",
             bin.display(),
             bin.display()
@@ -332,9 +334,13 @@ fn install_sh_goes_on_in_a_local_tree_without_a_signature() {
     assert_binary(&home, "kulman", KULMAN_BYTES);
     let bin = home.join("bin");
     assert_eq!(
+        stderr(&out),
+        "install.sh: signature not checked: local release tree\n"
+    );
+    assert_eq!(
         stdout(&out),
         format!(
-            "install.sh: signature not checked: local release tree\nkulman installed in {}\n\
+            "kulman installed in {}\n\
              next: {}/kulman install\n",
             bin.display(),
             bin.display()

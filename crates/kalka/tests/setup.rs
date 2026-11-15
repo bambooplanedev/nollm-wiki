@@ -271,6 +271,39 @@ fn setup_without_scope_and_terminal_fails() {
     assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
 }
 
+#[test]
+fn setup_yes_is_the_run_without_it_and_asks_nothing() {
+    let run = |yes: bool| {
+        let f = fixture(true, false);
+        let mut args = vec!["--scope", "local", "--agent", "pi"];
+        if yes {
+            args.push("--yes");
+        }
+        let a = f.setup(&args).success();
+        // The temp folder's name and the memory folder's path under it differ per run.
+        let tmp = f.tmp.path().canonicalize().unwrap().display().to_string();
+        let o = out(&a)
+            .lines()
+            .filter(|l| !l.starts_with("agent memory folder"))
+            .map(|l| l.replace(&tmp, "T"))
+            .collect::<Vec<_>>();
+        (o, tree(&f.root()))
+    };
+    let (yes, no) = (run(true), run(false));
+    assert_eq!(yes.0, no.0);
+    assert!(yes.1 == no.1, "the files differ");
+    // As without a terminal, a missing --scope stays an error.
+    let f = fixture(true, false);
+    let a = f.setup(&["--agent", "pi", "--yes"]).failure();
+    assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
+    let h = Command::cargo_bin("kalka")
+        .unwrap()
+        .args(["setup", "--help"])
+        .assert()
+        .success();
+    assert!(out(&h).contains("--yes"), "{}", out(&h));
+}
+
 /// A fixture with no agent to detect: no agent folder, no `claude` or `pi` on `PATH`.
 fn no_agent() -> Fixture {
     let f = fixture(true, false);
@@ -770,7 +803,10 @@ esac"#
 const CODEX_BLOCK: &str =
     "[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n";
 const CODEX_BLOCK_NO_MEMORY: &str = "[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\", \"--memory\", \"none\"]\n";
-const CODEX_HINT: &str = "Codex loads the server only in a project it trusts: open the project in Codex and accept the trust question.";
+/// The hint names the project's real path, as the process sees it.
+fn codex_hint(f: &Fixture) -> String {
+    format!("Codex loads the server only in a project it trusts: run codex in the project and accept the question, or add [projects.\"{}\"] trust_level = \"trusted\" to ~/.codex/config.toml", f.root().canonicalize().unwrap().display())
+}
 const MACHINE_REMOVED: &str =
     "removed the machine-wide Codex kalka server (it ran in every Codex session)";
 
@@ -795,11 +831,8 @@ fn setup_cursor_writes_the_project_mcp_json_and_says_to_approve_it() {
             ENTRY.replace('\n', "\n    ")
         )
     );
-    assert!(
-        out(&a).contains("cursor-agent mcp enable kalka"),
-        "{}",
-        out(&a)
-    );
+    let line = "Cursor: the editor lists the server under Settings → Tools & MCP; cursor-agent loads it only after `cursor-agent mcp enable kalka`.\n";
+    assert!(out(&a).ends_with(line), "{}", out(&a));
     f.setup(&["--remove", "--agent", "cursor", "--scope", "repo"])
         .success();
     assert!(!f.root().join(".cursor").exists());
@@ -824,7 +857,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     let a = f.setup(&args).success();
     let o = out(&a);
     assert!(o.contains("wrote .codex/config.toml kalka server\n"), "{o}");
-    assert!(o.ends_with(&format!("{CODEX_HINT}\n")), "{o}");
+    assert!(o.ends_with(&format!("{}\n", codex_hint(&f))), "{o}");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
     // Nothing machine-wide to remove: only asked, never added.
     assert_eq!(codex_log(&f), "mcp get kalka\n");
@@ -833,7 +866,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
 
     let a = f.setup(&args).success();
     for l in out(&a).lines().filter(|l| {
-        !l.starts_with("Compiled") && !l.starts_with("agent memory folder") && *l != CODEX_HINT
+        !l.starts_with("Compiled") && !l.starts_with("agent memory folder") && *l != codex_hint(&f)
     }) {
         assert!(l.starts_with("already set up:"), "{l}");
     }
@@ -849,7 +882,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
         "{}",
         out(&a)
     );
-    assert!(!out(&a).contains(CODEX_HINT), "{}", out(&a));
+    assert!(!out(&a).contains(&codex_hint(&f)), "{}", out(&a));
     assert_eq!(read(&agents), "# Team rules\n");
     assert!(!f.root().join(".codex").exists());
     assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(3));
@@ -1162,7 +1195,7 @@ fn setup_codex_needs_no_codex_cli() {
     let a = f.setup(&CODEX_ONLY).success();
     let o = out(&a);
     assert!(o.contains("wrote .codex/config.toml kalka server\n"), "{o}");
-    assert!(o.ends_with(&format!("{CODEX_HINT}\n")), "{o}");
+    assert!(o.ends_with(&format!("{}\n", codex_hint(&f))), "{o}");
     assert!(!o.contains("skipped"), "{o}");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
     f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
@@ -1256,7 +1289,7 @@ fn setup_codex_never_adds_a_second_kalka_definition() {
                 "{}",
                 out(&a)
             );
-            assert!(!out(&a).contains(CODEX_HINT), "{}", out(&a));
+            assert!(!out(&a).contains(&codex_hint(&f)), "{}", out(&a));
             assert_eq!(read(&p), text);
         }
     }

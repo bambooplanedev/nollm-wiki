@@ -255,7 +255,8 @@ fetched: <cause>` (будь-яка інша помилка: тайм-аут, TLS
 `nothing changed`, код виходу 1. Там, де команда лише дивиться, чи є новіший реліз (`kulman status`
 та `install` поверх установленої версії), причину натомість наводить її рядок `could not check for a
 newer release (…)`. У дереві `file://` наявний підпис теж мусить пройти перевірку; відсутній
-дозволено, і `kulman` один раз каже `signature not checked: local release tree`.
+дозволено, і `kulman` один раз каже `signature not checked: local release tree` у stderr: це
+повідомлення, а не результат.
 
 `install.sh` містить той самий ключ. Якщо `minisign` є в `PATH`, він завантажує `SHA256SUMS.minisig`
 і перевіряє ним `SHA256SUMS` (`minisign -VHm`: як і `kulman`, лише форму prehashed), перш ніж
@@ -267,7 +268,8 @@ is missing` (через `https://` нічого не завантажено: п�
 з версією, яка не знає, перевірка не проходить і `install.sh` зупиняється. У дереві `file://`
 відсутній підпис дозволено, з рядком `install.sh: signature not checked: local release tree`. Без
 `minisign` він іде далі лише за SHA-256 і каже про це: `install.sh: signature not checked (minisign
-not found); kulman checks it on every install and update`.
+not found); kulman checks it on every install and update`. Обидва рядки йдуть у stderr, тож скрипт,
+що перехоплює вивід, їх не отримує.
 
 Вручну, коли кожен файл і його `.minisig` лежать в одній теці:
 

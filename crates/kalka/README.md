@@ -193,7 +193,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 
 `kalka setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 It compiles `.` into `.kulman`, then installs the MCP server (`kalka serve --source .`) and what tells
 each agent to use it. pi gets the `kalka-navigation` skill (how to find code, and the memory rules).
@@ -228,7 +228,7 @@ stderr and exits 0.
 - Either scope writes Codex's server into the project's own `.codex/config.toml`, and needs no
   `codex` CLI for it; see [Codex](#codex).
 - Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
-  stdout are both terminals.
+  stdout are both terminals; `--yes` is the same as having no terminal.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
@@ -276,8 +276,8 @@ and reported; setup does the rest and exits 1. A JSON config setup edits is rewr
 pretty JSON with its keys and their order kept.
 
 After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
-print mode), and Cursor loads a new server only after you approve it (its MCP settings, or
-`cursor-agent mcp enable kalka`).
+print mode); `cursor-agent` loads a new server only after it is enabled
+(`cursor-agent mcp enable kalka`), and the Cursor editor lists it under Settings → Tools & MCP.
 
 #### Claude Code by hand
 
@@ -329,16 +329,16 @@ grep.
 { "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
-Cursor starts the server in the project directory, so `--source .` works. A new server stays off
-until you approve it, and Cursor drops that approval whenever the entry's command changes; the
-server then silently does not load. In our runs the agent called `search` and `callers` with no
-extra instructions.
+Cursor starts the server in the project directory, so `--source .` works. In `cursor-agent`, a new
+server stays off until you approve it, and `cursor-agent` drops that approval whenever the entry's
+command changes; the server then silently does not load. In our runs the agent called `search` and
+`callers` with no extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with
-`cursor-agent` 2026.10.22. The Cursor editor (3.30) reads the entry when the project opens and
-registers the server switched off, as its MCP log shows; in that run the server did not appear in
-the editor's MCP list, so switching it on from the editor is not confirmed.
+`cursor-agent` 2026.10.22. In the Cursor editor (3.30), with the project folder opened, the
+project's `.cursor/mcp.json` server appeared under Settings → Tools & MCP and worked after a
+window reload, also when git ignores the file (local scope).
 
 #### Codex
 
@@ -353,11 +353,14 @@ args = ["serve", "--source", "."]
 
 The server then exists only in this project, with either `--scope`: Codex starts it where setup ran,
 not in every session. Codex reads a project's `.codex/config.toml` only in a project it trusts, so
-setup ends with `Codex loads the server only in a project it trusts: open the project in Codex and
-accept the trust question.` Setup itself never edits Codex's own `~/.codex/config.toml`, and does
-not treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1;
-which earlier version first reads the project file, and whether the Codex desktop app does, is not
-checked.
+setup ends with `Codex loads the server only in a project it trusts: run codex in the project and
+accept the question, or add [projects."<project path>"] trust_level = "trusted" to
+~/.codex/config.toml`, with `<project path>` replaced by the project's absolute path. The `codex`
+command asks the trust question itself; the Codex desktop app (the ChatGPT app) did not ask when
+the project was opened, and loaded the project's server once that entry was in
+`~/.codex/config.toml`. Setup itself never edits Codex's own `~/.codex/config.toml`, and does not
+treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1 (the
+version bundled in that app); which earlier version first reads the project file is not checked.
 
 Setup appends the block only to what it can recognise. The block is its own when the header
 `[mcp_servers.kalka]` is followed by exactly the `command` line and one of the two `args` lines;

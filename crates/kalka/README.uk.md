@@ -204,7 +204,7 @@ calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: match
 
 `kalka setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`kalka serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `kalka-navigation` (як шукати код і правила
@@ -239,7 +239,7 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 - Обидва варіанти записують сервер Codex у власний `.codex/config.toml` проєкту, і CLI `codex` для
   цього не потрібен; див. [Codex](#codex).
 - Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою. Setup питає лише
-  тоді, коли і stdin, і stdout — термінали.
+  тоді, коли і stdin, і stdout — термінали; `--yes` — те саме, що відсутність термінала.
 - Хук запиту додає рядки коду з вікі до кожного запиту, перш ніж його побачить модель. Claude
   Code отримує запис `UserPromptSubmit` (`kalka hint --claude-hook`) у `.claude/settings.json`
   (`settings.local.json` з `--scope local`); pi — `.pi/extensions/kalka-hint/index.ts`. Хук мовчить,
@@ -289,8 +289,8 @@ Claude; глобальний сервер `wiki` у Codex; тека `.wiki/` і 
 редагує setup, переписується з відступом у 2 пробіли, ключі та їхній порядок зберігаються.
 
 Після setup: pi завантажує файли проєкту лише після того, як ви довірите проєкт (`/trust` або
-`--approve` у режимі print), а Cursor завантажує новий сервер лише після вашого схвалення (у
-налаштуваннях MCP або командою `cursor-agent mcp enable kalka`).
+`--approve` у режимі print), а `cursor-agent` завантажує новий сервер лише після того, як його
+ввімкнено (`cursor-agent mcp enable kalka`); редактор Cursor показує його в Settings → Tools & MCP.
 
 #### Claude Code вручну
 
@@ -342,16 +342,16 @@ whole files, whenever the task needs a function, type, handler or module locatio
 { "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
-Cursor запускає сервер у теці проєкту, тож `--source .` працює. Новий сервер вимкнений, доки ви
-його не схвалите, а Cursor скидає це схвалення щоразу, коли змінюється команда в записі; тоді сервер
-мовчки не завантажується. У наших прогонах агент викликав `search` і `callers` без додаткових
-інструкцій.
+Cursor запускає сервер у теці проєкту, тож `--source .` працює. У `cursor-agent` новий сервер
+вимкнений, доки ви його не схвалите, а `cursor-agent` скидає це схвалення щоразу, коли змінюється
+команда в записі; тоді сервер мовчки не завантажується. У наших прогонах агент викликав `search` і
+`callers` без додаткових інструкцій.
 
 `cursor-agent -p` (неінтерактивний режим) відхиляє кожен виклик MCP-інструмента, якщо не запущений з
 `--force`; `--mode ask --force` дозволяє інструменти вікі й однаково не дозволяє редагувати файли.
-Перевірено з `cursor-agent` 2026.10.22. Редактор Cursor (3.30) читає запис, коли відкривається
-проєкт, і реєструє сервер вимкненим — це видно в його журналі MCP; у тому запуску сервер не
-зʼявився у списку MCP редактора, тож увімкнення з редактора не підтверджено.
+Перевірено з `cursor-agent` 2026.10.22. У редакторі Cursor (3.30) з відкритою текою проєкту сервер
+із `.cursor/mcp.json` проєкту зʼявився в Settings → Tools & MCP і запрацював після перезавантаження
+вікна, також коли git ігнорує файл (local scope).
 
 #### Codex
 
@@ -366,11 +366,15 @@ args = ["serve", "--source", "."]
 
 Тоді сервер існує лише в цьому проєкті, за будь-якого `--scope`: Codex запускає його там, де
 запускали setup, а не в кожній сесії. Codex читає `.codex/config.toml` проєкту лише в проєкті, якому
-довіряє, тому setup завершується рядком `Codex loads the server only in a project it trusts: open
-the project in Codex and accept the trust question.` Сам setup ніколи не редагує власний
-`~/.codex/config.toml` Codex і не вважає ознакою проєкту теку `.codex/`, якщо це і є власна тека
-Codex. Перевірено з codex-cli 0.169.0-alpha.11.1; яка раніша версія першою читає файл проєкту і чи
-читає його настільний застосунок Codex, не перевірено.
+довіряє, тому setup завершується рядком `Codex loads the server only in a project it trusts: run
+codex in the project and accept the question, or add [projects."<project path>"] trust_level =
+"trusted" to ~/.codex/config.toml`, де `<project path>` замінено абсолютним шляхом проєкту.
+Команда `codex` сама ставить питання про довіру; настільний застосунок Codex (застосунок ChatGPT)
+при відкритті проєкту не питав і завантажив сервер проєкту, щойно цей запис зʼявився в
+`~/.codex/config.toml`. Сам setup ніколи не редагує власний `~/.codex/config.toml` Codex і не
+вважає ознакою проєкту теку `.codex/`, якщо це і є власна тека Codex. Перевірено з
+codex-cli 0.169.0-alpha.11.1 (версія, вбудована в цей застосунок); яка раніша версія першою читає
+файл проєкту, не перевірено.
 
 Setup дописує блок лише там, де може його впізнати. Блок його власний, коли за заголовком
 `[mcp_servers.kalka]` ідуть рівно рядок `command` і один із двох рядків `args`; тоді setup перемикає
