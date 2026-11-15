@@ -42,7 +42,7 @@ crates/kalka/src/lib.rs
   [Obsidian and Quartz](#obsidian-and-quartz) · [page ids](#page-ids)
 - [Measured](#measured)
 - [Limitations](#limitations)
-- [Library](#library) · [Determinism](#determinism) · [Error reporting](#error-reporting) · [Docs](#docs)
+- [Library](#library) · [Determinism](#determinism) · [Docs](#docs)
 - [Development](#development)
 - [License](#license)
 
@@ -336,7 +336,9 @@ extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with
-`cursor-agent` 2026.10.22; the Cursor editor itself is not checked.
+`cursor-agent` 2026.10.22. The Cursor editor (3.30) reads the entry when the project opens and
+registers the server switched off, as its MCP log shows; in that run the server did not appear in
+the editor's MCP list, so switching it on from the editor is not confirmed.
 
 #### Codex
 
@@ -1002,10 +1004,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Compiling the same input twice — on any machine, with any `--jobs` value — produces byte-identical
 output, across the ordering of parallel work, hashing, float comparisons and path handling. The
 rules that make this hold are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Error reporting
-
-Setting `SENTRY_DSN` enables Sentry error and panic reporting; it is off by default and nothing is sent without it.
 
 ## Docs
 
