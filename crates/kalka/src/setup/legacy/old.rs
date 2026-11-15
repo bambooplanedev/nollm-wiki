@@ -60,12 +60,13 @@ pub(super) fn block(text: &str) -> Option<&str> {
     Some(&text[i..i + j + NAV_END.len()])
 }
 
-/// Whether text (`None`: there, but not readable) holds the old tool's server `wiki`.
+/// Whether text (`None`: there, but not readable) holds the old tool's server `wiki`: one that
+/// runs `wiki`, as every entry it wrote did. Another `wiki` is the person's own.
 pub(super) fn old_server(t: Option<&str>) -> bool {
     let v = t.and_then(|t| serde_json::from_str::<Value>(t).ok());
     v.as_ref()
-        .and_then(|v| v.get("mcpServers")?.as_object())
-        .is_some_and(|m| m.contains_key("wiki"))
+        .and_then(|v| v.get("mcpServers")?.get("wiki"))
+        .is_some_and(|w| w["command"] == "wiki")
 }
 
 /// Whether a settings text holds a prompt hook item running `wiki hint`.

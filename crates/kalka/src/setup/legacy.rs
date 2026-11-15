@@ -252,17 +252,22 @@ pub(super) fn take_over(root: &Path, out: &mut dyn Write) -> Result<Found> {
     if find_on_path("claude").is_some() {
         // Recognised as the old one did (mod.rs:243-259), as strictly as kalka's own entry.
         match claude_local_mcp(root, "wiki", &[old_entry()], true, true) {
+            // Judged the old tool's, but not removed: a failed removal, as in any file.
+            Outcome::Foreign(why) if why.starts_with("`claude mcp remove` failed") => {
+                return Err(std::io::Error::other(why));
+            }
             Outcome::Foreign(_) => {
-                // Named by the scope Claude Code shows; its project scope is `.mcp.json`'s,
-                // listed once.
-                let scope = claude(root, &["mcp", "get", "wiki"])
-                    .ok()
-                    .and_then(|(_, text)| {
-                        let s = text
-                            .lines()
-                            .find_map(|l| l.trim().strip_prefix("Scope: "))?;
-                        Some(s.split_whitespace().next()?.to_lowercase())
-                    });
+                // Listed only when Claude Code shows a `wiki` that runs `wiki` (no answer, or
+                // another command, is nothing of the old tool's), named by the scope it shows;
+                // its project scope is `.mcp.json`'s, listed once.
+                let text = match claude(root, &["mcp", "get", "wiki"]) {
+                    Ok((true, text)) if text.lines().any(|l| l.trim() == "Command: wiki") => text,
+                    _ => return Ok(t.found),
+                };
+                let scope = text
+                    .lines()
+                    .find_map(|l| l.trim().strip_prefix("Scope: "))
+                    .and_then(|s| Some(s.split_whitespace().next()?.to_lowercase()));
                 let listed = |l: &String| l.starts_with(".mcp.json:");
                 if !(scope.as_deref() == Some("project") && t.found.differing.iter().any(listed)) {
                     let from = scope.map_or("claude".into(), |s| format!("claude ({s} scope)"));

@@ -739,3 +739,62 @@ fn an_old_local_claude_server_that_fails_to_connect_is_removed() {
     );
     assert!(f.claude_log().contains("mcp remove wiki --scope local"));
 }
+
+/// A server the person named `wiki` themselves (another command) is not the old tool's.
+#[test]
+fn a_wiki_server_with_another_command_is_not_mentioned() {
+    let f = fixture();
+    let own = pretty(&json!({"mcpServers": {"wiki": {"command": "node", "args": ["wiki.js"]}}}));
+    f.write(".mcp.json", &own);
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+    assert_eq!(read(&f.root().join(".mcp.json")), own);
+
+    let g = fixture();
+    g.claude_local(
+        "wiki",
+        "node",
+        "User config (available in all your projects)",
+    );
+    let a = g.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+}
+
+/// A `claude` that cannot run says nothing about the old server: there is no answer to judge.
+#[test]
+fn a_claude_that_cannot_run_says_nothing() {
+    let f = fixture();
+    f.stub("claude", "exit 0");
+    fs::write(f.bin().join("claude"), "#!/nonexistent/sh\n").unwrap();
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(err(&a), "");
+}
+
+/// The old local entry was judged the old tool's; failing to remove it fails setup.
+#[test]
+fn a_failed_remove_of_the_old_local_server_fails_setup() {
+    let f = fixture();
+    f.claude_local(
+        "wiki",
+        "wiki",
+        "Local config (private to you in this project)",
+    );
+    let t = f.tmp.path().display();
+    f.stub(
+        "claude",
+        &format!(
+            r#"case "$1 $2" in
+"mcp get") /bin/cat {t}/get-$3 2>/dev/null || {{ echo "No MCP server named \"$3\". Configured servers: " >&2; exit 1; }} ;;
+"mcp remove") echo "error: cannot write config" >&2; exit 1 ;;
+esac"#
+        ),
+    );
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).code(1);
+    assert!(
+        err(&a).contains("`claude mcp remove` failed: error: cannot write config"),
+        "{}",
+        err(&a)
+    );
+}
