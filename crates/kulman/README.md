@@ -6,7 +6,7 @@
 the tools, sets up a project.
 
 `kulman` installs, updates and sets up the modules of the kulman set: `kalka` (the project wiki for
-coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.7.1 is
+coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.7.2 is
 the first to carry it; the [repository README](../../README.md) describes the whole set.
 
 ## Getting it
@@ -202,7 +202,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.7.1",
+  "version": "0.7.2",
   "modules": [
     {
       "name": "kalka",
@@ -211,13 +211,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "kalka-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "kalka-v0.7.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.7.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
