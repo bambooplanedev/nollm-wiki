@@ -5,7 +5,7 @@
 mod toml;
 
 use super::edit::{inside, other_names, prune_dirs, Outcome};
-use super::{cli, serve_args, Report, CMD};
+use super::{cli, Report};
 use crate::{memory, WikiError};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -65,62 +65,25 @@ pub(super) fn codex_home(root: &Path) -> bool {
     home.is_some_and(|h| real(&h).is_some_and(|h| Some(h) == real(&root.join(".codex"))))
 }
 
-/// The entry the old setup's `codex mcp add` wrote, in either memory variant, and nothing else.
-fn old_entry(get: &str) -> bool {
-    let cmd = format!("command: {CMD}");
-    let args = [true, false].map(|m| format!("args: {}", serve_args(m).join(" ")));
-    let own = [
-        &cmd,
-        "calque",
-        "enabled: true",
-        "transport: stdio",
-        "cwd: -",
-        "env: -",
-    ];
-    let lines = || get.lines().map(str::trim).filter(|l| !l.is_empty());
-    let ours = |l: &str| own.contains(&l) || args.iter().any(|a| a == l);
-    lines().any(|l| l == cmd)
-        && lines().any(|l| args.iter().any(|a| a == l))
-        && lines().all(|l| ours(l) || l == "remove: codex mcp remove calque")
+/// Whether Codex has a machine-wide `calque`, asked outside any project: inside one, Codex also
+/// shows a trusted parent project's. Without `codex`, no.
+fn machine_get() -> bool {
+    cli("codex", &std::env::temp_dir(), &["mcp", "get", "calque"]).is_ok_and(|(found, _)| found)
 }
 
-/// The machine-wide `calque`, asked outside any project: inside one, Codex also shows a trusted
-/// parent project's. `Some(true)`: exactly the old setup's. Without `codex`, `None`.
-fn machine_get() -> Option<bool> {
-    match cli("codex", &std::env::temp_dir(), &["mcp", "get", "calque"]) {
-        Ok((true, get)) => Some(old_entry(&get)),
-        _ => None,
-    }
-}
-
-/// After the project's block is in place: the old setup's machine-wide entry is removed, another
-/// one reported (on `--remove` as a note: nothing of setup's was skipped).
-fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiError> {
-    if !exact && remove {
+/// After the project's block is in place: the machine-wide `calque` is another server that calque
+/// did not write, reported (on `--remove` as a note: nothing of setup's was skipped).
+fn machine_wide(r: &mut Report, remove: bool) -> Result<(), WikiError> {
+    if remove {
         return r.line(&format!("left the {MACHINE}: another \"calque\" server that calque did not write; `codex mcp remove calque` removes it"));
     }
-    if !exact {
-        return r.skip(MACHINE, &format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove calque` removes it); this project's {FILE} entry was written and takes precedence here"));
-    }
-    match cli("codex", &std::env::temp_dir(), &["mcp", "remove", "calque"]) {
-        // Gone in the meantime: nothing was removed.
-        Ok((_, out)) if out.contains("No MCP server named") => Ok(()),
-        Ok(_) => {
-            r.line("removed the machine-wide Codex calque server (it ran in every Codex session)")
-        }
-        Err(e) => r.skip(
-            MACHINE,
-            &format!("{e}; run `codex mcp remove calque` by hand"),
-        ),
-    }
+    r.skip(MACHINE, &format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove calque` removes it); this project's {FILE} entry was written and takes precedence here"))
 }
 
 /// Writes (or with `remove`, takes out) the block; `true` when it is in place. The machine-wide
-/// entry is looked at on every run that may edit the file, and acted on only once the block is
-/// in place (written, already there, removed, or nothing to remove), so a failed write never
-/// leaves no server at all: an exact one goes (a failed remove is retried next run), another is
-/// reported by setup on the run that finds the project without a `calque` of its own, and noted
-/// by every `--remove`.
+/// entry is looked at on every run that may edit the file, and reported only once the block is
+/// in place: by setup on the run that finds the project without a `calque` of its own, and as a
+/// note by every `--remove`.
 pub(super) fn run(
     root: &Path,
     r: &mut Report,
@@ -133,7 +96,7 @@ pub(super) fn run(
     let editable = text
         .as_ref()
         .is_ok_and(|t| !matches!(st(t), State::Other(_)));
-    let machine = editable.then(machine_get).flatten();
+    let machine = editable && machine_get();
     let path = root.join(FILE);
     let edit = || -> std::io::Result<Outcome> {
         let text = match text {
@@ -158,8 +121,8 @@ pub(super) fn run(
         Ok(Outcome::Done)
     };
     let present = r.file_item(root, FILE, &format!("{FILE} calque server"), edit)?;
-    if let Some(exact) = machine.filter(|&exact| present && (exact || absent || remove)) {
-        machine_wide(r, exact, remove)?;
+    if machine && present && (absent || remove) {
+        machine_wide(r, remove)?;
     }
     Ok(present)
 }

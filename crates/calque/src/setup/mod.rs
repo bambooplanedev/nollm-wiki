@@ -2,7 +2,6 @@
 
 mod codex;
 pub mod edit;
-mod legacy;
 
 use crate::{compile, memory, CompileOptions, WikiError};
 use clap::ValueEnum;
@@ -223,8 +222,8 @@ fn lost(e: &str) -> String {
 /// (same command, other args) is ours; another one is replaced by `own[0]` only when `mcp get`
 /// shows nothing but what setup's own `add-json` yields (scope, status and its issue, type,
 /// command, args, the remove hint): an `Environment:`, `Timeout:` or any other line is a setting
-/// setup did not write. `exact` asks the same of a removal.
-fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool, exact: bool) -> Outcome {
+/// setup did not write.
+fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Outcome {
     let cmd = format!(
         "Command: {}",
         own[0]["command"].as_str().unwrap_or_default()
@@ -274,11 +273,6 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool, exact:
                 .lines()
                 .map(str::trim)
                 .all(|l| l.is_empty() || own_line(l));
-            if other && exact {
-                return Ok(Outcome::Foreign(format!(
-                    "the \"{name}\" server carries settings setup did not write"
-                )));
-            }
             if other && !remove {
                 return Ok(other_settings(&format!(
                     "claude mcp remove {name} --scope local"
@@ -372,10 +366,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let skills = choice.map(skill_text);
     let skills = skills.each_ref().map(String::as_str);
     let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
-    let mut found = None;
     if !opts.remove {
-        // The old `wiki` setup's own entries go first, so that no run sees both.
-        found = Some(legacy::take_over(root, r.out)?);
         // As the registered server compiles: `--memory none` has no memory at all.
         let mut agent_dirs = Vec::new();
         if opts.memory {
@@ -523,7 +514,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
-            let o = claude_local_mcp(root, "calque", &entries, opts.remove, false);
+            let o = claude_local_mcp(root, "calque", &entries, opts.remove);
             r.item("Claude Code local calque server", Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
@@ -615,13 +606,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     if codex_added {
         r.line(&codex::hint(root))?;
-    }
-    // What the old `wiki` left for the person to decide, after setup's own lines.
-    if let Some(found) = found {
-        let mut err = std::io::stderr();
-        for line in legacy::report(root, &found) {
-            writeln!(err, "{line}")?;
-        }
     }
     Ok(r.ok)
 }
