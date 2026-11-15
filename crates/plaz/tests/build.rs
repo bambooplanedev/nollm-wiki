@@ -352,9 +352,14 @@ fn a_foreign_file_at_a_page_path_is_left_alone() {
     let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
     common::write_files(
         &src,
-        &[("src/a.rs", "fn f() {}\n"), ("src/b.rs", "fn g() {}\n")],
+        &[
+            ("src/a.rs", "fn f() {}\n"),
+            ("src/b.rs", "fn g() {}\n"),
+            ("src/c.rs", "fn h() {}\n"),
+        ],
     );
     // a.rs: a file of the user's own. b.rs: a page cut inside its front matter.
+    // c.rs: no page yet; it is written although the two before it are left alone.
     let own = "my own notes\n";
     let cut = "---\ntitle: \"b.rs";
     common::write_files(
@@ -364,7 +369,7 @@ fn a_foreign_file_at_a_page_path_is_left_alone() {
     let (a, b) = (vault.join("map/src/a_rs.md"), vault.join("map/src/b_rs.md"));
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 0 written, 0 unchanged, 0 removed, 2 left alone\n")
+        .stdout("map: 1 written, 0 unchanged, 0 removed, 2 left alone\n")
         .stderr(format!(
             "warning: {}: not a map page, left alone\nwarning: {}: not a map page, left alone\n",
             a.display(),
@@ -372,6 +377,7 @@ fn a_foreign_file_at_a_page_path_is_left_alone() {
         ));
     assert_eq!(std::fs::read_to_string(&a).unwrap(), own);
     assert_eq!(std::fs::read_to_string(&b).unwrap(), cut);
+    assert!(vault.join("map/src/c_rs.md").is_file());
 }
 
 #[test]

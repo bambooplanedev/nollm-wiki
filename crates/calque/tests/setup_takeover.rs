@@ -682,10 +682,7 @@ fn a_fifo_is_left_alone() {
             .status()
             .is_ok_and(|s| s.success())
     });
-    if !made {
-        eprintln!("skipped: no mkfifo");
-        return;
-    }
+    assert!(made, "needs mkfifo on PATH");
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert_eq!(err(&a), "");

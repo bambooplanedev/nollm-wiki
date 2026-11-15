@@ -42,7 +42,7 @@ fn a_docstring_sentence_wrapped_across_lines_summarizes_whole() {
 }
 
 #[test]
-fn a_module_docstring_is_its_first_paragraph_only() {
+fn a_boilerplate_first_paragraph_is_not_replaced_by_the_second() {
     // The opening paragraph is boilerplate, so the docstring gives no
     // summary; the second paragraph must not stand in for it.
     let src = "\"\"\"\nThis module fetches feeds.\n\nIt retries on failure.\n\"\"\"\ndef fetch():\n    pass\n";

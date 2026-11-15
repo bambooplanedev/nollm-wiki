@@ -16,15 +16,8 @@ fn a_const_only_module_without_docs_prefers_an_impl_header_to_the_const() {
 
 #[test]
 fn a_trait_impl_with_an_associated_const_summarizes_as_its_impl_header() {
-    // Classification must run AFTER `placement`, so an associated item
-    // inside a trait impl is a Member rather than a free value.
-    //
-    // Note what this test does NOT prove: it cannot fail
-    // by misclassification alone. `pick_summary_fallback` ranks Header
-    // above FreeValue, so the impl header wins this summary either way.
-    // Mutating the precedence in `classify` leaves the whole suite green —
-    // see the note there for why the distinction is unobservable in
-    // current output. What this pins is the summary itself.
+    // An associated const and type inside a trait impl do not displace the impl
+    // header as the summary.
     let src = "impl Iterator for Counter {\n    type Item = u32;\n    const FOO: u8 = 1;\n    fn next(&mut self) -> Option<u32> { None }\n}\n";
     let e = crate::extract("c.rs", src);
     assert_eq!(
@@ -244,28 +237,15 @@ fn symbols_and_imports_come_from_the_test_stripped_source() {
 }
 
 #[test]
-fn trait_impl_emits_header_and_qualified_methods() {
-    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
-    let e = crate::extract("text.rs", src);
-    assert_has(&e.symbols, "impl Extractor for TextExtractor");
-    // Methods in a trait impl carry no visibility modifier — they are
-    // public through the trait — so they must not be visibility-gated.
-    assert_has(
-        &e.symbols,
-        "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity",
-    );
-}
-
-#[test]
 fn a_trait_impl_header_leads_its_own_methods() {
-    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self) -> u8 { 0 }\n}\n";
+    let src = "pub struct TextExtractor;\nimpl Extractor for TextExtractor {\n    fn extensions(&self) -> &[&str] { &[] }\n    fn extract(&self, p: &str) -> Entity { todo!() }\n}\n";
     let e = crate::extract("text.rs", src);
     assert_eq!(
         e.symbols,
         vec![
             "impl Extractor for TextExtractor".to_string(),
             "fn <TextExtractor as Extractor>::extensions(&self) -> &[&str]".to_string(),
-            "fn <TextExtractor as Extractor>::extract(&self) -> u8".to_string(),
+            "fn <TextExtractor as Extractor>::extract(&self, p: &str) -> Entity".to_string(),
             "pub struct TextExtractor".to_string(),
         ],
         "the header must lead its methods: {:?}",
