@@ -5,7 +5,7 @@
 mod toml;
 
 use super::edit::{inside, other_names, prune_dirs, Outcome};
-use super::{cli, serve_args, tracked, Report, CMD};
+use super::{cli, serve_args, Report, CMD};
 use crate::WikiError;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -75,20 +75,28 @@ fn old_entry(get: &str) -> bool {
         && lines().all(|l| ours(l) || l == "remove: codex mcp remove kalka")
 }
 
-/// The old machine-wide entry (Codex shows it while the project defines no `kalka`): kalka's own
-/// is removed, another one reported. Without `codex` there is nothing to ask.
-fn machine_wide(root: &Path, r: &mut Report, remove: bool) -> Result<(), WikiError> {
-    let Ok((true, get)) = cli("codex", root, &["mcp", "get", "kalka"]) else {
-        return Ok(());
-    };
-    if !old_entry(&get) {
+/// The machine-wide `kalka`, asked outside any project: inside one, Codex also shows a trusted
+/// parent project's. `Some(true)`: exactly the old setup's. Without `codex`, `None`.
+fn machine_get() -> Option<bool> {
+    match cli("codex", &std::env::temp_dir(), &["mcp", "get", "kalka"]) {
+        Ok((true, get)) => Some(old_entry(&get)),
+        _ => None,
+    }
+}
+
+/// After the project's block is in place: the old setup's machine-wide entry is removed, another
+/// one reported.
+fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiError> {
+    if !exact {
         let here = format!("; this project's {FILE} entry overrides it here");
         return r.skip(
             MACHINE,
             &format!("{ANOTHER}{}", if remove { "" } else { &here }),
         );
     }
-    match cli("codex", root, &["mcp", "remove", "kalka"]) {
+    match cli("codex", &std::env::temp_dir(), &["mcp", "remove", "kalka"]) {
+        // Gone in the meantime: nothing was removed.
+        Ok((_, out)) if out.contains("No MCP server named") => Ok(()),
         Ok(_) => {
             r.line("removed the machine-wide Codex kalka server (it ran in every Codex session)")
         }
@@ -99,7 +107,9 @@ fn machine_wide(root: &Path, r: &mut Report, remove: bool) -> Result<(), WikiErr
     }
 }
 
-/// Writes (or with `remove`, takes out) the block; `true` when it is in place.
+/// Writes (or with `remove`, takes out) the block; `true` when it is in place. The machine-wide
+/// entry is looked at while the project defines no `kalka`, and acted on only once the block is
+/// in place (written, or nothing to remove), so a failed write never leaves no server at all.
 pub(super) fn run(
     root: &Path,
     r: &mut Report,
@@ -108,11 +118,8 @@ pub(super) fn run(
 ) -> Result<bool, WikiError> {
     let text = read(root);
     let st = |t: &Option<String>| state(t.as_deref().unwrap_or_default(), memory);
-    // Only where this run goes on to write: the project's entry would hide the machine-wide one.
-    let writes = !(r.guard_tracked && tracked(root, FILE));
-    if text.as_ref().is_ok_and(|t| st(t) == State::Absent) && writes {
-        machine_wide(root, r, remove)?;
-    }
+    let absent = text.as_ref().is_ok_and(|t| st(t) == State::Absent);
+    let machine = absent.then(machine_get).flatten();
     let path = root.join(FILE);
     let edit = || -> std::io::Result<Outcome> {
         let text = match text {
@@ -136,7 +143,11 @@ pub(super) fn run(
         }
         Ok(Outcome::Done)
     };
-    r.file_item(root, FILE, &format!("{FILE} kalka server"), false, edit)
+    let present = r.file_item(root, FILE, &format!("{FILE} kalka server"), false, edit)?;
+    if let Some(exact) = machine.filter(|_| present) {
+        machine_wide(r, exact, remove)?;
+    }
+    Ok(present)
 }
 
 #[cfg(test)]

@@ -903,7 +903,7 @@ fn setup_codex_removes_the_old_machine_wide_entry_once() {
     let o = out(&a);
     assert!(
         o.contains(&format!(
-            "{MACHINE_REMOVED}\nwrote .codex/config.toml kalka server\n"
+            "wrote .codex/config.toml kalka server\n{MACHINE_REMOVED}\n"
         )),
         "{o}"
     );
@@ -912,6 +912,52 @@ fn setup_codex_removes_the_old_machine_wide_entry_once() {
     let a = f.setup(&CODEX_ONLY).success();
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
     assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
+}
+
+#[test]
+fn the_machine_wide_entry_is_asked_outside_the_project() {
+    let f = fixture(true, false);
+    let t = f.tmp.path().display();
+    let inside = f.tmp.path().canonicalize().unwrap();
+    // Codex's merged view: inside the fixture (a trusted parent project), kalka's exact entry;
+    // outside it, none machine-wide.
+    f.stub(
+        "codex",
+        &format!(
+            r#"echo "$@" >> {t}/codex.log
+case "$(/bin/pwd -P)" in "{}"*) printf '%s\n' '{}' ;;
+*) echo "Error: No MCP server named 'kalka' found." >&2; exit 1 ;; esac"#,
+            inside.display(),
+            codex_get("serve --source .", "-")
+        ),
+    );
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
+    assert_eq!(codex_log(&f), "mcp get kalka\n");
+    assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
+}
+
+#[test]
+fn a_remove_that_finds_nothing_says_nothing() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source .", "-"),
+        "echo \"No MCP server named 'kalka' found.\"",
+    );
+    let remove = [&["--remove"], &CODEX_ONLY[..]].concat();
+    // Setup, then `--remove` twice: the second finds no project block and tries the machine-wide one.
+    for (args, log) in [
+        (&CODEX_ONLY[..], "mcp get kalka\nmcp remove kalka\n"),
+        (&remove[..], ""),
+        (&remove[..], "mcp get kalka\nmcp remove kalka\n"),
+    ] {
+        fs::remove_file(f.tmp.path().join("codex.log")).ok();
+        let a = f.setup(args).success();
+        assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
+        assert_eq!(codex_log(&f), log);
+    }
+    assert!(!f.root().join(".codex").exists());
 }
 
 #[test]
@@ -1099,7 +1145,8 @@ fn setup_local_skips_a_codex_config_git_tracks() {
     );
     assert_eq!(read(&r.join(".codex/config.toml")), "model = \"o3\"\n");
     // Nothing written in the project: the machine-wide entry stays too.
-    assert_eq!(codex_log(&f), "");
+    assert_eq!(codex_log(&f), "mcp get kalka\n");
+    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
     let a = f.setup(&CODEX_ONLY).success();
     assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
 }
@@ -1528,14 +1575,14 @@ fn setup_switches_a_fixed_codex_entry_without_memory_to_the_default() {
         &codex_get("serve --source . --memory none", "-"),
         "exit 0",
     );
-    // The old setup's machine-wide entry, in either variant, goes; the project gets the default.
+    // The old setup's machine-wide entry, in either variant, goes once the project has the default.
     let a = f.setup(&CODEX_ONLY).success();
     let o = out(&a);
     let (gone, wrote) = (
         o.find(&format!("{MACHINE_REMOVED}\n")),
         o.find("wrote .codex/config.toml kalka server\n"),
     );
-    assert!(gone.is_some() && gone < wrote, "{o}");
+    assert!(wrote.is_some() && wrote < gone, "{o}");
     assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
 }
