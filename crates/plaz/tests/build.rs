@@ -203,10 +203,8 @@ fn hostile_text_breaks_no_link_code_span_or_front_matter() {
     let d = tempfile::tempdir().unwrap();
     let (root, vault) = (d.path().join("src-root"), d.path().join("vault"));
     std::fs::create_dir_all(root.join("src")).unwrap();
-    if let Err(e) = std::fs::write(root.join(path), src) {
-        eprintln!("skipped: this platform refuses the file name: {e}");
-        return;
-    }
+    std::fs::write(root.join(path), src)
+        .unwrap_or_else(|e| panic!("needs a file system that accepts quotes in file names: {e}"));
     plaz::build(&root, &vault).unwrap();
     let page = common::map_page(&vault, "map/src/it_s__x__rs");
 
@@ -276,10 +274,10 @@ fn the_cli_names_every_file_it_could_not_read() {
     );
     let locked = d.path().join("src/c.rs");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    if std::fs::read(&locked).is_ok() {
-        eprintln!("skipped: running as a user that reads any file");
-        return;
-    }
+    assert!(
+        std::fs::read(&locked).is_err(),
+        "needs a user that cannot read a mode 000 file (not root)"
+    );
     assert_cmd::cargo_bin_cmd!()
         .args(["build", "--source"])
         .arg(d.path())
@@ -352,17 +350,28 @@ fn a_recursive_call_is_resolved_to_its_caller() {
 fn a_foreign_file_at_a_page_path_is_left_alone() {
     let d = tempfile::tempdir().unwrap();
     let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
-    common::write_files(&src, &[("src/a.rs", "fn f() {}\n")]);
-    common::write_files(&vault, &[("map/src/a_rs.md", "my own notes\n")]);
-    let page = vault.join("map/src/a_rs.md");
+    common::write_files(
+        &src,
+        &[("src/a.rs", "fn f() {}\n"), ("src/b.rs", "fn g() {}\n")],
+    );
+    // a.rs: a file of the user's own. b.rs: a page cut inside its front matter.
+    let own = "my own notes\n";
+    let cut = "---\ntitle: \"b.rs";
+    common::write_files(
+        &vault,
+        &[("map/src/a_rs.md", own), ("map/src/b_rs.md", cut)],
+    );
+    let (a, b) = (vault.join("map/src/a_rs.md"), vault.join("map/src/b_rs.md"));
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 0 written, 0 unchanged, 0 removed, 1 left alone\n")
+        .stdout("map: 0 written, 0 unchanged, 0 removed, 2 left alone\n")
         .stderr(format!(
-            "warning: {}: not a map page, left alone\n",
-            page.display()
+            "warning: {}: not a map page, left alone\nwarning: {}: not a map page, left alone\n",
+            a.display(),
+            b.display()
         ));
-    assert_eq!(std::fs::read_to_string(&page).unwrap(), "my own notes\n");
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), own);
+    assert_eq!(std::fs::read_to_string(&b).unwrap(), cut);
 }
 
 #[test]
@@ -450,10 +459,10 @@ fn an_unreadable_file_at_a_page_path_is_left_alone() {
     common::write_files(&vault, &[("map/src/a_rs.md", "secret\n")]);
     let page = vault.join("map/src/a_rs.md");
     std::fs::set_permissions(&page, std::fs::Permissions::from_mode(0o200)).unwrap();
-    if std::fs::read(&page).is_ok() {
-        eprintln!("skipped: running as a user that reads any file");
-        return;
-    }
+    assert!(
+        std::fs::read(&page).is_err(),
+        "needs a user that cannot read a mode 200 file (not root)"
+    );
     cli_build(&src, &vault)
         .success()
         .stdout("map: 0 written, 0 unchanged, 0 removed, 1 left alone\n")
@@ -2402,20 +2411,6 @@ fn a_leftover_temporary_file_is_removed_and_no_temporary_file_stays() {
 }
 
 #[test]
-fn a_file_cut_inside_its_front_matter_is_left_alone_and_counted() {
-    let d = tempfile::tempdir().unwrap();
-    let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
-    common::write_files(
-        &src,
-        &[("src/a.rs", "fn f() {}\n"), ("src/b.rs", "fn g() {}\n")],
-    );
-    common::write_files(&vault, &[("map/src/a_rs.md", "---\ntitle: \"a.rs")]);
-    cli_build(&src, &vault)
-        .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed, 1 left alone\n");
-}
-
-#[test]
 fn a_note_with_kind_map_but_no_plaz_tag_survives_a_build() {
     let d = tempfile::tempdir().unwrap();
     let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
@@ -2459,10 +2454,10 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
     common::write_files(&vault, &[("map/locked/x.md", "x\n")]);
     let locked = vault.join("map/locked");
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    if std::fs::read_dir(&locked).is_ok() {
-        eprintln!("skipped: running as a user that reads any directory");
-        return;
-    }
+    assert!(
+        std::fs::read_dir(&locked).is_err(),
+        "needs a user that cannot list a mode 000 directory (not root)"
+    );
     let out = cli_build(&src, &vault).success();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     out.stdout("map: 1 written, 0 unchanged, 0 removed\n")
@@ -2542,7 +2537,7 @@ setup   build, then keep .kulman/ out of git (--remove: delete the map's pages i
 }
 
 #[test]
-fn a_deeply_nested_function_builds() {
+fn a_function_with_a_20000_term_expression_chain_builds() {
     let d = tempfile::tempdir().unwrap();
     let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
     let body = vec!["g()"; 20_000].join(" + ");

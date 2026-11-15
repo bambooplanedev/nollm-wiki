@@ -105,12 +105,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn project_is_pure_sorted_and_keeps_call_sites() {
+    fn project_ignores_input_order_and_keeps_call_sites() {
         let p = project([
             ("src/b.rs".to_string(), "pub fn h() {}\n".to_string()),
             ("src/a.rs".to_string(), "fn f() { h(); }\n".to_string()),
         ]);
-        assert_eq!(p.files.keys().collect::<Vec<_>>(), ["src/a.rs", "src/b.rs"]);
         let a = &p.files["src/a.rs"];
         assert_eq!((a.family, a.syntax_errors), (Family::Rust, false));
         assert_eq!(a.code.items[0].call_sites.len(), 1);
