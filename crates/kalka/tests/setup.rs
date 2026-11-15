@@ -1128,6 +1128,35 @@ fn an_empty_codex_home_is_unset() {
 }
 
 #[test]
+fn a_codex_found_through_a_relative_path_entry_is_the_one_that_runs() {
+    let f = fixture(true, false);
+    let t = f.tmp.path().display();
+    let dir = f.root().join("node_modules/.bin");
+    fs::create_dir_all(&dir).unwrap();
+    let stub = dir.join("codex");
+    let get = codex_get("serve --source .", "-");
+    fs::write(
+        &stub,
+        format!("#!/bin/sh\necho \"$@\" >> {t}/codex.log\n[ \"$2\" = get ] && printf '%s\\n' '{get}'\n:\n"),
+    )
+    .unwrap();
+    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("node_modules/.bin:{}", f.bin().display());
+    let a = Command::cargo_bin("kalka")
+        .unwrap()
+        .args(["setup", "--agent", "codex", "--scope", "repo"])
+        .current_dir(f.root())
+        .env("PATH", path)
+        .env("HOME", f.home())
+        .env_remove("CODEX_HOME")
+        .assert()
+        .success();
+    // The project's stub answered from the temp dir, and its exact entry was removed.
+    assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
+    assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
+}
+
+#[test]
 fn setup_codex_needs_no_codex_cli() {
     let f = fixture(true, false);
     let a = f.setup(&CODEX_ONLY).success();

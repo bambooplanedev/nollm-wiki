@@ -182,6 +182,8 @@ impl Report<'_> {
 /// other call's text is stdout then stderr, whichever stream a CLI prints a note on.
 fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     let exe = find_on_path(name).ok_or(format!("{name} is not on PATH"))?;
+    // Found through a relative `PATH` entry, it is resolved here: `root` may be another folder.
+    let exe = std::path::absolute(exe).map_err(|e| format!("could not run {name}: {e}"))?;
     let o = Command::new(exe)
         .args(args)
         .current_dir(root)
