@@ -1280,9 +1280,11 @@ fn compile_never_reads_its_own_output_folder_as_a_source() {
                 .map(|e| e["id"].as_str().unwrap().to_string())
                 .collect()
         };
-        let first = ids(&out);
-        assert!(first.contains(&"notes".to_string()), "{first:?}");
+        // One page per source file (src/a.rs, notes.txt). Read back as sources, the pages written
+        // into `.kulman` would add ids of their own (seen: `kulman_a`, `src_a`, `kulman_notes`).
+        let want = ["a", "notes"];
+        assert_eq!(ids(&out), want, "respect_ignore={respect_ignore}");
         compile(project, &out, &opts).unwrap();
-        assert_eq!(ids(&out), first, "respect_ignore={respect_ignore}");
+        assert_eq!(ids(&out), want, "respect_ignore={respect_ignore}");
     }
 }

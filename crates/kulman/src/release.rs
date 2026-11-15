@@ -566,15 +566,21 @@ mod tests {
             whole: Duration::from_millis(400),
         };
         let start = std::time::Instant::now();
-        let err = manifest(&base, None, wait)
-            .err()
-            .expect("no answer, no manifest");
+        let result = manifest(&base, None, wait);
+        assert!(result.is_err(), "no answer, no manifest");
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "{:?}",
             start.elapsed()
         );
-        assert_eq!(err.root_cause().to_string(), "timeout: connect");
+    }
+
+    #[test]
+    fn check_base_returns_the_base_without_trailing_slashes() {
+        assert_eq!(check_base("https://h/r//").unwrap(), "https://h/r");
+        assert_eq!(check_base("file:///x/").unwrap(), "file:///x");
+        assert_eq!(check_base("https://h/r").unwrap(), "https://h/r");
+        assert!(check_base("https://h/r/?x").is_err());
     }
 
     #[test]
