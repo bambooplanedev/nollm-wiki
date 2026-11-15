@@ -71,7 +71,7 @@ fn neighbors_pack_includes_target_first_and_respects_max_nodes() {
     };
     let pack = w.neighbors("alpha", 1, &budget).unwrap();
     assert_eq!(pack.included.first().map(String::as_str), Some("alpha"));
-    assert!(pack.included.len() <= 2);
+    assert_eq!(pack.included.len(), 2, "{:?}", pack.included);
     assert!(pack.text.contains("# Alpha"));
 }
 

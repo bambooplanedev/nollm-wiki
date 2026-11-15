@@ -618,26 +618,22 @@ fn every_source_file_gets_a_page() {
         ("docs/v1.md", "# API Reference\n\nfirst\n"),
         ("docs/v2.md", "# API Reference\n\nsecond\n"),
     ]);
-    // .h files only count once Task 8 lands; assert on what is handled today
-    // and tighten the number in Task 12.
+    // One page per file, none shared: the two foo.h and the two same-titled
+    // docs are told apart by their directory and file name.
     let entries = index_entries(&out);
-    let ids: Vec<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
-    let mut sorted = ids.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
+    let mut ids: Vec<&str> = entries.iter().map(|e| e["id"].as_str().unwrap()).collect();
+    ids.sort_unstable();
     assert_eq!(
-        sorted.len(),
-        ids.len(),
-        "duplicate ids in index.json: {ids:?}"
-    );
-    assert!(ids.contains(&"client"), "ids: {ids:?}");
-    assert!(ids.contains(&"client_test"), "ids: {ids:?}");
-    assert!(
-        ids.iter()
-            .filter(|i| i.starts_with("api_reference"))
-            .count()
-            == 2,
-        "both same-titled docs need pages: {ids:?}"
+        ids,
+        [
+            "a_foo",
+            "a_foo_cpp",
+            "api_reference_v1",
+            "api_reference_v2",
+            "b_foo",
+            "client",
+            "client_test"
+        ]
     );
 }
 

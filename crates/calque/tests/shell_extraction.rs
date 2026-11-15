@@ -156,7 +156,9 @@ fn summary_is_the_header_comment_only() {
 fn a_comment_inside_a_function_body_is_no_summary() {
     let src = "foo() {\n  # inner note about things\n  :\n}\n";
     let (_d, _, out) = compiled(&[("ship.sh", src)]);
-    assert_ne!(entry(&out, "ship")["summary"], "inner note about things");
+    // No header comment, so the summary falls back to the first function's
+    // signature; the comment inside its body is not a summary.
+    assert_eq!(entry(&out, "ship")["summary"], "foo()");
 }
 
 fn callers_text(

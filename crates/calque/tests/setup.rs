@@ -616,7 +616,8 @@ fn setup_no_hook_installs_no_hook() {
     assert!(!r.join(".pi/extensions").exists());
     // The old opt-in flag is gone.
     f.setup(&["--agent", "claude", "--scope", "repo", "--hook"])
-        .failure();
+        .code(2)
+        .stderr(predicates::str::contains("--hook"));
 }
 
 #[test]
@@ -639,9 +640,16 @@ fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     let a = f.setup(&args).success();
     assert!(f.root().join(".agents/memory").is_dir());
     let o = out(&a);
-    assert!(o.contains("memory folder"), "{o}");
+    let lines: Vec<&str> = o.lines().collect();
+    // The repo's own folder is made; the Claude folder for it is only named,
+    // since nothing has written a note there yet.
     assert!(
-        o.contains("agent memory folder") || o.contains("no agent memory folders found"),
+        lines[0].starts_with("wrote memory folder ") && lines[0].ends_with("/.agents/memory"),
+        "{o}"
+    );
+    assert!(
+        lines[1].starts_with("agent memory folder ")
+            && lines[1].ends_with("/memory (not yet created)"),
         "{o}"
     );
     let text = read(&f.root().join(".agents/skills/calque-navigation/SKILL.md"));
