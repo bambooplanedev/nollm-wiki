@@ -54,9 +54,9 @@ symlink or not a directory is refused. No shell profile is edited.
 
 ## Commands
 
-    kulman
+    kulman [status]
 
-With no command: the installed version and modules (a module whose binary is missing is marked
+With no command, or `status`: the installed version and modules (a module whose binary is missing is marked
 `(missing: run kulman update)`), the line `PATH: <home>/bin is not on PATH (add it)` when it is not,
 and whether a newer release exists. It only reads: nothing is created. The release host gets 5 s to
 connect and 8 s in all; past that, or on any error, the last line says what could not be reached,

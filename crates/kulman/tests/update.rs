@@ -832,3 +832,15 @@ fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
     assert_eq!(lines(&out), ["nothing installed", last.as_str()]);
     assert_eq!(snapshot(&home), before);
 }
+
+#[test]
+fn status_command_equals_the_plain_form() {
+    let (_t, base, home) = installed();
+    let plain = kulman(&home, &base).output().unwrap();
+    let named = kulman(&home, &base).arg("status").output().unwrap();
+    assert!(named.status.success(), "{}", stderr(&named));
+    assert_eq!(stdout(&named), stdout(&plain));
+    assert_eq!(stderr(&named), stderr(&plain));
+    let help = kulman(&home, &base).arg("--help").output().unwrap();
+    assert!(stdout(&help).contains("status"), "{}", stdout(&help));
+}

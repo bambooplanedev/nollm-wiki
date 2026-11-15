@@ -23,13 +23,15 @@ use status::status;
 #[derive(Parser)]
 #[command(version, about, color = ColorChoice::Never)]
 struct Cli {
-    /// With no command: what is installed, and whether a newer release exists.
+    /// With no command, shows status: what is installed, and whether a newer release exists.
     #[command(subcommand)]
     command: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// Show what is installed and whether a newer release exists (what no command shows).
+    Status,
     /// Install modules of a release into ~/.kulman-home/bin (with kulman itself).
     Install {
         /// Modules to install, comma separated (default: the release's defaults).
@@ -114,7 +116,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let changes = matches!(cli.command, Some(Cmd::Install { .. } | Cmd::Update { .. }));
     let result = match cli.command {
-        None => status(),
+        None | Some(Cmd::Status) => status(),
         Some(Cmd::Install {
             modules,
             version,
