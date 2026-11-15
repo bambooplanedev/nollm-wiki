@@ -279,6 +279,7 @@ fn setup_local_removes_a_mixed_old_setup() {
   <bin>/wiki: an old wiki binary is on PATH
   .claude/settings.json: permission rules name mcp__wiki__*; the same rules for mcp__kalka__* are needed
   .claude/settings.local.json: enabledMcpjsonServers lists \"wiki\"
+  CLAUDE.md:2: mentions the old tool
   CLAUDE.md:3: mentions the old tool
   CLAUDE.md:4: mentions the old tool
   scripts/CLAUDE.md:1: mentions the old tool

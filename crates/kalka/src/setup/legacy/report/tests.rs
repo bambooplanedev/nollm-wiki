@@ -69,6 +69,24 @@ fn mentions_read_only_what_they_should() {
 }
 
 #[test]
+fn mentions_catch_the_name_in_backticks_and_not_plain_prose() {
+    let text = "use the `wiki` MCP first\n\
+                run `wiki search` now\n\
+                run `wiki` search now\n\
+                the wiki MCP\n\
+                wiki pages\n\
+                our wiki\n\
+                `wikipedia` MCP\n\
+                `wiki` pages\n\
+                the `wiki` is old\n";
+    let d = dir(&[("CLAUDE.md", text.as_bytes())]);
+    assert_eq!(
+        mentions(d.path()),
+        [1, 2, 3].map(|n| format!("  CLAUDE.md:{n}: mentions the old tool"))
+    );
+}
+
+#[test]
 fn mentions_skip_a_folder_git_ignores() {
     if crate::setup::find_on_path("git").is_none() {
         eprintln!("skipped: no git");

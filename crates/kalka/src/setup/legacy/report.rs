@@ -149,7 +149,7 @@ fn claude_settings(root: &Path, file: &str) -> Vec<String> {
 /// `wiki:navigation` block (begin and end both there) is the block's own line.
 fn mentions(root: &Path) -> Vec<String> {
     let re = regex::Regex::new(
-        r"mcp__wiki__|\.wiki/|\bwiki\s+(search|page|neighbors|callers|lint|compile|serve|setup|hint)\b",
+        r"mcp__wiki__|\.wiki/|\bwiki\s+(search|page|neighbors|callers|lint|compile|serve|setup|hint)\b|`wiki`?\s+(MCP|search|page|neighbors|callers|lint|compile|serve|setup|hint)\b",
     )
     .expect("a valid pattern");
     let mut dirs: Vec<String> = std::fs::read_dir(root)
