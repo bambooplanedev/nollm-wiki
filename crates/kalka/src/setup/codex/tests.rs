@@ -1,4 +1,4 @@
-use super::*;
+use super::toml::*;
 
 const B: &str =
     "[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n";
@@ -42,7 +42,6 @@ fn nothing_of_kalka_is_absent() {
         "[mcp_servers]\nother = { command = \"x\" }\nkalkax = { command = \"y\" }\n",
         "[mcp_servers.other]\ncommand = \"kalka\"\nargs = [\"kalka\"]\n",
         "[mcp_servers.kalkax]\ncommand = \"kalka\"\n",
-        "[profiles.x]\nmcp_servers.kalka.command = \"x\"\n",
     ] {
         assert_eq!(state(t, true), State::Absent, "{t:?}");
     }
@@ -68,7 +67,6 @@ fn any_other_kalka_definition_is_another_server() {
         format!("[mcp_servers.'kalka']\n{body}"),
         format!("[ mcp_servers . kalka ]\n{body}"),
         format!("[\"mcp_servers\".kalka]\n{body}"),
-        format!("\u{feff}[mcp_servers.kalka]\n{body}"),
         format!("{B}[mcp_servers.kalka.env]\nA = \"1\"\n"),
         "[mcp_servers]\nkalka.command = \"kalka\"\n".into(),
         "[mcp_servers]\nkalka = { command = \"kalka\" }\n".into(),
@@ -79,6 +77,44 @@ fn any_other_kalka_definition_is_another_server() {
         format!("mcp_servers = {{ kalka = {{}} }}\n{B}"),
     ] {
         assert_eq!(state(&t, true), State::Other(ANOTHER), "{t:?}");
+    }
+}
+
+#[test]
+fn a_line_that_only_looks_like_a_header_hides_nothing() {
+    // A `[` line inside a multi-line string or array is no table: what follows is still read.
+    let doc = "doc = \"\"\"\n[docs](https://example.com)\n\"\"\"\n";
+    let notify = "notify = [\n  [\"a\"],\n]\n";
+    for (t, why) in [
+        (
+            format!("{doc}mcp_servers = {{ other = {{ command = \"x\" }} }}\n"),
+            UNEXTENDABLE,
+        ),
+        (format!("{doc}mcp_servers.kalka.command = \"y\"\n"), ANOTHER),
+        (
+            format!("{notify}mcp_servers = {{ kalka = {{ command = \"y\" }} }}\n"),
+            ANOTHER,
+        ),
+        (format!("{notify}mcp_servers = {{}}\n"), UNEXTENDABLE),
+        (
+            "[mcp_servers]\nx = \"\"\"\n[x]\n\"\"\"\nkalka = { command = \"y\" }\n".to_string(),
+            ANOTHER,
+        ),
+        (
+            "[profiles.x]\nmcp_servers.kalka.command = \"x\"\n".into(),
+            ANOTHER,
+        ),
+        ("[profiles.x]\nmcp_servers = {}\n".into(), UNEXTENDABLE),
+    ] {
+        assert_eq!(state(&t, true), State::Other(why), "{t:?}");
+    }
+    // A byte order mark: refused, never stripped (the header behind it would not be found).
+    for t in [
+        "\u{feff}[mcp_servers]\nkalka = { command = \"y\" }\n".to_string(),
+        format!("\u{feff}{B}"),
+        "\u{feff}model = \"o3\"\n".into(),
+    ] {
+        assert_eq!(state(&t, true), State::Other(BOM), "{t:?}");
     }
 }
 

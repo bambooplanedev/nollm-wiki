@@ -2,19 +2,16 @@
 //! its table is recognised as text, exactly; anything else that names the server, in any
 //! spelling, is another server and the file is not touched.
 
+mod toml;
+
 use super::edit::{inside, other_names, prune_dirs, Outcome};
 use super::{cli, serve_args, tracked, Report, CMD};
 use crate::WikiError;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
+use toml::{state, with_args, with_block, without_block, State, ANOTHER};
 
 pub(super) const FILE: &str = ".codex/config.toml";
-const HEADER: &str = "[mcp_servers.kalka]";
-/// Another definition of the server (the words of the old machine-wide report).
-const ANOTHER: &str = "another \"kalka\" server is configured";
-/// An `mcp_servers` a `[mcp_servers.kalka]` table cannot be added to without breaking the file.
-const UNEXTENDABLE: &str =
-    "the file defines mcp_servers inline, by dotted keys or as an array; add the kalka server by hand";
 const LINK: &str =
     "reached through a link, out of the project or a file with more than one name; left as it is";
 const UNREADABLE: &str = "not a regular UTF-8 file; left as it is";
@@ -23,158 +20,6 @@ const HOME: &str =
 pub(super) const HINT: &str = "Codex loads the server only in a project it trusts: open the project in Codex and accept the trust question.";
 /// What the machine-wide entry is reported as, as the old setup named it.
 const MACHINE: &str = "Codex kalka server (~/.codex/config.toml)";
-
-fn command_line() -> String {
-    format!("command = \"{CMD}\"")
-}
-
-fn args_line(memory: bool) -> String {
-    format!("args = [\"{}\"]", serve_args(memory).join("\", \""))
-}
-
-fn block(memory: bool, eol: &str) -> String {
-    [HEADER, &command_line(), &args_line(memory)]
-        .map(|l| format!("{l}{eol}"))
-        .concat()
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum State {
-    /// The exact block, in this run's memory variant.
-    Ours,
-    /// The exact block, in the other one.
-    OursOtherArgs,
-    /// Anything else that defines the server, or an `mcp_servers` it cannot join.
-    Other(&'static str),
-    Absent,
-}
-
-/// A line without its `\n` or `\r\n`.
-fn bare(l: &str) -> &str {
-    l.strip_suffix('\n')
-        .map_or(l, |l| l.strip_suffix('\r').unwrap_or(l))
-}
-
-/// The line's text without spaces, quotes and a byte order mark: `[ mcp_servers . "kalka" ]` reads `[mcp_servers.kalka]`.
-fn squeeze(l: &str) -> String {
-    l.chars()
-        .filter(|c| !c.is_whitespace() && !matches!(c, '"' | '\'' | '\u{feff}'))
-        .collect()
-}
-
-/// Whether a squeezed key starts with the key `kalka` (not `kalkax`).
-fn names_kalka(key: &str) -> bool {
-    let bare_key = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
-    key.strip_prefix("kalka")
-        .is_some_and(|rest| !rest.starts_with(bare_key))
-}
-
-/// Indexes of the exact header and the two lines after it that are not blank.
-fn block_lines(lines: &[&str]) -> Option<[usize; 3]> {
-    let h = lines.iter().position(|l| bare(l).trim() == HEADER)?;
-    let mut body = (h + 1..lines.len()).filter(|&i| !bare(lines[i]).trim().is_empty());
-    Some([h, body.next()?, body.next()?])
-}
-
-/// What a squeezed header (`table`) or top-level line beginning with `mcp_servers` says: the
-/// server defined, or an `mcp_servers` that a `[mcp_servers.kalka]` table cannot join.
-fn servers(s: &str, table: bool) -> Option<&'static str> {
-    let rest = s.trim_start_matches('[').strip_prefix("mcp_servers")?;
-    if rest.strip_prefix('.').is_some_and(names_kalka)
-        || (rest.starts_with('=') && s.contains("kalka"))
-    {
-        return Some(ANOTHER);
-    }
-    let joins = if table {
-        s.starts_with("[[") && rest.starts_with(['.', ']'])
-    } else {
-        rest.starts_with(['.', '='])
-    };
-    joins.then_some(UNEXTENDABLE)
-}
-
-fn state(text: &str, memory: bool) -> State {
-    // The squeezed key of the current table header (`None` at the top level); the first reason.
-    let mut table: Option<String> = None;
-    let (mut headers, mut body, mut other) = (0, Vec::new(), None);
-    for l in text.split_inclusive('\n').map(bare) {
-        let t = l.trim();
-        let in_ours = table.as_deref() == Some(HEADER);
-        if t.is_empty() || (t.starts_with('#') && !in_ours) {
-            continue;
-        }
-        let s = squeeze(t);
-        if t == HEADER {
-            headers += 1;
-            table = Some(HEADER.into());
-        } else if t.starts_with('[') {
-            other = other.or(servers(&s, true));
-            table = Some(s.trim_start_matches('[').into());
-        } else if in_ours {
-            body.push(l.trim_end());
-        } else if let Some(h) = &table {
-            if h.starts_with("mcp_servers]") && names_kalka(&s) {
-                other = other.or(Some(ANOTHER));
-            }
-        } else {
-            other = other.or(servers(&s, false));
-        }
-    }
-    if let Some(why) = other {
-        return State::Other(why);
-    }
-    match (headers, body.as_slice()) {
-        (0, _) => State::Absent,
-        (1, [c, a]) if *c == command_line() => match *a {
-            a if a == args_line(memory) => State::Ours,
-            a if a == args_line(!memory) => State::OursOtherArgs,
-            _ => State::Other(ANOTHER),
-        },
-        _ => State::Other(ANOTHER),
-    }
-}
-
-/// `text` with the block at the end, after one blank line when there is text, in the ending of
-/// the last line that has one (`\n` when none has).
-fn with_block(text: &str, memory: bool) -> String {
-    let eol = text
-        .split_inclusive('\n')
-        .rfind(|l| l.ends_with('\n'))
-        .map_or("\n", |l| if l.ends_with("\r\n") { "\r\n" } else { "\n" });
-    let mut out = text.to_string();
-    if !out.is_empty() {
-        if !out.ends_with('\n') {
-            out.push_str(eol);
-        }
-        out.push_str(eol);
-    }
-    out + &block(memory, eol)
-}
-
-/// An exact block's `args` line in `memory`'s variant, its line ending kept.
-fn with_args(text: &str, memory: bool) -> String {
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some([_, _, a]) = block_lines(&lines) else {
-        return text.into();
-    };
-    let eol = &lines[a][bare(lines[a]).len()..];
-    let (before, after) = (lines[..a].concat(), lines[a + 1..].concat());
-    format!("{before}{}{eol}{after}", args_line(memory))
-}
-
-/// `text` without an exact block and the one blank line before it.
-fn without_block(text: &str) -> String {
-    let lines: Vec<&str> = text.split_inclusive('\n').collect();
-    let Some([h, c, a]) = block_lines(&lines) else {
-        return text.into();
-    };
-    let blank = h > 0 && bare(lines[h - 1]).trim().is_empty();
-    let gone = |i: &usize| [h, c, a].contains(i) || (blank && i + 1 == h);
-    (0..lines.len())
-        .filter(|i| !gone(i))
-        .map(|i| lines[i])
-        .collect()
-}
 
 /// The file's text (`None`: absent) when it may be edited: no link on the way, inside the
 /// project, a regular file with one name, UTF-8; not Codex's own home.
