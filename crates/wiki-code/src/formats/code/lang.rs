@@ -105,18 +105,18 @@ impl LangSpec {
             lang_name,
             language,
             query_src,
-            name_filter: keep_all,
-            vis_filter: keep_any_vis,
+            name_filter: |_| true,
+            vis_filter: |_| true,
             strip_trailing: &[],
             placement: |_, _| Placement::Scoped(Vec::new()),
             owner_sep: ".",
-            export_set: no_export_set,
+            export_set: |_, _| None,
             join_continuations: false,
-            sig_start: sig_start_identity,
-            owner_anchor: owner_anchor_identity,
-            header_group: no_header_group,
+            sig_start: |def| def,
+            owner_anchor: |name| name,
+            header_group: |_, _| None,
             item_lead: |_, _| Lead::Stop,
-            body_doc: no_body_doc,
+            body_doc: |_, _| None,
             query_gates_visibility: false,
             shape: default_shape,
             fixed_signature: |_, _| None,
@@ -135,39 +135,6 @@ pub(crate) enum Lead {
     Attr,
     /// Not part of the item; the walk ends here.
     Stop,
-}
-
-/// `body_doc` for a language with no in-body doc convention.
-fn no_body_doc(_: Node, _: &str) -> Option<String> {
-    None
-}
-
-fn sig_start_identity(def: Node) -> Node {
-    def
-}
-
-/// `owner_anchor` for a language whose declarations never write their own
-/// qualifier: the owner is spliced in at the name node itself.
-fn owner_anchor_identity(name: Node) -> Node {
-    name
-}
-
-fn keep_all(_name: &str) -> bool {
-    true
-}
-
-fn keep_any_vis(_vis: &str) -> bool {
-    true
-}
-
-fn no_export_set(_tree: &Tree, _text: &str) -> Option<BTreeSet<String>> {
-    None
-}
-
-/// Only Rust emits a `@def` without a `@name` (the trait-impl header pattern),
-/// so every other language never reaches this.
-fn no_header_group(_def: Node, _text: &str) -> Option<String> {
-    None
 }
 
 /// Where a captured definition sits relative to the module's public surface.
