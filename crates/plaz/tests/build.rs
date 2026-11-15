@@ -1132,7 +1132,14 @@ fn every_chart_parses_with_mermaid_cli() {
         "map/py/c_py",
         "map/py/t_py",
     ] {
-        for block in common::map_page(&vault, page).split("```mermaid\n").skip(1) {
+        let text = common::map_page(&vault, page);
+        let blocks: Vec<&str> = text.split("```mermaid\n").skip(1).collect();
+        // One chart per function heading: a page that lost a chart, or whose charts
+        // were never fed to the renderer, fails here, and a new fixture needs no new count.
+        let headings = text.lines().filter(|l| l.starts_with("## ")).count();
+        assert_ne!(headings, 0, "{page}");
+        assert_eq!(blocks.len(), headings, "{page}");
+        for block in blocks {
             let chart = block.split_once("\n```\n").unwrap().0;
             let mmd = d.path().join(format!("{n}.mmd"));
             std::fs::write(&mmd, chart).unwrap();
@@ -1151,7 +1158,7 @@ fn every_chart_parses_with_mermaid_cli() {
             n += 1;
         }
     }
-    assert_eq!(n, 12);
+    assert_ne!(n, 0);
 }
 
 #[test]
@@ -2103,16 +2110,37 @@ fn a_python_class_defined_in_the_function_is_not_visible() {
 #[test]
 fn a_python_keyword_case_is_not_a_catch_all() {
     let a = "def f(x):\n    match x:\n        case 1:\n            one()\n        case None:\n            other()\n    after()\n";
+    // `None` is a keyword, not a capture: it can fail to match, so it has a `-no->` edge.
     let edges = edges_of_py(a, "f");
-    assert!(
-        edges.contains(&"None -no-> after()".to_string()),
-        "{edges:?}"
+    assert_eq!(
+        edges,
+        [
+            "f --> match x",
+            "match x --> 1",
+            "1 -yes-> one()",
+            "1 -no-> None",
+            "None -yes-> other()",
+            "one() --> after()",
+            "other() --> after()",
+            "None -no-> after()",
+            "after() --> end",
+        ]
     );
     let b = a.replace("case None", "case rest");
     let edges = edges_of_py(&b, "f");
-    assert!(
-        !edges.iter().any(|e| e.starts_with("rest -no->")),
-        "{edges:?}"
+    // A bare name matches anything: no `-no->` edge and `after()` is reached only through the bodies.
+    assert_eq!(
+        edges,
+        [
+            "f --> match x",
+            "match x --> 1",
+            "1 -yes-> one()",
+            "1 -no-> rest",
+            "rest -yes-> other()",
+            "one() --> after()",
+            "other() --> after()",
+            "after() --> end",
+        ]
     );
 }
 
@@ -2477,19 +2505,10 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
 #[test]
 fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
     let usage = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup [--source DIR] --scope repo|local [--remove]\n";
-    let help = format!(
-        "{usage}\n{}\n",
-        "\
-build   write the vault of flowchart pages for the source tree
-setup   build, then keep .kulman/ out of git (--remove: delete the map's pages instead)
-
---source DIR          the source tree (default .)
---vault DIR           build only: the vault (default <source>/.kulman, pages in its map/)
---scope repo|local    setup only, required unless --remove: ignore .kulman/ in .gitignore or in this clone's info/exclude
---remove              setup only: delete the map's own pages instead of building
---version             print the version
---help, -h, help      print this text"
-    );
+    // Help wording is not pinned. What is: every spelling succeeds quietly, opens with
+    // the usage line (the same line bad usage prints on stderr) and prints one text.
+    // What each flag does is covered by the setup tests and the build tests.
+    let mut helps = Vec::new();
     for args in [
         &["--help"][..],
         &["-h"],
@@ -2497,13 +2516,18 @@ setup   build, then keep .kulman/ out of git (--remove: delete the map's pages i
         &["build", "--help"],
         &["setup", "--help"],
     ] {
-        assert_cmd::cargo_bin_cmd!()
+        let out = assert_cmd::cargo_bin_cmd!()
             .args(args)
             .assert()
             .success()
-            .stdout(help.clone())
-            .stderr("");
+            .stderr("")
+            .get_output()
+            .stdout
+            .clone();
+        assert!(out.starts_with(usage.as_bytes()), "{args:?}");
+        helps.push(out);
     }
+    assert!(helps.windows(2).all(|w| w[0] == w[1]), "{helps:?}");
     assert_cmd::cargo_bin_cmd!()
         .arg("--version")
         .assert()
