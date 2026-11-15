@@ -776,9 +776,10 @@ fn a_claude_that_cannot_run_says_nothing() {
     assert_eq!(err(&a), "");
 }
 
-/// The old local entry was judged the old tool's; failing to remove it fails setup.
+/// The old local entry was judged the old tool's; when Claude Code fails to remove it, it is
+/// listed with the command to run, and setup goes on with its exit code unchanged.
 #[test]
-fn a_failed_remove_of_the_old_local_server_fails_setup() {
+fn a_failed_remove_of_the_old_local_server_is_listed() {
     let f = fixture();
     f.claude_local(
         "wiki",
@@ -795,11 +796,17 @@ fn a_failed_remove_of_the_old_local_server_fails_setup() {
 esac"#
         ),
     );
-    let a = f.setup(&["--scope", "local", "--agent", "pi"]).code(1);
-    assert!(
-        err(&a).contains("`claude mcp remove` failed: error: cannot write config"),
-        "{}",
-        err(&a)
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert!(out(&a).contains("Compiled "), "{}", out(&a));
+    assert_eq!(
+        err(&a),
+        format!(
+            "kalka: left from the old wiki (not changed):
+  claude (local scope): could not remove the old wiki server (error: cannot write config); run: claude mcp remove wiki --scope local
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+{RESTART}"
+        )
     );
 }
 
@@ -879,4 +886,59 @@ fn traces_that_may_be_anyones_say_nothing() {
         assert_eq!(err(&a), "", "{case}");
         assert_eq!(takeover_lines(&out(&a)).len(), clean, "{case}");
     }
+}
+
+/// A file where a folder should be on the way to an old path is nothing there.
+#[test]
+fn a_file_where_a_folder_should_be_is_nothing_there() {
+    let f = fixture();
+    // Not `.agents` itself: setup's own memory folder needs that one.
+    f.write(".agents/skills", "notes\n");
+    f.write(".pi", "notes\n");
+    let a = f.setup(&["--scope", "repo", "--agent", "claude"]).success();
+    assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+    assert_eq!(err(&a), "");
+}
+
+/// A committed file holding the old entry is edited even in local scope: the team sees it.
+#[test]
+fn a_tracked_old_entry_is_removed_in_local_scope() {
+    let f = fixture();
+    let git = String::from_utf8(
+        std::process::Command::new("which")
+            .arg("git")
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    symlink(git.trim(), f.bin().join("git")).unwrap();
+    f.write(
+        ".mcp.json",
+        &pretty(&json!({"mcpServers": {"wiki": old_entry()}})),
+    );
+    let git_in = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .current_dir(f.root())
+            .output()
+            .unwrap()
+    };
+    assert!(git_in(&["add", ".mcp.json"]).status.success());
+    assert!(git_in(&["commit", "-q", "-m", "x"]).status.success());
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(
+        takeover_lines(&out(&a)),
+        ["removed old wiki server from .mcp.json"]
+    );
+    let st = String::from_utf8(git_in(&["status", "--short", "--", ".mcp.json"]).stdout).unwrap();
+    assert_eq!(st, " D .mcp.json\n");
 }

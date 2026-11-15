@@ -83,15 +83,18 @@ impl Takeover<'_> {
             return Err(Left::Link);
         }
         let path = base.join(rel);
+        // A file where a folder should be (`.agents` a file) holds nothing either.
+        let absent =
+            |e: &std::io::Error| matches!(e.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory);
         match std::fs::symlink_metadata(&path) {
-            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(e) if absent(&e) => return Ok(None),
             Ok(m) if m.is_file() && other_names(&m) => return Err(Left::Link),
             Ok(m) if m.is_file() => {}
             _ => return Err(Left::Unreadable),
         }
         match std::fs::read(path) {
             Ok(b) => String::from_utf8(b).map(Some).map_err(|_| Left::Unreadable),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) if absent(&e) => Ok(None),
             Err(_) => Err(Left::Unreadable),
         }
     }
@@ -256,9 +259,13 @@ pub(super) fn take_over(root: &Path, out: &mut dyn Write) -> Result<Found> {
     if find_on_path("claude").is_some() {
         // Recognised as the old one did (mod.rs:243-259), as strictly as kalka's own entry.
         match claude_local_mcp(root, "wiki", &[old_entry()], true, true) {
-            // Judged the old tool's, but not removed: a failed removal, as in any file.
+            // Judged the old tool's, but Claude Code did not remove it: listed, and setup goes on.
             Outcome::Foreign(why) if why.starts_with("`claude mcp remove` failed") => {
-                return Err(std::io::Error::other(why));
+                let why = why.split_once(": ").map_or(why.as_str(), |(_, w)| w);
+                t.found.running = true;
+                t.found.differing.push(format!(
+                    "claude (local scope): could not remove the old wiki server ({why}); run: claude mcp remove wiki --scope local"
+                ));
             }
             Outcome::Foreign(_) => {
                 // Listed only when Claude Code shows a `wiki` that runs `wiki` (no answer, or
