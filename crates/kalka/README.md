@@ -85,8 +85,8 @@ A release of the kulman set carries `kalka` for the two systems above; on any ot
 it from source.
 
 Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
-folder was `.wiki/`. From 0.7.1 the binary is `kalka` and the folder `.kulman/`. The agent configs
-an old setup wrote start a server named `wiki`, which 0.7.1 does not have; `kalka setup` replaces
+folder was `.wiki/`. From 0.7.2 the binary is `kalka` and the folder `.kulman/`. The agent configs
+an old setup wrote start a server named `wiki`, which 0.7.2 does not have; `kalka setup` replaces
 them, see [`kalka setup`](#kalka-setup).
 
 ### With kulman

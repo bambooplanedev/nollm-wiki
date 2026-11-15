@@ -86,8 +86,8 @@ repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd -- "$repo"
 pub=release/kulman.pub
 # The releases address the installer uses (install.rs), so a draft of a fork is never signed.
-releases=$(sed -n 's|^const RELEASES: &str = "\(https://github\.com/[^/"]*/[^/"]*/releases\)";$|\1|p' \
-    crates/kulman/src/install.rs 2>/dev/null) || :
+extract='s|^const RELEASES: &str = "\(https://github\.com/[^/"]*/[^/"]*/releases\)";$|\1|p'
+releases=$(sed -n "$extract" crates/kulman/src/install.rs 2>/dev/null) || :
 case $releases in
     https://*/releases) ;;
     *) die "no releases address in crates/kulman/src/install.rs" ;;
