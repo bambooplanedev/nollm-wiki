@@ -390,7 +390,19 @@ impl Wiki {
     /// file is missing has no body. `items.json` is read the same way: missing
     /// or invalid means no items.
     pub fn load(dir: &Path) -> Result<Wiki, std::io::Error> {
-        let text = std::fs::read_to_string(dir.join("index.json"))?;
+        let file = dir.join("index.json");
+        let text = std::fs::read_to_string(&file).map_err(|e| {
+            let msg = if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "{} not found — run `calque compile <input> {}`",
+                    file.display(),
+                    dir.display()
+                )
+            } else {
+                format!("{}: {e}", file.display())
+            };
+            std::io::Error::new(e.kind(), msg)
+        })?;
         let index: IndexFile = serde_json::from_str(&text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let entries: BTreeMap<String, Entry> = index
