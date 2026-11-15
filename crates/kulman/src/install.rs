@@ -100,10 +100,13 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
         }
     }
     let bin = home.path.join("bin");
-    if !on_path(&bin) {
+    let kulman = if on_path(&bin) {
+        "kulman".to_string()
+    } else {
         println!("{}", path_hint(&bin));
-    }
-    println!("next: run \"kulman setup --scope repo\" (or local) in a project");
+        bin.join("kulman").display().to_string()
+    };
+    println!("next: run \"{kulman} setup --scope repo\" (or local) in a project");
     Ok(())
 }
 

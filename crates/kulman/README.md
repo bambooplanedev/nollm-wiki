@@ -77,7 +77,7 @@ version is read once `.lock` is held. If the installed version differs from `--v
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
 update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
 install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman setup` in
-a project. With nothing to do it writes nothing and says `already installed: <names> (<version>)`
+a project (named by its full path in `bin/` while `bin/` is not on `PATH`). With nothing to do it writes nothing and says `already installed: <names> (<version>)`
 instead (and, as above, a newer release).
 
     kulman update [--yes]

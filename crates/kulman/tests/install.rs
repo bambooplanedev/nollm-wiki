@@ -784,11 +784,15 @@ fn install_says_how_to_add_to_path() {
         format!("    export PATH=\"{}:$PATH\"", bin.display()),
     ];
     let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
+    let full = format!(
+        "next: run \"{}/kulman setup --scope repo\" (or local) in a project",
+        bin.display()
+    );
     let out = kulman(&home, &base).arg("install").output().unwrap();
     let text = stdout(&out);
     assert_eq!(
         text.lines().rev().take(3).collect::<Vec<_>>(),
-        [next, hint[1].as_str(), hint[0].as_str()],
+        [full.as_str(), hint[1].as_str(), hint[0].as_str()],
         "{text}"
     );
 
