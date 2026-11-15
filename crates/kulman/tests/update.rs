@@ -344,8 +344,8 @@ fn remove_everything_leaves_foreign_files() {
             "removed kalka",
             "removed plaz",
             "removed kulman",
-            "projects set up with kulman still name \"kalka\" in their agent configs: run kulman \
-             setup --remove in each first"
+            "projects set up with kulman still name \"kalka\" in their agent configs: run \"kulman \
+             setup --scope repo --remove\" (or local) in each first"
         ]
     );
     let left: Vec<_> = snapshot(&home).into_keys().collect();

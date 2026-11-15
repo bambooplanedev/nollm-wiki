@@ -96,7 +96,7 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
     // Removing everything leaves kalka's name in the agent configs of set-up projects.
     let projects = (names.is_none() && state.modules.iter().any(|m| m == "kalka")).then_some(
         "projects set up with kulman still name \"kalka\" in their agent configs: \
-         run kulman setup --remove in each first",
+         run \"kulman setup --scope repo --remove\" (or local) in each first",
     );
     if ask {
         if let Some(line) = projects {
