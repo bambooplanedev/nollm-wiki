@@ -259,8 +259,9 @@ fn lost(e: &str) -> String {
 /// setup's own `add-json` yields (scope, status and its issue, type, command, args, the remove
 /// hint): an `Environment:`, `Timeout:` or any other line is a setting setup did not write.
 fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Outcome {
-    // Each entry's `Command:` and `Args:` lines.
-    let lines: Vec<[String; 2]> = own
+    // Each entry's `Command:` and `Args:` lines, the latter also as Claude Code shows it: it
+    // prints `${VAR:-default}` as `${VAR}`, so [`LAUNCH`] reads `"${KULMAN_HOME}/bin/calque"`.
+    let lines: Vec<[String; 3]> = own
         .iter()
         .map(|v| {
             let a: Vec<&str> = v["args"]
@@ -272,6 +273,7 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
             [
                 format!("Command: {}", v["command"].as_str().unwrap_or_default()),
                 format!("Args: {}", a.join(" ")),
+                format!("Args: {}", a.join(" ")).replace(":-$HOME/.kulman-home", ""),
             ]
         })
         .collect();
@@ -279,7 +281,7 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
         let (found, text) = claude(root, &["mcp", "get", name])?;
         if found {
             let has = |l: &str| text.lines().any(|t| t.trim() == l);
-            let shows = |[c, a]: &[String; 2]| has(c) && has(a);
+            let shows = |[c, a, shown]: &[String; 3]| has(c) && (has(a) || has(shown));
             let ours = text.lines().any(|t| t.trim().starts_with("Scope: Local"))
                 && lines.iter().any(shows);
             if !ours {

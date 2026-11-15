@@ -1833,8 +1833,13 @@ const LAUNCH_ENTRY: &str = r#"{
     "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."
   ]
 }"#;
+/// The `Args:` line of `claude mcp get` for the launch entry: as stored, and as Claude Code
+/// (2026-11-15) shows it, with `${VAR:-default}` printed as `${VAR}`.
 const LAUNCH_ARGS: &str =
     r#"-c exec "${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque" serve --source ."#;
+const LAUNCH_SHOWN: &str = r#"-c exec "${KULMAN_HOME}/bin/calque" serve --source ."#;
+/// The launch entry as `claude mcp add-json` gets it.
+const LAUNCH_JSON: &str = r#"{"command":"sh","args":["-c","exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]}"#;
 const LAUNCH_HOOK: &str = r#""${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque" hint --claude-hook"#;
 const LAUNCH_CODEX_BLOCK: &str = r#"[mcp_servers.calque]
 command = "sh"
@@ -1906,33 +1911,76 @@ fn setup_from_the_kulman_home_writes_the_launch_line_and_no_path_warning() {
 
 #[test]
 fn setup_local_from_the_kulman_home_adds_the_launch_line_through_claude() {
+    for shown in [LAUNCH_SHOWN, LAUNCH_ARGS] {
+        let f = fixture(false, true);
+        claude_stub_args(&f, "sh", shown);
+        let exe = f.home_calque();
+        let args = ["--agent", "claude", "--scope", "local"];
+        f.run(&exe, &args).assert().success();
+        let added = format!("mcp get calque\nmcp add-json calque {LAUNCH_JSON} --scope local\n");
+        assert_eq!(f.claude_log(), added);
+        assert_eq!(
+            prompt_hooks(&f.root().join(".claude/settings.local.json")),
+            serde_json::json!([launch_hook_item()])
+        );
+        let a = f.run(&exe, &args).assert().success();
+        assert!(
+            out(&a).contains("already set up: Claude Code local calque server"),
+            "{shown}: {}",
+            out(&a)
+        );
+        assert_eq!(f.claude_log(), format!("{added}mcp get calque\n"));
+        let a = f
+            .run(&exe, &[&["--remove"], &args[..]].concat())
+            .assert()
+            .success();
+        assert!(
+            out(&a).contains("removed Claude Code local calque server"),
+            "{shown}: {}",
+            out(&a)
+        );
+        assert_eq!(
+            f.claude_log(),
+            format!("{added}mcp get calque\nmcp get calque\nmcp remove calque --scope local\n")
+        );
+        assert!(!f.root().join(".claude/settings.local.json").exists());
+    }
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_switches_memory_on_the_shown_entry() {
     let f = fixture(false, true);
-    claude_stub_args(&f, "sh", LAUNCH_ARGS);
-    let exe = f.home_calque();
-    let args = ["--agent", "claude", "--scope", "local"];
-    f.run(&exe, &args).assert().success();
-    let json = r#"{"command":"sh","args":["-c","exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]}"#;
+    claude_stub_args(&f, "sh", &format!("{LAUNCH_SHOWN} --memory none"));
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    f.run(&f.home_calque(), &args).assert().success();
     assert_eq!(
         f.claude_log(),
-        format!("mcp get calque\nmcp add-json calque {json} --scope local\n")
+        format!(
+            "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque {LAUNCH_JSON} --scope local\n"
+        )
     );
-    assert_eq!(
-        prompt_hooks(&f.root().join(".claude/settings.local.json")),
-        serde_json::json!([launch_hook_item()])
-    );
-    let a = f.run(&exe, &args).assert().success();
+}
+
+#[test]
+fn setup_local_from_the_kulman_home_leaves_another_sh_server_alone() {
+    let f = fixture(false, true);
+    claude_stub_args(&f, "sh", r#"-c exec "/other/calque" serve --source ."#);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let exe = f.home_calque();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    let a = f.run(&exe, &args).assert().code(1);
     assert!(
-        out(&a).contains("already set up: Claude Code local calque server"),
+        out(&a).contains(
+            "skipped Claude Code local calque server: another \"calque\" server is configured"
+        ),
         "{}",
         out(&a)
     );
     f.run(&exe, &[&["--remove"], &args[..]].concat())
         .assert()
-        .success();
-    assert!(f
-        .claude_log()
-        .ends_with("mcp remove calque --scope local\n"));
-    assert!(!f.root().join(".claude/settings.local.json").exists());
+        .code(1);
+    assert_eq!(f.claude_log(), "mcp get calque\nmcp get calque\n");
 }
 
 #[test]
@@ -1942,11 +1990,10 @@ fn setup_local_from_the_kulman_home_replaces_a_bare_claude_entry() {
     fs::write(f.tmp.path().join("state"), "x").unwrap();
     let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
     f.run(&f.home_calque(), &args).assert().success();
-    let json = r#"{"command":"sh","args":["-c","exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]}"#;
     assert_eq!(
         f.claude_log(),
         format!(
-            "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque {json} --scope local\n"
+            "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque {LAUNCH_JSON} --scope local\n"
         )
     );
 }
