@@ -225,14 +225,29 @@ fn pagerank_of_a_dangling_star_matches_the_hand_solved_values() {
     }
 }
 
+// Hand-solved fixed point for a page with two links: d = 0.85, a mentions Beta
+// and Gamma, b and c mention Alpha; nobody is dangling. With rb = rc by symmetry:
+//   rb = 0.05 + d*ra/2               = 0.05 + 0.425*ra   (a gives half to each)
+//   ra = 0.05 + d*(rb + rc)          = 0.05 + 1.7*rb
+// Substituting: ra = 0.05 + 0.085 + 0.7225*ra => ra = 0.135/0.2775 = 18/37 = 0.486486
+//   rb = rc = 0.05 + 0.425*18/37 = 9.5/37 = 19/74 = 0.256757  (sum 36/74 + 38/74 = 1).
+// Without the split (a giving its whole share to both) rb would be 0.05 + 0.85*ra.
+// The links form a two-way cycle, so the iteration oscillates with factor -0.85:
+// after 40 steps from uniform it is off by 0.85^40 * (18/37 - 1/3) = 2.3e-4, hence 1e-3.
 #[test]
-fn pagerank_sums_to_about_one() {
+fn a_page_with_two_links_splits_its_rank_between_them() {
     let g = build_graph(&map(vec![
-        ent("a", "Alpha", "mentions Beta"),
+        ent("a", "Alpha", "mentions Beta and Gamma"),
         ent("b", "Beta", "mentions Alpha"),
+        ent("c", "Gamma", "mentions Alpha"),
     ]));
-    let sum: f64 = g.pagerank.values().sum();
-    assert!((sum - 1.0).abs() < 1e-6);
+    for (id, want) in [("a", 18.0 / 37.0), ("b", 19.0 / 74.0), ("c", 19.0 / 74.0)] {
+        assert!(
+            (g.pagerank[id] - want).abs() < 1e-3,
+            "{id}: {} vs {want}",
+            g.pagerank[id]
+        );
+    }
 }
 
 fn sh(id: &str, path: &str, imports: &[&str]) -> Entity {

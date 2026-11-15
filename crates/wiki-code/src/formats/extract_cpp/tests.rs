@@ -9,18 +9,25 @@ fn summary(path: &str, src: &str) -> Option<String> {
     crate::extract(path, src).summary
 }
 
+// Source order; the class first, then each declaration with its return type and
+// trailing `const` kept and the owner spliced in; the constructor has no return
+// type; the private member is kept.
 #[test]
 fn declaration_only_header_yields_the_class_and_a_signature_for_each_method() {
     let s = syms(
             "src/orderbook.h",
             "class OrderBook {\npublic:\n  OrderBook(int cap);\n  void apply(const Order& o);\n  int best_bid() const;\nprivate:\n  void rebuild_();\n};\n",
         );
-    assert!(s.iter().any(|x| x == "class OrderBook"), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("OrderBook::apply")), "{s:?}");
-    assert!(s.iter().any(|x| x.contains("OrderBook::best_bid")), "{s:?}");
-    assert!(
-        s.iter().any(|x| x.contains("OrderBook::rebuild_")),
-        "private members are kept: {s:?}"
+    assert_eq!(
+        s,
+        [
+            "class OrderBook",
+            "OrderBook::OrderBook(int cap)",
+            "void OrderBook::apply(const Order& o)",
+            "int OrderBook::best_bid() const",
+            "void OrderBook::rebuild_()",
+        ],
+        "{s:?}"
     );
 }
 
