@@ -27,8 +27,7 @@ fn python_signatures_gated_docstring_and_imports() {
     let e = crate::extract("extractor.py", src);
     assert_has(&e.symbols, "def extract_all(d)");
     assert_lacks(&e.symbols, "_private");
-    assert!(e.imports.iter().any(|i| i.contains("graph")));
-    assert!(e.imports.iter().any(|i| i.contains("os")));
+    assert_eq!(e.imports, vec!["graph", "os"]);
     assert_eq!(e.summary.as_deref(), Some("Top docstring."));
 }
 
@@ -276,11 +275,8 @@ fn a_second_module_level_all_assignment_wins() {
     let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = [\"b\"]\n";
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "def b()");
-    assert!(
-        !e.symbols.iter().any(|s| s == "def a()"),
-        "the second, later __all__ must win over the first: {:?}",
-        e.symbols
-    );
+    // the second, later __all__ must win over the first
+    assert_lacks(&e.symbols, "def a()");
 }
 
 #[test]
@@ -351,12 +347,8 @@ fn python_class_fields_are_qualified_and_gated() {
 fn python_class_fields_are_emitted_once_not_twice() {
     let src = "class Article:\n    title: str\n";
     let e = crate::extract("m.py", src);
-    let hits = e
-        .symbols
-        .iter()
-        .filter(|s| *s == "Article.title: str")
-        .count();
-    assert_eq!(hits, 1, "one pattern, one emission: {:?}", e.symbols);
+    // one pattern, one emission
+    assert_eq!(e.symbols, vec!["class Article", "Article.title: str"]);
 }
 
 #[test]
@@ -364,13 +356,11 @@ fn python_long_values_are_truncated_on_a_character_boundary() {
     // Multibyte characters: a byte-indexed cut panics here.
     let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
     let e = crate::extract("judge.py", &src);
-    let sig = e
-        .symbols
-        .iter()
-        .find(|s| s.starts_with("SYSTEM_PROMPT"))
-        .unwrap_or_else(|| panic!("no SYSTEM_PROMPT in {:?}", e.symbols));
-    assert!(sig.ends_with('…'), "must be truncated: {sig}");
-    assert!(sig.chars().count() < 80, "budget not applied: {sig}");
+    // 48 characters of value, then the ellipsis
+    assert_has(
+        &e.symbols,
+        "SYSTEM_PROMPT = \"naïve café — naïve café — naïve café — naïve ca…",
+    );
 }
 
 #[test]
@@ -469,12 +459,7 @@ fn python_unannotated_assignment_renders_its_value_once() {
     // head must not also carry it: `MAX_IDS = 2000 = 2000` is the failure.
     let src = "MAX_IDS = 2000\n";
     let e = crate::extract("state.py", src);
-    assert_has(&e.symbols, "MAX_IDS = 2000");
-    assert!(
-        !e.symbols.iter().any(|s| s.matches(" = ").count() > 1),
-        "value appended twice: {:?}",
-        e.symbols
-    );
+    assert_eq!(e.symbols, vec!["MAX_IDS = 2000"]);
 }
 
 #[test]
@@ -486,13 +471,7 @@ fn python_assignment_without_spaces_is_normalized_and_budgeted() {
     let src = format!("CACHE_DIR=\"/var/cache/store\"\nBIG=\"{long}\"\n");
     let e = crate::extract("state.py", &src);
     assert_has(&e.symbols, "CACHE_DIR = \"/var/cache/store\"");
-    let big = e
-        .symbols
-        .iter()
-        .find(|s| s.starts_with("BIG"))
-        .unwrap_or_else(|| panic!("no BIG in {:?}", e.symbols));
-    assert!(big.starts_with("BIG = "), "normalized spacing: {big}");
-    assert!(big.ends_with('…'), "budget must apply: {big}");
+    assert_has(&e.symbols, &format!("BIG = \"{}…", "y".repeat(47)));
 }
 
 #[test]
@@ -502,9 +481,8 @@ fn python_annotated_over_budget_omits_the_value() {
     let long = "z".repeat(200);
     let src = format!("BIG: str = \"{long}\"\n");
     let e = crate::extract("state.py", &src);
-    assert_has(&e.symbols, "BIG: str");
     // annotated must omit, not truncate
-    assert_lacks(&e.symbols, "…");
+    assert_eq!(e.symbols, vec!["BIG: str"]);
 }
 
 #[test]
@@ -541,11 +519,7 @@ fn a_const_only_module_does_not_summarize_as_a_truncated_value() {
     let long = "q".repeat(200);
     let src = format!("TOPICS: list[str] = [\"{long}\"]\n");
     let e = crate::extract("settings.py", &src);
-    let summary = e.summary.unwrap_or_default();
-    assert!(
-        !summary.contains('…'),
-        "summary must not be a truncated value: {summary}"
-    );
+    assert_eq!(e.summary.as_deref(), Some("TOPICS: list[str]"));
 }
 
 #[test]
