@@ -3,7 +3,7 @@
 use std::env;
 use std::fs::{self, File, TryLockError};
 use std::io::{self, Write};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{symlink, MetadataExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -282,9 +282,9 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
 }
 
 /// When `$HOME/.local/bin` is a directory on `PATH`, points `<it>/<name>` at `bin/<name>` for
-/// each of `names`. What is there already is replaced only when it is a symlink directly into
-/// `bin/` (by `bin` as given or its real path), through a temp link renamed over it; anything else
-/// is left and said. A failure is a warning: the binaries are installed.
+/// each of `names`. A link already pointing there is left; another symlink directly into `bin/`
+/// (by `bin` as given or its real path) is replaced; anything else is left and said. Only what
+/// was made or replaced is named. A failure is a warning: the binaries are installed.
 fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
     let Some(user) = env::var_os("HOME").filter(|h| !h.is_empty()) else {
         return;
@@ -303,27 +303,39 @@ fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
     let mut linked = Vec::new();
     for name in names {
         let at = dir.join(name);
-        let replace = match fs::read_link(&at) {
-            Ok(old) => ours(&old),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => true,
-            // Not a symlink.
-            Err(e) if e.kind() == io::ErrorKind::InvalidInput => false,
-            Err(e) => {
-                eprintln!("kulman: warning: cannot link {}: {e}", at.display());
+        let target = bin.join(name);
+        let left = || eprintln!("kulman: left {} as it is (not a kulman link)", at.display());
+        let made = match fs::read_link(&at) {
+            Ok(old) if old == target => continue,
+            // Only an own link with a different spelling is renamed over: through a temp link
+            // that is removed only once this run has made it.
+            Ok(old) if ours(&old) => {
+                let tmp = dir.join(format!(".{name}.kulman-{}", std::process::id()));
+                symlink(&target, &tmp).and_then(|()| {
+                    fs::rename(&tmp, &at).inspect_err(|_| {
+                        let _ = fs::remove_file(&tmp);
+                    })
+                })
+            }
+            // Nothing there: made in place, so a file that appears meanwhile is never replaced.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => match symlink(&target, &at) {
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    left();
+                    continue;
+                }
+                made => made,
+            },
+            // A symlink elsewhere, or not a symlink.
+            Ok(_) => {
+                left();
                 continue;
             }
+            Err(e) if e.kind() == io::ErrorKind::InvalidInput => {
+                left();
+                continue;
+            }
+            Err(e) => Err(e),
         };
-        if !replace {
-            eprintln!("kulman: left {} as it is (not a kulman link)", at.display());
-            continue;
-        }
-        // The temp link is removed only once this run has made it.
-        let tmp = dir.join(format!(".{name}.kulman-{}", std::process::id()));
-        let made = std::os::unix::fs::symlink(bin.join(name), &tmp).and_then(|()| {
-            fs::rename(&tmp, &at).inspect_err(|_| {
-                let _ = fs::remove_file(&tmp);
-            })
-        });
         match made {
             Ok(()) => linked.push(name),
             Err(e) => eprintln!("kulman: warning: cannot link {}: {e}", at.display()),

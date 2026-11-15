@@ -1091,3 +1091,25 @@ fn remove_everything_deletes_every_link_of_its_own() {
     assert_eq!(left, [Path::new("calque")]);
     assert_eq!(fs::read(dir.join("calque")).unwrap(), b"mine");
 }
+
+#[test]
+fn update_names_only_the_link_it_made() {
+    let (_t, base, home, dir) = installed_linked(&[]);
+    fs::remove_file(dir.join("plaz")).unwrap();
+    // A listed binary missing: the update repairs it, so it commits.
+    fs::remove_file(home.join("bin/calque")).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let linked = format!("kulman: linked plaz into {}", dir.display());
+    assert_eq!(stderr(&out).lines().last(), Some(linked.as_str()));
+    for name in ["calque", "plaz", "kulman"] {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}

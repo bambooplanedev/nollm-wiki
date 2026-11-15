@@ -1183,9 +1183,42 @@ fn install_replaces_its_own_links_by_the_home_as_given_or_its_real_path() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let linked = format!("kulman: linked calque plaz kulman into {}\n", dir.display());
+    // calque's link is already the one kulman makes: left, not named.
+    let linked = format!("kulman: linked plaz kulman into {}\n", dir.display());
     assert_eq!(stderr(&out), format!("{UNSIGNED}{linked}"));
     for name in ["calque", "plaz", "kulman"] {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}
+
+#[test]
+fn install_again_leaves_links_that_are_already_right() {
+    use std::os::unix::fs::MetadataExt;
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    let run = || {
+        kulman(&home, &base)
+            .env("PATH", path_first(&dir))
+            .arg("install")
+            .output()
+            .unwrap()
+    };
+    assert!(run().status.success());
+    let names = ["calque", "plaz", "kulman"];
+    let inodes = || names.map(|n| fs::symlink_metadata(dir.join(n)).unwrap().ino());
+    let before = inodes();
+    // A listed binary missing: this install commits again.
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    let out = run();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), UNSIGNED);
+    assert_eq!(inodes(), before);
+    for name in names {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)
