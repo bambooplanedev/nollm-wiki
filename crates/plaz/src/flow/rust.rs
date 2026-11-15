@@ -1,6 +1,6 @@
 //! Rust's flow hooks.
 
-use super::{ArmNode, Bindings, FlowNode, Hooks};
+use super::{text, ArmNode, Bindings, FlowNode, Hooks};
 use crate::model::{ExitKind, NotDrawn};
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
@@ -30,10 +30,6 @@ const CONTROL: [&str; 8] = [
     "break_expression",
     "continue_expression",
 ];
-
-fn text<'t>(n: Node, src: &'t str) -> &'t str {
-    &src[n.byte_range()]
-}
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
     let field = |f: &str| n.child_by_field_name(f);

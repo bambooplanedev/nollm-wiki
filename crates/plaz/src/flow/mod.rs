@@ -173,13 +173,17 @@ struct Walker<'s> {
     comments: Vec<Note>,
 }
 
+fn text<'t>(n: Node, src: &'t str) -> &'t str {
+    &src[n.byte_range()]
+}
+
 fn line(n: Node) -> usize {
     n.start_position().row + 1
 }
 
 impl<'s> Walker<'s> {
     fn text(&self, n: Node) -> &'s str {
-        &self.source.text()[n.byte_range()]
+        text(n, self.source.text())
     }
 
     /// The flow of `root`'s children, with `root`'s bindings.

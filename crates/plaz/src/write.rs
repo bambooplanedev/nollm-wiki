@@ -75,7 +75,7 @@ pub struct Written {
 /// path. The prune removes any such file a dead run left behind.
 const TMP: &str = ".plaz-tmp";
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
+pub(crate) fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
     move |source| Error::Io {
         path: path.to_path_buf(),
         source,

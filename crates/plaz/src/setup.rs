@@ -1,6 +1,7 @@
 //! `plaz setup`: the ignore line for the map's folder, and the map's removal.
 
-use crate::{write, Error};
+use crate::write::{self, io};
+use crate::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -10,13 +11,6 @@ pub enum Scope {
     Repo,
     /// The repository's `info/exclude`, for this clone only.
     Local,
-}
-
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> Error + '_ {
-    move |source| Error::Io {
-        path: path.to_path_buf(),
-        source,
-    }
 }
 
 /// The repository's `info/exclude`, `None` outside a repository or without git.

@@ -1,6 +1,6 @@
 //! Python's flow hooks, and the imports a module's tree shows.
 
-use super::{ArmNode, Bindings, FlowNode, Hooks};
+use super::{text, ArmNode, Bindings, FlowNode, Hooks};
 use crate::model::{ExitKind, Import, NotDrawn};
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
@@ -11,10 +11,6 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
 };
-
-fn text<'t>(n: Node, src: &'t str) -> &'t str {
-    &src[n.byte_range()]
-}
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
     let field = |f: &str| n.child_by_field_name(f);
