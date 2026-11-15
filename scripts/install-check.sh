@@ -27,7 +27,7 @@ bin=$KULMAN_HOME/bin
 cat "$tree/latest/download/install.sh" | sh
 out=$("$bin/kulman" install --yes) || fail "kulman install --yes failed"
 printf '%s\n' "$out"
-printf '%s\n' "$out" | grep -qxF "$bin is not on PATH; add it:" || fail "no 'is not on PATH' line"
+printf '%s\n' "$out" | grep -qxF "$bin is not on PATH; to type kulman in a terminal, add it:" || fail "no 'is not on PATH' line"
 printf '%s\n' "$out" | grep -qxF "    export PATH=\"$bin:\$PATH\"" || fail "no 'export PATH' line"
 case $("$bin/kulman") in "kulman $version in "*) ;; *) fail "kulman does not show $version" ;; esac
 for b in kulman calque plaz; do

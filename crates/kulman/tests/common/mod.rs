@@ -292,3 +292,14 @@ pub fn path_linking(links: &Path, bin: &Path, names: &[&str]) -> std::ffi::OsStr
     let dirs = std::iter::once(links.to_path_buf()).chain(std::env::split_paths(&own));
     std::env::join_paths(dirs).unwrap()
 }
+
+/// `$HOME/.local/bin` of the user home [`kulman`] sets for `home` (not created).
+pub fn local_bin(home: &Path) -> PathBuf {
+    home.with_file_name("user-home").join(".local/bin")
+}
+
+/// `PATH` with `first` before the test's own entries.
+pub fn path_first(first: impl Into<PathBuf>) -> std::ffi::OsString {
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(first.into()).chain(std::env::split_paths(&own))).unwrap()
+}

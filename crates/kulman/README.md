@@ -59,13 +59,13 @@ symlink or not a directory is refused. No shell profile is edited.
     kulman [status]
 
 With no command, or `status`: the installed version and modules (a module whose binary is missing is
-marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; add it:` and
-`export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry that reaches `bin/`
-through a symlink counts, and so does a link in a `PATH` folder for each of kulman and the
-installed modules, when it is the first of its name on `PATH`), and whether a newer release exists
-(`newer release: <X.Y.Z> (kulman update)`, or `up to date`). It only reads: nothing is created. The
-release host gets 5 s to connect and 8 s in all; past that, or on any error, the last line says
-what could not be reached, and why.
+marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; to type kulman in
+a terminal, add it:` and `export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry
+that reaches `bin/` through a symlink counts, and so does a link in a `PATH` folder for each of
+kulman and the installed modules, when it is the first of its name on `PATH`), and whether a newer
+release exists (`newer release: <X.Y.Z> (kulman update)`, or `up to date`). It only reads: nothing
+is created. The release host gets 5 s to connect and 8 s in all; past that, or on any error, the
+last line says what could not be reached, and why.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
@@ -80,11 +80,14 @@ version and says so (`newer release X.Y.Z: kulman update`); when the latest rele
 it says that instead (`could not check for a newer release (<base>: <reason>)`). The installed
 version is read once `.lock` is held. If the installed version differs from `--version`, or is newer
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
-update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
-install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman
-setup` in a project (named by its full path in `bin/` while neither `bin/` nor every binary is on
-`PATH`, as above). With nothing to do it writes nothing and says `already installed: <names>
-(<version>)` instead (and, as above, a newer release).
+update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. When
+`$HOME/.local/bin` is a directory on `PATH`, install and update link each installed binary there to
+`bin/<name>` (`kulman: linked <names> into <dir>`); anything there that is not a link into `bin/` is
+left as it is (`kulman: left <path> as it is (not a kulman link)`), and `kulman remove` deletes only
+its own links. A successful install ends with the next steps: the same two lines for `bin/` if it is
+not on `PATH`, then `kulman setup` in a project (named by its full path in `bin/` while neither
+`bin/` nor every binary is on `PATH`, as above). With nothing to do it writes nothing and says
+`already installed: <names> (<version>)` instead (and, as above, a newer release).
 
     kulman update [--yes]
 

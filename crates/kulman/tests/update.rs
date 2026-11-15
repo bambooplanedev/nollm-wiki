@@ -1,12 +1,12 @@
 mod common;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, edit_manifest, kulman, no_tmp_left, path_linking, release, set_sha256, snapshot,
-    state, stderr, stdout, version_dir, KULMAN_BYTES,
+    assert_binary, edit_manifest, kulman, local_bin, no_tmp_left, path_first, path_linking,
+    release, set_sha256, snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::json;
 
@@ -65,7 +65,7 @@ fn status_lists_what_is_installed() {
     assert!(out.status.success(), "{}", stderr(&out));
     let first = format!("kulman 0.7.0 in {}", home.display());
     let bin = home.join("bin").display().to_string();
-    let hint = format!("{bin} is not on PATH; add it:");
+    let hint = format!("{bin} is not on PATH; to type kulman in a terminal, add it:");
     let export = format!("    export PATH=\"{bin}:$PATH\"");
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
     assert_eq!(
@@ -86,7 +86,10 @@ fn status_lists_what_is_installed() {
 fn status_says_when_bin_is_not_on_path() {
     let (_t, base, home) = installed();
     let bin = home.join("bin");
-    let line = format!("{} is not on PATH; add it:", bin.display());
+    let line = format!(
+        "{} is not on PATH; to type kulman in a terminal, add it:",
+        bin.display()
+    );
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out)[3], line);
@@ -994,4 +997,97 @@ fn status_finds_bin_on_path_through_a_symlink() {
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
+}
+
+#[test]
+fn update_links_each_binary_into_local_bin_on_path() {
+    let (t, base, home) = installed();
+    publish_0_8(t.path());
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let linked = format!("kulman: linked calque plaz kulman into {}", dir.display());
+    assert_eq!(stderr(&out).lines().last(), Some(linked.as_str()));
+    for name in ["calque", "plaz", "kulman"] {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}
+
+/// A temp root with `release/` at 0.7.0 and `home` holding calque and plaz, linked from
+/// `$HOME/.local/bin` (returned last) except where `foreign` names a file put there first.
+fn installed_linked(foreign: &[&str]) -> (tempfile::TempDir, String, PathBuf, PathBuf) {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("calque", CALQUE), ("plaz", PLAZ)],
+    );
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    for name in foreign {
+        fs::write(dir.join(name), "mine").unwrap();
+    }
+    kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .arg("install")
+        .assert()
+        .success();
+    (t, base, home, dir)
+}
+
+#[test]
+fn remove_modules_deletes_only_their_links() {
+    let (_t, base, home, dir) = installed_linked(&[]);
+    // A binary already gone leaves its link dangling: still removed.
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    let out = kulman(&home, &base)
+        .args(["remove", "--modules", "plaz", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    assert!(fs::symlink_metadata(dir.join("plaz")).is_err());
+    for name in ["calque", "kulman"] {
+        assert_eq!(
+            fs::read_link(dir.join(name)).unwrap(),
+            home.join("bin").join(name)
+        );
+    }
+}
+
+#[test]
+fn remove_modules_leaves_a_file_that_is_not_its_link() {
+    let (_t, base, home, dir) = installed_linked(&["plaz"]);
+    let out = kulman(&home, &base)
+        .args(["remove", "--modules", "plaz", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    assert_eq!(lines(&out), ["removed plaz"]);
+    assert_eq!(fs::read(dir.join("plaz")).unwrap(), b"mine");
+    assert!(!home.join("bin/plaz").exists());
+}
+
+#[test]
+fn remove_everything_deletes_every_link_of_its_own() {
+    let (_t, base, home, dir) = installed_linked(&["calque"]);
+    let out = kulman(&home, &base)
+        .args(["remove", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stderr(&out), "");
+    let left: Vec<_> = snapshot(&dir).into_keys().collect();
+    assert_eq!(left, [Path::new("calque")]);
+    assert_eq!(fs::read(dir.join("calque")).unwrap(), b"mine");
 }
