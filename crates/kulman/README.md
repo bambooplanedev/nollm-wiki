@@ -89,7 +89,8 @@ setup` in a project (named by its full path in `bin/` while neither `bin/` nor e
 Updates kulman and every installed module to the latest release, all or none. A release older
 than the installed one is not installed: nothing changes. At the installed version with every file
 in place it says `up to date` and does nothing. Each module it moves is named with both
-versions (`updated <name> <old> -> <new>`), and the last line, when the version changed, is
+versions (`updated <name> <old> -> <new>`), a module the new release requires that was not
+installed is named `installed <name> <version>`, and the last line, when the version changed, is
 `restart running agent sessions; they keep the old binaries until then`. At the same version, files
 put back are named `repaired <name> <version>`, with no restart line.
 

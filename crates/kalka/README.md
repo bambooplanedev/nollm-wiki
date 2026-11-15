@@ -252,16 +252,21 @@ say, and only where it is exactly what `wiki` wrote: its server entry in `.mcp.j
 navigation block in `AGENTS.md`, and the ignore lines that local scope wrote for the skill and the
 extension. Each removal is one line on stdout, `removed old wiki <what> from <path>`, for example
 `removed old wiki server from .mcp.json`. A tracked file such as a committed `.mcp.json` is edited
-even with `--scope local` when it holds the old entry, so the team sees the change. Everything
-else it finds is left as it is and listed on stderr in a block that starts
-`kalka: left from the old wiki (not changed):`. Its last lines tell the person or agent what to
-rename (`wiki` -> `kalka`, `mcp__wiki__*` -> `mcp__kalka__*`, `.wiki/` -> `.kulman/`) and to
-restart running agent sessions, which keep the old server until then. Never touched: an entry,
-file or block that differs from what `wiki` wrote; the prose of `CLAUDE.md` and `AGENTS.md` (lines
-that name the old tool are listed); permission rules and `enabledMcpjsonServers` in Claude
-settings; the machine-wide Codex server `wiki`; the `.wiki/` folder and its ignore lines; the old
-binary; and anything reached through a link or outside the project. `kalka setup --remove` removes
-only kalka's own entries.
+even with `--scope local` when it holds the old entry, so the team sees the change. What it
+recognises but leaves is listed on stderr in a block that starts
+`kalka: left from the old wiki (not changed):`, and only in a project that bears the old tool's
+own marks: something was removed, an old entry differs (or Claude Code could not remove its old
+local server, listed with the command to run), Codex has the old `wiki` server, or
+`.wiki/.wiki/cache.json` exists. Beside those it also lists the `.wiki/` folder and its ignore
+lines, a `wiki` binary on `PATH`, Claude settings that name `mcp__wiki__*` or `"wiki"`, and lines
+of `CLAUDE.md` and `AGENTS.md` that name the old tool; alone, none of these prints anything. The
+block's last lines tell the person or agent what to rename (`wiki` -> `kalka`, `mcp__wiki__*` ->
+`mcp__kalka__*`, `.wiki/` -> `.kulman/`) and, when an agent may still run the old server, to
+restart running agent sessions, which keep it until then. Never touched: an entry, file or block
+that differs from what `wiki` wrote; the prose of `CLAUDE.md` and `AGENTS.md`; permission rules
+and `enabledMcpjsonServers` in Claude settings; the machine-wide Codex server `wiki`; the `.wiki/`
+folder and its ignore lines; the old binary; and anything reached through a link or outside the
+project. `kalka setup --remove` removes only kalka's own entries.
 
 Every agent runs the server as plain `kalka`, so `kalka` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
