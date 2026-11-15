@@ -1648,46 +1648,65 @@ fn mcp_and_cli_search_carry_the_same_called_by_note() {
     );
 }
 
+/// `kalka serve --source <src> --dir <out>` with stderr piped.
+fn serve_source_dir(src: &std::path::Path, out: &std::path::Path) -> Command {
+    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
+    server
+        .args(["serve", "--source"])
+        .arg(src)
+        .arg("--dir")
+        .arg(out)
+        .stderr(Stdio::piped());
+    server
+}
+
 #[test]
 fn serve_says_on_stderr_when_it_compiles_a_wiki_made_by_another_version() {
+    use std::io::Read;
     let src = source_project();
     let out = src.path().join("out");
     kalka::compile(src.path(), &out, &kalka::CompileOptions::default()).unwrap();
     let cache = out.join(".wiki/cache.json");
-    let old = std::fs::read_to_string(&cache).unwrap();
+    let current = std::fs::read_to_string(&cache).unwrap();
     let new = env!("CARGO_PKG_VERSION");
-    std::fs::write(&cache, old.replace(&format!("\"{new}\""), "\"0.0.1\"")).unwrap();
-    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
-    server
-        .args(["serve", "--source"])
-        .arg(src.path())
-        .arg("--dir")
-        .arg(&out)
-        .stderr(Stdio::piped());
-    let (child, mut stdin, stdout) = attach(server);
-    initialize(&mut stdin, &stdout);
-    drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stamp_old = || std::fs::write(&cache, current.replace(&format!("\"{new}\""), "\"0.0.1\""));
+    stamp_old().unwrap();
     let line = format!("kalka: this wiki was compiled by 0.0.1; compiling it again with {new}");
-    assert_eq!(stderr.matches(&line).count(), 1, "stderr: {stderr}");
-    for line in stdout.try_iter() {
-        assert!(serde_json::from_str::<Value>(&line).is_ok(), "{line}");
+
+    // The writer says so, once, on stderr; stdout carries protocol messages only.
+    let (mut writer, mut stdin, stdout) = attach(serve_source_dir(src.path(), &out));
+    initialize(&mut stdin, &stdout);
+    let mut said = String::new();
+    BufReader::new(writer.stderr.as_mut().unwrap())
+        .read_line(&mut said)
+        .unwrap();
+    assert_eq!(said.trim_end(), line);
+    for l in stdout.try_iter() {
+        assert!(serde_json::from_str::<Value>(&l).is_ok(), "{l}");
+    }
+    // Wait for its compile to rewrite the cache.
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while std::fs::read_to_string(&cache).unwrap().contains("0.0.1") {
+        assert!(std::time::Instant::now() < deadline, "no compile");
+        std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Same version: nothing said.
-    std::fs::write(&cache, old).unwrap();
-    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
-    server
-        .args(["serve", "--source"])
-        .arg(src.path())
-        .arg("--dir")
-        .arg(&out)
-        .stderr(Stdio::piped());
-    let (child, mut stdin, stdout) = attach(server);
-    initialize(&mut stdin, &stdout);
+    // A second server on the same output, while the writer lives: it does not compile, so it
+    // says nothing.
+    stamp_old().unwrap();
+    let (reader, mut stdin2, stdout2) = attach(serve_source_dir(src.path(), &out));
+    initialize(&mut stdin2, &stdout2);
+    drop(stdin2);
+    let second = reader.wait_with_output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&second.stderr), "");
     drop(stdin);
-    let output = child.wait_with_output().unwrap();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.contains("compiled by"), "stderr: {stderr}");
+    let mut rest = String::new();
+    writer
+        .stderr
+        .as_mut()
+        .unwrap()
+        .read_to_string(&mut rest)
+        .unwrap();
+    assert!(!rest.contains("compiled by"), "{rest}");
+    let _ = writer.wait();
 }

@@ -177,6 +177,17 @@ impl Live {
             dir,
         });
         let writer = live.try_become_writer(true);
+        // The writer's start-up compile starts over from an output another version wrote.
+        if let Some(old) = writer
+            .then(|| crate::cache::other_tool_version(&live.dir))
+            .flatten()
+        {
+            eprintln!(
+                "kalka: this wiki was compiled by {}; compiling it again with {}",
+                old.escape_debug(),
+                env!("CARGO_PKG_VERSION")
+            );
+        }
         // Never wait out a compile here: with `compile.lock` busy, start
         // empty and catch up like a reader with no wiki on disk.
         let loaded = live.reload(Some(Instant::now()));
