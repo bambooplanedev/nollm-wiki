@@ -59,6 +59,7 @@ fi
 [ -f "$BUILD_DIR/node_modules/.package-lock.json" ] || ( cd "$BUILD_DIR" && npm install )
 
 # 2. Patch pageTitle (value-agnostic; " and \ would break the TS string).
+# shellcheck disable=SC1003 # a double quote and two backslashes in single quotes, not an escaped quote
 SAFE_TITLE="$(printf '%s' "$TITLE" | tr '"\\' "'/")"
 TITLE="$SAFE_TITLE" perl -i -pe 's/pageTitle: "[^"]*"/pageTitle: "$ENV{TITLE}"/' "$BUILD_DIR/quartz.config.ts"
 grep -Fq "pageTitle: \"$SAFE_TITLE\"" "$BUILD_DIR/quartz.config.ts" \
