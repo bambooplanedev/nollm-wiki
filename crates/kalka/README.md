@@ -193,7 +193,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 
 `kalka setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 It compiles `.` into `.kulman`, then installs the MCP server (`kalka serve --source .`) and what tells
 each agent to use it. pi gets the `kalka-navigation` skill (how to find code, and the memory rules).

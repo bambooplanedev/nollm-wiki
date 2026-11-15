@@ -191,6 +191,9 @@ enum Command {
         /// No agent memory: no `.agents/memory`, and the server runs with `--memory none`.
         #[arg(long)]
         no_memory: bool,
+        /// Ask nothing.
+        #[arg(long)]
+        yes: bool,
     },
     /// Write a synthetic corpus (same seed, same files).
     Generate {
@@ -205,15 +208,15 @@ enum Command {
     },
 }
 
-/// setup asks only when stdin and stdout are both terminals.
-fn at_terminal() -> bool {
+/// setup asks only when stdin and stdout are both terminals, and not with `--yes`.
+fn at_terminal(yes: bool) -> bool {
     use std::io::IsTerminal;
-    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+    !yes && std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
-fn ask_scope() -> Result<Scope> {
+fn ask_scope(yes: bool) -> Result<Scope> {
     anyhow::ensure!(
-        at_terminal(),
+        at_terminal(yes),
         "no terminal to ask: pass --scope repo or --scope local"
     );
     println!(
@@ -232,9 +235,9 @@ fn ask_scope() -> Result<Scope> {
 
 /// No agent was found: which to set up, asked at a terminal (as [`ask_scope`] decides one);
 /// without one, none.
-fn ask_agents() -> Result<Vec<Agent>> {
+fn ask_agents(yes: bool) -> Result<Vec<Agent>> {
     use clap::ValueEnum;
-    if !at_terminal() {
+    if !at_terminal(yes) {
         return Ok(Vec::new());
     }
     println!("No agent found in this project. Which should setup wire?");
@@ -545,8 +548,9 @@ fn main() -> Result<()> {
             remove,
             memory: _,
             no_memory,
+            yes,
         } => {
-            let scope = scope.map_or_else(ask_scope, Ok)?;
+            let scope = scope.map_or_else(|| ask_scope(yes), Ok)?;
             let root = std::env::current_dir()?;
             // None found: asked at a terminal, else none; `--remove` then removes nothing
             // agent-specific, and says so when no `--agent` was given.
@@ -554,7 +558,7 @@ fn main() -> Result<()> {
             let agents = match agent {
                 Some(a) => a,
                 None => match kalka::setup::detect(&root) {
-                    a if a.is_empty() && !remove => ask_agents()?,
+                    a if a.is_empty() && !remove => ask_agents(yes)?,
                     a => a,
                 },
             };

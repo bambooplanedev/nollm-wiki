@@ -204,7 +204,7 @@ calls  crates/kalka/src/calls.rs  Calls — Call edges between code items: match
 
 `kalka setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove]
+    kalka setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`kalka serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `kalka-navigation` (як шукати код і правила

@@ -271,6 +271,39 @@ fn setup_without_scope_and_terminal_fails() {
     assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
 }
 
+#[test]
+fn setup_yes_is_the_run_without_it_and_asks_nothing() {
+    let run = |yes: bool| {
+        let f = fixture(true, false);
+        let mut args = vec!["--scope", "local", "--agent", "pi"];
+        if yes {
+            args.push("--yes");
+        }
+        let a = f.setup(&args).success();
+        // The temp folder's name and the memory folder's path under it differ per run.
+        let tmp = f.tmp.path().canonicalize().unwrap().display().to_string();
+        let o = out(&a)
+            .lines()
+            .filter(|l| !l.starts_with("agent memory folder"))
+            .map(|l| l.replace(&tmp, "T"))
+            .collect::<Vec<_>>();
+        (o, tree(&f.root()))
+    };
+    let (yes, no) = (run(true), run(false));
+    assert_eq!(yes.0, no.0);
+    assert!(yes.1 == no.1, "the files differ");
+    // As without a terminal, a missing --scope stays an error.
+    let f = fixture(true, false);
+    let a = f.setup(&["--agent", "pi", "--yes"]).failure();
+    assert!(String::from_utf8_lossy(&a.get_output().stderr).contains("--scope repo"));
+    let h = Command::cargo_bin("kalka")
+        .unwrap()
+        .args(["setup", "--help"])
+        .assert()
+        .success();
+    assert!(out(&h).contains("--yes"), "{}", out(&h));
+}
+
 /// A fixture with no agent to detect: no agent folder, no `claude` or `pi` on `PATH`.
 fn no_agent() -> Fixture {
     let f = fixture(true, false);
