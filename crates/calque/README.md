@@ -96,8 +96,8 @@ the [repository README](../../README.md#install). In short, once `kulman` is on 
     kulman setup --scope local         # runs calque setup and plaz setup here
     kulman update                      # later: everything to the latest release
 
-Add `~/.kulman-home/bin` to your `PATH` (agents start `calque` by its name; `kulman` and
-`kulman setup` say when it is missing). Everything is on by default; turn things off with flags
+Adding `~/.kulman-home/bin` to your `PATH` is optional, for typing `kulman` in a terminal (agents
+find `calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
 (`kulman install --modules calque`, `kulman setup --no-memory`). `kulman setup` runs every chosen
 module even when one fails, and names the ones that failed at the end. `kulman remove` deletes what
 kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `calque` in
@@ -247,7 +247,8 @@ A `calque` installed by kulman (run as `~/.kulman-home/bin/calque`, or from `$KU
 has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` through `sh -c` (the
 prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
 `PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
-`~/.kulman-home` setup warns that the agents need that variable too. An entry that starts plain
+`~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"` or
+`$` is not supported by this line). An entry that starts plain
 `calque` counts as setup's own and is rewritten. Any other `calque` (built from source, installed
 elsewhere) has every agent run the server as plain `calque`, so `calque` must be on `PATH`; setup
 warns when it is not. Safe to run twice. An entry, file or block at the same place with other content is left alone

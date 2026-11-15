@@ -36,8 +36,9 @@ One line fetches `kulman` itself:
 The script downloads the `kulman` archive for your system, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
 `~/.kulman-home/bin/kulman`. It writes nothing else and edits no shell profile. Add
-`~/.kulman-home/bin` to your `PATH` yourself: agents start `calque` by its name. Releases are
-signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `kulman`
+`~/.kulman-home/bin` to your `PATH` yourself if you want to type `kulman` in a terminal; agents
+find `calque` without it, and when `~/.local/bin` is already on your `PATH`, `kulman install` links
+the tools there. Releases are signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `kulman`
 checks every release it reads (see [Checking a release](#checking-a-release)).
 
 Then install the modules:

@@ -18,9 +18,9 @@ agree, run:
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
     ~/.kulman-home/bin/kulman install --yes
 
-The installer prints nothing about the signature when it checked it. When it did not, it
-prints `install.sh: signature not checked (minisign not found); kulman checks it on every install
-and update`; tell the user that. Set `Installed:` to the version `kulman --version` now prints.
+The installer prints `install.sh: signature checked` when it checked the signature. When it did
+not, it prints `install.sh: signature not checked (minisign not found); kulman checks it on every
+install and update` (or `... not checked: local release tree`); tell the user that. Set `Installed:` to the version `kulman --version` now prints.
 
 **Installed.** Run `kulman` (no arguments). If it prints `nothing installed in <home>; run kulman
 install`, kulman is there but no modules are: say you will install `calque` and `plaz`, and after
@@ -57,10 +57,18 @@ Do not edit files yourself; `setup` writes what it needs. Keep the user's existi
 
 Show the user every hint the commands printed and apply each only after they say yes:
 
-- `<bin> is not on PATH; add it:` followed by an `export PATH=...` line: required, not optional.
-  The agent configurations start `calque` by name, so an agent started without it on PATH cannot
-  find it. The user adds the line to their shell profile themselves; show it, do not edit the
-  profile. Put it in "Next step for me".
+- `<bin> is not on PATH; to type kulman in a terminal, add it:` followed by an indented
+  `export PATH=...` line: optional, a convenience for typing `kulman` and the modules in a
+  terminal. The agents find calque without PATH. If the user wants it, they add the line to their
+  shell profile themselves; show it, do not edit the profile. It is not a "Next step for me"
+  item unless the user asks for it.
+- `kulman: linked <names> into <dir>`: nothing to do; mention it in the report.
+- `kulman: left <path> as it is (not a kulman link)`: tell the user; do not delete or replace that
+  file.
+- `warning: <file> is ignored by git; teammates will not get it`: tell the user; do not change
+  their ignore rules unless they say yes.
+- `warning: the agents find calque through KULMAN_HOME; set it in their environment`: tell the
+  user; nothing is edited for them.
 - `skipped AGENTS.md calque navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md from
   pi; ...`: the rename it names, if the user wants it.
 - `Codex loads the server only in a project it trusts: ...`: the trust it names.
@@ -79,8 +87,9 @@ One line each:
     Updated: <old -> new, or "no">
     Agents: <the agents set up>
     Verified: pending — after the restart ask me to search the project with calque
-    Next step for me: <restart; and, if setup printed the PATH hint: add the printed
-      `export PATH=...` line to your shell profile, open a new terminal, then restart the agent>
+    Signature: <the installer's own line, `install.sh: signature checked` or its "not checked"
+      line; "no installer run" if it did not run; never inferred>
+    Next step for me: <restart the agent; plus any hint above the user asked to act on>
 
 If a step fails, stop and show the exact output.
 

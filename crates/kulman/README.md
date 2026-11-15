@@ -33,7 +33,8 @@ By hand, the same: download `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` an
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Then add `~/.kulman-home/bin` to `PATH` yourself (agents start `calque` by its name) and run:
+Adding `~/.kulman-home/bin` to `PATH` is optional, for typing `kulman` in a terminal (agents find
+`calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Then run:
 
     ~/.kulman-home/bin/kulman install       # kulman and the release's default modules
     cd your-project
@@ -157,7 +158,8 @@ by a signal).
 
 ## Environment
 
-- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset).
+- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset; a path containing `"` or `$` is not
+  supported by the agent launch line calque writes).
 - `KULMAN_RELEASE_URL` — where releases are (default
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` or `file://…`, nothing else.
 

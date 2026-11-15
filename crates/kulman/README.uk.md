@@ -34,7 +34,8 @@
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
-Далі самі додайте `~/.kulman-home/bin` у `PATH` (агенти запускають `calque` за назвою) і виконайте:
+Додати `~/.kulman-home/bin` у `PATH` необов'язково, це для набору `kulman` у терміналі (агенти
+знаходять `calque` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). Далі виконайте:
 
     ~/.kulman-home/bin/kulman install       # kulman і модулі релізу за замовчуванням
     cd your-project
@@ -163,7 +164,7 @@ errors: <modules>` і виходить з кодом першого модуля
 ## Змінні середовища
 
 - `KULMAN_HOME` — домашня тека (за замовчуванням `$HOME/.kulman-home`; порожнє значення — те саме,
-  що не задане).
+  що не задане; шлях із `"` чи `$` не підтримується рядком запуску агентів, який пише calque).
 - `KULMAN_RELEASE_URL` — де лежать релізи (за замовчуванням
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` або `file://…`, і більше нічого.
 
