@@ -234,6 +234,15 @@ impl<'s> Walker<'s> {
         after
     }
 
+    /// The steps of `nodes`, each walked in order.
+    fn sub<'t>(&self, nodes: impl IntoIterator<Item = Node<'t>>, flow: &mut Flow) -> Vec<Step> {
+        let mut out = Vec::new();
+        for c in nodes {
+            self.walk(c, flow, &mut out);
+        }
+        out
+    }
+
     fn walk(&self, n: Node, flow: &mut Flow, out: &mut Vec<Step>) {
         match (self.hooks.flow_node)(n, self.source.text()) {
             FlowNode::Plain => {
@@ -278,14 +287,9 @@ impl<'s> Walker<'s> {
             } => {
                 let except: Vec<Node> = each.into_iter().chain([body]).chain(orelse).collect();
                 let rest = self.around(n, &except, flow, out);
-                let (mut pre, mut steps, mut after) = (Vec::new(), Vec::new(), Vec::new());
-                if let Some(e) = each {
-                    self.walk(e, flow, &mut pre);
-                }
-                self.walk(body, flow, &mut steps);
-                if let Some(e) = orelse {
-                    self.walk(e, flow, &mut after);
-                }
+                let pre = self.sub(each, flow);
+                let steps = self.sub([body], flow);
+                let after = self.sub(orelse, flow);
                 out.push(Step::Loop {
                     header,
                     line: line(n),
@@ -297,9 +301,7 @@ impl<'s> Walker<'s> {
                     hidden_exit,
                     orelse: after,
                 });
-                for c in rest {
-                    self.walk(c, flow, out);
-                }
+                out.extend(self.sub(rest, flow));
             }
             FlowNode::Branch {
                 head,
@@ -322,16 +324,9 @@ impl<'s> Walker<'s> {
                             .last()
                             .or(a.cond_node.as_ref())
                             .map_or(after, Node::end_byte);
-                        let (mut pre, mut body, mut late) = (Vec::new(), Vec::new(), Vec::new());
-                        if let Some(c) = a.cond_node {
-                            self.walk(c, flow, &mut pre);
-                        }
-                        for b in a.body {
-                            self.walk(b, flow, &mut body);
-                        }
-                        if let Some(l) = a.after {
-                            self.walk(l, flow, &mut late);
-                        }
+                        let pre = self.sub(a.cond_node, flow);
+                        let body = self.sub(a.body, flow);
+                        let late = self.sub(a.after, flow);
                         Arm {
                             cond: a.cond,
                             line: line(a.at),
@@ -348,9 +343,7 @@ impl<'s> Walker<'s> {
                     arms,
                     exhaustive,
                 });
-                for c in rest {
-                    self.walk(c, flow, out);
-                }
+                out.extend(self.sub(rest, flow));
             }
         }
     }
