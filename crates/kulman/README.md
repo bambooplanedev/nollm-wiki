@@ -127,9 +127,7 @@ the modules run with it put first on their own `PATH` (kulman's own environment 
 not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is),
 and a setup of calque first says on stderr, in the same two lines, that `bin/` is not on `PATH` and
 what to add, and then that the agent configs it writes start `calque` by name; that is left unsaid
-when `calque` itself is linked into a `PATH` folder as described under status. In a project that the
-old `wiki` (releases up to 0.6.13) set up, calque's setup first removes the entries `wiki` wrote and
-lists the rest, as described in [calque's README](../calque/README.md#calque-setup).
+when `calque` itself is linked into a `PATH` folder as described under status.
 
 ## Asking and not asking
 

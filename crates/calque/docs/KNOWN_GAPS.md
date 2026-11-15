@@ -392,9 +392,7 @@ per question is noise-level: treat single results as anecdotes.
   Cursor editor is not checked, only `cursor-agent`.
 - The `.codex/config.toml` block is recognised as lines of text, not parsed. A multi-line string
   value that holds exactly calque's block is treated as calque's own: setup says it is set up, a
-  memory switch or `--remove` edits the string, and, since the machine-wide entry is checked on
-  every run, an old exact machine-wide entry is removed too, which leaves Codex with no calque
-  server. A key spelled with an escape sequence inside quotes (`"c\u0061lque"` under
+  memory switch or `--remove` edits the string. A key spelled with an escape sequence inside quotes (`"c\u0061lque"` under
   `[mcp_servers]`, or `[mcp_servers."c\u0061lque"]`) is not recognised as naming the server: setup
   appends its block, the file then holds two definitions of the same table, and it no longer
   parses until one of them is removed by hand.

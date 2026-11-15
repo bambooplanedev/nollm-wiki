@@ -62,10 +62,8 @@ own configuration and needs the `claude` CLI. Codex's server goes into the proje
 
 Later, `kulman update` brings everything to the latest release, `kulman setup --scope repo --remove`
 undoes a project's setup (with the scope it was set up with) and `kulman remove` deletes what kulman
-installed. In a project that the old `wiki` (releases up to 0.6.13) set up, `kulman setup` first
-removes the entries it wrote and lists the rest, see
-[calque setup](crates/calque/README.md#calque-setup). Commands, flags, exit codes and the layout of
-a release: [crates/kulman/README.md](crates/kulman/README.md).
+installed. Commands, flags, exit codes and the layout of a release:
+[crates/kulman/README.md](crates/kulman/README.md).
 
 ### Checking a release
 

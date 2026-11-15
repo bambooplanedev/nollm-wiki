@@ -85,11 +85,6 @@ crates/calque/src/lib.rs
 A release of the kulman set carries `calque` for the two systems above; on any other system, build
 it from source.
 
-Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
-folder was `.wiki/`. From 0.8.0 the binary is `calque` and the folder `.kulman/`. The agent configs
-an old setup wrote start a server named `wiki`, which 0.8.0 does not have; `calque setup` replaces
-them, see [`calque setup`](#calque-setup).
-
 ### With kulman
 
 `kulman` installs, updates and sets up `calque` together with the other modules; the steps are in
@@ -247,30 +242,6 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-**A project the old `wiki` set up.** Before it writes anything, `calque setup` (and `kulman setup`,
-which runs it) removes what `wiki` 0.6.x wrote, in every scope whatever `--scope` and `--agent`
-say, and only where it is exactly what `wiki` wrote: its server entry in `.mcp.json`,
-`.pi/mcp.json`, `.cursor/mcp.json` and Claude Code's local scope, its prompt hook in
-`.claude/settings.json` and `.claude/settings.local.json`, its pi skill and extension, the
-navigation block in `AGENTS.md`, and the ignore lines that local scope wrote for the skill and the
-extension. Each removal is one line on stdout, `removed old wiki <what> from <path>`, for example
-`removed old wiki server from .mcp.json`. A tracked file such as a committed `.mcp.json` is edited
-even with `--scope local` when it holds the old entry, so the team sees the change. What it
-recognises but leaves is listed on stderr in a block that starts
-`calque: left from the old wiki (not changed):`, and only in a project that bears the old tool's
-own marks: something was removed, an old entry differs (or Claude Code could not remove its old
-local server, listed with the command to run), Codex has the old `wiki` server, or
-`.wiki/.wiki/cache.json` exists. Beside those it also lists the `.wiki/` folder and its ignore
-lines, a `wiki` binary on `PATH`, Claude settings that name `mcp__wiki__*` or `"wiki"`, and lines
-of `CLAUDE.md` and `AGENTS.md` that name the old tool; alone, none of these prints anything. The
-block's last lines tell the person or agent what to rename (`wiki` -> `calque`, `mcp__wiki__*` ->
-`mcp__calque__*`, `.wiki/` -> `.kulman/`) and, when an agent may still run the old server, to
-restart running agent sessions, which keep it until then. Never touched: an entry, file or block
-that differs from what `wiki` wrote; the prose of `CLAUDE.md` and `AGENTS.md`; permission rules
-and `enabledMcpjsonServers` in Claude settings; the machine-wide Codex server `wiki`; the `.wiki/`
-folder and its ignore lines; the old binary; and anything reached through a link or outside the
-project. `calque setup --remove` removes only calque's own entries.
-
 Every agent runs the server as plain `calque`, so `calque` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
@@ -372,18 +343,12 @@ it is and reported as `skipped .codex/config.toml calque server: …` (exit 1), 
 definition would make the file invalid; add the server by hand then. Other tables in the file are
 never changed.
 
-Earlier versions of setup ran `codex mcp add calque -- calque serve --source .`, one machine-wide
-entry that started the server in every Codex session, in folders that are no project too. When
-`codex` is on `PATH`, every setup and `--remove` run that can edit the project's file asks Codex for
-its machine-wide entry (`codex mcp get calque`, run outside any project, so that a parent project's
-file does not answer). An entry that is exactly what the old setup wrote is removed with `codex mcp
-remove calque` once the project's block is in place (with `--remove`: once it is gone), with the
-line `removed the machine-wide Codex calque server (it ran in every Codex session)`; a removal that
-fails is tried again on the next run. That entry served every project on the machine: other projects
-set up with an older calque have no Codex server until `calque setup` is run in each of them. An
-entry with other settings is left: setup reports it, with the command that removes it, on the run
-that finds the project without a `calque` server of its own (exit 1); `--remove` notes it on every
-run, without changing the exit code. Without `codex` on `PATH` setup does not look.
+When `codex` is on `PATH`, every setup and `--remove` run that can edit the project's file asks
+Codex for a machine-wide `calque` server (`codex mcp get calque`, run outside any project, so that a
+parent project's file does not answer). One that exists is another server, and it still runs in
+every other Codex session: setup reports it, with the command that removes it, on the run that finds
+the project without a `calque` server of its own (exit 1); `--remove` notes it on every run, without
+changing the exit code. Without `codex` on `PATH` setup does not look.
 
 The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
 Codex does not reach for them on its own, though: it needs the
