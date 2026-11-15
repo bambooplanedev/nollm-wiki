@@ -1647,3 +1647,47 @@ fn mcp_and_cli_search_carry_the_same_called_by_note() {
         "{mcp}"
     );
 }
+
+#[test]
+fn serve_says_on_stderr_when_it_compiles_a_wiki_made_by_another_version() {
+    let src = source_project();
+    let out = src.path().join("out");
+    kalka::compile(src.path(), &out, &kalka::CompileOptions::default()).unwrap();
+    let cache = out.join(".wiki/cache.json");
+    let old = std::fs::read_to_string(&cache).unwrap();
+    let new = env!("CARGO_PKG_VERSION");
+    std::fs::write(&cache, old.replace(&format!("\"{new}\""), "\"0.0.1\"")).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
+    server
+        .args(["serve", "--source"])
+        .arg(src.path())
+        .arg("--dir")
+        .arg(&out)
+        .stderr(Stdio::piped());
+    let (child, mut stdin, stdout) = attach(server);
+    initialize(&mut stdin, &stdout);
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let line = format!("kalka: this wiki was compiled by 0.0.1; compiling it again with {new}");
+    assert_eq!(stderr.matches(&line).count(), 1, "stderr: {stderr}");
+    for line in stdout.try_iter() {
+        assert!(serde_json::from_str::<Value>(&line).is_ok(), "{line}");
+    }
+
+    // Same version: nothing said.
+    std::fs::write(&cache, old).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_kalka"));
+    server
+        .args(["serve", "--source"])
+        .arg(src.path())
+        .arg("--dir")
+        .arg(&out)
+        .stderr(Stdio::piped());
+    let (child, mut stdin, stdout) = attach(server);
+    initialize(&mut stdin, &stdout);
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("compiled by"), "stderr: {stderr}");
+}

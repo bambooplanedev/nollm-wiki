@@ -624,6 +624,12 @@ pub fn run(
                 memory,
                 repo_memory,
             };
+            if let Some(old) = crate::cache::other_tool_version(dir) {
+                eprintln!(
+                    "kalka: this wiki was compiled by {old}; compiling it again with {}",
+                    env!("CARGO_PKG_VERSION")
+                );
+            }
             WikiState::live(Live::start(source, dir, opts)?)
         }
         None => WikiState::load(dir).map_err(|e| {

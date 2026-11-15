@@ -62,6 +62,13 @@ pub fn load(dir: &Path) -> Cache {
         .unwrap_or_else(Cache::fresh)
 }
 
+/// The tool version that wrote `dir`'s cache, when it is not this one.
+pub fn other_tool_version(dir: &Path) -> Option<String> {
+    read(dir)
+        .map(|c| c.tool_version)
+        .filter(|v| v != env!("CARGO_PKG_VERSION"))
+}
+
 /// The page ids recorded in `dir`'s cache, IGNORING the version guard — for
 /// migration diagnostics (files the compiler previously wrote). Empty if the
 /// cache is absent or unparseable.
