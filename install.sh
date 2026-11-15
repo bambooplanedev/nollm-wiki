@@ -114,7 +114,9 @@ main() {
             minisign -VHm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
                 die "SHA256SUMS: signature does not verify"
         elif [ -e "$ki_sig" ]; then
-            # There, but past the limit: curl makes no file for one that is absent.
+            # A file was left past the limit (a local tree, or a server that sends no length):
+            # there, but no signature. curl makes no file for one that is absent, nor for one
+            # whose announced length is past the limit, so those read as missing below.
             die "SHA256SUMS: signature does not verify"
         elif [ -n "$ki_https" ]; then
             die "SHA256SUMS: signature is missing"

@@ -254,12 +254,14 @@ a `file://` tree a signature that is there must verify too; one that is absent i
 `install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
 checks `SHA256SUMS` with it (`minisign -VHm`: like `kulman`, only the prehashed form) before it
 reads a line of it; it stops (exit 1) with `install.sh: SHA256SUMS: signature is missing` (over
-`https://`, nothing could be downloaded) or `install.sh: SHA256SUMS: signature does not verify`
-(also for a signature past 4 KiB). The check needs a minisign that knows `-H`; 0.11 and 0.12 do, and
-with one that does not, the check fails and `install.sh` stops. In a `file://` tree an absent
-signature is allowed, with the line `install.sh: signature not checked: local release tree`. Without
-`minisign` it goes on by SHA-256 alone and says so: `install.sh: signature not checked (minisign not
-found); kulman checks it on every install and update`.
+`https://`, nothing was downloaded: no signature, no answer, or a server that announces one past 4
+KiB) or `install.sh: SHA256SUMS: signature does not verify` (also for a signature past 4 KiB that
+was partly downloaded, as from a local tree or a server that sends no length). The check needs a
+minisign that knows `-H`; 0.11 and 0.12 do, and with one that does not, the check fails and
+`install.sh` stops. In a `file://` tree an absent signature is allowed, with the line `install.sh:
+signature not checked: local release tree`. Without `minisign` it goes on by SHA-256 alone and says
+so: `install.sh: signature not checked (minisign not found); kulman checks it on every install and
+update`.
 
 By hand, with each file and its `.minisig` in one folder:
 
@@ -273,15 +275,29 @@ Signing a release: a pushed `v*` tag makes a draft release with the 9 files (the
 workflow); nothing in GitHub holds the secret key. The owner then runs, in a terminal, in a
 checkout that has the tag:
 
-    sh scripts/release-sign.sh <version>      # --key <secret key file> if not minisign's default
+    # with --key <secret key file> if the key is not minisign's default
+    sh scripts/release-sign.sh <version>
 
-It checks the draft (exactly the 9 files; each archive's SHA-256 as `SHA256SUMS` and
-`manifest.json` state it; the version; `install.sh` as at the tag), signs the two files (minisign
-asks for the key's password, once per file), verifies both with `release/kulman.pub` (a signature
-by any other key stops it, with nothing uploaded) and uploads the two `.minisig` files to the draft;
-`--replace` signs a draft that has them again. It does not publish: it ends with the command that
-does, `gh release edit v<version> --draft=false`. Once published, the release is the latest one,
-the one `install.sh` and `kulman update` take.
+It checks the draft (this repository's: under the releases address `kulman` uses; it prints the
+repository and the release's address before signing; exactly the 9 files; each archive's SHA-256 as
+`SHA256SUMS` and `manifest.json` state it; the version; `install.sh` as at the tag), signs the two
+files (minisign asks for the key's password, once per file), verifies both with `release/kulman.pub`
+(a signature by any other key stops it, with nothing uploaded) and uploads the two `.minisig` files
+to the draft; `--replace` signs a draft that has them again. It does not publish: it ends with the
+command that does, `gh release edit v<version> --draft=false`. Once published, the release is the
+latest one, the one `install.sh` and `kulman update` take.
+
+To try a signed draft before publishing it, download it into `$dl` (`gh release download v$v --dir
+"$dl"`, with `v` the version) and lay it out as a release tree at `$out`:
+
+    mkdir -p "$out/download/v$v" "$out/latest/download"
+    cp "$dl"/* "$out/download/v$v/"
+    cp "$dl"/SHA256SUMS "$dl"/SHA256SUMS.minisig "$dl"/manifest.json "$dl"/manifest.json.minisig \
+        "$dl"/install.sh "$out/latest/download/"
+
+Then `KULMAN_RELEASE_URL=file://$out` makes `install.sh` and `kulman` install the candidate, with
+its signatures checked. Do not run `release-assemble.sh` on the downloaded files: it rewrites the
+two signed files.
 
 Limits:
 
@@ -291,5 +307,7 @@ Limits:
 - A signature shows that the files are the owner's, not that they are the newest. Whoever controls
   the release host could serve an older signed release as the latest: `kulman update` refuses to go
   back to an older version, but a fresh install would take it.
-- On a machine without `minisign`, `install.sh` relies on HTTPS for its one step, the `kulman`
-  binary it puts in place; from then on `kulman` checks every manifest it reads.
+- `install.sh` itself comes over HTTPS and is not signed: whoever controls the place it is
+  downloaded from controls that first step, with or without `minisign`. The signatures protect
+  what `install.sh` and `kulman` download after it. To trust no download host, check by hand (see
+  [Getting it](#getting-it)).
