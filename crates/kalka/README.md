@@ -82,8 +82,7 @@ crates/kalka/src/lib.rs
 ## Installation
 
 A release of the kulman set carries `kalka` for the two systems above; on any other system, build
-it from source. The static Linux build uses a different allocator, and its peak memory on large
-projects is higher than a glibc build's.
+it from source.
 
 Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
 folder was `.wiki/`. From 0.7.1 the binary is `kalka` and the folder `.kulman/`. The agent configs
