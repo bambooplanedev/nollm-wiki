@@ -154,7 +154,7 @@ fn non_rust_bodies_are_untouched() {
 }
 
 #[test]
-fn each_language_keeps_its_own_scope_rules() {
+fn each_language_keeps_its_own_symbols_and_summary_fallback() {
     // Python now qualifies members and drops function-local definitions.
     let py = "class Registry:\n    def register(self, x):\n        pass\n\ndef outer():\n    def inner():\n        pass\n    return inner\n";
     let e = crate::extract("t.py", py);
@@ -339,7 +339,7 @@ fn the_query_registry_covers_exactly_the_claimed_extensions() {
 }
 
 #[test]
-fn each_grammar_query_is_built_once() {
+fn there_is_one_valid_query_per_grammar() {
     validate_queries();
     let grammars: HashSet<Language> = CODE_EXTENSIONS
         .iter()

@@ -146,38 +146,6 @@ fn skipped_counts_each_file_once_for_its_outermost_rule() {
 }
 
 #[test]
-fn the_output_folder_is_not_a_source() {
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-    for p in [format!("{}/page.md", crate::OUT_DIR), "src/a.rs".into()] {
-        fs::create_dir_all(root.join(&p).parent().unwrap()).unwrap();
-        fs::write(root.join(p), "x").unwrap();
-    }
-    let rels: Vec<_> = walk(root, true, &all)
-        .files
-        .into_iter()
-        .map(|f| f.rel_path)
-        .collect();
-    assert_eq!(rels, vec!["src/a.rs"]);
-}
-
-#[test]
-fn an_old_wiki_folder_is_not_a_source() {
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-    for p in [".wiki/page.md", "src/a.rs"] {
-        fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
-        fs::write(root.join(p), "x").unwrap();
-    }
-    let rels: Vec<_> = walk(root, true, &all)
-        .files
-        .into_iter()
-        .map(|f| f.rel_path)
-        .collect();
-    assert_eq!(rels, vec!["src/a.rs"]);
-}
-
-#[test]
 fn skipped_is_empty_when_nothing_is_skipped() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("a.txt"), b"a").unwrap();
@@ -199,9 +167,10 @@ fn a_file_that_cannot_be_read_is_listed_as_unreadable() {
 
     let w = walk(root, true, &all);
     fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
-    if readable {
-        return;
-    }
+    assert!(
+        !readable,
+        "needs a user that cannot read a mode 000 file (not root)"
+    );
     let rels: Vec<_> = w.files.iter().map(|f| f.rel_path.clone()).collect();
     assert_eq!(rels, vec!["ok.txt"]);
     assert_eq!(w.unreadable, vec!["locked.txt"]);

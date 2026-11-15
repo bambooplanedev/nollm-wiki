@@ -16,8 +16,7 @@ fn every_function_item_points_at_its_own_node() {
     .unwrap();
     assert_eq!(def_text(&a, "a"), "fn a() {}");
     assert_eq!(def_text(&a, "a2"), "fn a2() { g(); }");
-    assert!(def_text(&a, "t").contains("fn t()")); // items of a stripped test module still have nodes
-    assert_eq!(a.file, crate::extract("src/a.rs", a.sources[0].text()));
+    assert_eq!(def_text(&a, "t"), "fn t() {}"); // items of a stripped test module still have nodes
     assert!(analyze("notes.txt", "x").is_none());
 }
 

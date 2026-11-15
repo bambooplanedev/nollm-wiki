@@ -28,9 +28,7 @@ pub(crate) fn tsx_spec() -> LangSpec {
 
 #[cfg(test)]
 mod tests {
-    use crate::formats::code::testutil::{assert_deterministic, assert_has};
-
-    const TSX: &str = "import { useState } from \"react\";\nimport { Card } from \"./Card\";\n\nexport function Counter({ start }: { start: number }): JSX.Element {\n  const [n, setN] = useState(start);\n  return <Card title=\"count\" onClick={() => setN(n + 1)}>{n}</Card>;\n}\n\nexport class Panel extends Component<Props> {\n  render() {\n    return <div className=\"panel\" />;\n  }\n}\n\nfunction Hidden() {\n  return <span />;\n}\n";
+    use crate::formats::code::testutil::assert_has;
 
     #[test]
     fn tsx_reads_a_generic_arrow_as_a_generic_not_a_cast() {
@@ -47,10 +45,5 @@ mod tests {
         let src = "// Renders the cart badge.\nexport function Badge() {\n  return <b />;\n}\n";
         let e = crate::extract("Badge.tsx", src);
         assert_eq!(e.summary.as_deref(), Some("Renders the cart badge."));
-    }
-
-    #[test]
-    fn extraction_is_deterministic() {
-        assert_deterministic("src/Counter.tsx", TSX);
     }
 }

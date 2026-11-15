@@ -1048,15 +1048,6 @@ pub(crate) mod testutil {
         (item.doc.clone(), item.start_line)
     }
 
-    /// Two extractions of the same file agree on symbols, imports and summary.
-    pub(crate) fn assert_deterministic(path: &str, src: &str) {
-        let a = crate::extract(path, src);
-        let b = crate::extract(path, src);
-        assert_eq!(a.symbols, b.symbols);
-        assert_eq!(a.imports, b.imports);
-        assert_eq!(a.summary, b.summary);
-    }
-
     /// The exact signature `want` must be among `symbols`.
     pub(crate) fn assert_has(symbols: &[String], want: &str) {
         assert!(

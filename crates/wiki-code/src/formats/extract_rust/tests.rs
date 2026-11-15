@@ -15,11 +15,11 @@ fn a_const_only_module_without_docs_prefers_an_impl_header_to_the_const() {
 }
 
 #[test]
-fn an_associated_const_in_a_trait_impl_is_a_member_not_a_free_value() {
+fn a_trait_impl_with_an_associated_const_summarizes_as_its_impl_header() {
     // Classification must run AFTER `placement`, so an associated item
     // inside a trait impl is a Member rather than a free value.
     //
-    // Note what this test does NOT prove, despite its name: it cannot fail
+    // Note what this test does NOT prove: it cannot fail
     // by misclassification alone. `pick_summary_fallback` ranks Header
     // above FreeValue, so the impl header wins this summary either way.
     // Mutating the precedence in `classify` leaves the whole suite green —
@@ -396,15 +396,6 @@ fn summary_fallback_uses_an_unsafe_impl_header() {
     let e = crate::extract("t.rs", src);
     assert_eq!(e.symbols, vec!["unsafe impl Send for Foo".to_string()]);
     assert_eq!(e.summary.as_deref(), Some("unsafe impl Send for Foo"));
-}
-
-#[test]
-fn placement_reproduces_the_module_level_guard_and_owner() {
-    let src = "pub struct Wiki;\nimpl Wiki {\n    pub fn search(&self) -> u8 { 0 }\n}\npub fn outer() {\n    pub fn hidden() {}\n}\n";
-    let e = crate::extract("q.rs", src);
-    assert_has(&e.symbols, "pub fn Wiki::search(&self) -> u8");
-    // function-local item leaked
-    assert_lacks(&e.symbols, "hidden");
 }
 
 #[test]

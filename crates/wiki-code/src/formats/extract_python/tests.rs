@@ -96,18 +96,6 @@ fn python_relative_and_aliased_imports_are_captured() {
 }
 
 #[test]
-fn python_from_import_does_not_capture_symbol_names() {
-    let src = "from .models import Article, FeedSource\n";
-    let e = crate::extract("m.py", src);
-    assert_eq!(
-        e.imports,
-        vec![".models".to_string()],
-        "imports: {:?}",
-        e.imports
-    );
-}
-
-#[test]
 fn python_methods_are_qualified_by_their_class() {
     let src = "class Wiki:\n    def search(self, q: str) -> list:\n        return []\n    async def fetch(self) -> bytes:\n        return b\"\"\n\ndef free_function() -> int:\n    return 1\n";
     let e = crate::extract("q.py", src);

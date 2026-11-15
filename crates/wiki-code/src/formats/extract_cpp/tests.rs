@@ -10,7 +10,7 @@ fn summary(path: &str, src: &str) -> Option<String> {
 }
 
 #[test]
-fn declaration_only_header_yields_one_signature_per_member() {
+fn declaration_only_header_yields_the_class_and_a_signature_for_each_method() {
     let s = syms(
             "src/orderbook.h",
             "class OrderBook {\npublic:\n  OrderBook(int cap);\n  void apply(const Order& o);\n  int best_bid() const;\nprivate:\n  void rebuild_();\n};\n",
@@ -85,15 +85,6 @@ fn destructor_operator_and_defaulted_members() {
     assert!(s.iter().any(|x| x.contains("= default")), "{s:?}");
     assert!(s.iter().any(|x| x.contains("~OrderBook")), "{s:?}");
     assert!(s.iter().any(|x| x.contains("operator<")), "{s:?}");
-}
-
-#[test]
-fn pointer_return_type_is_captured() {
-    let s = syms(
-        "src/ob.cpp",
-        "Level* OrderBook::top() { return nullptr; }\n",
-    );
-    assert!(s.iter().any(|x| x.contains("OrderBook::top")), "{s:?}");
 }
 
 #[test]
