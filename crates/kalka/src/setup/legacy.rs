@@ -206,8 +206,10 @@ impl Takeover<'_> {
         })?;
         self.note("navigation block", "AGENTS.md", o)?;
 
-        // The lines local scope wrote for those two folders (mod.rs:494, 545, 579-590). One
-        // whose folder is still there (an edited file was left) keeps ignoring it. The file is
+        // The lines local scope wrote for those folders (mod.rs:494, 545, 579-590; the two
+        // `.claude/skills` ones by wiki before 0.6.0: the navigation skill until 0.4.0, the
+        // memory skill until 0.5.0). One whose folder is still there (an edited file was left)
+        // keeps ignoring it. The file is
         // where setup puts its own lines; git resolved the way to its git folder (outside the
         // project in a linked worktree), so the link check covers `info/exclude` below that.
         let Some(exclude) = exclude_file(root) else {
@@ -221,7 +223,12 @@ impl Takeover<'_> {
             },
         };
         let prefix = worktree_prefix(root);
-        for dir in [".agents/skills/wiki-navigation", ".pi/extensions/wiki-hint"] {
+        for dir in [
+            ".agents/skills/wiki-navigation",
+            ".pi/extensions/wiki-hint",
+            ".claude/skills/wiki-navigation",
+            ".claude/skills/wiki-memory",
+        ] {
             let line = format!("/{prefix}{dir}/");
             // Not `exists()`: a dangling link is still the folder's place.
             if std::fs::symlink_metadata(root.join(dir)).is_ok() {
