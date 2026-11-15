@@ -209,9 +209,9 @@ impl Takeover<'_> {
         // The lines local scope wrote for those folders (mod.rs:494, 545, 579-590; the two
         // `.claude/skills` ones by wiki before 0.6.0: the navigation skill until 0.4.0, the
         // memory skill until 0.5.0). One whose folder is still there (an edited file was left)
-        // keeps ignoring it. The file is
-        // where setup puts its own lines; git resolved the way to its git folder (outside the
-        // project in a linked worktree), so the link check covers `info/exclude` below that.
+        // keeps ignoring it. The file is where setup puts its own lines; git resolved the way to
+        // its git folder (outside the project in a linked worktree), so the link check covers
+        // `info/exclude` below that.
         let Some(exclude) = exclude_file(root) else {
             return Ok(());
         };
