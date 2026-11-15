@@ -45,7 +45,9 @@ fn read(root: &Path) -> Result<Option<String>, &'static str> {
 
 /// Whether `root/.codex` is where Codex keeps its machine-wide config.
 pub(super) fn codex_home(root: &Path) -> bool {
+    // Empty is unset.
     let home = std::env::var_os("CODEX_HOME")
+        .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| {
             let h = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
@@ -112,8 +114,10 @@ fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiErr
 }
 
 /// Writes (or with `remove`, takes out) the block; `true` when it is in place. The machine-wide
-/// entry is looked at while the project defines no `kalka`, and acted on only once the block is
-/// in place (written, or nothing to remove), so a failed write never leaves no server at all.
+/// entry is looked at on every run that may edit the file, and acted on only once the block is
+/// in place (written, already there, removed, or nothing to remove), so a failed write never
+/// leaves no server at all: an exact one goes (a failed remove is retried next run), another is
+/// reported on the run that finds the project without a `kalka` of its own.
 pub(super) fn run(
     root: &Path,
     r: &mut Report,
@@ -123,7 +127,10 @@ pub(super) fn run(
     let text = read(root);
     let st = |t: &Option<String>| state(t.as_deref().unwrap_or_default(), memory);
     let absent = text.as_ref().is_ok_and(|t| st(t) == State::Absent);
-    let machine = absent.then(machine_get).flatten();
+    let editable = text
+        .as_ref()
+        .is_ok_and(|t| !matches!(st(t), State::Other(_)));
+    let machine = editable.then(machine_get).flatten();
     let path = root.join(FILE);
     let edit = || -> std::io::Result<Outcome> {
         let text = match text {
@@ -148,7 +155,7 @@ pub(super) fn run(
         Ok(Outcome::Done)
     };
     let present = r.file_item(root, FILE, &format!("{FILE} kalka server"), false, edit)?;
-    if let Some(exact) = machine.filter(|_| present) {
+    if let Some(exact) = machine.filter(|&exact| present && (exact || absent)) {
         machine_wide(r, exact, remove)?;
     }
     Ok(present)

@@ -838,8 +838,8 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
         assert!(l.starts_with("already set up:"), "{l}");
     }
     assert!(out(&a).contains("already set up: .codex/config.toml kalka server\n"));
-    // The project's entry is there: the machine-wide one is not asked about again.
-    assert_eq!(codex_log(&f), "mcp get kalka\n");
+    // Asked on every run; with no machine-wide entry, nothing is said.
+    assert_eq!(codex_log(&f), "mcp get kalka\nmcp get kalka\n");
 
     let a = f
         .setup(&["--remove", "--agent", "codex", "--scope", "repo"])
@@ -852,7 +852,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     assert!(!out(&a).contains(CODEX_HINT), "{}", out(&a));
     assert_eq!(read(&agents), "# Team rules\n");
     assert!(!f.root().join(".codex").exists());
-    assert_eq!(codex_log(&f), "mcp get kalka\n");
+    assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(3));
 }
 
 #[test]
@@ -909,9 +909,13 @@ fn setup_codex_removes_the_old_machine_wide_entry_once() {
     );
     assert!(!f.tmp.path().join("codex.state").exists());
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
+    // Asked again, gone: nothing to say.
     let a = f.setup(&CODEX_ONLY).success();
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
-    assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
+    assert_eq!(
+        codex_log(&f),
+        "mcp get kalka\nmcp remove kalka\nmcp get kalka\n"
+    );
 }
 
 #[test]
@@ -946,12 +950,9 @@ fn a_remove_that_finds_nothing_says_nothing() {
         "echo \"No MCP server named 'kalka' found.\"",
     );
     let remove = [&["--remove"], &CODEX_ONLY[..]].concat();
-    // Setup, then `--remove` twice: the second finds no project block and tries the machine-wide one.
-    for (args, log) in [
-        (&CODEX_ONLY[..], "mcp get kalka\nmcp remove kalka\n"),
-        (&remove[..], ""),
-        (&remove[..], "mcp get kalka\nmcp remove kalka\n"),
-    ] {
+    // Setup, then `--remove` twice: each tries the exact machine-wide entry, none says so.
+    for args in [&CODEX_ONLY[..], &remove[..], &remove[..]] {
+        let log = "mcp get kalka\nmcp remove kalka\n";
         fs::remove_file(f.tmp.path().join("codex.log")).ok();
         let a = f.setup(args).success();
         assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
@@ -1035,6 +1036,95 @@ fn a_remove_that_finds_nothing_says_nothing_on_stderr_too() {
     let a = f.setup(&CODEX_ONLY).success();
     assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
     assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
+}
+
+#[test]
+fn a_failed_machine_wide_remove_is_tried_again_on_the_next_run() {
+    let f = fixture(true, false);
+    let t = f.tmp.path().display();
+    fs::write(f.tmp.path().join("fail"), "").unwrap();
+    codex_fixed(
+        &f,
+        &codex_get("serve --source .", "-"),
+        &format!("[ -f {t}/fail ] && {{ /bin/rm {t}/fail; echo boom >&2; exit 1; }}; :"),
+    );
+    let a = f.setup(&CODEX_ONLY).code(1);
+    assert!(
+        out(&a).contains("`codex mcp remove` failed: boom"),
+        "{}",
+        out(&a)
+    );
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(
+        out(&a).contains(&format!(
+            "already set up: .codex/config.toml kalka server\n{MACHINE_REMOVED}\n"
+        )),
+        "{}",
+        out(&a)
+    );
+}
+
+#[test]
+fn an_exact_machine_wide_entry_added_later_is_removed_by_the_next_run() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    f.setup(&CODEX_ONLY).success();
+    fs::write(f.tmp.path().join("codex.state"), "kalka serve --source .\n").unwrap();
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(out(&a).contains(MACHINE_REMOVED), "{}", out(&a));
+    assert!(!f.tmp.path().join("codex.state").exists());
+}
+
+#[test]
+fn remove_takes_an_exact_machine_wide_entry_beside_the_project_block() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    f.setup(&CODEX_ONLY).success();
+    fs::write(f.tmp.path().join("codex.state"), "kalka serve --source .\n").unwrap();
+    let a = f
+        .setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
+        .success();
+    assert!(
+        out(&a).contains(&format!(
+            "removed .codex/config.toml kalka server\n{MACHINE_REMOVED}\n"
+        )),
+        "{}",
+        out(&a)
+    );
+    assert!(!f.tmp.path().join("codex.state").exists());
+    assert!(!f.root().join(".codex").exists());
+}
+
+#[test]
+fn an_unwritable_project_file_keeps_the_machine_wide_entry() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    fs::write(f.tmp.path().join("codex.state"), "kalka serve --source .\n").unwrap();
+    let dir = f.root().join(".codex");
+    fs::create_dir_all(&dir).unwrap();
+    let mode = |m| fs::set_permissions(&dir, fs::Permissions::from_mode(m)).unwrap();
+    mode(0o555);
+    if fs::write(dir.join("probe"), "").is_ok() {
+        // root: permissions do not stop it, so there is no failed write to see here.
+        fs::remove_file(dir.join("probe")).unwrap();
+        mode(0o755);
+        eprintln!("skipped: .codex/ stays writable for this user");
+        return;
+    }
+    let a = f.setup(&CODEX_ONLY).failure();
+    mode(0o755);
+    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
+    assert_eq!(codex_log(&f), "mcp get kalka\n");
+    assert!(f.tmp.path().join("codex.state").exists());
+    assert!(!dir.join("config.toml").exists());
+}
+
+#[test]
+fn an_empty_codex_home_is_unset() {
+    let f = fixture(true, false);
+    let a = setup_at_home(&f, &f.root(), &[("CODEX_HOME", Path::new(""))], &CODEX_ONLY).code(1);
+    assert!(out(&a).contains("Codex's own"), "{}", out(&a));
+    assert!(!f.root().join(".codex").exists());
 }
 
 #[test]
@@ -1681,13 +1771,13 @@ fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
         read(&f.root().join(".codex/config.toml")),
         CODEX_BLOCK_NO_MEMORY
     );
-    // With the project's entry there, Codex shows that one: not asked again.
+    // Asked on every run, but reported only where the project had no kalka of its own.
     let a = f.setup(&CODEX_ONLY).success();
     assert!(!out(&a).contains("skipped"), "{}", out(&a));
     f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
         .success();
-    assert_eq!(codex_log(&f), "mcp get kalka\n");
-    // Asked again once the project has none, and left.
+    assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(3));
+    // Again once the project has none, and left.
     let a = f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat()).code(1);
     assert!(
         out(&a).contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and runs in every Codex session; `codex mcp remove kalka` removes it\n"),
