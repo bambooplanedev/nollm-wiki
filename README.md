@@ -22,7 +22,7 @@ each.
 | Name | Say it | The word |
 |---|---|---|
 | kulman | KOOL-mahn (кульман) | a design bureau's drawing board — the front door: installs the tools, sets up a project |
-| calque | /kalk/ (калька) | French for tracing paper — an exact tracing of your project that agents read |
+| calque | /kalk/ | French for tracing paper (Ukrainian «калька») — an exact tracing of your project that agents read |
 | plaz | plahz (плаз) | the loft floor where a bureau draws the airframe's real lines full size — the real decisions of each function |
 | techlog | TEK-log | an aircraft's technical log — the agent's memory of the project |
 | wiki-code | — | plain name: the shared library that walks, parses and indexes code |

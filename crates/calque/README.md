@@ -2,7 +2,8 @@
 
 # calque
 
-**calque**, said /kalk/ (калька): French for tracing paper — an exact tracing of your project that agents read.
+**calque** is French for tracing paper, read /kalk/ (Ukrainian «калька») — an exact tracing of your
+project that agents read.
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
