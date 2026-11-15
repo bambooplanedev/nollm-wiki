@@ -355,8 +355,9 @@ The server then exists only in this project, with either `--scope`: Codex starts
 not in every session. Codex reads a project's `.codex/config.toml` only in a project it trusts, so
 setup ends with `Codex loads the server only in a project it trusts: open the project in Codex and
 accept the trust question.` Setup itself never edits Codex's own `~/.codex/config.toml`, and does
-not treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169; which earlier
-version first reads the project file, and whether the Codex desktop app does, is not checked.
+not treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1;
+which earlier version first reads the project file, and whether the Codex desktop app does, is not
+checked.
 
 Setup appends the block only to what it can recognise. The block is its own when the header
 `[mcp_servers.kalka]` is followed by exactly the `command` line and one of the two `args` lines;
@@ -374,9 +375,11 @@ its machine-wide entry (`codex mcp get kalka`, run outside any project, so that 
 file does not answer). An entry that is exactly what the old setup wrote is removed with `codex mcp
 remove kalka` once the project's block is in place (with `--remove`: once it is gone), with the line
 `removed the machine-wide Codex kalka server (it ran in every Codex session)`; a removal that fails
-is tried again on the next run. An entry with other settings is left and reported, with the command
-that removes it, on the run that finds the project without a `kalka` server of its own. Without
-`codex` on `PATH` setup does not look.
+is tried again on the next run. That entry served every project on the machine: other projects set
+up with an older kalka have no Codex server until `kalka setup` is run in each of them. An entry
+with other settings is left: setup reports it, with the command that removes it, on the run that
+finds the project without a `kalka` server of its own (exit 1); `--remove` notes it on every run,
+without changing the exit code. Without `codex` on `PATH` setup does not look.
 
 The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
 Codex does not reach for them on its own, though: it needs the
