@@ -158,8 +158,8 @@ by a signal).
 
 ## Environment
 
-- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset; a path containing `"` or `$` is not
-  supported by the agent launch line calque writes).
+- `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset; a path containing `"`,
+  `$`, a backtick or `\` is not supported by the agent launch line calque writes).
 - `KULMAN_RELEASE_URL` — where releases are (default
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` or `file://…`, nothing else.
 
@@ -263,7 +263,8 @@ minisign that knows `-H`; 0.11 and 0.12 do, and with one that does not, the chec
 `install.sh` stops. In a `file://` tree an absent signature is allowed, with the line `install.sh:
 signature not checked: local release tree`. Without `minisign` it goes on by SHA-256 alone and says
 so: `install.sh: signature not checked (minisign not found); kulman checks it on every install and
-update`. Both lines go to stderr, so a script that captures the output does not get them.
+update`. When the signature verified, it prints `install.sh: signature checked`. All three lines
+go to stderr, so a script that captures the output does not get them.
 
 By hand, with each file and its `.minisig` in one folder:
 

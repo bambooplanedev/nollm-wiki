@@ -164,7 +164,8 @@ errors: <modules>` і виходить з кодом першого модуля
 ## Змінні середовища
 
 - `KULMAN_HOME` — домашня тека (за замовчуванням `$HOME/.kulman-home`; порожнє значення — те саме,
-  що не задане; шлях із `"` чи `$` не підтримується рядком запуску агентів, який пише calque).
+  що не задане; шлях із `"`, `$`, зворотним апострофом чи `\` не підтримується рядком запуску
+  агентів, який пише calque).
 - `KULMAN_RELEASE_URL` — де лежать релізи (за замовчуванням
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` або `file://…`, і більше нічого.
 
@@ -268,8 +269,9 @@ is missing` (через `https://` нічого не завантажено: п�
 з версією, яка не знає, перевірка не проходить і `install.sh` зупиняється. У дереві `file://`
 відсутній підпис дозволено, з рядком `install.sh: signature not checked: local release tree`. Без
 `minisign` він іде далі лише за SHA-256 і каже про це: `install.sh: signature not checked (minisign
-not found); kulman checks it on every install and update`. Обидва рядки йдуть у stderr, тож скрипт,
-що перехоплює вивід, їх не отримує.
+not found); kulman checks it on every install and update`. Коли підпис підтверджено, він друкує
+`install.sh: signature checked`. Усі три рядки йдуть у stderr, тож скрипт, що перехоплює вивід, їх
+не отримує.
 
 Вручну, коли кожен файл і його `.minisig` лежать в одній теці:
 

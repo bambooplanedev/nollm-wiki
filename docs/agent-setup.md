@@ -62,7 +62,7 @@ Show the user every hint the commands printed and apply each only after they say
   terminal. The agents find calque without PATH. If the user wants it, they add the line to their
   shell profile themselves; show it, do not edit the profile. It is not a "Next step for me"
   item unless the user asks for it.
-- `kulman: linked <names> into <dir>`: nothing to do; mention it in the report.
+- `kulman: linked <names> into <dir>`: nothing to do.
 - `kulman: left <path> as it is (not a kulman link)`: tell the user; do not delete or replace that
   file.
 - `warning: <file> is ignored by git; teammates will not get it`: tell the user; do not change

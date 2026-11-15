@@ -308,7 +308,8 @@ fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
         let made = match fs::read_link(&at) {
             Ok(old) if old == target => continue,
             // Only an own link with a different spelling is renamed over: through a temp link
-            // that is removed only once this run has made it.
+            // that is removed only once this run has made it; a file put at `at` between the
+            // read and the rename would be replaced.
             Ok(old) if ours(&old) => {
                 let tmp = dir.join(format!(".{name}.kulman-{}", std::process::id()));
                 symlink(&target, &tmp).and_then(|()| {
