@@ -42,8 +42,6 @@ mod barrier;
 mod exe;
 
 use barrier::own_token;
-#[cfg(test)]
-use exe::Exe;
 pub(crate) use exe::{EXE, OUTDATED};
 
 /// How long a tool call waits for a fresh snapshot before answering from the

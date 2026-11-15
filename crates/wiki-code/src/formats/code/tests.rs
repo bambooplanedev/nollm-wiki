@@ -1,7 +1,9 @@
 //! Tests for `code`.
 use super::testutil::{assert_has, assert_lacks};
 use super::*;
+use crate::model::CallVia;
 use std::collections::HashSet;
+use tree_sitter::Language;
 
 #[test]
 fn ext_of_lowercases_and_source_rank_totally_orders_headers() {

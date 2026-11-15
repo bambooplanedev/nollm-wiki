@@ -5,8 +5,6 @@
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::{Live, EXE, OUTDATED, RUNNING, WAIT};
 use crate::model::KindFilter;
-#[cfg(test)]
-use crate::query::Hit;
 use crate::query::PackBudget;
 use crate::query::Wiki;
 use crate::{CompileOptions, WikiError};

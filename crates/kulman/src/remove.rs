@@ -5,8 +5,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 
 use crate::{ask_yes, asks, is_installed, store, Usage};
-use store::Home;
-use store::State;
+use store::{Home, State};
 
 pub(super) fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     for name in names.iter().flatten() {

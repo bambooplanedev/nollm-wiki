@@ -11,8 +11,10 @@ fn unfence_drops_only_the_outer_fence_lines() {
     assert_eq!(unfence("```\nquoted\n```\nmore"), "```\nquoted\n```\nmore");
 }
 
-use super::{query_dates, AhoCorasick, QueryDate, Wiki};
+use super::tokens::{CORPUS_STEMS, QUERY_STEMS, QUERY_STEMS_MAX};
+use super::{query_dates, QueryDate, Wiki};
 use crate::model::{CodeItem, CodeItemKind, PairRole};
+use aho_corasick::AhoCorasick;
 use std::collections::BTreeSet;
 
 fn set(items: &[&str]) -> BTreeSet<String> {
@@ -67,18 +69,15 @@ fn query_words_stay_out_of_the_corpus_stem_memo() {
         0.0,
         "no hit"
     );
-    assert!(super::CORPUS_STEMS
-        .read()
-        .unwrap()
-        .contains_key("provision"));
-    assert!(!super::CORPUS_STEMS
+    assert!(CORPUS_STEMS.read().unwrap().contains_key("provision"));
+    assert!(!CORPUS_STEMS
         .read()
         .unwrap()
         .contains_key("quokkaprovisioning"));
-    for i in 0..=super::QUERY_STEMS_MAX {
+    for i in 0..=QUERY_STEMS_MAX {
         Wiki::with_query_stem(&format!("quokka{i}"), |_| ());
     }
-    assert!(super::QUERY_STEMS.read().unwrap().len() <= super::QUERY_STEMS_MAX);
+    assert!(QUERY_STEMS.read().unwrap().len() <= QUERY_STEMS_MAX);
 }
 
 #[test]

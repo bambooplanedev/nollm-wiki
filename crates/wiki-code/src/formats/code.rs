@@ -7,11 +7,6 @@ use crate::support::{basename, summarize, title_from_slug};
 use std::collections::{BTreeMap, BTreeSet};
 use tree_sitter::{Node, Parser, QueryCursor, QueryMatch, StreamingIterator, Tree};
 
-#[cfg(test)]
-use crate::model::CallVia;
-#[cfg(test)]
-use tree_sitter::Language;
-
 mod calls;
 mod doc;
 mod lang;

@@ -1,4 +1,5 @@
 //! Tests for `live`.
+use super::exe::Exe;
 use super::*;
 use notify::event::{AccessKind, AccessMode, Flag, ModifyKind};
 use notify::{Event, EventKind};

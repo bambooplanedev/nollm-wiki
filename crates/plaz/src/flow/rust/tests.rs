@@ -1,4 +1,4 @@
-//! Tests for the parent module.
+//! Tests for `flow::rust`.
 use crate::flow::testutil::{file, flow_lines, not_drawn};
 
 #[test]

@@ -7,8 +7,6 @@
 
 use crate::calls::{callers_index, Caller};
 use crate::model::{CodeItem, KindFilter, Origin, SourceKind};
-#[cfg(test)]
-use aho_corasick::AhoCorasick;
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -20,8 +18,6 @@ mod search;
 mod tokens;
 
 pub(crate) use dates::{query_dates, QueryDate};
-#[cfg(test)]
-use tokens::{CORPUS_STEMS, QUERY_STEMS, QUERY_STEMS_MAX};
 
 #[derive(Deserialize)]
 pub(crate) struct Entry {
@@ -541,7 +537,7 @@ impl Wiki {
     // items included, test and module items never. A whole item name
     // scores `W_SYMBOL`, a word of one `W_SYMBOL_WORD`; `W_SYMBOL` sits
     // above the word weight plus the doc weight and below `W_NAME` (checked at compile time
-    // below), so a page naming the query beats a page whose names merely
+    // in `score.rs`), so a page naming the query beats a page whose names merely
     // contain it, and a page titled by the query beats both. Tuned on the
     // symbol eval's `tune` split (2026-10-23): `W_SYMBOL_DOC` 0.5 → 0.75
     // moved a doc query to file@1; 1.0 cost a title query. `W_SYMBOL` 3.0 →

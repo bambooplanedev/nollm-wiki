@@ -1,5 +1,6 @@
 //! Tests for `serve`.
 use super::*;
+use crate::query::Hit;
 use crate::{compile, CompileOptions};
 use std::time::{Duration, Instant};
 
