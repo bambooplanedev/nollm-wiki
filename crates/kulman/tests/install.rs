@@ -744,17 +744,35 @@ fn the_default_home_is_dot_kulman_home() {
 fn install_rejects_a_plain_http_base() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path().join("home");
-    for base in [
-        "http://example.invalid/releases",
-        "file://host/x",
-        "ftp://x",
-        "https://",
-        "file:///",
-        "https://example.invalid/releases?x=1",
-        "https://example.invalid/releases#x",
+    // The base as given, and as the message names it (trailing slashes are trimmed first).
+    for (base, shown) in [
+        (
+            "http://example.invalid/releases",
+            "http://example.invalid/releases",
+        ),
+        ("file://host/x", "file://host/x"),
+        ("ftp://x", "ftp://x"),
+        ("https://", "https:"),
+        ("file:///", "file:"),
+        (
+            "https://example.invalid/releases?x=1",
+            "https://example.invalid/releases?x=1",
+        ),
+        (
+            "https://example.invalid/releases#x",
+            "https://example.invalid/releases#x",
+        ),
     ] {
         let out = kulman(&home, base).arg("install").output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{base}");
+        assert_eq!(
+            stderr(&out),
+            format!(
+                "kulman: KULMAN_RELEASE_URL must start with https:// or file:// (got {shown})\n\
+                 nothing changed\n"
+            ),
+            "{base}"
+        );
     }
     assert!(!home.exists());
 }

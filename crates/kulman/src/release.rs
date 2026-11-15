@@ -424,12 +424,19 @@ mod tests {
 
     #[test]
     fn the_client_refuses_plain_http() {
-        let connect = Duration::from_secs(15);
-        assert!(agent(connect, None).config().https_only());
-        assert_eq!(agent(connect, None).config().timeouts().global, None);
+        // Nothing listens on the discard port: were plain http allowed, the error would be a
+        // refused connection, not the refusal of the scheme.
+        let err = download(
+            "http://127.0.0.1:9/x",
+            &mut Vec::new(),
+            10,
+            WAIT.connect,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(
-            agent(connect, None).config().timeouts().connect,
-            Some(connect)
+            err.to_string(),
+            "configured for https only: http://127.0.0.1:9/x"
         );
     }
 
