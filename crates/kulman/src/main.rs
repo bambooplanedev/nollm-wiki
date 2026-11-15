@@ -21,16 +21,15 @@ use setup::setup;
 use status::status;
 
 #[derive(Parser)]
-#[command(version, about, color = ColorChoice::Never)]
+#[command(version, about, after_help = "With no command, shows status.", color = ColorChoice::Never)]
 struct Cli {
-    /// With no command, shows status: what is installed, and whether a newer release exists.
     #[command(subcommand)]
     command: Option<Cmd>,
 }
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Show what is installed and whether a newer release exists (what no command shows).
+    /// Show what is installed and whether a newer release exists (the same as no command).
     Status,
     /// Install modules of a release into ~/.kulman-home/bin (with kulman itself).
     Install {

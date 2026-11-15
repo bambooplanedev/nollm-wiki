@@ -851,7 +851,18 @@ fn status_command_equals_the_plain_form() {
     assert_eq!(stdout(&named), stdout(&plain));
     assert_eq!(stderr(&named), stderr(&plain));
     let help = kulman(&home, &base).arg("--help").output().unwrap();
-    assert!(stdout(&help).contains("status"), "{}", stdout(&help));
+    let help = stdout(&help);
+    assert!(
+        help.contains(
+            "  status   Show what is installed and whether a newer release exists \
+             (the same as no command)\n"
+        ),
+        "{help}"
+    );
+    assert!(
+        help.trim_end().ends_with("With no command, shows status."),
+        "{help}"
+    );
 }
 
 #[test]
