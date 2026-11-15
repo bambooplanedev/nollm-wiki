@@ -82,8 +82,8 @@ crates/calque/src/lib.rs
 
 - macOS на Apple silicon (`aarch64-apple-darwin`) або Linux x86_64 (`x86_64-unknown-linux-musl`) для
   релізного бінарника. Збірка для Linux статична й працює однаково на системах із glibc і з musl.
-- Або Rust 1.90 чи новіший, щоб зібрати з коду (для `cargo test` потрібен ще й `jq`). На Windows не
-  перевірено.
+- Або Rust 1.90 чи новіший, щоб зібрати з коду (для `cargo test` потрібні ще й `git`, `jq` та
+  користувач без прав root). На Windows не перевірено.
 - Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `calque setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 

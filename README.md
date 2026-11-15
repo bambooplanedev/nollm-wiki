@@ -108,7 +108,8 @@ tree, extracts functions and types with tree-sitter, and indexes calls and impor
 
 ## Building from source
 
-Building needs Rust 1.90 or later; the tests also need `jq`.
+Building needs Rust 1.90 or later; the tests also need `git`, `jq` and a
+non-root user.
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman

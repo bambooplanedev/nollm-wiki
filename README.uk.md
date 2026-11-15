@@ -108,7 +108,8 @@ Python; інші мови отримують примітку «not covered yet�
 
 ## Збірка з коду
 
-Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `jq`.
+Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `git`, `jq` та
+користувач без прав root.
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman
