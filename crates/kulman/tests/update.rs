@@ -408,6 +408,43 @@ fn remove_everything_removes_an_empty_home() {
     assert!(!home.exists());
 }
 
+/// A home at 0.7.0 whose manifest says plaz requires kalka.
+fn installed_with_requires() -> (tempfile::TempDir, String, std::path::PathBuf) {
+    let t = tempfile::tempdir().unwrap();
+    let dir = t.path().join("release");
+    let base = release(&dir, "0.7.0", &[("kalka", KALKA), ("plaz", PLAZ)]);
+    common::edit_manifest(&dir, "0.7.0", |m| {
+        m["modules"][1]["requires"] = json!(["kalka"]);
+    });
+    let home = t.path().join("home");
+    kulman(&home, &base).arg("install").assert().success();
+    (t, base, home)
+}
+
+#[test]
+fn remove_refuses_a_module_another_installed_one_requires() {
+    let (t, base, home) = installed_with_requires();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["remove", "--modules", "kalka", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(stderr(&out).contains("kulman: cannot remove kalka: plaz requires it\n"));
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn remove_a_module_together_with_the_one_that_requires_it() {
+    let (_t, base, home) = installed_with_requires();
+    let out = kulman(&home, &base)
+        .args(["remove", "--modules", "kalka,plaz", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(state(&home), json!({"version": "0.7.0", "modules": []}));
+}
+
 #[test]
 fn remove_kulman_by_name_is_usage() {
     let (t, base, home) = installed();
