@@ -353,11 +353,14 @@ args = ["serve", "--source", "."]
 
 The server then exists only in this project, with either `--scope`: Codex starts it where setup ran,
 not in every session. Codex reads a project's `.codex/config.toml` only in a project it trusts, so
-setup ends with `Codex loads the server only in a project it trusts: open the project in Codex and
-accept the trust question.` Setup itself never edits Codex's own `~/.codex/config.toml`, and does
-not treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1;
-which earlier version first reads the project file, and whether the Codex desktop app does, is not
-checked.
+setup ends with `Codex loads the server only in a project it trusts: run codex in the project and
+accept the question, or add [projects."<project path>"] trust_level = "trusted" to
+~/.codex/config.toml`, with `<project path>` replaced by the project's absolute path. The `codex`
+command asks the trust question itself; the Codex desktop app (the ChatGPT app) did not ask when
+the project was opened, and loaded the project's server once that entry was in
+`~/.codex/config.toml`. Setup itself never edits Codex's own `~/.codex/config.toml`, and does not
+treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169.0-alpha.11.1 (the
+version bundled in that app); which earlier version first reads the project file is not checked.
 
 Setup appends the block only to what it can recognise. The block is its own when the header
 `[mcp_servers.kalka]` is followed by exactly the `command` line and one of the two `args` lines;

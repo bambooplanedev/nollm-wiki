@@ -366,11 +366,15 @@ args = ["serve", "--source", "."]
 
 Тоді сервер існує лише в цьому проєкті, за будь-якого `--scope`: Codex запускає його там, де
 запускали setup, а не в кожній сесії. Codex читає `.codex/config.toml` проєкту лише в проєкті, якому
-довіряє, тому setup завершується рядком `Codex loads the server only in a project it trusts: open
-the project in Codex and accept the trust question.` Сам setup ніколи не редагує власний
-`~/.codex/config.toml` Codex і не вважає ознакою проєкту теку `.codex/`, якщо це і є власна тека
-Codex. Перевірено з codex-cli 0.169.0-alpha.11.1; яка раніша версія першою читає файл проєкту і чи
-читає його настільний застосунок Codex, не перевірено.
+довіряє, тому setup завершується рядком `Codex loads the server only in a project it trusts: run
+codex in the project and accept the question, or add [projects."<project path>"] trust_level =
+"trusted" to ~/.codex/config.toml`, де `<project path>` замінено абсолютним шляхом проєкту.
+Команда `codex` сама ставить питання про довіру; настільний застосунок Codex (застосунок ChatGPT)
+при відкритті проєкту не питав і завантажив сервер проєкту, щойно цей запис зʼявився в
+`~/.codex/config.toml`. Сам setup ніколи не редагує власний `~/.codex/config.toml` Codex і не
+вважає ознакою проєкту теку `.codex/`, якщо це і є власна тека Codex. Перевірено з
+codex-cli 0.169.0-alpha.11.1 (версія, вбудована в цей застосунок); яка раніша версія першою читає
+файл проєкту, не перевірено.
 
 Setup дописує блок лише там, де може його впізнати. Блок його власний, коли за заголовком
 `[mcp_servers.kalka]` ідуть рівно рядок `command` і один із двох рядків `args`; тоді setup перемикає

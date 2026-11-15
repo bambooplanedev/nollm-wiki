@@ -619,7 +619,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
     }
     if codex_added {
-        r.line(codex::HINT)?;
+        r.line(&codex::hint(root))?;
     }
     // What the old `wiki` left for the person to decide, after setup's own lines.
     if let Some(found) = found {

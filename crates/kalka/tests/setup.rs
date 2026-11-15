@@ -770,7 +770,10 @@ esac"#
 const CODEX_BLOCK: &str =
     "[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n";
 const CODEX_BLOCK_NO_MEMORY: &str = "[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\", \"--memory\", \"none\"]\n";
-const CODEX_HINT: &str = "Codex loads the server only in a project it trusts: open the project in Codex and accept the trust question.";
+/// The hint names the project's real path, as the process sees it.
+fn codex_hint(f: &Fixture) -> String {
+    format!("Codex loads the server only in a project it trusts: run codex in the project and accept the question, or add [projects.\"{}\"] trust_level = \"trusted\" to ~/.codex/config.toml", f.root().canonicalize().unwrap().display())
+}
 const MACHINE_REMOVED: &str =
     "removed the machine-wide Codex kalka server (it ran in every Codex session)";
 
@@ -824,7 +827,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
     let a = f.setup(&args).success();
     let o = out(&a);
     assert!(o.contains("wrote .codex/config.toml kalka server\n"), "{o}");
-    assert!(o.ends_with(&format!("{CODEX_HINT}\n")), "{o}");
+    assert!(o.ends_with(&format!("{}\n", codex_hint(&f))), "{o}");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
     // Nothing machine-wide to remove: only asked, never added.
     assert_eq!(codex_log(&f), "mcp get kalka\n");
@@ -833,7 +836,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
 
     let a = f.setup(&args).success();
     for l in out(&a).lines().filter(|l| {
-        !l.starts_with("Compiled") && !l.starts_with("agent memory folder") && *l != CODEX_HINT
+        !l.starts_with("Compiled") && !l.starts_with("agent memory folder") && *l != codex_hint(&f)
     }) {
         assert!(l.starts_with("already set up:"), "{l}");
     }
@@ -849,7 +852,7 @@ fn setup_codex_adds_its_server_and_the_steps_to_agents_md_and_remove_undoes_both
         "{}",
         out(&a)
     );
-    assert!(!out(&a).contains(CODEX_HINT), "{}", out(&a));
+    assert!(!out(&a).contains(&codex_hint(&f)), "{}", out(&a));
     assert_eq!(read(&agents), "# Team rules\n");
     assert!(!f.root().join(".codex").exists());
     assert_eq!(codex_log(&f), "mcp get kalka\n".repeat(3));
@@ -1162,7 +1165,7 @@ fn setup_codex_needs_no_codex_cli() {
     let a = f.setup(&CODEX_ONLY).success();
     let o = out(&a);
     assert!(o.contains("wrote .codex/config.toml kalka server\n"), "{o}");
-    assert!(o.ends_with(&format!("{CODEX_HINT}\n")), "{o}");
+    assert!(o.ends_with(&format!("{}\n", codex_hint(&f))), "{o}");
     assert!(!o.contains("skipped"), "{o}");
     assert_eq!(read(&f.root().join(".codex/config.toml")), CODEX_BLOCK);
     f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
@@ -1256,7 +1259,7 @@ fn setup_codex_never_adds_a_second_kalka_definition() {
                 "{}",
                 out(&a)
             );
-            assert!(!out(&a).contains(CODEX_HINT), "{}", out(&a));
+            assert!(!out(&a).contains(&codex_hint(&f)), "{}", out(&a));
             assert_eq!(read(&p), text);
         }
     }

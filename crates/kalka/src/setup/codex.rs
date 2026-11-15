@@ -6,7 +6,7 @@ mod toml;
 
 use super::edit::{inside, other_names, prune_dirs, Outcome};
 use super::{cli, serve_args, Report, CMD};
-use crate::WikiError;
+use crate::{memory, WikiError};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use toml::{state, with_args, with_block, without_block, State, ANOTHER};
@@ -17,7 +17,11 @@ const LINK: &str =
 const UNREADABLE: &str = "not a regular UTF-8 file; left as it is";
 const HOME: &str =
     "this .codex/ is Codex's own (CODEX_HOME or ~/.codex), whose config is machine-wide; left as it is";
-pub(super) const HINT: &str = "Codex loads the server only in a project it trusts: open the project in Codex and accept the trust question.";
+/// What to say after the project's block is written; `root` as setup knows it.
+pub(super) fn hint(root: &Path) -> String {
+    let path = memory::display_path(root);
+    format!("Codex loads the server only in a project it trusts: run codex in the project and accept the question, or add [projects.\"{path}\"] trust_level = \"trusted\" to ~/.codex/config.toml")
+}
 /// What the machine-wide entry is reported as (`CODEX_HOME` may put it anywhere).
 const MACHINE: &str = "Codex kalka server (machine-wide)";
 
