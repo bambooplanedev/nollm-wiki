@@ -128,6 +128,13 @@ fn old_block() -> String {
     format!("<!-- wiki:navigation -->\n{OLD_NAV}<!-- /wiki:navigation -->\n")
 }
 
+fn err(a: &assert_cmd::assert::Assert) -> String {
+    String::from_utf8(a.get_output().stderr.clone()).unwrap()
+}
+
+const RESTART: &str =
+    "kalka: restart running agent sessions; they keep the old server until then\n";
+
 fn takeover_lines(o: &str) -> Vec<&str> {
     o.lines().filter(|l| l.contains("old wiki")).collect()
 }
@@ -241,10 +248,40 @@ fn setup_local_removes_a_mixed_old_setup() {
     f.write(".gitignore", gitignore);
     let exclude = "# git ls-files --others --exclude-from=.git/info/exclude\n.wiki/\n/.agents/memory/\n/.pi/mcp.json\n/.agents/skills/wiki-navigation/\n/.pi/extensions/wiki-hint/\n/.claude/settings.local.json\n";
     f.write(".git/info/exclude", exclude);
+    // Read-only leftovers for the report.
+    f.stub(
+        "codex",
+        "[ \"$1 $2 $3\" = 'mcp get wiki' ] || exit 1\nprintf 'wiki\\n  enabled: true\\n  transport: stdio\\n  command: wiki\\n  args: serve --source .\\n'",
+    );
+    f.stub("wiki", "exit 0");
+    f.write(
+        "CLAUDE.md",
+        "# Project\n**Code lookup:** the `wiki` MCP first (`search`, `page`, `callers`).\nRebuild with `wiki compile . .wiki`.\nTools: mcp__wiki__search.\n",
+    );
+    f.write("scripts/CLAUDE.md", "(look one up with `wiki page`)\n");
+    f.write("target/CLAUDE.md", "wiki page\n");
+    f.write(".hidden/CLAUDE.md", "wiki page\n");
 
     let a = f
         .setup(&["--scope", "local", "--agent", "claude,pi"])
         .success();
+    assert_eq!(
+        err(&a).replace(&f.bin().display().to_string(), "<bin>"),
+        "kalka: left from the old wiki (not changed):
+  codex: server \"wiki\" is registered machine-wide; when no project uses it: codex mcp remove wiki
+  .wiki/: old compiled output (the new one is .kulman/); delete it when you no longer need it
+  .gitignore:3: ignore line for .wiki/
+  .git/info/exclude:2: ignore line for .wiki/
+  <bin>/wiki: an old wiki binary is on PATH
+  .claude/settings.json: permission rules name mcp__wiki__*; the same rules for mcp__kalka__* are needed
+  .claude/settings.local.json: enabledMcpjsonServers lists \"wiki\"
+  CLAUDE.md:3: mentions the old tool
+  CLAUDE.md:4: mentions the old tool
+  scripts/CLAUDE.md:1: mentions the old tool
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+kalka: restart running agent sessions; they keep the old server until then
+"
+    );
     let o = out(&a);
     assert_eq!(
         takeover_lines(&o),
@@ -298,8 +335,10 @@ fn setup_removes_the_old_local_claude_server_only() {
         ["removed old wiki server from claude (local scope)"]
     );
     assert!(f.claude_log().contains("mcp remove wiki --scope local"));
+    // Only removals: no block, the restart line.
+    assert_eq!(err(&a), RESTART);
 
-    // A user-scope `wiki` is not the project's: it stays.
+    // A user-scope `wiki` is not the project's: it stays, listed by its scope.
     let g = fixture();
     g.claude_local(
         "wiki",
@@ -309,6 +348,52 @@ fn setup_removes_the_old_local_claude_server_only() {
     let a = g.setup(&["--scope", "repo", "--agent", "claude"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert!(!g.claude_log().contains("mcp remove wiki"));
+    assert!(
+        err(&a).contains("\n  claude (user scope): wiki server differs from what wiki wrote; remove it by hand\n"),
+        "{}",
+        err(&a)
+    );
+}
+
+/// Claude Code shows an edited `.mcp.json` `wiki` as its project-scope server: one line for it.
+#[test]
+fn an_edited_project_server_is_listed_once() {
+    let f = fixture();
+    let edited = json!({"command": "wiki", "args": ["serve", "--source", "src"]});
+    f.write(
+        ".mcp.json",
+        &pretty(&json!({"mcpServers": {"wiki": edited}})),
+    );
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(
+        err(&a),
+        format!(
+            "kalka: left from the old wiki (not changed):
+  .mcp.json: wiki server differs from what wiki wrote; remove it by hand
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+{RESTART}"
+        )
+    );
+    assert!(f.claude_log().contains("mcp get wiki"));
+}
+
+#[test]
+fn mentions_stop_at_twenty_lines() {
+    let f = fixture();
+    let text = (1..=25)
+        .map(|i| format!("step {i}: run `wiki search`\n"))
+        .collect::<Vec<_>>()
+        .concat();
+    f.write("AGENTS.md", &text);
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    let e = err(&a);
+    let mentions: Vec<&str> = e.lines().filter(|l| l.contains("mentions")).collect();
+    assert_eq!(mentions.len(), 20, "{e}");
+    assert_eq!(mentions[19], "  AGENTS.md:20: mentions the old tool");
+    assert!(
+        e.contains("\n  AGENTS.md:20: mentions the old tool\n  … and 5 more\n"),
+        "{e}"
+    );
 }
 
 #[test]
@@ -330,6 +415,15 @@ fn setup_leaves_an_edited_old_skill_and_its_ignore_line() {
     assert_eq!(read(&r.join("AGENTS.md")), block);
     let ex = read(&r.join(".git/info/exclude"));
     assert!(ex.starts_with("/.agents/skills/wiki-navigation/\n"), "{ex}");
+    // After the compile's own warning about the AGENTS.md page.
+    let want = format!(
+            "kalka: left from the old wiki (not changed):
+  .agents/skills/wiki-navigation/SKILL.md: wiki skill differs from what wiki wrote; remove it by hand
+  AGENTS.md: wiki navigation block differs from what wiki wrote; remove it by hand
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+{RESTART}"
+    );
+    assert!(err(&a).ends_with(&want), "{}", err(&a));
 }
 
 /// No old traces: the output is what setup printed before the takeover existed.
@@ -343,6 +437,8 @@ fn setup_without_old_traces_prints_what_it_printed_before() {
     let o = out(&a).replace(&tmp.display().to_string(), "<tmp>");
     let o = o.replace(&f.tmp.path().display().to_string(), "<tmp>");
     assert!(!o.contains("removed old wiki"), "{o}");
+    // Nothing on stderr either, as before the takeover.
+    assert_eq!(err(&a), "");
     let mut lines: Vec<&str> = o.lines().collect();
     // The agent memory folder's name is the mangled temporary path.
     let agent = lines.remove(1);
@@ -420,6 +516,14 @@ fn the_takeover_never_follows_a_link_out_of_the_project() {
 
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new(), "{}", out(&a));
+    let e = err(&a);
+    for l in [
+        "  .mcp.json: reached through a link; the old wiki server there was left",
+        "  .agents/skills/wiki-navigation/SKILL.md: reached through a link; the old wiki skill there was left",
+        "  AGENTS.md: reached through a link; the old wiki navigation block there was left",
+    ] {
+        assert!(e.lines().any(|x| x == l), "{l} missing from {e}");
+    }
     assert_eq!(read(&shared.join("wn/SKILL.md")), OLD_SKILL);
     assert_eq!(read(&shared.join("mcp.json")), mcp);
     assert_eq!(read(&r.join("CLAUDE.md")), claude_md);
@@ -527,4 +631,32 @@ fn an_unreadable_old_location_does_not_fail_setup() {
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert!(f.root().join(".mcp.json").is_dir());
+    assert_eq!(err(&a), "");
+}
+
+/// A `.mcp.json` linked from a dotfiles folder says something only when it names `wiki`.
+#[test]
+fn a_linked_config_is_listed_only_with_an_old_server() {
+    for (servers, want) in [
+        (json!({"other": {"command": "x"}}), String::new()),
+        (
+            json!({"wiki": old_entry()}),
+            format!(
+                "kalka: left from the old wiki (not changed):
+  .mcp.json: reached through a link; the old wiki server there was left
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+{RESTART}"
+            ),
+        ),
+    ] {
+        let f = fixture();
+        let dotfiles = f.tmp.path().join("dotfiles.json");
+        let text = pretty(&json!({"mcpServers": servers}));
+        fs::write(&dotfiles, &text).unwrap();
+        symlink(&dotfiles, f.root().join(".mcp.json")).unwrap();
+        let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+        assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
+        assert_eq!(err(&a), want);
+        assert_eq!(read(&dotfiles), text);
+    }
 }

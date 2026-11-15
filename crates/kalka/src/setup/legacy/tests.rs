@@ -44,10 +44,10 @@ fn edited_old_entries_are_reported_and_left() {
     assert_eq!(
         f.differing,
         [
-            ".mcp.json: old wiki server: \"wiki\" has another value",
-            ".claude/settings.json: old wiki hook: a hook running `wiki hint --claude-hook` differs",
-            ".agents/skills/wiki-navigation/SKILL.md: old wiki skill: file has other content",
-            "AGENTS.md: old wiki navigation block: the block has other content",
+            ".mcp.json: wiki server differs from what wiki wrote; remove it by hand",
+            ".claude/settings.json: wiki hook differs from what wiki wrote; remove it by hand",
+            ".agents/skills/wiki-navigation/SKILL.md: wiki skill differs from what wiki wrote; remove it by hand",
+            "AGENTS.md: wiki navigation block differs from what wiki wrote; remove it by hand",
         ]
     );
     for (file, text) in files {
@@ -60,18 +60,19 @@ fn edited_old_entries_are_reported_and_left() {
 }
 
 #[test]
-fn a_config_that_is_not_a_json_object_is_reported() {
-    let (d, f) = found_in(&[(".mcp.json", "{ not json"), (".cursor/mcp.json", "[1]")]);
+fn a_config_that_is_not_a_json_object_is_reported_when_it_names_wiki() {
+    let (d, f) = found_in(&[
+        (".mcp.json", "{ \"wiki\": not json"),
+        (".cursor/mcp.json", "[1]"),
+        (".pi/mcp.json", "{ not json"),
+    ]);
     assert_eq!(
         f.differing,
-        [
-            ".mcp.json: old wiki server: not a JSON object",
-            ".cursor/mcp.json: old wiki server: not a JSON object",
-        ]
+        [".mcp.json: wiki server differs from what wiki wrote; remove it by hand"]
     );
     assert_eq!(
         fs::read_to_string(d.path().join(".mcp.json")).unwrap(),
-        "{ not json"
+        "{ \"wiki\": not json"
     );
 }
 
@@ -117,16 +118,17 @@ fn a_differing_hook_beside_a_removed_one_is_reported() {
     );
     assert_eq!(
         f.differing,
-        [".claude/settings.local.json: old wiki hook: a hook running `wiki hint --claude-hook` differs"]
+        [".claude/settings.local.json: wiki hook differs from what wiki wrote; remove it by hand"]
     );
     let left = fs::read_to_string(d.path().join(".claude/settings.local.json")).unwrap();
     assert!(left.contains("\"matcher\": \"x\""), "{left}");
 }
 
 #[test]
-fn a_location_that_cannot_be_read_is_reported() {
+fn an_unreadable_location_is_listed_only_where_the_old_tool_wrote_a_file() {
     let d = tempfile::tempdir().unwrap();
     fs::create_dir_all(d.path().join(".mcp.json")).unwrap();
+    fs::create_dir_all(d.path().join(OLD_HOOK)).unwrap();
     let mut out = Vec::new();
     let mut t = Takeover {
         root: d.path(),
@@ -134,6 +136,8 @@ fn a_location_that_cannot_be_read_is_reported() {
         found: Found::default(),
     };
     t.in_files().unwrap();
-    assert_eq!(t.found.differing.len(), 1, "{:?}", t.found.differing);
-    assert!(t.found.differing[0].starts_with(".mcp.json: old wiki server: could not be read"));
+    assert_eq!(
+        t.found.differing,
+        [".pi/extensions/wiki-hint/index.ts: wiki extension differs from what wiki wrote; remove it by hand"]
+    );
 }

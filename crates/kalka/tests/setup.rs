@@ -80,8 +80,8 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
     f
 }
 
-/// A `claude` that logs its argv and answers `mcp get kalka` as a local server running `cmd`
-/// once `add-json` has been called (the state file).
+/// A `claude` that logs its argv and answers `mcp get kalka` (and no other name) as a local
+/// server running `cmd` once `add-json` has been called (the state file).
 fn claude_stub(f: &Fixture, cmd: &str) {
     claude_stub_args(f, cmd, "serve --source .");
 }
@@ -94,7 +94,7 @@ fn claude_stub_args(f: &Fixture, cmd: &str, args: &str) {
             &format!(
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
-"mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "kalka".'; exit 1; }}
+"mcp get") [ "$3" = kalka ] && [ -f {t}/state ] || {{ echo "No MCP server named \"$3\"."; exit 1; }}
   printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;

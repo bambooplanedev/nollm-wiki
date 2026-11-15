@@ -423,9 +423,10 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let skills = choice.map(skill_text);
     let skills = skills.each_ref().map(String::as_str);
     let entries = choice.map(|m| json!({"command": CMD, "args": serve_args(m)}));
+    let mut found = None;
     if !opts.remove {
         // The old `wiki` setup's own entries go first, so that no run sees both.
-        legacy::take_over(root, r.out)?;
+        found = Some(legacy::take_over(root, r.out)?);
         // As the registered server compiles: `--memory none` has no memory at all.
         let mut agent_dirs = Vec::new();
         if opts.memory {
@@ -657,6 +658,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     if cursor_added {
         r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
+    }
+    // What the old `wiki` left for the person to decide, after setup's own lines.
+    if let Some(found) = found {
+        let mut err = std::io::stderr();
+        for line in legacy::report(root, &found) {
+            writeln!(err, "{line}")?;
+        }
     }
     Ok(r.ok)
 }
