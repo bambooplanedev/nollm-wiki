@@ -37,6 +37,8 @@ pub(super) fn status() -> Result<()> {
         Ok((latest, _)) => {
             if release::version_key(&latest.version) > release::version_key(&state.version) {
                 println!("newer release: {} (kulman update)", latest.version);
+            } else {
+                println!("up to date");
             }
         }
         Err(e) => println!("could not check for a newer release ({e:#})"),

@@ -74,7 +74,8 @@ fn status_lists_what_is_installed() {
             "kalka",
             "plaz",
             hint.as_str(),
-            export.as_str()
+            export.as_str(),
+            "up to date"
         ]
     );
     assert_eq!(snapshot(t.path()), before);
