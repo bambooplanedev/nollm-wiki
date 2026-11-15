@@ -1,12 +1,15 @@
 //! C++: a language whose public surface is a header's declarations, with owner
 //! resolution through class bodies and qualified names, and no visibility gate.
 use super::code::{
-    default_cut, default_shape, ext_of, is_cpp, module_stem, outermost, plain_comment_text,
-    source_rank, value_shape, CodeUnit, LangSpec, Lead, Placement, Shape,
+    default_cut, default_shape, outermost, plain_comment_text, value_shape, LangSpec, Lead,
+    Placement, Shape,
 };
-use crate::model::{CodeItem, CodeItemKind, PairRole};
-use std::collections::BTreeMap;
+use crate::model::PairRole;
 use tree_sitter::{Node, Parser, Tree};
+
+mod pairs;
+
+pub use pairs::pair_declarations;
 
 /// Every capture shape a definition's name can take. The general `(_)` form
 /// must NOT be used where a qualified-name pattern can also match:
@@ -473,7 +476,7 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
 /// The number of parameters in the list right after `name(` in a signature:
 /// top-level commas plus one, with `()` and `(void)` counting none. `None`
 /// when the signature has no such list.
-fn arity(signature: &str, name: &str) -> Option<usize> {
+pub(super) fn arity(signature: &str, name: &str) -> Option<usize> {
     let start = signature.find(&format!("{name}("))? + name.len() + 1;
     let params = &signature[start..];
     let (mut depth, mut commas) = (0i32, 0);
@@ -539,162 +542,6 @@ pub(crate) fn namespace_of(def: Node, text: &str) -> Option<String> {
         .and_then(|n| text.get(n.byte_range()))
         .and_then(|n| n.rsplit("::").next())
         .map(|n| n.trim().to_string())
-}
-
-type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
-
-/// The `(owner, name, arity)` keys that occur exactly once among `items`,
-/// with the index of their item. Overloads with the same parameter count
-/// share a key, so they drop out here.
-fn unique_keys(items: &[CodeItem]) -> BTreeMap<Key<'_>, usize> {
-    let mut seen: BTreeMap<Key<'_>, Option<usize>> = BTreeMap::new();
-    for (i, it) in items.iter().enumerate() {
-        if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
-            let key = (
-                it.owner.as_deref(),
-                it.name.as_str(),
-                arity(&it.signature, &it.name),
-            );
-            seen.entry(key).and_modify(|v| *v = None).or_insert(Some(i));
-        }
-    }
-    seen.into_iter()
-        .filter_map(|(k, v)| v.map(|i| (k, i)))
-        .collect()
-}
-
-/// The header and the implementation file of a group of files: its only
-/// `.cpp` and its only lowest-rank header, when both are unique.
-fn header_and_impl<'a, U: CodeUnit>(
-    entities: &BTreeMap<String, U>,
-    ids: &[&'a str],
-) -> Option<(&'a str, &'a str)> {
-    let rank = |id: &str| source_rank(entities[id].path());
-    let impls: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == 2).collect();
-    let min = ids.iter().map(|id| rank(id)).min().filter(|r| *r < 2)?;
-    let headers: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == min).collect();
-    match (impls.as_slice(), headers.as_slice()) {
-        ([imp], [hdr]) => Some((*hdr, *imp)),
-        _ => None,
-    }
-}
-
-/// Pairs a header's declarations with their definitions: the doc usually
-/// sits on the declaration, so the definition inherits it, and each side's
-/// `twin` names the other's lines. Two steps. Same stem first: a group with
-/// exactly one implementation file and a unique lowest-rank header pairs (a
-/// same-stem group that is not one pairs within each directory), on keys
-/// unique within that file pair, a `Declaration` header item with an
-/// `OutOfLineDefinition` implementation item (`pair_role`). Then the whole
-/// project (`pair_project`):
-/// keys unique among all header items and among all implementation items.
-/// A wrong pairing is worse than none, so overloads with the same parameter
-/// count and keys with two declarations or two definitions stay unpaired.
-pub fn pair_declarations<U: CodeUnit>(entities: &mut BTreeMap<String, U>) {
-    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-    for (id, e) in entities.iter() {
-        let sp = e.path();
-        if is_cpp(&ext_of(sp)) {
-            groups.entry(module_stem(sp)).or_default().push(id);
-        }
-    }
-    let mut pairs: Vec<(String, usize, String, usize)> = Vec::new();
-    for ids in groups.values() {
-        let found = header_and_impl(entities, ids).map_or_else(
-            || {
-                // Same-stem files in several directories (`src/exchange/x.cpp`,
-                // `src/execution/x.cpp`) pair within each directory.
-                let mut dirs: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-                for &id in ids {
-                    let sp = entities[id].path();
-                    dirs.entry(sp.rsplit_once('/').map_or("", |(d, _)| d))
-                        .or_default()
-                        .push(id);
-                }
-                dirs.values()
-                    .filter_map(|d| header_and_impl(entities, d))
-                    .collect()
-            },
-            |p| vec![p],
-        );
-        for (hdr, imp) in found {
-            let (h, c) = (entities[hdr].items(), entities[imp].items());
-            let cu = unique_keys(c);
-            for (key, hi) in unique_keys(h) {
-                let Some(&ci) = cu.get(&key) else { continue };
-                if h[hi].pair_role == PairRole::Declaration
-                    && c[ci].pair_role == PairRole::OutOfLineDefinition
-                {
-                    pairs.push((hdr.to_string(), hi, imp.to_string(), ci));
-                }
-            }
-        }
-    }
-    pair_project(entities, &mut pairs);
-    for (hid, hi, cid, ci) in pairs {
-        let span = |e: &U, i: usize| e.items()[i].span(e.path());
-        let (h_span, c_span) = (span(&entities[&hid], hi), span(&entities[&cid], ci));
-        let h_doc = &entities[&hid].items()[hi];
-        let (doc, doc_text) = (h_doc.doc.clone(), h_doc.doc_text.clone());
-        let h_item = &mut entities.get_mut(&hid).unwrap().items_mut()[hi];
-        h_item.twin = Some(c_span);
-        let c_item = &mut entities.get_mut(&cid).unwrap().items_mut()[ci];
-        c_item.twin = Some(h_span);
-        if c_item.doc.is_none() {
-            c_item.doc = doc;
-            c_item.doc_text = doc_text;
-        }
-    }
-}
-
-/// The project step of `pair_declarations`: appends every key
-/// `(owner, name, arity)` that occurs exactly once among the `Fn`/`Method`
-/// items of all C++ headers and exactly once among those of all
-/// implementation files. Only a `Declaration` header item and an
-/// `OutOfLineDefinition` implementation item pair (`pair_role`), but
-/// uniqueness counts every item, whatever its role and paired or not, so an
-/// item the same-stem step paired blocks any other partner. There is no
-/// "already paired" set: a key unique project-wide is unique inside its file
-/// pair too, so this step can only re-find a same-stem pair, and applying a
-/// pair twice leaves `twin` and `doc` as after once (the definition's `doc`
-/// is filled only while empty).
-fn pair_project<U: CodeUnit>(
-    entities: &BTreeMap<String, U>,
-    pairs: &mut Vec<(String, usize, String, usize)>,
-) {
-    let unique = |header: bool| {
-        let mut seen: BTreeMap<Key<'_>, Option<(&str, usize)>> = BTreeMap::new();
-        for (id, e) in entities {
-            let sp = e.path();
-            if !is_cpp(&ext_of(sp)) || (source_rank(sp) < 2) != header {
-                continue;
-            }
-            for (i, it) in e.items().iter().enumerate() {
-                if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
-                    let key = (
-                        it.owner.as_deref(),
-                        it.name.as_str(),
-                        arity(&it.signature, &it.name),
-                    );
-                    seen.entry(key)
-                        .and_modify(|v| *v = None)
-                        .or_insert(Some((id.as_str(), i)));
-                }
-            }
-        }
-        seen
-    };
-    let role = |id: &str, i: usize| entities[id].items()[i].pair_role;
-    let impls = unique(false);
-    for (key, h) in unique(true) {
-        if let (Some((hid, hi)), Some(Some((cid, ci)))) = (h, impls.get(&key)) {
-            if role(hid, hi) == PairRole::Declaration
-                && role(cid, *ci) == PairRole::OutOfLineDefinition
-            {
-                pairs.push((hid.to_string(), hi, cid.to_string(), *ci));
-            }
-        }
-    }
 }
 
 /// For a tree with errors: the tree of `first_branch(text)` when it is less
