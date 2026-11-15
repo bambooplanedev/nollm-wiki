@@ -6,7 +6,7 @@
 двері набору: він встановлює інструменти й налаштовує проєкт.
 
 `kulman` встановлює, оновлює й налаштовує модулі набору kulman: `kalka` (вікі проєкту для агентів,
-що пишуть код) і `plaz` (блок-схеми рішень). Це інсталятор, а не модуль. Реліз 0.7.0 — перший, що
+що пишуть код) і `plaz` (блок-схеми рішень). Це інсталятор, а не модуль. Реліз 0.7.1 — перший, що
 його містить; весь набір описано в [README репозиторію](../../README.uk.md).
 
 ## Як отримати
@@ -193,7 +193,7 @@ errors: <modules>` і виходить з кодом першого модуля
 
 ```json
 {
-  "version": "0.7.0",
+  "version": "0.7.1",
   "modules": [
     {
       "name": "kalka",
@@ -202,13 +202,13 @@ errors: <modules>` і виходить з кодом першого модуля
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "kalka-v0.7.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "kalka-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.7.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.7.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
