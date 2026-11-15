@@ -59,8 +59,10 @@ CLI `claude`. Сервер для Codex за будь-якого `--scope` ле�
 
 Згодом `kulman update` доводить усе до останнього релізу, `kulman setup --scope repo --remove`
 скасовує налаштування проєкту (з тим самим `--scope`, з яким його налаштовували), а `kulman remove`
-видаляє те, що встановив kulman. Команди, прапорці, коди виходу й будова релізу:
-[crates/kulman/README.uk.md](crates/kulman/README.uk.md).
+видаляє те, що встановив kulman. У проєкті, який налаштував старий `wiki` (релізи до 0.6.13
+включно), `kulman setup` спершу видаляє записи, які той написав, і перелічує решту, див.
+[kalka setup](crates/kalka/README.uk.md#kalka-setup). Команди, прапорці, коди виходу й будова
+релізу: [crates/kulman/README.uk.md](crates/kulman/README.uk.md).
 
 ### Перевірка релізу
 

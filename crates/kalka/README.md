@@ -82,13 +82,12 @@ crates/kalka/src/lib.rs
 ## Installation
 
 A release of the kulman set carries `kalka` for the two systems above; on any other system, build
-it from source. The static Linux build uses a different allocator, and its peak memory on large
-projects is higher than a glibc build's.
+it from source.
 
 Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
 folder was `.wiki/`. From 0.7.1 the binary is `kalka` and the folder `.kulman/`. The agent configs
-an old setup wrote start a server named `wiki`, which 0.7.1 does not have, so remove that setup
-first with the old binary: `wiki setup --remove` with the same `--scope`.
+an old setup wrote start a server named `wiki`, which 0.7.1 does not have; `kalka setup` replaces
+them, see [`kalka setup`](#kalka-setup).
 
 ### With kulman
 
@@ -245,6 +244,30 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
+**A project the old `wiki` set up.** Before it writes anything, `kalka setup` (and `kulman setup`,
+which runs it) removes what `wiki` 0.6.x wrote, in every scope whatever `--scope` and `--agent`
+say, and only where it is exactly what `wiki` wrote: its server entry in `.mcp.json`,
+`.pi/mcp.json`, `.cursor/mcp.json` and Claude Code's local scope, its prompt hook in
+`.claude/settings.json` and `.claude/settings.local.json`, its pi skill and extension, the
+navigation block in `AGENTS.md`, and the ignore lines that local scope wrote for the skill and the
+extension. Each removal is one line on stdout, `removed old wiki <what> from <path>`, for example
+`removed old wiki server from .mcp.json`. A tracked file such as a committed `.mcp.json` is edited
+even with `--scope local` when it holds the old entry, so the team sees the change. What it
+recognises but leaves is listed on stderr in a block that starts
+`kalka: left from the old wiki (not changed):`, and only in a project that bears the old tool's
+own marks: something was removed, an old entry differs (or Claude Code could not remove its old
+local server, listed with the command to run), Codex has the old `wiki` server, or
+`.wiki/.wiki/cache.json` exists. Beside those it also lists the `.wiki/` folder and its ignore
+lines, a `wiki` binary on `PATH`, Claude settings that name `mcp__wiki__*` or `"wiki"`, and lines
+of `CLAUDE.md` and `AGENTS.md` that name the old tool; alone, none of these prints anything. The
+block's last lines tell the person or agent what to rename (`wiki` -> `kalka`, `mcp__wiki__*` ->
+`mcp__kalka__*`, `.wiki/` -> `.kulman/`) and, when an agent may still run the old server, to
+restart running agent sessions, which keep it until then. Never touched: an entry, file or block
+that differs from what `wiki` wrote; the prose of `CLAUDE.md` and `AGENTS.md`; permission rules
+and `enabledMcpjsonServers` in Claude settings; the machine-wide Codex server `wiki`; the `.wiki/`
+folder and its ignore lines; the old binary; and anything reached through a link or outside the
+project. `kalka setup --remove` removes only kalka's own entries.
+
 Every agent runs the server as plain `kalka`, so `kalka` must be on `PATH`; setup warns when it is
 not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
@@ -311,7 +334,9 @@ extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with
-`cursor-agent` 2026.10.22; the Cursor editor itself is not checked.
+`cursor-agent` 2026.10.22. The Cursor editor (3.30) reads the entry when the project opens and
+registers the server switched off, as its MCP log shows; in that run the server did not appear in
+the editor's MCP list, so switching it on from the editor is not confirmed.
 
 #### Codex
 

@@ -2486,6 +2486,7 @@ setup   build, then keep .kulman/ out of git (--remove: delete the map's pages i
 --vault DIR           build only: the vault (default <source>/.kulman, pages in its map/)
 --scope repo|local    setup only, required unless --remove: ignore .kulman/ in .gitignore or in this clone's info/exclude
 --remove              setup only: delete the map's own pages instead of building
+--version             print the version
 --help, -h, help      print this text"
     );
     for args in [

@@ -59,8 +59,10 @@ symlink or not a directory is refused. No shell profile is edited.
 With no command, or `status`: the installed version and modules (a module whose binary is missing is
 marked `(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; add it:` and
 `export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry that reaches `bin/`
-through a symlink counts), and whether a newer release exists. It only reads: nothing is created.
-The release host gets 5 s to connect and 8 s in all; past that, or on any error, the last line says
+through a symlink counts, and so does a link in a `PATH` folder for each of kulman and the
+installed modules, when it is the first of its name on `PATH`), and whether a newer release exists
+(`newer release: <X.Y.Z> (kulman update)`, or `up to date`). It only reads: nothing is created. The
+release host gets 5 s to connect and 8 s in all; past that, or on any error, the last line says
 what could not be reached, and why.
 
     kulman install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
@@ -78,14 +80,19 @@ version is read once `.lock` is held. If the installed version differs from `--v
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
 update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
 install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman
-setup` in a project (named by its full path in `bin/` while `bin/` is not on `PATH`). With nothing
-to do it writes nothing and says `already installed: <names> (<version>)` instead (and, as above, a
-newer release).
+setup` in a project (named by its full path in `bin/` while neither `bin/` nor every binary is on
+`PATH`, as above). With nothing to do it writes nothing and says `already installed: <names>
+(<version>)` instead (and, as above, a newer release).
 
     kulman update [--yes]
 
 Updates kulman and every installed module to the latest release, all or none. A release older
-than the installed one is not installed: nothing changes.
+than the installed one is not installed: nothing changes. At the installed version with every file
+in place it says `up to date` and does nothing. Each module it moves is named with both
+versions (`updated <name> <old> -> <new>`), a module the new release requires that was not
+installed is named `installed <name> <version>`, and the last line, when the version changed, is
+`restart running agent sessions; they keep the old binaries until then`. At the same version, files
+put back are named `repaired <name> <version>`, with no restart line.
 
     kulman remove [--modules <MODULES>] [--yes]
 
@@ -117,7 +124,10 @@ kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on 
 run with it put first on their own `PATH` (kulman's own environment and your shell are not changed;
 a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
 kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
-then that the agent configs it writes start `kalka` by name.
+then that the agent configs it writes start `kalka` by name; that is left unsaid when
+`kalka` itself is linked into a `PATH` folder as described under status. In a project that the old
+`wiki` (releases up to 0.6.13) set up, kalka's setup first removes the entries `wiki` wrote and
+lists the rest, as described in [kalka's README](../kalka/README.md#kalka-setup).
 
 ## Asking and not asking
 

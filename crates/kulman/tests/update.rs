@@ -5,8 +5,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, kulman, no_tmp_left, release, set_sha256, snapshot, state, stderr, stdout,
-    version_dir, KULMAN_BYTES,
+    assert_binary, edit_manifest, kulman, no_tmp_left, path_linking, release, set_sha256, snapshot,
+    state, stderr, stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::json;
 
@@ -74,7 +74,8 @@ fn status_lists_what_is_installed() {
             "kalka",
             "plaz",
             hint.as_str(),
-            export.as_str()
+            export.as_str(),
+            "up to date"
         ]
     );
     assert_eq!(snapshot(t.path()), before);
@@ -99,6 +100,28 @@ fn status_says_when_bin_is_not_on_path() {
     let out = kulman(&home, &base).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
+}
+
+#[test]
+fn status_takes_binaries_linked_into_path_as_on_path() {
+    let (t, base, home) = installed();
+    let (bin, links) = (home.join("bin"), t.path().join("links"));
+    let say = |names: &[&str]| {
+        let path = path_linking(&links, &bin, names);
+        let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let _ = fs::remove_dir_all(&links);
+        stdout(&out)
+    };
+    assert!(!say(&["kulman", "kalka", "plaz"]).contains("on PATH"));
+    // One module not linked, or kulman not linked: still said.
+    assert!(say(&["kulman", "kalka"]).contains("is not on PATH"));
+    assert!(say(&["kalka", "plaz"]).contains("is not on PATH"));
+    // The first `plaz` on PATH is another program: still said.
+    let path = path_linking(&links, &bin, &["kulman", "kalka"]);
+    fs::write(links.join("plaz"), "#!/bin/sh\n").unwrap();
+    let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+    assert!(stdout(&out).contains("is not on PATH"), "{}", stdout(&out));
 }
 
 #[test]
@@ -166,9 +189,10 @@ fn update_moves_every_module() {
     assert_eq!(
         lines(&out),
         [
-            "updated kalka 0.8.0",
-            "updated plaz 0.8.0",
-            "updated kulman 0.8.0"
+            "updated kalka 0.7.0 -> 0.8.0",
+            "updated plaz 0.7.0 -> 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
         ]
     );
     assert_eq!(
@@ -225,7 +249,7 @@ fn update_repairs_a_half_finished_update() {
     fs::write(home.join("bin/kulman"), "old").unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out).len(), 3, "{}", stdout(&out));
+    assert_eq!(lines(&out).len(), 4, "{}", stdout(&out));
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
@@ -249,6 +273,14 @@ fn update_when_current_says_up_to_date() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
+    assert_eq!(
+        lines(&out),
+        [
+            "repaired kalka 0.7.0",
+            "repaired plaz 0.7.0",
+            "repaired kulman 0.7.0"
+        ]
+    );
     assert_eq!(snapshot(t.path()), before);
 
     // So is manifest.json.
@@ -256,7 +288,39 @@ fn update_when_current_says_up_to_date() {
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_ne!(lines(&out), ["up to date"]);
+    assert!(!stdout(&out).contains("restart"), "{}", stdout(&out));
     assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
+fn update_installs_a_module_the_new_release_requires() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(
+        &t.path().join("release"),
+        "0.7.0",
+        &[("kalka", KALKA), ("plaz", PLAZ)],
+    );
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    publish_0_8(t.path());
+    edit_manifest(&t.path().join("release"), "0.8.0", |m| {
+        m["modules"][0]["requires"] = json!(["plaz"]);
+    });
+    let out = kulman(&home, &base).arg("update").output().unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    // The version changed, so the restart line stays; the new module is not "updated".
+    assert_eq!(
+        lines(&out),
+        [
+            "updated kalka 0.7.0 -> 0.8.0",
+            "installed plaz 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
 }
 
 #[test]
@@ -863,6 +927,19 @@ fn status_command_equals_the_plain_form() {
         help.trim_end().ends_with("With no command, shows status."),
         "{help}"
     );
+}
+
+#[test]
+fn yes_is_described_in_the_help_of_install_update_and_remove() {
+    let (_t, base, home) = installed();
+    for (cmd, text) in [
+        ("install", "Ask nothing: take the defaults and go on"),
+        ("update", "Ask nothing: take the defaults and go on"),
+        ("remove", "Ask nothing: say yes and go on"),
+    ] {
+        let out = kulman(&home, &base).args([cmd, "--help"]).output().unwrap();
+        assert!(stdout(&out).contains(text), "{cmd}: {}", stdout(&out));
+    }
 }
 
 #[test]

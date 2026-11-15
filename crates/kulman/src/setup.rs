@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::install::unknown_module;
 use crate::release::Manifest;
-use crate::{ask_choose, ask_yes, asks, on_path, path_hint, store, SetupArgs, Usage};
+use crate::{ask_choose, ask_yes, asks, on_path, path_hint, reachable, store, SetupArgs, Usage};
 use store::State;
 
 /// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
@@ -138,7 +138,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     } else {
         None
     };
-    if off_path && kalka && !a.remove {
+    if kalka && !a.remove && !reachable(&bin, ["kalka"]) {
         eprintln!("kulman: {}", path_hint(&bin));
         eprintln!(
             "kulman: the agent configs written now start \"kalka\"; an agent started without it \

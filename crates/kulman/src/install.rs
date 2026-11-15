@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 
-use crate::{ask_choose, ask_yes, is_installed, on_path, path_hint, release, store, Usage};
+use crate::{ask_choose, ask_yes, is_installed, path_hint, reachable, release, store, Usage};
 use release::Manifest;
 use store::{Home, State};
 
@@ -100,7 +100,9 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
         }
     }
     let bin = home.path.join("bin");
-    let kulman = if on_path(&bin) {
+    let modules = State::load(&home.path)?.map_or_else(Vec::new, |s| s.modules);
+    let names = modules.iter().map(String::as_str).chain(["kulman"]);
+    let kulman = if reachable(&bin, names) {
         "kulman".to_string()
     } else {
         println!("{}", path_hint(&bin));
@@ -298,13 +300,25 @@ fn renew(
     let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
+    let old_modules = state.modules.clone();
     let state = State {
         version: latest.clone(),
         modules: modules.into_iter().collect(),
     };
     store::commit(home, &staged, raw, &state)?;
     for s in &staged {
-        println!("updated {} {latest}", s.name);
+        // A module the release newly requires was not there before; at the same version, files
+        // are only put back.
+        if s.name != "kulman" && !old_modules.contains(&s.name) {
+            println!("installed {} {latest}", s.name);
+        } else if have == latest {
+            println!("repaired {} {latest}", s.name);
+        } else {
+            println!("updated {} {have} -> {latest}", s.name);
+        }
+    }
+    if have != latest {
+        println!("restart running agent sessions; they keep the old binaries until then");
     }
     Ok(())
 }

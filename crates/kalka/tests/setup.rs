@@ -80,8 +80,10 @@ fn fixture(with_wiki: bool, with_claude: bool) -> Fixture {
     f
 }
 
-/// A `claude` that logs its argv and answers `mcp get kalka` as a local server running `cmd`
-/// once `add-json` has been called (the state file).
+/// A `claude` that logs its argv and answers `mcp get kalka` (and no other name) as a local
+/// server running `cmd` once `add-json` has been called (the state file), in the shape the real
+/// CLI prints (2.1.325): fields indented by two, a blank line, the remove hint; not found is
+/// exit 1 with the message on stderr.
 fn claude_stub(f: &Fixture, cmd: &str) {
     claude_stub_args(f, cmd, "serve --source .");
 }
@@ -94,8 +96,8 @@ fn claude_stub_args(f: &Fixture, cmd: &str, args: &str) {
             &format!(
                 r#"echo "$@" >> {t}/claude.log
 case "$1 $2" in
-"mcp get") [ -f {t}/state ] || {{ echo 'No MCP server named "kalka".'; exit 1; }}
-  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ok\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n' ;;
+"mcp get") [ "$3" = kalka ] && [ -f {t}/state ] || {{ echo "No MCP server named \"$3\". Configured servers: claude.ai Gmail" >&2; exit 1; }}
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✔ Connected\n  Type: stdio\n  Command: {cmd}\n  Args: {args}\n\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
 "mcp add-json") echo x > {t}/state ;;
 "mcp remove") /bin/rm -f {t}/state ;;
 esac"#
@@ -510,7 +512,7 @@ fn setup_local_reports_a_failed_claude_add() {
     let f = fixture(true, false);
     f.stub(
         "claude",
-        "[ \"$2\" = get ] && exit 1\necho boom >&2\nexit 2",
+        "[ \"$2\" = get ] && { echo 'No MCP server named \"kalka\". Configured servers: ' >&2; exit 1; }\necho boom >&2\nexit 2",
     );
     let a = f.setup(&["--agent", "claude", "--scope", "local"]).code(1);
     let o = out(&a);
@@ -715,6 +717,33 @@ fn setup_local_twice_reports_everything_already_there() {
     let o = out(&f.setup(&args).success());
     assert!(o.contains("already set up: memory folder"), "{o}");
     assert!(!o.contains("skipped"), "{o}");
+}
+
+/// A failed `mcp get` with nothing on stdout is no server, whatever stderr says first (a
+/// warning, a reworded message): the entry is added, and a broken CLI fails there.
+#[test]
+fn setup_local_adds_the_server_after_a_get_with_a_warning_first() {
+    let f = fixture(true, false);
+    let t = f.tmp.path().display();
+    f.stub(
+        "claude",
+        &format!(
+            "echo \"$@\" >> {t}/claude.log\n[ \"$2\" = get ] || exit 0\necho 'warning: a newer version is available' >&2\necho 'No MCP server named \"kalka\".' >&2\nexit 1"
+        ),
+    );
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(
+        out(&a).contains("wrote Claude Code local kalka server"),
+        "{}",
+        out(&a)
+    );
+    assert!(
+        f.claude_log().contains("mcp add-json kalka"),
+        "{}",
+        f.claude_log()
+    );
 }
 
 /// A `codex` that logs its argv and answers `mcp get kalka` with the server `mcp add` added.
@@ -960,12 +989,14 @@ fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     assert!(!f.root().join(".kulman/.serve").exists());
 }
 
-/// A project that `wiki setup` set up in an earlier life: its `wiki` server, skill and block.
+/// A project that `wiki setup` set up in an earlier life, edited by hand since: its `wiki`
+/// server, skill and block, none of them what the old tool wrote (that is taken over, see
+/// `setup_takeover.rs`).
 fn old_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
     let f = fixture(true, true);
     codex_stub(&f);
     let r = f.root();
-    let mcp = "{\n  \"mcpServers\": {\n    \"wiki\": {\n      \"command\": \"wiki\",\n      \"args\": [\n        \"serve\",\n        \"--source\",\n        \".\"\n      ]\n    }\n  }\n}\n";
+    let mcp = "{\n  \"mcpServers\": {\n    \"wiki\": {\n      \"command\": \"wiki\",\n      \"args\": [\n        \"serve\",\n        \"--source\",\n        \"src\"\n      ]\n    }\n  }\n}\n";
     let skill = "---\nname: wiki-navigation\n---\nold skill\n";
     let agents = "# Team\n\n<!-- wiki:navigation -->\nold steps\n<!-- /wiki:navigation -->\n";
     let old = [
