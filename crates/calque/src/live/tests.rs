@@ -362,7 +362,8 @@ fn start_does_not_wait_for_a_cli_compile() {
     let t = Instant::now();
     let a = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
     let b = Live::start(src.path(), out.path(), CompileOptions::default()).unwrap();
-    assert!(t.elapsed() < Duration::from_secs(1), "{:?}", t.elapsed());
+    // Well below the 10-second hold, loose enough for a loaded parallel run.
+    assert!(t.elapsed() < Duration::from_secs(5), "{:?}", t.elapsed());
     assert!(a.is_writer() && !b.is_writer());
     release.send(()).unwrap();
     cli.join().unwrap();

@@ -1158,7 +1158,8 @@ fn every_chart_parses_with_mermaid_cli() {
             n += 1;
         }
     }
-    assert_ne!(n, 0);
+    // The fixture's functions, one chart each (a nested `inner` is drawn inside `f`).
+    assert_eq!(n, 12, "a function vanished from the map, or one was added");
 }
 
 #[test]
@@ -2515,6 +2516,7 @@ fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
         &["help"],
         &["build", "--help"],
         &["setup", "--help"],
+        &["build", "-h"],
     ] {
         let out = assert_cmd::cargo_bin_cmd!()
             .args(args)

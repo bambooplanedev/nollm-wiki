@@ -144,8 +144,8 @@ fn a_pointer_returning_out_of_line_definition_renders_its_owner_once() {
     // name segment: a general `(_)` capture would also take the whole
     // `qualified_identifier` and splice the owner AHEAD of the qualifier
     // the source already wrote. Asserting presence alone would not catch
-    // it — a doubled entry would sit beside a correct one — so the
-    // absence is asserted too.
+    // it — a doubled entry would sit beside a correct one — so the whole
+    // list is compared exactly.
     let s = syms(
         "src/ob.cpp",
         "Level* OrderBook::top() { return nullptr; }\n",

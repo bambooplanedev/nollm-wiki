@@ -19,6 +19,11 @@ fn walk_returns_sorted_relative_files_and_honors_gitignore() {
     fs::write(root.join("sub/c.txt"), b"ccc").unwrap();
     fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
     fs::write(root.join("ignored.txt"), b"nope").unwrap();
+    fs::write(root.join(".ignore"), b"dot_ignored.txt\n").unwrap();
+    fs::write(root.join("dot_ignored.txt"), b"nope").unwrap();
+    fs::create_dir_all(root.join(".git/info")).unwrap();
+    fs::write(root.join(".git/info/exclude"), b"excluded.txt\n").unwrap();
+    fs::write(root.join("excluded.txt"), b"nope").unwrap();
 
     let files = walk(root, true, &all).files;
     let rels: Vec<_> = files.iter().map(|f| f.rel_path.clone()).collect();
@@ -32,22 +37,31 @@ fn walk_no_ignore_includes_gitignored() {
     let root = dir.path();
     fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
     fs::write(root.join("ignored.txt"), b"nope").unwrap();
+    fs::write(root.join(".ignore"), b"dot_ignored.txt\n").unwrap();
+    fs::write(root.join("dot_ignored.txt"), b"nope").unwrap();
+    fs::create_dir_all(root.join(".git/info")).unwrap();
+    fs::write(root.join(".git/info/exclude"), b"excluded.txt\n").unwrap();
+    fs::write(root.join("excluded.txt"), b"nope").unwrap();
     fs::write(root.join("a.txt"), b"a").unwrap();
     fs::create_dir(root.join(".hidden")).unwrap();
     fs::write(root.join(".hidden/x.rs"), b"x").unwrap();
     fs::create_dir(root.join("node_modules")).unwrap();
     fs::write(root.join("node_modules/m.js"), b"m").unwrap();
-    // The doc's promise: nothing is filtered, so the gitignored file, the hidden
-    // directory and a skipped-by-name directory all come back (and `.gitignore`
-    // itself, a hidden file).
+    // The doc's promise: nothing is filtered, so the files excluded by `.gitignore`,
+    // `.ignore` and `.git/info/exclude`, the hidden directory and a skipped-by-name
+    // directory all come back (and the rule files themselves, hidden).
     let files = walk(root, false, &all).files;
     let rels: Vec<_> = files.iter().map(|f| f.rel_path.as_str()).collect();
     assert_eq!(
         rels,
         [
+            ".git/info/exclude",
             ".gitignore",
             ".hidden/x.rs",
+            ".ignore",
             "a.txt",
+            "dot_ignored.txt",
+            "excluded.txt",
             "ignored.txt",
             "node_modules/m.js"
         ]
