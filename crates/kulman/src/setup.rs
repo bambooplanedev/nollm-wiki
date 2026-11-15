@@ -77,29 +77,29 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         None => installed.clone(),
     };
     let chosen: Vec<&String> = installed.iter().filter(|n| wanted.contains(n)).collect();
-    let kalka = chosen.iter().any(|n| *n == "kalka");
+    let calque = chosen.iter().any(|n| *n == "calque");
     for (given, flag) in [
         (a.memory, "--memory"),
         (a.no_memory, "--no-memory"),
         (a.agent.is_some(), "--agent"),
         (a.no_hook, "--no-hook"),
     ] {
-        if given && !kalka {
-            let why = format!("{flag} applies to kalka, which is not chosen");
+        if given && !calque {
+            let why = format!("{flag} applies to calque, which is not chosen");
             return Err(Usage(why).into());
         }
     }
-    let memory_default = module("kalka")
+    let memory_default = module("calque")
         .and_then(|m| m.options.iter().find(|o| o.name == "memory"))
         .is_none_or(|o| o.default);
     let memory = match (a.memory, a.no_memory) {
         (true, _) => true,
         (_, true) => false,
-        _ if kalka && ask && !a.remove => ask_yes("agent memory?", memory_default)?,
+        _ if calque && ask && !a.remove => ask_yes("agent memory?", memory_default)?,
         _ => memory_default,
     };
-    // kalka needs the scope even to remove; plaz does not.
-    let scope_needed = kalka || !a.remove;
+    // calque needs the scope even to remove; plaz does not.
+    let scope_needed = calque || !a.remove;
     let scope = match a.scope {
         None if scope_needed && ask => {
             let items = [
@@ -128,7 +128,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
             Some(_) => {}
         }
     }
-    // The modules find each other (kalka its own name) on PATH: `bin/` first when it is not on
+    // The modules find each other (calque its own name) on PATH: `bin/` first when it is not on
     // it, in their environment only; one that cannot be on a PATH (a `:` in it) leaves PATH as
     // it is.
     let off_path = !on_path(&bin);
@@ -138,10 +138,10 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     } else {
         None
     };
-    if kalka && !a.remove && !reachable(&bin, ["kalka"]) {
+    if calque && !a.remove && !reachable(&bin, ["calque"]) {
         eprintln!("kulman: {}", path_hint(&bin));
         eprintln!(
-            "kulman: the agent configs written now start \"kalka\"; an agent started without it \
+            "kulman: the agent configs written now start \"calque\"; an agent started without it \
              on PATH will not find it"
         );
     }
@@ -149,18 +149,18 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     let mut failures: Vec<&str> = Vec::new();
     let mut first_code = None;
     for name in chosen {
-        let is_kalka = name == "kalka";
+        let is_calque = name == "calque";
         let mut args = vec!["setup"];
-        if let (true, Some(agent)) = (is_kalka, &a.agent) {
+        if let (true, Some(agent)) = (is_calque, &a.agent) {
             args.extend(["--agent", agent]);
         }
         if let Some(scope) = &scope {
             args.extend(["--scope", scope]);
         }
-        if is_kalka && a.no_hook {
+        if is_calque && a.no_hook {
             args.push("--no-hook");
         }
-        if is_kalka {
+        if is_calque {
             args.push(if memory { "--memory" } else { "--no-memory" });
         }
         if a.remove {

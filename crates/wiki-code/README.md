@@ -2,7 +2,7 @@
 
 **wiki-code**: a plain name — the shared library that walks, parses and indexes code.
 
-A library crate of the [kulman set](../../README.md), shared by [kalka](../kalka/README.md) and
+A library crate of the [kulman set](../../README.md), shared by [calque](../calque/README.md) and
 [plaz](../plaz/README.md): the item model, the source tree walk, tree-sitter extraction for each
 language, the index that call sites resolve against, and import resolution. The contract a consumer
 may rely on is written at the top of [`src/lib.rs`](src/lib.rs); the grammar versions are pinned

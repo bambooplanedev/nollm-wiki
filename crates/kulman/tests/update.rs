@@ -10,30 +10,30 @@ use common::{
 };
 use serde_json::json;
 
-const KALKA: &[u8] = b"#!/bin/sh\necho kalka\n";
+const CALQUE: &[u8] = b"#!/bin/sh\necho calque\n";
 const PLAZ: &[u8] = b"#!/bin/sh\necho plaz\n";
-const KALKA_8: &[u8] = b"#!/bin/sh\necho kalka 0.8\n";
+const CALQUE_8: &[u8] = b"#!/bin/sh\necho calque 0.8\n";
 const PLAZ_8: &[u8] = b"#!/bin/sh\necho plaz 0.8\n";
 
-/// A temp root with `release/` at 0.7.0 (kalka and plaz) and `home` holding both.
+/// A temp root with `release/` at 0.7.0 (calque and plaz) and `home` holding both.
 fn installed() -> (tempfile::TempDir, String, std::path::PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("kalka", KALKA), ("plaz", PLAZ)],
+        &[("calque", CALQUE), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
     (t, base, home)
 }
 
-/// Publishes 0.8.0 (kalka and plaz, new bytes) as the latest in the same release dir.
+/// Publishes 0.8.0 (calque and plaz, new bytes) as the latest in the same release dir.
 fn publish_0_8(t: &Path) {
     release(
         &t.join("release"),
         "0.8.0",
-        &[("kalka", KALKA_8), ("plaz", PLAZ_8)],
+        &[("calque", CALQUE_8), ("plaz", PLAZ_8)],
     );
 }
 
@@ -47,7 +47,7 @@ fn status_lists_what_is_installed() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("kalka", KALKA), ("plaz", PLAZ)],
+        &[("calque", CALQUE), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     let out = kulman(&home, &base).output().unwrap();
@@ -72,7 +72,7 @@ fn status_lists_what_is_installed() {
         lines(&out),
         [
             first.as_str(),
-            "kalka",
+            "calque",
             "plaz",
             hint.as_str(),
             export.as_str(),
@@ -114,12 +114,12 @@ fn status_takes_binaries_linked_into_path_as_on_path() {
         let _ = fs::remove_dir_all(&links);
         stdout(&out)
     };
-    assert!(!say(&["kulman", "kalka", "plaz"]).contains("on PATH"));
+    assert!(!say(&["kulman", "calque", "plaz"]).contains("on PATH"));
     // One module not linked, or kulman not linked: still said.
-    assert!(say(&["kulman", "kalka"]).contains("is not on PATH"));
-    assert!(say(&["kalka", "plaz"]).contains("is not on PATH"));
+    assert!(say(&["kulman", "calque"]).contains("is not on PATH"));
+    assert!(say(&["calque", "plaz"]).contains("is not on PATH"));
     // The first `plaz` on PATH is another program: still said.
-    let path = path_linking(&links, &bin, &["kulman", "kalka"]);
+    let path = path_linking(&links, &bin, &["kulman", "calque"]);
     fs::write(links.join("plaz"), "#!/bin/sh\n").unwrap();
     let out = kulman(&home, &base).env("PATH", path).output().unwrap();
     assert!(stdout(&out).contains("is not on PATH"), "{}", stdout(&out));
@@ -133,7 +133,7 @@ fn status_marks_a_listed_binary_that_is_missing() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out)[1..3],
-        ["kalka", "plaz  (missing: run kulman update)"]
+        ["calque", "plaz  (missing: run kulman update)"]
     );
 }
 
@@ -141,7 +141,7 @@ fn status_marks_a_listed_binary_that_is_missing() {
 fn status_announces_a_newer_release() {
     let (t, base, home) = installed();
     // 0.10.0 is newer than 0.7.0 only when the three parts are compared as integers.
-    release(&t.path().join("release"), "0.10.0", &[("kalka", KALKA)]);
+    release(&t.path().join("release"), "0.10.0", &[("calque", CALQUE)]);
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
@@ -191,7 +191,7 @@ fn update_moves_every_module() {
     assert_eq!(
         lines(&out),
         [
-            "updated kalka 0.7.0 -> 0.8.0",
+            "updated calque 0.7.0 -> 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
@@ -199,9 +199,9 @@ fn update_moves_every_module() {
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
     );
-    assert_binary(&home, "kalka", KALKA_8);
+    assert_binary(&home, "calque", CALQUE_8);
     assert_binary(&home, "plaz", PLAZ_8);
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(
@@ -229,7 +229,7 @@ fn update_with_one_bad_archive_changes_nothing() {
     assert_eq!(snapshot(t.path()), before);
 
     // A module the latest release no longer holds.
-    release(&t.path().join("release"), "0.9.0", &[("kalka", KALKA_8)]);
+    release(&t.path().join("release"), "0.9.0", &[("calque", CALQUE_8)]);
     let before = snapshot(t.path());
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
@@ -243,20 +243,20 @@ fn update_with_one_bad_archive_changes_nothing() {
 
 #[test]
 fn update_repairs_a_half_finished_update() {
-    // An update killed after its first rename: kalka is 0.8.0, plaz and kulman are not, and
+    // An update killed after its first rename: calque is 0.8.0, plaz and kulman are not, and
     // state.json still says 0.7.0.
     let (t, base, home) = installed();
     publish_0_8(t.path());
-    fs::write(home.join("bin/kalka"), KALKA_8).unwrap();
+    fs::write(home.join("bin/calque"), CALQUE_8).unwrap();
     fs::write(home.join("bin/kulman"), "old").unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out).len(), 4, "{}", stdout(&out));
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
     );
-    assert_binary(&home, "kalka", KALKA_8);
+    assert_binary(&home, "calque", CALQUE_8);
     assert_binary(&home, "plaz", PLAZ_8);
     assert_binary(&home, "kulman", KULMAN_BYTES);
 }
@@ -280,7 +280,7 @@ fn update_when_current_says_up_to_date() {
     assert_eq!(
         lines(&out),
         [
-            "repaired kalka 0.7.0",
+            "repaired calque 0.7.0",
             "repaired plaz 0.7.0",
             "repaired kulman 0.7.0"
         ]
@@ -302,11 +302,11 @@ fn update_installs_a_module_the_new_release_requires() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("kalka", KALKA), ("plaz", PLAZ)],
+        &[("calque", CALQUE), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     kulman(&home, &base)
-        .args(["install", "--modules", "kalka"])
+        .args(["install", "--modules", "calque"])
         .assert()
         .success();
     publish_0_8(t.path());
@@ -320,7 +320,7 @@ fn update_installs_a_module_the_new_release_requires() {
     assert_eq!(
         lines(&out),
         [
-            "updated kalka 0.7.0 -> 0.8.0",
+            "updated calque 0.7.0 -> 0.8.0",
             "installed plaz 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
@@ -331,8 +331,8 @@ fn update_installs_a_module_the_new_release_requires() {
 #[test]
 fn update_does_not_downgrade() {
     let t = tempfile::tempdir().unwrap();
-    let newer = release(&t.path().join("newer"), "0.10.0", &[("kalka", KALKA)]);
-    let older = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let newer = release(&t.path().join("newer"), "0.10.0", &[("calque", CALQUE)]);
+    let older = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
     let home = t.path().join("home");
     kulman(&home, &newer).arg("install").assert().success();
     let before = snapshot(t.path());
@@ -349,7 +349,7 @@ fn update_does_not_downgrade() {
 #[test]
 fn update_with_nothing_installed_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
     let home = t.path().join("home");
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -371,11 +371,11 @@ fn remove_modules_drops_only_those() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out), ["removed plaz"]);
     assert!(!home.join("bin/plaz").exists());
-    assert_binary(&home, "kalka", KALKA);
+    assert_binary(&home, "calque", CALQUE);
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["kalka"]})
+        json!({"version": "0.7.0", "modules": ["calque"]})
     );
     no_tmp_left(&home);
 
@@ -389,9 +389,9 @@ fn remove_modules_drops_only_those() {
     assert_eq!(snapshot(t.path()), before);
 
     // A listed binary already missing counts as removed.
-    fs::remove_file(home.join("bin/kalka")).unwrap();
+    fs::remove_file(home.join("bin/calque")).unwrap();
     kulman(&home, &base)
-        .args(["remove", "--modules", "kalka", "--yes"])
+        .args(["remove", "--modules", "calque", "--yes"])
         .assert()
         .success();
     assert_eq!(state(&home), json!({"version": "0.7.0", "modules": []}));
@@ -411,10 +411,10 @@ fn remove_everything_leaves_foreign_files() {
     assert_eq!(
         lines(&out),
         [
-            "removed kalka",
+            "removed calque",
             "removed plaz",
             "removed kulman",
-            "projects set up with kulman still name \"kalka\" in their agent configs: run \"kulman \
+            "projects set up with kulman still name \"calque\" in their agent configs: run \"kulman \
              setup --scope repo --remove\" (or local) in each first"
         ]
     );
@@ -431,10 +431,10 @@ fn remove_everything_leaves_foreign_files() {
 }
 
 #[test]
-fn remove_without_kalka_says_nothing_of_projects() {
+fn remove_without_calque_says_nothing_of_projects() {
     let (_t, base, home) = installed();
     kulman(&home, &base)
-        .args(["remove", "--modules", "kalka", "--yes"])
+        .args(["remove", "--modules", "calque", "--yes"])
         .assert()
         .success();
     let out = kulman(&home, &base)
@@ -470,7 +470,7 @@ fn remove_everything_removes_an_empty_home() {
     // A remove killed after state.json, before `.lock`: the next one finishes the job.
     kulman(&home, &base).arg("install").assert().success();
     for name in [
-        "bin/kalka",
+        "bin/calque",
         "bin/plaz",
         "bin/kulman",
         "manifest.json",
@@ -487,13 +487,13 @@ fn remove_everything_removes_an_empty_home() {
     assert!(!home.exists());
 }
 
-/// A home at 0.7.0 whose manifest says plaz requires kalka.
+/// A home at 0.7.0 whose manifest says plaz requires calque.
 fn installed_with_requires() -> (tempfile::TempDir, String, std::path::PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("release");
-    let base = release(&dir, "0.7.0", &[("kalka", KALKA), ("plaz", PLAZ)]);
+    let base = release(&dir, "0.7.0", &[("calque", CALQUE), ("plaz", PLAZ)]);
     common::edit_manifest(&dir, "0.7.0", |m| {
-        m["modules"][1]["requires"] = json!(["kalka"]);
+        m["modules"][1]["requires"] = json!(["calque"]);
     });
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
@@ -505,11 +505,11 @@ fn remove_refuses_a_module_another_installed_one_requires() {
     let (t, base, home) = installed_with_requires();
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "kalka", "--yes"])
+        .args(["remove", "--modules", "calque", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(stderr(&out).contains("kulman: cannot remove kalka: plaz requires it\n"));
+    assert!(stderr(&out).contains("kulman: cannot remove calque: plaz requires it\n"));
     assert_eq!(snapshot(t.path()), before);
 }
 
@@ -517,7 +517,7 @@ fn remove_refuses_a_module_another_installed_one_requires() {
 fn remove_a_module_together_with_the_one_that_requires_it() {
     let (_t, base, home) = installed_with_requires();
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "kalka,plaz", "--yes"])
+        .args(["remove", "--modules", "calque,plaz", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -529,7 +529,7 @@ fn remove_kulman_by_name_is_usage() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "kalka,kulman", "--yes"])
+        .args(["remove", "--modules", "calque,kulman", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
@@ -550,7 +550,7 @@ fn remove_kulman_by_name_is_usage() {
         .success();
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["kalka"]})
+        json!({"version": "0.7.0", "modules": ["calque"]})
     );
 }
 
@@ -561,13 +561,13 @@ fn remove_refuses_a_path_like_name_in_the_state() {
     fs::write(t.path().join("victim"), "keep").unwrap();
     fs::write(
         home.join("state.json"),
-        br#"{"version":"0.7.0","modules":["kalka","../../victim"]}"#,
+        br#"{"version":"0.7.0","modules":["calque","../../victim"]}"#,
     )
     .unwrap();
     let before = snapshot(t.path());
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "kalka", "--yes"],
+        &["remove", "--modules", "calque", "--yes"],
         &["update"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
@@ -584,7 +584,7 @@ fn two_installs_at_once_keep_both_modules() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("kalka", KALKA), ("plaz", PLAZ)],
+        &[("calque", CALQUE), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     let user = t.path().join("user-home");
@@ -601,16 +601,16 @@ fn two_installs_at_once_keep_both_modules() {
             .spawn()
             .unwrap()
     };
-    let children = [start("kalka"), start("plaz")];
+    let children = [start("calque"), start("plaz")];
     for child in children {
         let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
     }
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["kalka", "plaz"]})
+        json!({"version": "0.7.0", "modules": ["calque", "plaz"]})
     );
-    assert_binary(&home, "kalka", KALKA);
+    assert_binary(&home, "calque", CALQUE);
     assert_binary(&home, "plaz", PLAZ);
     assert_binary(&home, "kulman", KULMAN_BYTES);
 }
@@ -634,7 +634,7 @@ fn remove_refuses_a_symlinked_bin() {
     );
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "kalka", "--yes"],
+        &["remove", "--modules", "calque", "--yes"],
         &["update"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
@@ -654,7 +654,7 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
     let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "kalka,plaz", "--yes"],
+        &["remove", "--modules", "calque,plaz", "--yes"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
@@ -684,8 +684,8 @@ fn remove_refuses_a_manifest_that_is_not_a_file_before_deleting_any_binary() {
 #[test]
 fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
     for bad in [
-        r#"{"version":"0.7.0","modules":["kalka","kulman"]}"#,
-        r#"{"version":"0.7.0","modules":["kalka","plaz","kalka"]}"#,
+        r#"{"version":"0.7.0","modules":["calque","kulman"]}"#,
+        r#"{"version":"0.7.0","modules":["calque","plaz","calque"]}"#,
         r#"{"version":"#,
     ] {
         let (t, base, home) = installed();
@@ -713,11 +713,11 @@ fn update_adds_what_an_installed_module_now_requires() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("kalka", KALKA), ("plaz", PLAZ)],
+        &[("calque", CALQUE), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     kulman(&home, &base)
-        .args(["install", "--modules", "kalka"])
+        .args(["install", "--modules", "calque"])
         .assert()
         .success();
     publish_0_8(t.path());
@@ -728,9 +728,9 @@ fn update_adds_what_an_installed_module_now_requires() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
     );
-    assert_binary(&home, "kalka", KALKA_8);
+    assert_binary(&home, "calque", CALQUE_8);
     assert_binary(&home, "plaz", PLAZ_8);
 }
 
@@ -738,12 +738,12 @@ fn update_adds_what_an_installed_module_now_requires() {
 fn remove_on_a_home_with_no_state_deletes_no_file() {
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "kalka", "--yes"],
+        &["remove", "--modules", "calque", "--yes"],
     ] {
         let (t, base, home) = installed();
         // Not kulman's by any record: no state.json.
         fs::remove_file(home.join("state.json")).unwrap();
-        fs::remove_file(home.join("bin/kalka")).unwrap();
+        fs::remove_file(home.join("bin/calque")).unwrap();
         fs::remove_file(home.join("bin/plaz")).unwrap();
         fs::write(home.join("notes.txt"), "mine").unwrap();
         let mut before = snapshot(&home);
@@ -799,7 +799,7 @@ fn update_when_current_does_not_need_every_module_in_the_release() {
 #[test]
 fn remove_without_state_keeps_stale_temp_entries() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
     let home = t.path().join("home");
     fs::create_dir_all(home.join(".tmp-x")).unwrap();
     fs::write(home.join(".lock"), "").unwrap();
@@ -834,7 +834,7 @@ fn remove_without_a_terminal_needs_yes() {
 #[test]
 fn remove_without_a_terminal_on_a_missing_home_is_usage_and_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
     let home = t.path().join("home");
     let mut cmd = kulman(&home, &base);
     // All but the user's home, where an emulator (Rosetta) may keep a cache of its own.
@@ -896,7 +896,7 @@ fn an_unreadable_state_is_named_with_its_cause_by_every_command() {
 #[test]
 fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("kalka", KALKA)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();

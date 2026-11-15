@@ -36,7 +36,7 @@ pub struct Module {
     pub archives: BTreeMap<String, Archive>,
 }
 
-/// A choice a module's own `setup` offers, such as kalka's `memory`; its summary is not read.
+/// A choice a module's own `setup` offers, such as calque's `memory`; its summary is not read.
 #[derive(Deserialize)]
 pub struct ModuleOption {
     pub name: String,
@@ -446,7 +446,7 @@ mod tests {
     #[test]
     fn a_manifest_without_summary_or_options_parses() {
         let m = Manifest::parse(
-            br#"{"version": "0.1.0", "modules": [{"name": "kalka"}],
+            br#"{"version": "0.1.0", "modules": [{"name": "calque"}],
             "kulman": {"archives": {}}, "later": 1}"#,
         )
         .unwrap();

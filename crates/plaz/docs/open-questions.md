@@ -123,7 +123,7 @@ First measurement gate, 2026-11-14. It is an early check that the call targets a
 ## Measurement gate, later rounds
 
 - **Projects not used in design.** Design used nine projects of the owner's, seen during development.
-  - Rust: kalka's own crate (the Rust code of this repository besides plaz) is now a fair candidate (it was not a design input).
+  - Rust: calque's own crate (the Rust code of this repository besides plaz) is now a fair candidate (it was not a design input).
   - C++: the owner allows the C++ trading system, read only, compiled into a scratch output outside it (also the check of its order state machine).
   - Go: no project is known locally.
   - Python and shell: four small unused samples are tiny, so a pass there is a smoke check, not a GO.
@@ -139,7 +139,7 @@ First measurement gate, 2026-11-14. It is an early check that the call targets a
 
 ## Publishing
 
-- **A separate module, not yet designed** (owner decision). kalka and plaz only write vault-format Markdown and know nothing of Quartz or of each other's pages; a publisher downstream of both builds the site, owns the Quartz version and a ready site config, so the reader adds nothing by hand. kalka's `scripts/` would move there.
+- **A separate module, not yet designed** (owner decision). calque and plaz only write vault-format Markdown and know nothing of Quartz or of each other's pages; a publisher downstream of both builds the site, owns the Quartz version and a ready site config, so the reader adds nothing by hand. calque's `scripts/` would move there.
 
 ## Deferred by decision
 

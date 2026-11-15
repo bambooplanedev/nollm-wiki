@@ -12,7 +12,7 @@ use serde_json::json;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const VERSION: &str = "0.7.0";
-const BINARIES: [&str; 3] = ["kalka", "plaz", "kulman"];
+const BINARIES: [&str; 3] = ["calque", "plaz", "kulman"];
 /// What the script runs, linked from this `PATH`; `gh` and `minisign` are fakes.
 const TOOLS: [&str; 22] = [
     "sh",
@@ -137,7 +137,7 @@ impl Fixture {
             }
             serde_json::Value::Object(archives)
         };
-        let modules: Vec<_> = ["kalka", "plaz"]
+        let modules: Vec<_> = ["calque", "plaz"]
             .iter()
             .map(|m| json!({"name": m, "archives": entries(m)}))
             .collect();
@@ -503,7 +503,7 @@ fn an_unexpected_file_is_refused_even_with_replace() {
 #[test]
 fn an_archive_whose_hash_is_not_in_sha256sums_is_refused() {
     let f = Fixture::new();
-    let file = archive("kalka", TARGETS[0]);
+    let file = archive("calque", TARGETS[0]);
     fs::write(f.asset(&file), "altered\n").unwrap();
     f.refused_unsigned(
         &f.sign(&[VERSION]),

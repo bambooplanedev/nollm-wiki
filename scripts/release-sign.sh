@@ -26,7 +26,7 @@ LC_ALL=C
 export LC_ALL
 
 targets='aarch64-apple-darwin x86_64-unknown-linux-musl'
-binaries='kalka plaz kulman'
+binaries='calque plaz kulman'
 
 die() {
     printf 'release-sign.sh: %s\n' "$1" >&2
