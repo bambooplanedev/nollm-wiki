@@ -146,6 +146,10 @@ fn initialize(stdin: &mut ChildStdin, stdout: &Receiver<String>) {
     );
     let resp = read_response(stdout, 1);
     assert_eq!(resp["result"]["serverInfo"]["name"], "calque");
+    assert_eq!(
+        resp["result"]["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION")
+    );
     assert_eq!(resp["result"]["instructions"], calque::serve::INSTRUCTIONS);
     send(
         stdin,
