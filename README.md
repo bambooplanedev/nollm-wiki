@@ -36,7 +36,9 @@ One line fetches `kulman` itself:
 The script downloads the `kulman` archive for your system, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
 `~/.kulman-home/bin/kulman`. It writes nothing else and edits no shell profile. Add
-`~/.kulman-home/bin` to your `PATH` yourself: agents start `kalka` by its name.
+`~/.kulman-home/bin` to your `PATH` yourself: agents start `kalka` by its name. Releases are signed:
+`install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `kulman` checks
+every release it reads (see [Checking a release](#checking-a-release)).
 
 Then install the modules:
 
@@ -67,11 +69,12 @@ release: [crates/kulman/README.md](crates/kulman/README.md).
 
 ### Checking a release
 
-A release is checked by SHA-256 only: `install.sh` and `kulman` compare each archive with the sums
-in the release's `SHA256SUMS` and `manifest.json`. Releases are not signed: the sums show that a
-download is the file the release lists, not who made the release. To check an archive by hand, with
-it and `SHA256SUMS` in one folder, run `grep <archive> SHA256SUMS | sha256sum -c -` (on macOS `grep
-<archive> SHA256SUMS | shasum -a 256 -c -`).
+A release's `manifest.json` and `SHA256SUMS` are signed with minisign by the release key,
+[`release/kulman.pub`](release/kulman.pub); each archive is checked against the SHA-256 sums in
+them. `kulman` refuses a release whose signature does not verify, or is missing over `https://`;
+`install.sh` checks the signature when `minisign` is installed and otherwise says it did not. The
+key, the commands to check a release by hand, how a release is signed and the limits:
+[Signatures](crates/kulman/README.md#signatures).
 
 ## Modules
 
@@ -125,7 +128,9 @@ build for that system, and `kulman install` stops with `no build for <os>/<arch>
 `kalka` and `plaz` built here and run their own setup in each project (`kalka setup --scope repo`,
 `plaz setup --scope repo`). kulman's own tests install a release, which also needs one of the two
 release systems. Pushing a `v*` tag that equals the workspace version builds the macOS and Linux
-archives, checks that they install, and makes a draft GitHub Release with their `SHA256SUMS`.
+archives, checks that they install, and makes a draft GitHub Release with their `SHA256SUMS`; the
+owner signs the draft with `scripts/release-sign.sh` and then publishes it
+([Signatures](crates/kulman/README.md#signatures)).
 
 ## License
 

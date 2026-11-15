@@ -1116,7 +1116,8 @@ unknown; and the names of one multi-declarator statement share its range.
   warnings` turns the rest into failures. Two more workflows: `audit.yml`
   checks `Cargo.lock` against the RustSec database on every lockfile change
   and weekly, and `release.yml` builds Linux and macOS binaries for a `v*`
-  tag and attaches them, with their `SHA256SUMS`, to a GitHub Release with
-  generated notes.
+  tag and attaches them, with their `SHA256SUMS` and `manifest.json`, to a
+  draft GitHub Release with generated notes, which the owner signs
+  (`scripts/release-sign.sh`) before publishing it.
   `.github/dependabot.yml` opens weekly dependency PRs, minor and patch
   bumps grouped into one.

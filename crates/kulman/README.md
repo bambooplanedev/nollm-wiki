@@ -13,20 +13,22 @@ the first to carry it; the [repository README](../../README.md) describes the wh
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
-`install.sh` reads `SHA256SUMS` of the latest release, downloads the `kulman` archive for this
-machine (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`; any other system gets "no build"),
-checks it against that file and puts the binary at `~/.kulman-home/bin/kulman`. It needs `curl`,
-`tar`, `mktemp` and `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the
-check. Besides that binary and the folders it goes into, `install.sh` writes nothing and edits no
+`install.sh` reads `SHA256SUMS` of the latest release (and checks its signature when `minisign` is
+installed, see [Signatures](#signatures)), downloads the `kulman` archive for this machine
+(`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`; any other system gets "no build"), checks it
+against that file and puts the binary at `~/.kulman-home/bin/kulman`. It needs `curl`, `tar`,
+`mktemp` and `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the check.
+Besides that binary and the folders it goes into, `install.sh` writes nothing and edits no
 shell profile. On any failure it exits non-zero and leaves no temp dir; a first install also leaves
 no `kulman` in `bin/` (over an installation the old one stays), and a home directory it created is
 removed again if empty. Over an installation (`state.json` present) it ends by saying to run `kulman
 update`, which brings the modules to the version of the `kulman` it just put in place. The Linux
 build is static and runs on glibc and musl systems alike.
 
-By hand, the same: download `kulman-v<version>-<target>.tar.gz` and `SHA256SUMS` from the release
-page, then
+By hand, the same: download `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` and
+`SHA256SUMS.minisig` from the release page, then
 
+    minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
     grep kulman-v<version>-<target>.tar.gz SHA256SUMS | sha256sum -c -   # on macOS: … | shasum -a 256 -c -
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
@@ -186,7 +188,9 @@ A release holds, under `<base>/download/v<version>/`:
 - `<module>-v<version>-<target>.tar.gz` and `kulman-v<version>-<target>.tar.gz`, each holding one
   file named after its binary;
 - `SHA256SUMS` — `<sha256>  <file>` lines, for `install.sh` and for people;
-- `install.sh`.
+- `install.sh`;
+- `manifest.json.minisig` and `SHA256SUMS.minisig` — the signatures of those two files (see
+  [Signatures](#signatures)).
 
 `<base>/latest/download/` serves the same files of the latest release. kulman reads the manifest
 from there; from `download/v<version>/` with `--version`; and from `download/v<installed>/` for an
@@ -220,3 +224,68 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 ```
 
 Unknown fields are ignored. Each archive is checked against its `sha256` before it is unpacked.
+
+### Signatures
+
+A published release holds 11 files: the 6 archives, `manifest.json`, `SHA256SUMS`, `install.sh`
+and two detached [minisign](https://jedisct1.github.io/minisign/) signatures,
+`manifest.json.minisig` and `SHA256SUMS.minisig`. Only `manifest.json` and `SHA256SUMS` are
+signed; the archives are covered by the SHA-256 sums inside them. The release key is
+[`release/kulman.pub`](../../release/kulman.pub) in this repository:
+
+```
+untrusted comment: minisign public key 87CC6E990C51AF83
+RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+```
+
+`kulman` has the key compiled in; no flag or variable changes it. With every `manifest.json` it
+reads it fetches `manifest.json.minisig` from beside it and checks it before anything in the
+manifest is used. Only the form minisign makes by default (prehashed) is taken, not the legacy one
+(`minisign -S -l`). Over `https://` the signature is required, and a manifest without a good one is
+not used: `install` and `update` stop with `kulman: manifest.json: signature is missing: <url>:
+<cause>` (the address of the `.minisig` and why it could not be read) or `kulman: manifest.json:
+signature does not verify`, then `nothing changed`, exit 1. Where a command only looks at the
+latest release for a newer one (`kulman status`, and `install` over an installed version), its
+`could not check for a newer release (…)` line gives the reason instead. In a `file://` tree a
+signature that is there must verify too; one that is absent is allowed, and `kulman` says
+`signature not checked: local release tree` once.
+
+`install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
+checks `SHA256SUMS` with it before it reads a line of it; it stops (exit 1) with `install.sh:
+SHA256SUMS: signature is missing` or `install.sh: SHA256SUMS: signature does not verify`. In a
+`file://` tree an absent signature is allowed, with the line `install.sh: signature not checked:
+local release tree`. Without `minisign` it goes on by SHA-256 alone and says so: `install.sh:
+signature not checked (minisign not found); kulman checks it on every install and update`.
+
+By hand, with each file and its `.minisig` in one folder:
+
+    minisign -Vm manifest.json -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+    minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+
+Signatures came before any release of `kulman` was published: every published `kulman` checks
+them, so every release must be signed, or `install` and `update` refuse it.
+
+Signing a release: a pushed `v*` tag makes a draft release with the 9 files (the release
+workflow); nothing in GitHub holds the secret key. The owner then runs, in a terminal, in a
+checkout that has the tag:
+
+    sh scripts/release-sign.sh <version>      # --key <secret key file> if not minisign's default
+
+It checks the draft (exactly the 9 files; each archive's SHA-256 as `SHA256SUMS` and
+`manifest.json` state it; the version; `install.sh` as at the tag), signs the two files (minisign
+asks for the key's password, once per file), verifies both with `release/kulman.pub` (a signature
+by any other key stops it, with nothing uploaded) and uploads the two `.minisig` files to the draft;
+`--replace` signs a draft that has them again. It does not publish: it ends with the command that
+does, `gh release edit v<version> --draft=false`. Once published, the release is the latest one,
+the one `install.sh` and `kulman update` take.
+
+Limits:
+
+- One key, no rotation yet. A new key can reach users only in a release signed by the old one, so
+  losing the secret key (or its password) leaves no way to make a release `kulman` accepts: keep a
+  backup of it.
+- A signature shows that the files are the owner's, not that they are the newest. Whoever controls
+  the release host could serve an older signed release as the latest: `kulman update` refuses to go
+  back to an older version, but a fresh install would take it.
+- On a machine without `minisign`, `install.sh` relies on HTTPS for its one step, the `kulman`
+  binary it puts in place; from then on `kulman` checks every manifest it reads.
