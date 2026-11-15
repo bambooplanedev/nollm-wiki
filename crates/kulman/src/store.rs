@@ -267,10 +267,24 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     for (s, dest) in staged.iter().zip(&dests) {
         fs::rename(&s.path, dest).with_context(|| dest.display().to_string())?;
     }
+    sync_dir(&bin);
     write(home, "manifest.json", manifest)?;
+    sync_dir(&home.path);
     write(home, "state.json", &serde_json::to_vec(state)?)?;
+    sync_dir(&home.path);
     let _ = fs::remove_dir_all(home.tmp());
     Ok(())
+}
+
+/// Makes the renames and deletions in `dir` durable. A failure is only a warning: the files are
+/// already in place.
+fn sync_dir(dir: &Path) {
+    match File::open(dir).and_then(|d| d.sync_all()) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => {
+            eprintln!("kulman: warning: could not sync {}: {e}", dir.display());
+        }
+        _ => {}
+    }
 }
 
 /// Replaces `<home>/<name>` by `bytes`, ending with a newline, through a synced file in the
@@ -308,7 +322,9 @@ pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()
     for path in &paths {
         delete(path)?;
     }
+    sync_dir(&bin);
     write(home, "state.json", &serde_json::to_vec(state)?)?;
+    sync_dir(&home.path);
     let _ = fs::remove_dir_all(home.tmp());
     Ok(())
 }
@@ -333,9 +349,11 @@ pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
     for path in &paths {
         delete(path)?;
     }
+    sync_dir(&bin);
     for name in ["manifest.json", "state.json", ".lock"] {
         delete(&home.path.join(name))?;
     }
+    sync_dir(&home.path);
     // remove_dir fails on a directory that is not empty, or is a symlink: both are kept.
     let _ = fs::remove_dir(&bin);
     let _ = fs::remove_dir(&home.path);
