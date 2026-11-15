@@ -146,4 +146,25 @@ mod tests {
             assert_eq!(ca, cb);
         }
     }
+
+    #[test]
+    fn past_the_topic_list_names_get_a_version_suffix() {
+        let dir = tempdir().unwrap();
+        let paths = generate_corpus(dir.path(), 57, 42).unwrap();
+        let name = |i: usize| paths[i].file_name().unwrap().to_str().unwrap().to_string();
+        let names: Vec<String> = [0, 27, 28, 29, 55, 56].iter().map(|&i| name(i)).collect();
+        assert_eq!(
+            names,
+            [
+                "gradient_descent.txt",
+                "reranking.txt",
+                "gradient_descent_v2.txt",
+                "attention_mechanism_v2.txt",
+                "reranking_v2.txt",
+                "gradient_descent_v3.txt"
+            ]
+        );
+        let files: std::collections::BTreeSet<_> = paths.iter().collect();
+        assert_eq!(files.len(), 57, "every request gets its own file");
+    }
 }
