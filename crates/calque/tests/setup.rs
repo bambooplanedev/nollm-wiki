@@ -2051,3 +2051,64 @@ fn setup_from_a_kulman_home_elsewhere_says_the_agents_need_kulman_home() {
     assert!(o.contains("already set up: .mcp.json calque server"), "{o}");
     assert!(!o.contains("warning:"), "{o}");
 }
+
+/// The `is ignored by git` lines of a setup report.
+fn ignored_warnings(a: &assert_cmd::assert::Assert) -> Vec<String> {
+    out(a)
+        .lines()
+        .filter(|l| l.contains("is ignored by git"))
+        .map(String::from)
+        .collect()
+}
+
+/// A project whose `.git/info/exclude` ignores `.claude/`.
+fn ignoring_claude() -> Fixture {
+    let f = fixture(true, true);
+    fs::write(f.root().join(".git/info/exclude"), ".claude/\n").unwrap();
+    f
+}
+
+const IGNORED: &str = "warning: .claude/settings.json is ignored by git; teammates will not get it";
+
+#[test]
+fn setup_repo_warns_for_each_written_file_git_ignores() {
+    let f = ignoring_claude();
+    real_git(&f);
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    // `.mcp.json` and the pi files are written too and not ignored: no warning for them.
+    assert_eq!(ignored_warnings(&a), [IGNORED]);
+    // Nothing written the second time, so nothing to warn about.
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+#[test]
+fn setup_warns_about_ignored_files_only_in_a_repository_with_git() {
+    // Not a repository: git exits 128.
+    let f = ignoring_claude();
+    real_git(&f);
+    fs::remove_dir_all(f.root().join(".git")).unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+    // Git is not on PATH (the fixture's default).
+    let f = ignoring_claude();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+#[test]
+fn setup_local_does_not_warn_about_the_files_it_excludes_itself() {
+    let f = ignoring_claude();
+    real_git(&f);
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(out(&a).contains("wrote .claude/settings.local.json prompt hook"));
+    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}

@@ -186,7 +186,18 @@ impl Report<'_> {
             self.skip(what, "tracked by git; use --scope repo")?;
             return Ok(false);
         }
-        self.item(what, res())
+        let wrote = self.wrote;
+        let present = self.item(what, res())?;
+        // Repo scope: a file git ignores never reaches the teammates it was written for.
+        if !self.guard_tracked
+            && self.wrote > wrote
+            && git(root, &["check-ignore", "-q", "--", file]).is_some()
+        {
+            self.line(&format!(
+                "warning: {file} is ignored by git; teammates will not get it"
+            ))?;
+        }
+        Ok(present)
     }
 
     /// Reports one outcome; `true` when the item is in place (written or already there).
