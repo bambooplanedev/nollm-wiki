@@ -131,6 +131,20 @@ fn place(
         },
         _ => release::manifest(base, version, release::WAIT)?,
     };
+    // Every refusal on the version comes before the question.
+    if let Some(state) = &state {
+        let (have, want) = (&state.version, &manifest.version);
+        let order = release::version_key(have).cmp(&release::version_key(want));
+        if order.is_lt() {
+            bail!("version {have} is installed; run kulman update");
+        }
+        if order.is_gt() {
+            bail!(
+                "version {have} is installed, newer than {want}; \
+                 run kulman remove, then kulman install --version {want}"
+            );
+        }
+    }
     let wanted = match wanted {
         None if ask => {
             let items: Vec<_> = (manifest.modules.iter())
@@ -145,17 +159,6 @@ fn place(
     // At the same version, an installed kulman is the release's already.
     let kulman_too = state.is_none() || !home.path.join("bin/kulman").is_file();
     if let Some(state) = state {
-        let (have, want) = (&state.version, &manifest.version);
-        let order = release::version_key(have).cmp(&release::version_key(want));
-        if order.is_lt() {
-            bail!("version {have} is installed; run kulman update");
-        }
-        if order.is_gt() {
-            bail!(
-                "version {have} is installed, newer than {want}; \
-                 run kulman remove, then kulman install --version {want}"
-            );
-        }
         modules.extend(state.modules);
     }
     let bin = home.path.join("bin");
