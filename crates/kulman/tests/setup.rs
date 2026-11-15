@@ -319,6 +319,29 @@ fn setup_warns_when_bin_is_not_on_path_and_still_runs() {
 }
 
 #[test]
+fn setup_takes_binaries_linked_into_path_as_on_path() {
+    let f = installed(LOGS, "kalka,plaz");
+    let (bin, links) = (f.home.join("bin"), f.t.path().join("links"));
+    let run = |names: &[&str]| {
+        let _ = fs::remove_dir_all(&links);
+        let path = common::path_linking(&links, &bin, names);
+        let out = kulman(&f.home, &f.base)
+            .args(["setup", "--scope", "repo"])
+            .current_dir(f.t.path().join("project"))
+            .env("KULMAN_TEST_LOG", f.log())
+            .env("PATH", path)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        stderr(&out)
+    };
+    // Each module set up is linked: nothing said (kulman itself is not launched by agents).
+    assert_eq!(run(&["kalka", "plaz"]), "");
+    // plaz is not: said.
+    assert!(run(&["kalka"]).contains("is not on PATH"));
+}
+
+#[test]
 fn setup_gives_the_modules_bin_on_their_path() {
     let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$KULMAN_TEST_LOG\"\n";
     let f = installed(logs_path, "kalka");

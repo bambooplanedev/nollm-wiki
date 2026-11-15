@@ -5,8 +5,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, kulman, no_tmp_left, release, set_sha256, snapshot, state, stderr, stdout,
-    version_dir, KULMAN_BYTES,
+    assert_binary, kulman, no_tmp_left, path_linking, release, set_sha256, snapshot, state, stderr,
+    stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::json;
 
@@ -100,6 +100,28 @@ fn status_says_when_bin_is_not_on_path() {
     let out = kulman(&home, &base).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
+}
+
+#[test]
+fn status_takes_binaries_linked_into_path_as_on_path() {
+    let (t, base, home) = installed();
+    let (bin, links) = (home.join("bin"), t.path().join("links"));
+    let say = |names: &[&str]| {
+        let path = path_linking(&links, &bin, names);
+        let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let _ = fs::remove_dir_all(&links);
+        stdout(&out)
+    };
+    assert!(!say(&["kulman", "kalka", "plaz"]).contains("on PATH"));
+    // One module not linked, or kulman not linked: still said.
+    assert!(say(&["kulman", "kalka"]).contains("is not on PATH"));
+    assert!(say(&["kalka", "plaz"]).contains("is not on PATH"));
+    // The first `plaz` on PATH is another program: still said.
+    let path = path_linking(&links, &bin, &["kulman", "kalka"]);
+    fs::write(links.join("plaz"), "#!/bin/sh\n").unwrap();
+    let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+    assert!(stdout(&out).contains("is not on PATH"), "{}", stdout(&out));
 }
 
 #[test]

@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 
-use crate::{ask_choose, ask_yes, is_installed, on_path, path_hint, release, store, Usage};
+use crate::{ask_choose, ask_yes, is_installed, path_hint, reachable, release, store, Usage};
 use release::Manifest;
 use store::{Home, State};
 
@@ -100,7 +100,9 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
         }
     }
     let bin = home.path.join("bin");
-    let kulman = if on_path(&bin) {
+    let modules = State::load(&home.path)?.map_or_else(Vec::new, |s| s.modules);
+    let names = modules.iter().map(String::as_str).chain(["kulman"]);
+    let kulman = if reachable(&bin, names) {
         "kulman".to_string()
     } else {
         println!("{}", path_hint(&bin));

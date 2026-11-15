@@ -280,3 +280,15 @@ pub fn per_target_kulman(dir: &Path, version: &str, bytes: &[u8]) {
         m["kulman"]["archives"] = Value::Object(archives);
     });
 }
+
+/// `PATH` with a new folder `links` first, holding a symlink to `<bin>/<name>` for each of `names`
+/// (made before the binaries exist, so an install can follow), then the test's own.
+pub fn path_linking(links: &Path, bin: &Path, names: &[&str]) -> std::ffi::OsString {
+    fs::create_dir_all(links).unwrap();
+    for name in names {
+        std::os::unix::fs::symlink(bin.join(name), links.join(name)).unwrap();
+    }
+    let own = std::env::var_os("PATH").unwrap_or_default();
+    let dirs = std::iter::once(links.to_path_buf()).chain(std::env::split_paths(&own));
+    std::env::join_paths(dirs).unwrap()
+}

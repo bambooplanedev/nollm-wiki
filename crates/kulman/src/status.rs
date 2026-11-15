@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::install::release_base;
-use crate::{on_path, path_hint, release, store};
+use crate::{path_hint, reachable, release, store};
 use store::State;
 
 /// `kulman` with no command. Only reads: home is not created, nor locked.
@@ -25,7 +25,10 @@ pub(super) fn status() -> Result<()> {
         }
     }
     let bin = home.join("bin");
-    if !on_path(&bin) {
+    if !reachable(
+        &bin,
+        state.modules.iter().map(String::as_str).chain(["kulman"]),
+    ) {
         println!("{}", path_hint(&bin));
     }
     // Said with the base and the first cause: the URL under the base adds nothing.

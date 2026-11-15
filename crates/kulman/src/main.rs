@@ -197,6 +197,28 @@ fn on_path(dir: &Path) -> bool {
     })
 }
 
+/// The first `name` found on `PATH` is `bin/<name>`, by real path: a link in a `PATH` folder counts.
+/// Any error is `false`.
+fn resolves_on_path(bin: &Path, name: &str) -> bool {
+    let Ok(want) = bin.join(name).canonicalize() else {
+        return false;
+    };
+    std::env::var_os("PATH")
+        .and_then(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join(name))
+                .find(|f| f.is_file())
+        })
+        .and_then(|f| f.canonicalize().ok())
+        == Some(want)
+}
+
+/// `bin` is on `PATH`, or each of `names` is reached through it by `resolves_on_path`: nothing
+/// needs saying about `PATH`.
+fn reachable<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) -> bool {
+    on_path(bin) || names.into_iter().all(|n| resolves_on_path(bin, n))
+}
+
 /// What kulman says when `bin` is not on `PATH`: two lines, the second one to copy.
 fn path_hint(bin: &Path) -> String {
     let bin = bin.display();
