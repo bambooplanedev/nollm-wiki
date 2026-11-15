@@ -3,6 +3,7 @@
 
 use super::old::{NAV_BEGIN, NAV_END};
 use super::Found;
+use crate::setup::edit::inside;
 use crate::setup::{cli, exclude_file, find_on_path, git, worktree_prefix};
 use serde_json::Value;
 use std::path::Path;
@@ -47,13 +48,25 @@ pub(in crate::setup) fn report(root: &Path, found: &Found) -> Vec<String> {
             }
         }
     }
-    if let Some(p) = find_on_path("wiki") {
+    // A `wiki` that is kalka itself (a person's alias) is not the old binary.
+    let kalka = |p: &Path| {
+        let Ok(p) = p.canonicalize() else {
+            return false;
+        };
+        let exe = std::env::current_exe().and_then(|e| e.canonicalize());
+        p.file_name().is_some_and(|n| n == "kalka") || exe.is_ok_and(|e| e == p)
+    };
+    if let Some(p) = find_on_path("wiki").filter(|p| !kalka(p)) {
         items.push(format!("  {}: an old wiki binary is on PATH", p.display()));
     }
     for file in [".claude/settings.json", ".claude/settings.local.json"] {
         items.extend(claude_settings(root, file));
     }
-    items.extend(mentions(root));
+    // Prose names the old tool only beside another trace of it: a project that writes about
+    // "wiki pages" and has no other trace hears nothing.
+    if !items.is_empty() || !found.removed.is_empty() {
+        items.extend(mentions(root));
+    }
 
     let mut lines = Vec::new();
     if !items.is_empty() {
@@ -96,13 +109,16 @@ fn claude_settings(root: &Path, file: &str) -> Vec<String> {
             .collect()
     };
     let mut out = Vec::new();
-    let rules = ["allow", "deny", "ask"]
+    let rules: Vec<String> = ["allow", "deny", "ask"]
         .iter()
-        .flat_map(|k| strings(&v["permissions"][k]));
-    if rules
-        .into_iter()
-        .any(|r| r.starts_with("mcp__wiki__") || r == "mcp__wiki")
-    {
+        .flat_map(|k| strings(&v["permissions"][k]))
+        .collect();
+    let names = |tool: &str| {
+        let prefix = format!("{tool}__");
+        rules.iter().any(|r| r.starts_with(&prefix) || *r == tool)
+    };
+    // Once a rule names kalka, the person has made the switch.
+    if names("mcp__wiki") && !names("mcp__kalka") {
         out.push(format!(
             "  {file}: permission rules name mcp__wiki__*; the same rules for mcp__kalka__* are needed"
         ));
@@ -115,8 +131,9 @@ fn claude_settings(root: &Path, file: &str) -> Vec<String> {
     out
 }
 
-/// Lines of `CLAUDE.md` and `AGENTS.md`, at the top and one folder down, that name the old tool.
-/// Links are not followed; the inside of a `wiki:navigation` block is the block's own line.
+/// Lines of `CLAUDE.md` and `AGENTS.md`, at the top and one folder down, and of
+/// `.claude/CLAUDE.md`, that name the old tool. Links are not followed; the inside of a
+/// `wiki:navigation` block (begin and end both there) is the block's own line.
 fn mentions(root: &Path) -> Vec<String> {
     let re = regex::Regex::new(
         r"mcp__wiki__|\.wiki/|\bwiki\s+(search|page|neighbors|callers|lint|compile|serve|setup|hint)\b",
@@ -140,26 +157,28 @@ fn mentions(root: &Path) -> Vec<String> {
     let files = [String::new()]
         .into_iter()
         .chain(dirs.into_iter().map(|d| format!("{d}/")))
-        .flat_map(|d| [format!("{d}CLAUDE.md"), format!("{d}AGENTS.md")]);
+        .flat_map(|d| [format!("{d}CLAUDE.md"), format!("{d}AGENTS.md")])
+        .chain([".claude/CLAUDE.md".to_string()]);
 
     let mut hits = Vec::new();
     for file in files {
         let path = root.join(&file);
-        let small_file = std::fs::symlink_metadata(&path)
-            .is_ok_and(|m| m.file_type().is_file() && m.len() <= MAX_SIZE);
-        let Some(text) = small_file
-            .then(|| std::fs::read_to_string(&path).ok())
-            .flatten()
-        else {
+        let small_file = inside(root, Path::new(&file))
+            && std::fs::symlink_metadata(&path)
+                .is_ok_and(|m| m.file_type().is_file() && m.len() <= MAX_SIZE);
+        let Some(bytes) = small_file.then(|| std::fs::read(&path).ok()).flatten() else {
             continue;
         };
-        let mut inside = false;
-        for (i, l) in text.lines().enumerate() {
-            if l == NAV_BEGIN.trim_end() {
-                inside = true;
-            } else if l == NAV_END.trim_end() {
-                inside = false;
-            } else if !inside && re.is_match(l) {
+        let text = String::from_utf8_lossy(&bytes);
+        let lines: Vec<&str> = text.lines().collect();
+        let (begin, end) = (NAV_BEGIN.trim_end(), NAV_END.trim_end());
+        let mut in_block = false;
+        for (i, l) in lines.iter().enumerate() {
+            if *l == begin && lines[i + 1..].contains(&end) {
+                in_block = true;
+            } else if *l == end {
+                in_block = false;
+            } else if !in_block && re.is_match(l) {
                 hits.push(format!("  {file}:{}: mentions the old tool", i + 1));
             }
         }
@@ -171,3 +190,6 @@ fn mentions(root: &Path) -> Vec<String> {
     }
     hits
 }
+
+#[cfg(test)]
+mod tests;

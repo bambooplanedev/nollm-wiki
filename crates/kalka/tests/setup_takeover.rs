@@ -387,6 +387,8 @@ fn mentions_stop_at_twenty_lines() {
         .collect::<Vec<_>>()
         .concat();
     f.write("AGENTS.md", &text);
+    // Prose is listed only beside another trace.
+    f.write(".wiki/index.json", "{}\n");
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     let e = err(&a);
     let mentions: Vec<&str> = e.lines().filter(|l| l.contains("mentions")).collect();
@@ -807,4 +809,34 @@ fn a_failed_claude_get_says_nothing_about_the_old_server() {
     let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
     assert_eq!(takeover_lines(&out(&a)), Vec::<&str>::new());
     assert_eq!(err(&a), "");
+}
+
+/// Prose alone is no trace: a project that writes about wiki pages hears nothing.
+#[test]
+fn prose_alone_says_nothing() {
+    let f = fixture();
+    f.write(
+        "CLAUDE.md",
+        "Run `wiki search` in the docs portal; see .wiki/ for notes.\n",
+    );
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(err(&a), "");
+}
+
+/// A `wiki` on PATH that is kalka itself is not an old binary.
+#[test]
+fn a_wiki_alias_of_kalka_is_no_old_binary() {
+    let f = fixture();
+    symlink(env!("CARGO_BIN_EXE_kalka"), f.bin().join("wiki")).unwrap();
+    f.write(".wiki/index.json", "{}\n");
+    let a = f.setup(&["--scope", "local", "--agent", "pi"]).success();
+    assert_eq!(
+        err(&a),
+        format!(
+            "kalka: left from the old wiki (not changed):
+  .wiki/: old compiled output (the new one is .kulman/); delete it when you no longer need it
+  rename: wiki -> kalka, mcp__wiki__* -> mcp__kalka__*, .wiki/ -> .kulman/
+{RESTART}"
+        )
+    );
 }
