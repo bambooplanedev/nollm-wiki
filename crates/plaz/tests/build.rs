@@ -2476,13 +2476,17 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
 #[test]
 fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
     let usage = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup [--source DIR] --scope repo|local [--remove]\n";
-    for flag in ["--help", "-h"] {
-        assert_cmd::cargo_bin_cmd!()
+    for flag in ["--help", "-h", "help"] {
+        let out = assert_cmd::cargo_bin_cmd!()
             .arg(flag)
             .assert()
             .success()
-            .stdout(usage)
             .stderr("");
+        let out = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+        assert!(
+            out.starts_with(usage) && out.contains("--vault DIR"),
+            "{flag}"
+        );
     }
     assert_cmd::cargo_bin_cmd!()
         .arg("--version")

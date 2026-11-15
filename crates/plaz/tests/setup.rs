@@ -165,3 +165,29 @@ fn remove_with_nothing_built_is_fine() {
     assert_eq!(stdout(&o), "map: 0 removed\n");
     assert!(!d.path().join(".kulman").exists());
 }
+
+#[test]
+fn help_prints_both_commands_on_stdout_and_exits_0() {
+    for args in [
+        &["--help"][..],
+        &["-h"],
+        &["help"],
+        &["build", "--help"],
+        &["setup", "--help"],
+    ] {
+        let o = Command::new(env!("CARGO_BIN_EXE_plaz"))
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{args:?}");
+        let out = stdout(&o);
+        assert!(
+            out.contains("plaz build") && out.contains("plaz setup"),
+            "{args:?}: {out}"
+        );
+        assert!(
+            out.lines().count() > 1 && o.stderr.is_empty(),
+            "{args:?}: {out}"
+        );
+    }
+}
