@@ -67,13 +67,13 @@ CLI `claude`. Сервер для Codex за будь-якого `--scope` по�
 
 ### Нехай це зробить ваш агент
 
-Якщо не хочете виконувати ці кроки вручну, вставте це у свій агент для коду:
+Якщо не хочете виконувати ці кроки вручну, вставте це у чат свого агента для програмування:
 
     Install or update kulman in this project by following
-    https://github.com/bambooplanedev/kulman/blob/main/docs/agent-setup.md
+    https://raw.githubusercontent.com/bambooplanedev/kulman/main/docs/agent-setup.md
     Ask me before installing, updating, or changing any file outside this agent's own configuration.
 
-Файл за посиланням — звичайний текст: прочитайте його наперед, щоб побачити, що скажуть агентові.
+Заздалегідь прочитайте [docs/agent-setup.md](docs/agent-setup.md), щоб побачити, що скажуть агентові.
 
 ### Перевірка релізу
 

@@ -1,14 +1,19 @@
 # Installing or updating kulman: steps for a coding agent
 
 You run the commands below yourself and ask the user only for approvals, choices and restarts.
+Wherever this guide says `kulman`, run `~/.kulman-home/bin/kulman` if the shell does not find
+`kulman` (a fresh install is not on PATH). If this guide and the installed tool differ (a flag, an
+output line), follow the tool (`kulman --help`) and tell the user.
 
 ## 1. Find out what is installed
 
 Run `kulman --version`. If the shell cannot find it, try `~/.kulman-home/bin/kulman --version`.
 
 **Missing.** Tell the user you will run the release installer: it downloads the release, checks
-its SHA-256 and, when `minisign` is installed, its signature, and installs into
-`~/.kulman-home` in their home folder, with no sudo. After they agree, run:
+its SHA-256 and, when `minisign` is installed, its signature, and installs the `kulman` installer
+into `~/.kulman-home` in their home folder, with no sudo. Then `kulman install --yes` installs the
+modules `calque` (project wiki, search, MCP server) and `plaz` (decision charts). After they
+agree, run:
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
     ~/.kulman-home/bin/kulman install --yes
@@ -17,44 +22,54 @@ The installer prints nothing about the signature when it checked it. When it did
 prints `install.sh: signature not checked (minisign not found); kulman checks it on every install
 and update`; tell the user that. Set `Installed:` to the version `kulman --version` now prints.
 
-**Installed.** Run `kulman` (no arguments). The first line is `kulman <installed> in <home>`.
-The last line is `newer release: <newest> (kulman update)`, `up to date`, or `could not check for a
-newer release (...)`; in that case show the line to the user and do not update. If a newer
-release exists, tell the user both versions and ask whether to update. On yes run
+**Installed.** Run `kulman` (no arguments). If it prints `nothing installed in <home>; run kulman
+install`, kulman is there but no modules are: say you will install `calque` and `plaz`, and after
+the user agrees run `kulman install --yes`. Otherwise the first line is `kulman <installed> in
+<home>`. The last line is `newer release: <newest> (kulman update)`, `up to date`, or `could not
+check for a newer release (...)`; in that case show the line to the user and do not update. If a
+newer release exists, tell the user both versions and ask whether to update. On yes run
 `kulman update --yes`; it prints `updated <module> <old> -> <new>` per module and then
 `restart running agent sessions; they keep the old binaries until then`.
 
 ## 2. Set up the project
 
-In the project root run `kulman setup --yes --scope repo --agent <this agent>`, where the agent is
-one of `claude`, `codex`, `cursor`, `pi`. Ask the user first whether the files go in the repo
-(`--scope repo`, committed for the team) or stay local (`--scope local`). `kulman update` does not
-set projects up again, so run this after an update too; it is safe to run again and reports
-`already set up: ...` for what is there.
+If this agent is none of `claude`, `codex`, `cursor`, `pi`, tell the user that kulman has no setup
+for it, and stop here: the tools are installed, the project is not set up.
 
-## 3. Settings
+Ask the user first. Setup writes in the project: the `.kulman/` folder with the compiled wiki and
+decision charts; `.agents/memory`, the agent memory folder; this agent's files, `.mcp.json` and
+`.claude/settings.json` for Claude Code, `.cursor/mcp.json` for Cursor, `.codex/config.toml` and a
+navigation block in `AGENTS.md` for Codex, `.pi/` and `.agents/skills/` for pi; and lines that
+keep `.kulman/` out of git. Two scopes: `repo` writes the files for the whole team to commit and
+puts the ignore line in `.gitignore`; `local` is for this checkout only, with the ignore lines in
+`.git/info/exclude` (for Claude Code the server goes in Claude's own local config and the hook in
+`.claude/settings.local.json`).
 
-Keep the user's existing settings. Edit only this agent's own configuration.
+After they answer, in the project root run:
 
-## 4. Hints
+    kulman setup --yes --scope <repo|local> --agent <agent>
+
+Run it after an update too: `kulman update` does not set projects up again. It is safe to repeat.
+
+Do not edit files yourself; `setup` writes what it needs. Keep the user's existing settings.
+
+## 3. Hints
 
 Show the user every hint the commands printed and apply each only after they say yes:
 
-- `<bin> is not on PATH; add it:` followed by an `export PATH=...` line: the user adds it to
-  their shell profile themselves. Show the line; do not edit the profile.
+- `<bin> is not on PATH; add it:` followed by an `export PATH=...` line: required, not optional.
+  The agent configurations start `calque` by name, so an agent started without it on PATH cannot
+  find it. The user adds the line to their shell profile themselves; show it, do not edit the
+  profile. Put it in "Next step for me".
 - `skipped AGENTS.md calque navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md from
   pi; ...`: the rename it names, if the user wants it.
 - `Codex loads the server only in a project it trusts: ...`: the trust it names.
 - `Cursor: ... cursor-agent mcp enable calque`: run it.
 
-## 5. Restart
+## 4. Report, then restart
 
-Tell the user to restart this agent session so it loads the new tools. Do not wait for it.
-
-## 6. Check
-
-After the restart, call the `search` tool of the `calque` server (in Claude Code
-`mcp__calque__search`) with any word from the project. If the tool is not there, report `pending`.
+The session after a restart does not have this guide: give the final report first, then tell the
+user to restart this agent session so it loads the new tools.
 
 ## Final report
 
@@ -63,14 +78,19 @@ One line each:
     Installed: <version, or "already there">
     Updated: <old -> new, or "no">
     Agents: <the agents set up>
-    Verified: <the search result, or "pending">
-    Next step for me: <what the user still has to do>
+    Verified: pending — after the restart ask me to search the project with calque
+    Next step for me: <restart; and, if setup printed the PATH hint: add the printed
+      `export PATH=...` line to your shell profile, open a new terminal, then restart the agent>
 
 If a step fails, stop and show the exact output.
 
+## 5. Check, if the user asks after the restart
+
+Call the `search` tool of the `calque` server (in Claude Code `mcp__calque__search`) with any word
+from the project. If the tool is not there, say so.
+
 ## Do not
 
-- Use sudo.
-- Edit shell startup files.
+- Use sudo, or edit shell startup files.
 - Change files outside the project and this agent's own configuration without asking.
 - Skip the signature or checksum check.

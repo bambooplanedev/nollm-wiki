@@ -70,10 +70,10 @@ installed. Commands, flags, exit codes and the layout of a release:
 If you would rather not run these steps by hand, paste this into your coding agent:
 
     Install or update kulman in this project by following
-    https://github.com/bambooplanedev/kulman/blob/main/docs/agent-setup.md
+    https://raw.githubusercontent.com/bambooplanedev/kulman/main/docs/agent-setup.md
     Ask me before installing, updating, or changing any file outside this agent's own configuration.
 
-The linked file is plain text: read it first to see what the agent will be told.
+Read [docs/agent-setup.md](docs/agent-setup.md) first to see what the agent will be told.
 
 ### Checking a release
 
