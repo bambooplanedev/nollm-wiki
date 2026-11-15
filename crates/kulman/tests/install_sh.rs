@@ -73,7 +73,7 @@ fn tools(dir: &Path) -> PathBuf {
 }
 
 /// A fake `minisign` on the `PATH` of `sh`: it writes its arguments, one per line, to
-/// `<t>/minisign.args`, and the file named after `-Vm` to `<t>/minisign.file`, and exits `code`.
+/// `<t>/minisign.args`, and the file named after `-VHm` to `<t>/minisign.file`, and exits `code`.
 fn fake_minisign(t: &Path, code: i32) {
     use std::os::unix::fs::PermissionsExt;
     let path = tools(&t.join("tools")).join("minisign");
@@ -254,7 +254,7 @@ fn install_sh_checks_the_signature_with_minisign() {
     let [vm, got_sums, x, got_sig, p, key] = args[..] else {
         panic!("{args:?}");
     };
-    assert_eq!((vm, x, p), ("-Vm", "-x", "-P"));
+    assert_eq!((vm, x, p), ("-VHm", "-x", "-P"));
     let got_sums = Path::new(got_sums);
     assert_eq!(got_sums.parent().unwrap().parent().unwrap(), home);
     let tmp = got_sums.parent().unwrap().file_name().unwrap();

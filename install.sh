@@ -110,13 +110,14 @@ main() {
         ki_sig=$ki_tmp/SHA256SUMS.minisig
         # In a subshell: fetch exits on failure, and in a local tree no signature is allowed.
         if (fetch "$ki_base/latest/download/SHA256SUMS.minisig" "$ki_sig" 4096) 2>/dev/null; then
-            minisign -Vm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
+            # -H: only the prehashed form minisign makes by default, as kulman takes it.
+            minisign -VHm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
                 die "SHA256SUMS: signature does not verify"
-        elif [ -n "$ki_https" ]; then
-            die "SHA256SUMS: signature is missing"
         elif [ -e "$ki_sig" ]; then
             # There, but past the limit: curl makes no file for one that is absent.
             die "SHA256SUMS: signature does not verify"
+        elif [ -n "$ki_https" ]; then
+            die "SHA256SUMS: signature is missing"
         else
             printf 'install.sh: signature not checked: local release tree\n'
         fi

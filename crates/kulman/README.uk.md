@@ -257,13 +257,16 @@ fetched: <cause>` (будь-яка інша помилка: тайм-аут, TLS
 newer release (…)`. У дереві `file://` наявний підпис теж мусить пройти перевірку; відсутній
 дозволено, і `kulman` один раз каже `signature not checked: local release tree`.
 
-`install.sh` містить той самий ключ. Якщо `minisign` є в `PATH`, він завантажує
-`SHA256SUMS.minisig` і перевіряє ним `SHA256SUMS`, перш ніж прочитати з нього бодай рядок; він
-зупиняється (код виходу 1) з `install.sh: SHA256SUMS: signature is missing` або `install.sh:
-SHA256SUMS: signature does not verify`. У дереві `file://` відсутній підпис дозволено, з рядком
-`install.sh: signature not checked: local release tree`. Без `minisign` він іде далі лише за
-SHA-256 і каже про це: `install.sh: signature not checked (minisign not found); kulman checks it
-on every install and update`.
+`install.sh` містить той самий ключ. Якщо `minisign` є в `PATH`, він завантажує `SHA256SUMS.minisig`
+і перевіряє ним `SHA256SUMS` (`minisign -VHm`: як і `kulman`, лише форму prehashed), перш ніж
+прочитати з нього бодай рядок; він зупиняється (код виходу 1) з `install.sh: SHA256SUMS: signature
+is missing` (через `https://` нічого не вдалося завантажити) або `install.sh: SHA256SUMS: signature
+does not verify` (так само для підпису, більшого за 4 КіБ). Для перевірки потрібен minisign, який
+знає `-H`; 0.11 і 0.12 його знають, а з версією, яка не знає, перевірка не проходить і `install.sh`
+зупиняється. У дереві `file://` відсутній підпис дозволено, з рядком `install.sh: signature not
+checked: local release tree`. Без `minisign` він іде далі лише за SHA-256 і каже про це:
+`install.sh: signature not checked (minisign not found); kulman checks it on every install and
+update`.
 
 Вручну, коли кожен файл і його `.minisig` лежать в одній теці:
 

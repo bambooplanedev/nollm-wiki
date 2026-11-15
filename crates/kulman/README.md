@@ -252,11 +252,14 @@ a `file://` tree a signature that is there must verify too; one that is absent i
 `kulman` says `signature not checked: local release tree` once.
 
 `install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
-checks `SHA256SUMS` with it before it reads a line of it; it stops (exit 1) with `install.sh:
-SHA256SUMS: signature is missing` or `install.sh: SHA256SUMS: signature does not verify`. In a
-`file://` tree an absent signature is allowed, with the line `install.sh: signature not checked:
-local release tree`. Without `minisign` it goes on by SHA-256 alone and says so: `install.sh:
-signature not checked (minisign not found); kulman checks it on every install and update`.
+checks `SHA256SUMS` with it (`minisign -VHm`: like `kulman`, only the prehashed form) before it
+reads a line of it; it stops (exit 1) with `install.sh: SHA256SUMS: signature is missing` (over
+`https://`, nothing could be downloaded) or `install.sh: SHA256SUMS: signature does not verify`
+(also for a signature past 4 KiB). The check needs a minisign that knows `-H`; 0.11 and 0.12 do, and
+with one that does not, the check fails and `install.sh` stops. In a `file://` tree an absent
+signature is allowed, with the line `install.sh: signature not checked: local release tree`. Without
+`minisign` it goes on by SHA-256 alone and says so: `install.sh: signature not checked (minisign not
+found); kulman checks it on every install and update`.
 
 By hand, with each file and its `.minisig` in one folder:
 
