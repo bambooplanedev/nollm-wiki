@@ -5,7 +5,8 @@
 #
 # Run it in a terminal, inside this checkout: gh takes the repository from it, and minisign asks
 # for the secret key's password on the terminal, once per file. The script reads the draft
-# v<version> (it must hold exactly the 9 files the release workflow uploads), downloads it into a
+# v<version> (it must be under the releases address of crates/kulman/src/install.rs, so a fork's
+# draft is refused, and hold exactly the 9 files the release workflow uploads), downloads it into a
 # temp dir, checks every archive's SHA-256 against SHA256SUMS and manifest.json, the manifest's
 # version, and install.sh against the tag's, signs manifest.json and SHA256SUMS (minisign -S;
 # --key is passed as -s, otherwise minisign's default key is used), verifies both signatures with
@@ -84,6 +85,13 @@ esac
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd -- "$repo"
 pub=release/kulman.pub
+# The releases address the installer uses (install.rs), so a draft of a fork is never signed.
+releases=$(sed -n 's|^const RELEASES: &str = "\(https://github\.com/[^/"]*/[^/"]*/releases\)";$|\1|p' \
+    crates/kulman/src/install.rs 2>/dev/null) || :
+case $releases in
+    https://*/releases) ;;
+    *) die "no releases address in crates/kulman/src/install.rs" ;;
+esac
 keyid=$(sed -n '1s/^untrusted comment: minisign public key //p' "$pub" 2>/dev/null) || :
 [ -n "$keyid" ] || die "$pub is not a minisign public key file"
 
@@ -101,10 +109,19 @@ printf '%s\n' "$archives" SHA256SUMS manifest.json install.sh | sort >"$tmp/want
 # The draft's files: exactly the 9, or with --replace also the signatures.
 # $1: what is checked, for the message.
 assets() {
-    gh release view "$tag" --json isDraft,assets >"$tmp/view.json" ||
+    gh release view "$tag" --json url,isDraft,assets >"$tmp/view.json" ||
         die "cannot read the release $tag ($1); is the tag pushed and the draft made?"
+    url=$(jq -r '.url' "$tmp/view.json") || die "gh gave no release for $tag"
+    case $url in
+        "$releases"/*) ;;
+        *) die "this draft belongs to $url, not to $releases" ;;
+    esac
     draft=$(jq -r '.isDraft' "$tmp/view.json") || die "gh gave no release for $tag"
-    [ "$draft" = true ] || die "$tag is already published; only a draft is signed"
+    case $draft in
+        true) ;;
+        false) die "$tag is already published; only a draft is signed" ;;
+        *) die "could not read the release's draft state" ;;
+    esac
     jq -r '.assets[].name' "$tmp/view.json" >"$tmp/names" || die "gh gave no files for $tag"
     sort "$tmp/names" >"$tmp/got"
 }
@@ -153,6 +170,9 @@ git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null ||
 git show "refs/tags/$tag:install.sh" >"$tmp/install.sh" || die "$tag has no install.sh"
 cmp -s "$tmp/install.sh" "$dl/install.sh" || die "install.sh of the draft is not the one at $tag"
 
+repository=${releases#https://github.com/}
+printf 'repository: %s\n' "${repository%/releases}"
+printf 'release: %s\n' "$url"
 printf 'signing the draft %s:\n' "$tag"
 for f in $archives; do
     printf '  %s  %s\n' "$(awk -v f="$f" '$2 == f { print $1 }' "$sums")" "$f"

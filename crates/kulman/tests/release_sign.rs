@@ -39,6 +39,14 @@ const TOOLS: [&str; 22] = [
     "env",
 ];
 
+/// The releases address of `install.rs`, which the script must take as this repository's.
+fn releases() -> String {
+    let source = fs::read_to_string(Path::new(ROOT).join("crates/kulman/src/install.rs")).unwrap();
+    let start = source.find("const RELEASES: &str = \"").unwrap() + 24;
+    let len = source[start..].find('"').unwrap();
+    source[start..start + len].to_string()
+}
+
 fn archive(binary: &str, target: &str) -> String {
     format!("{binary}-v{VERSION}-{target}.tar.gz")
 }
@@ -96,6 +104,7 @@ impl Fixture {
             "scripts/release-sign.sh",
             "install.sh",
             "release/kulman.pub",
+            "crates/kulman/src/install.rs",
         ] {
             fs::create_dir_all(repo.join(rel).parent().unwrap()).unwrap();
             fs::copy(Path::new(ROOT).join(rel), repo.join(rel)).unwrap();
@@ -110,7 +119,12 @@ impl Fixture {
     fn draft(&self) {
         let assets = self.path("gh/assets");
         fs::create_dir_all(&assets).unwrap();
-        fs::write(self.path("gh/draft"), "").unwrap();
+        fs::write(self.path("gh/draft"), "true").unwrap();
+        fs::write(
+            self.path("gh/url"),
+            format!("{}/tag/untagged-1", releases()),
+        )
+        .unwrap();
         let mut sums = String::new();
         let mut entries = |binary: &str| {
             let mut archives = serde_json::Map::new();
@@ -228,8 +242,9 @@ printf '%s\n' "$*" >>"$F/gh.log"
 case "$1 $2" in
     'release view')
         [ -d "$F/gh/assets" ] || { echo 'release not found' >&2; exit 1; }
-        if [ -e "$F/gh/draft" ]; then d=true; else d=false; fi
-        ls "$F/gh/assets" | jq -R . | jq -s --argjson d "$d" '{isDraft: $d, assets: map({name: .})}'
+        if [ -e "$F/gh/draft" ]; then d=$(cat "$F/gh/draft"); else d=false; fi
+        ls "$F/gh/assets" | jq -R . | jq -s --argjson d "$d" --arg u "$(cat "$F/gh/url")" \
+            '{url: $u, isDraft: $d, assets: map({name: .})}'
         ;;
     'release download')
         mkdir -p "$5" && cp "$F/gh/assets/"* "$5/"
@@ -331,6 +346,14 @@ fn a_draft_is_checked_signed_verified_and_uploaded_but_not_published() {
             assert!(text.contains(&line), "{text}");
         }
     }
+    let repository = releases()
+        .replace("https://github.com/", "")
+        .replace("/releases", "");
+    let release = format!("{}/tag/untagged-1", releases());
+    assert!(
+        text.starts_with(&format!("repository: {repository}\nrelease: {release}\n")),
+        "{text}"
+    );
     assert!(text.contains("with the key 87CC6E990C51AF83 (release/kulman.pub)\n"));
     assert!(text.contains("minisign asks for the password twice, once per file\n"));
     assert!(text.ends_with(
@@ -379,6 +402,34 @@ fn signatures_already_there_without_replace_are_refused() {
         &f.sign(&[VERSION]),
         "release-sign.sh: v0.7.0 is already signed (SHA256SUMS.minisig manifest.json.minisig); \
          --replace signs it again\n",
+    );
+}
+
+#[test]
+fn a_draft_of_another_repository_is_refused() {
+    let f = Fixture::new();
+    let other = "https://github.com/someone/fork/releases/tag/untagged-1";
+    fs::write(f.path("gh/url"), other).unwrap();
+    f.refused_unsigned(
+        &f.sign(&[VERSION]),
+        &format!(
+            "release-sign.sh: this draft belongs to {other}, not to {}\n",
+            releases()
+        ),
+    );
+    assert!(f
+        .log("gh.log")
+        .iter()
+        .all(|l| !l.starts_with("release download")));
+}
+
+#[test]
+fn a_draft_state_that_is_not_true_or_false_is_refused() {
+    let f = Fixture::new();
+    fs::write(f.path("gh/draft"), "null").unwrap();
+    f.refused_unsigned(
+        &f.sign(&[VERSION]),
+        "release-sign.sh: could not read the release's draft state\n",
     );
 }
 
