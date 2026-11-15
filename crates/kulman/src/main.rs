@@ -198,6 +198,12 @@ fn on_path(dir: &Path) -> bool {
     })
 }
 
+/// What kulman says when `bin` is not on `PATH`: two lines, the second one to copy.
+fn path_hint(bin: &Path) -> String {
+    let bin = bin.display();
+    format!("{bin} is not on PATH; add it:\n    export PATH=\"{bin}:$PATH\"")
+}
+
 /// `state.json` exists under `home`: checked before anything is created.
 fn is_installed(home: &Path) -> Result<bool> {
     home.join("state.json")

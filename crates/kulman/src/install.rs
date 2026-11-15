@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{bail, Result};
 
-use crate::{ask_choose, ask_yes, is_installed, on_path, release, store, Usage};
+use crate::{ask_choose, ask_yes, is_installed, on_path, path_hint, release, store, Usage};
 use release::Manifest;
 use store::{Home, State};
 
@@ -101,7 +101,7 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
     }
     let bin = home.path.join("bin");
     if !on_path(&bin) {
-        println!("add to PATH: {}", bin.display());
+        println!("{}", path_hint(&bin));
     }
     println!("next: run \"kulman setup --scope repo\" (or local) in a project");
     Ok(())

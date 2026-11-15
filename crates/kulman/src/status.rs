@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 use crate::install::release_base;
-use crate::{on_path, release, store};
+use crate::{on_path, path_hint, release, store};
 use store::State;
 
 /// `kulman` with no command. Only reads: home is not created, nor locked.
@@ -26,7 +26,7 @@ pub(super) fn status() -> Result<()> {
     }
     let bin = home.join("bin");
     if !on_path(&bin) {
-        println!("PATH: {} is not on PATH (add it)", bin.display());
+        println!("{}", path_hint(&bin));
     }
     // Said with the base and the first cause: the URL under the base adds nothing.
     let latest = release_base().and_then(|base| {

@@ -779,13 +779,16 @@ fn install_says_how_to_add_to_path() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let bin = home.join("bin");
-    let hint = format!("add to PATH: {}", bin.display());
+    let hint = [
+        format!("{} is not on PATH; add it:", bin.display()),
+        format!("    export PATH=\"{}:$PATH\"", bin.display()),
+    ];
     let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
     let out = kulman(&home, &base).arg("install").output().unwrap();
     let text = stdout(&out);
     assert_eq!(
-        text.lines().rev().take(2).collect::<Vec<_>>(),
-        [next, hint.as_str()],
+        text.lines().rev().take(3).collect::<Vec<_>>(),
+        [next, hint[1].as_str(), hint[0].as_str()],
         "{text}"
     );
 
@@ -802,7 +805,7 @@ fn install_says_how_to_add_to_path() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("add to PATH"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("not on PATH"), "{}", stdout(&out));
     assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
 }
 

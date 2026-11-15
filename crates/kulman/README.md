@@ -57,8 +57,8 @@ symlink or not a directory is refused. No shell profile is edited.
     kulman [status]
 
 With no command, or `status`: the installed version and modules (a module whose binary is missing is marked
-`(missing: run kulman update)`), the line `PATH: <home>/bin is not on PATH (add it)` when it is not,
-and whether a newer release exists. It only reads: nothing is created. The release host gets 5 s to
+`(missing: run kulman update)`), the two lines `<home>/bin is not on PATH; add it:` and `    export PATH="<home>/bin:$PATH"` when it is
+not (a `PATH` entry that reaches `bin/` through a symlink counts), and whether a newer release exists. It only reads: nothing is created. The release host gets 5 s to
 connect and 8 s in all; past that, or on any error, the last line says what could not be reached,
 and why.
 
@@ -76,7 +76,7 @@ it says that instead (`could not check for a newer release (<base>: <reason>)`).
 version is read once `.lock` is held. If the installed version differs from `--version`, or is newer
 than the latest release, it changes nothing and exits 1: an older one gets the advice to run `kulman
 update`; a newer one, to run `kulman remove`, then `kulman install --version <X.Y.Z>`. A successful
-install ends with the next steps: adding `bin/` to `PATH` if it is not there, then `kulman setup` in
+install ends with the next steps: the same two lines for `bin/` if it is not on `PATH`, then `kulman setup` in
 a project. With nothing to do it writes nothing and says `already installed: <names> (<version>)`
 instead (and, as above, a newer release).
 
@@ -113,8 +113,8 @@ the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run whe
 kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`, the modules
 run with it put first on their own `PATH` (kulman's own environment and your shell are not changed;
 a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is), and a setup of
-kalka first says on stderr that `bin/` is not on `PATH`, that the agent configs it writes start
-`kalka` by name, and what to add to `PATH`.
+kalka first says on stderr, in the same two lines, that `bin/` is not on `PATH` and what to add, and
+then that the agent configs it writes start `kalka` by name.
 
 ## Asking and not asking
 

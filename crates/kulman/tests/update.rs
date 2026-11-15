@@ -64,13 +64,18 @@ fn status_lists_what_is_installed() {
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let first = format!("kulman 0.7.0 in {}", home.display());
-    let path = format!(
-        "PATH: {} is not on PATH (add it)",
-        home.join("bin").display()
-    );
+    let bin = home.join("bin").display().to_string();
+    let hint = format!("{bin} is not on PATH; add it:");
+    let export = format!("    export PATH=\"{bin}:$PATH\"");
     assert_eq!(
         lines(&out),
-        [first.as_str(), "kalka", "plaz", path.as_str()]
+        [
+            first.as_str(),
+            "kalka",
+            "plaz",
+            hint.as_str(),
+            export.as_str()
+        ]
     );
     assert_eq!(snapshot(t.path()), before);
 }
@@ -79,17 +84,21 @@ fn status_lists_what_is_installed() {
 fn status_says_when_bin_is_not_on_path() {
     let (_t, base, home) = installed();
     let bin = home.join("bin");
-    let line = format!("PATH: {} is not on PATH (add it)", bin.display());
+    let line = format!("{} is not on PATH; add it:", bin.display());
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out)[3], line);
+    assert_eq!(
+        lines(&out)[4],
+        format!("    export PATH=\"{}:$PATH\"", bin.display())
+    );
     let own = std::env::var_os("PATH").unwrap_or_default();
     let path =
         std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own)))
             .unwrap();
     let out = kulman(&home, &base).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("PATH:"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
 }
 
 #[test]
@@ -135,10 +144,10 @@ fn status_survives_an_unreachable_release() {
         let out = kulman(&home, base).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let text = lines(&out);
-        assert_eq!(text.len(), 5, "{text:?}");
-        assert!(text[4].starts_with(&start), "{text:?}");
-        assert!(text[4].ends_with(')'), "{text:?}");
-        assert!(!text[4].contains("download failed"), "{text:?}");
+        assert_eq!(text.len(), 6, "{text:?}");
+        assert!(text[5].starts_with(&start), "{text:?}");
+        assert!(text[5].ends_with(')'), "{text:?}");
+        assert!(!text[5].contains("download failed"), "{text:?}");
     }
     assert_eq!(snapshot(t.path()), before);
 }
@@ -860,5 +869,5 @@ fn status_finds_bin_on_path_through_a_symlink() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("PATH:"), "{}", stdout(&out));
+    assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
 }

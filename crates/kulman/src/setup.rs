@@ -8,7 +8,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::install::unknown_module;
 use crate::release::Manifest;
-use crate::{ask_choose, ask_yes, asks, on_path, store, SetupArgs, Usage};
+use crate::{ask_choose, ask_yes, asks, on_path, path_hint, store, SetupArgs, Usage};
 use store::State;
 
 /// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
@@ -139,13 +139,11 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         None
     };
     if off_path && kalka && !a.remove {
-        let bin = bin.display();
-        eprintln!("kulman: {bin} is not on PATH");
+        eprintln!("kulman: {}", path_hint(&bin));
         eprintln!(
             "kulman: the agent configs written now start \"kalka\"; an agent started without it \
              on PATH will not find it"
         );
-        eprintln!("kulman: add to PATH: {bin}");
     }
     // Names of the modules that failed, and the first failure's status.
     let mut failures: Vec<&str> = Vec::new();
