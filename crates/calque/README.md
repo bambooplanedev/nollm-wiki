@@ -86,8 +86,8 @@ A release of the kulman set carries `calque` for the two systems above; on any o
 it from source.
 
 Releases up to 0.6.13 were named `wiki`: the binary and its commands were `wiki`, and the project
-folder was `.wiki/`. From 0.7.2 the binary is `calque` and the folder `.kulman/`. The agent configs
-an old setup wrote start a server named `wiki`, which 0.7.2 does not have; `calque setup` replaces
+folder was `.wiki/`. From 0.8.0 the binary is `calque` and the folder `.kulman/`. The agent configs
+an old setup wrote start a server named `wiki`, which 0.8.0 does not have; `calque setup` replaces
 them, see [`calque setup`](#calque-setup).
 
 ### With kulman
