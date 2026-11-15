@@ -1025,6 +1025,19 @@ fn setup_codex_adds_its_table_beside_a_server_that_names_kalka() {
 }
 
 #[test]
+fn a_remove_that_finds_nothing_says_nothing_on_stderr_too() {
+    let f = fixture(true, false);
+    codex_fixed(
+        &f,
+        &codex_get("serve --source .", "-"),
+        "echo \"No MCP server named 'kalka' found.\" >&2",
+    );
+    let a = f.setup(&CODEX_ONLY).success();
+    assert!(!out(&a).contains("machine-wide"), "{}", out(&a));
+    assert_eq!(codex_log(&f), "mcp get kalka\nmcp remove kalka\n");
+}
+
+#[test]
 fn setup_codex_needs_no_codex_cli() {
     let f = fixture(true, false);
     let a = f.setup(&CODEX_ONLY).success();

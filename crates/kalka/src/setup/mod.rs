@@ -178,7 +178,8 @@ impl Report<'_> {
 }
 
 /// Runs the agent CLI `name` with `args` in `root`; the error is a short reason for the user.
-/// `mcp get` may fail: its status says whether the server exists.
+/// `mcp get` may fail: its status says whether the server exists, and its text is stdout. Any
+/// other call's text is stdout then stderr, whichever stream a CLI prints a note on.
 fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     let exe = find_on_path(name).ok_or(format!("{name} is not on PATH"))?;
     let o = Command::new(exe)
@@ -186,11 +187,13 @@ fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String>
         .current_dir(root)
         .output()
         .map_err(|e| format!("could not run {name}: {e}"))?;
-    if o.status.success() || args[1] == "get" {
-        return Ok((
-            o.status.success(),
-            String::from_utf8_lossy(&o.stdout).into_owned(),
-        ));
+    let get = args[1] == "get";
+    if o.status.success() || get {
+        let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+        if !get {
+            text.push_str(&String::from_utf8_lossy(&o.stderr));
+        }
+        return Ok((o.status.success(), text));
     }
     let err = String::from_utf8_lossy(&o.stderr);
     Err(format!(
