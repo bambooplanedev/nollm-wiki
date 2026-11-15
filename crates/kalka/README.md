@@ -42,7 +42,7 @@ crates/kalka/src/lib.rs
   [Obsidian and Quartz](#obsidian-and-quartz) · [page ids](#page-ids)
 - [Measured](#measured)
 - [Limitations](#limitations)
-- [Library](#library) · [Determinism](#determinism) · [Error reporting](#error-reporting) · [Docs](#docs)
+- [Library](#library) · [Determinism](#determinism) · [Docs](#docs)
 - [Development](#development)
 - [License](#license)
 
@@ -974,10 +974,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 Compiling the same input twice — on any machine, with any `--jobs` value — produces byte-identical
 output, across the ordering of parallel work, hashing, float comparisons and path handling. The
 rules that make this hold are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Error reporting
-
-Setting `SENTRY_DSN` enables Sentry error and panic reporting; it is off by default and nothing is sent without it.
 
 ## Docs
 
