@@ -12,14 +12,14 @@ use std::process::ExitCode;
 const USAGE: &str = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup [--source DIR] --scope repo|local [--remove]";
 
 const HELP: &str = "\
-build   write the vault of flowcharts for the source tree
-setup   register plaz with the agents of a project: build, then keep .kulman/ out of git
+build   write the vault of flowchart pages for the source tree
+setup   build, then keep .kulman/ out of git (--remove: delete the map's pages instead)
 
---source DIR      the source tree (default .)
---vault DIR       build only: the vault (default <source>/.kulman, pages in its map/)
---scope repo|local  setup only: ignore .kulman/ in .gitignore or in this clone's info/exclude
---remove          setup only: delete the map's own pages instead of building
---help, -h, help  print this text";
+--source DIR          the source tree (default .)
+--vault DIR           build only: the vault (default <source>/.kulman, pages in its map/)
+--scope repo|local    setup only, required unless --remove: ignore .kulman/ in .gitignore or in this clone's info/exclude
+--remove              setup only: delete the map's own pages instead of building
+--help, -h, help      print this text";
 
 /// The build's own stack: the flow walker recurses once per syntax tree
 /// level. The OS reserves it lazily.
