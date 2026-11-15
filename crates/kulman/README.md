@@ -124,10 +124,8 @@ undoes each module's setup. Before the first module runs, every chosen module's 
 write into the project's `.kulman/`, a folder of its own: setup refuses (exit 1) to run where that
 folder is kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`,
 the modules run with it put first on their own `PATH` (kulman's own environment and your shell are
-not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is),
-and a setup of calque first says on stderr, in the same two lines, that `bin/` is not on `PATH` and
-what to add, and then that the agent configs it writes start `calque` by name; that is left unsaid
-when `calque` itself is linked into a `PATH` folder as described under status.
+not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is).
+The agent configs calque writes start it from the kulman home, so they need nothing on `PATH`.
 
 ## Asking and not asking
 
