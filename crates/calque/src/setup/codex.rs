@@ -157,7 +157,7 @@ pub(super) fn run(
         }
         Ok(Outcome::Done)
     };
-    let present = r.file_item(root, FILE, &format!("{FILE} calque server"), false, edit)?;
+    let present = r.file_item(root, FILE, &format!("{FILE} calque server"), edit)?;
     if let Some(exact) = machine.filter(|&exact| present && (exact || absent || remove)) {
         machine_wide(r, exact, remove)?;
     }

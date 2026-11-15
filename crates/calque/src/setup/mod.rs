@@ -94,6 +94,7 @@ struct Report<'a> {
     remove: bool,
     /// Nothing skipped so far.
     ok: bool,
+    wrote: usize,
     wrote_pi: bool,
     /// Local-scope install: skip files git already tracks.
     guard_tracked: bool,
@@ -144,28 +145,22 @@ impl Report<'_> {
         root: &Path,
         file: &str,
         what: &str,
-        pi: bool,
         res: impl FnOnce() -> std::io::Result<Outcome>,
     ) -> Result<bool, WikiError> {
         if self.guard_tracked && tracked(root, file) {
             self.skip(what, "tracked by git; use --scope repo")?;
             return Ok(false);
         }
-        self.item(what, pi, res())
+        self.item(what, res())
     }
 
     /// Reports one outcome; `true` when the item is in place (written or already there).
-    fn item(
-        &mut self,
-        what: &str,
-        pi: bool,
-        r: std::io::Result<Outcome>,
-    ) -> Result<bool, WikiError> {
+    fn item(&mut self, what: &str, r: std::io::Result<Outcome>) -> Result<bool, WikiError> {
         let r = r?;
         let present = !matches!(r, Outcome::Foreign(_));
         match (r, self.remove) {
             (Outcome::Done, false) => {
-                self.wrote_pi |= pi;
+                self.wrote += 1;
                 self.line(&format!("wrote {what}"))
             }
             (Outcome::Done, true) => self.line(&format!("removed {what}")),
@@ -361,6 +356,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         out,
         remove: opts.remove,
         ok: true,
+        wrote: 0,
         wrote_pi: false,
         guard_tracked: local && !opts.remove,
     };
@@ -393,7 +389,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             } else {
                 Outcome::Done
             };
-            r.item(&what, false, Ok(o))?;
+            r.item(&what, Ok(o))?;
             agent_dirs = memory::agent_dirs(root);
             for d in &agent_dirs {
                 let state = if d.is_dir() {
@@ -438,9 +434,10 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     let (mut cursor_added, mut codex_added) = (false, false);
 
     for agent in agents {
-        let (name, pi) = match agent {
-            Agent::Claude => ("claude", false),
-            Agent::Pi => ("pi", true),
+        let wrote = r.wrote;
+        let pi = match agent {
+            Agent::Claude => false,
+            Agent::Pi => true,
             Agent::Cursor => {
                 let file = ".cursor/mcp.json";
                 let path = root.join(file);
@@ -452,7 +449,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     }
                 };
                 let before = path.exists();
-                if r.file_item(root, file, &format!("{file} calque server"), false, res)? {
+                if r.file_item(root, file, &format!("{file} calque server"), res)? {
                     cursor_added |= !opts.remove;
                     if !before {
                         ignore.push(format!("/{file}"));
@@ -497,7 +494,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     )?;
                 } else {
                     let before = path.exists();
-                    if r.file_item(root, file, what, false, res)? && !before {
+                    if r.file_item(root, file, what, res)? && !before {
                         ignore.push(format!("/{file}"));
                     }
                 }
@@ -523,12 +520,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     edit::upsert_entry(&path, &["mcpServers"], "calque", &value)
                 }
             };
-            if r.file_item(root, file, &format!("{file} calque server"), pi, res)? && pi {
+            if r.file_item(root, file, &format!("{file} calque server"), res)? && pi {
                 ignore.push("/.pi/mcp.json".into());
             }
         } else {
             let o = claude_local_mcp(root, "calque", &entries, opts.remove, false);
-            r.item("Claude Code local calque server", false, Ok(o))?;
+            r.item("Claude Code local calque server", Ok(o))?;
         }
         // Skill: pi only. Claude Code shows the server instructions, which carry the navigation
         // steps (a navigation skill cost a turn per task there), and keeps its own memory.
@@ -542,8 +539,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     edit::write_file(&root.join(&file), &skills)
                 }
             };
-            let what = format!("{} skill for {name}", file.display());
-            if r.file_item(root, &file.to_string_lossy(), &what, pi, res)? {
+            let what = format!("{} skill for pi", file.display());
+            if r.file_item(root, &file.to_string_lossy(), &what, res)? {
                 ignore.push(format!("/{}/", skill.display()));
             }
         }
@@ -561,7 +558,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     }
                 };
                 let what = format!("{PI_HOOK_FILE} hook for pi");
-                if r.file_item(root, PI_HOOK_FILE, &what, true, res)? {
+                if r.file_item(root, PI_HOOK_FILE, &what, res)? {
                     ignore.push("/.pi/extensions/calque-hint/".into());
                 }
             } else {
@@ -580,11 +577,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                         edit::append_item(&path, &parents, &item)
                     }
                 };
-                if r.file_item(root, file, &format!("{file} prompt hook"), false, res)? && local {
+                if r.file_item(root, file, &format!("{file} prompt hook"), res)? && local {
                     ignore.push(format!("/{file}"));
                 }
             }
         }
+        r.wrote_pi |= pi && r.wrote > wrote;
     }
 
     if opts.remove {
@@ -592,7 +590,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     } else if !local {
         r.item(
             &format!("{OUT_DIR}/ in .gitignore"),
-            false,
             edit::ensure_line(&root.join(".gitignore"), &format!("{OUT_DIR}/")),
         )?;
     } else if let Some(exclude) = exclude_file(root) {
@@ -605,7 +602,6 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             };
             r.item(
                 &format!("{line} in .git/info/exclude"),
-                false,
                 edit::ensure_line(&exclude, &line),
             )?;
         }
