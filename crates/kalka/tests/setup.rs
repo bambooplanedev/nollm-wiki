@@ -883,7 +883,7 @@ fn setup_codex_leaves_another_wiki_server_alone() {
     let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
     assert!(
         out(&a).contains(
-            "skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured; this project's .codex/config.toml entry overrides it here\n"
+            "skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"
         ),
         "{}",
         out(&a)
@@ -958,6 +958,55 @@ fn a_remove_that_finds_nothing_says_nothing() {
         assert_eq!(codex_log(&f), log);
     }
     assert!(!f.root().join(".codex").exists());
+}
+
+/// `kalka setup` run with `home` as the home folder and `env` set, in the project.
+fn setup_at_home(
+    f: &Fixture,
+    home: &Path,
+    env: &[(&str, &Path)],
+    args: &[&str],
+) -> assert_cmd::assert::Assert {
+    let mut c = Command::cargo_bin("kalka").unwrap();
+    c.arg("setup")
+        .args(args)
+        .current_dir(f.root())
+        .env("PATH", f.bin())
+        .env("HOME", home)
+        .env_remove("CODEX_HOME");
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    c.assert()
+}
+
+#[test]
+fn a_codex_home_reached_through_a_link_is_still_codexs() {
+    let f = fixture(true, false);
+    fs::create_dir_all(f.root().join(".codex")).unwrap();
+    let link = f.tmp.path().join("codex-home");
+    symlink(f.root().join(".codex"), &link).unwrap();
+    let a = setup_at_home(&f, &f.home(), &[("CODEX_HOME", &link)], &CODEX_ONLY).code(1);
+    assert!(out(&a).contains("Codex's own"), "{}", out(&a));
+    assert!(!f.root().join(".codex/config.toml").exists());
+}
+
+#[test]
+fn codexs_own_home_is_no_project_that_uses_codex() {
+    let f = fixture(true, false);
+    fs::remove_file(f.bin().join("pi")).unwrap();
+    fs::create_dir_all(f.root().join(".codex")).unwrap();
+    let a = setup_at_home(&f, &f.root(), &[], &["--scope", "repo"]).success();
+    assert!(!out(&a).contains("codex"), "{}", out(&a));
+    assert!(!f.root().join(".codex/config.toml").exists());
+    // Named, it is said why nothing is written.
+    let a = setup_at_home(&f, &f.root(), &[], &CODEX_ONLY).code(1);
+    assert!(
+        out(&a).contains("skipped .codex/config.toml kalka server: this .codex/ is Codex's own"),
+        "{}",
+        out(&a)
+    );
+    assert!(!f.root().join(".codex/config.toml").exists());
 }
 
 #[test]
@@ -1597,7 +1646,7 @@ fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
         .code(1);
     let o = out(&a);
     assert!(
-        o.contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured; this project's .codex/config.toml entry overrides it here\n"),
+        o.contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"),
         "{o}"
     );
     assert_eq!(
@@ -1613,7 +1662,7 @@ fn a_switch_leaves_a_codex_entry_with_other_settings_alone() {
     // Asked again once the project has none, and left.
     let a = f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat()).code(1);
     assert!(
-        out(&a).contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured\n"),
+        out(&a).contains("skipped Codex kalka server (~/.codex/config.toml): another \"kalka\" server is configured machine-wide and runs in every Codex session; `codex mcp remove kalka` removes it\n"),
         "{}",
         out(&a)
     );
@@ -1641,9 +1690,7 @@ fn a_switch_leaves_a_claude_entry_with_other_settings_alone() {
 }
 
 #[test]
-/// The old setup switched the machine-wide entry with a remove and an add; now a failed
-/// removal of it names the command, and the project still gets its entry.
-fn a_failed_add_after_a_switch_says_the_entry_was_removed() {
+fn a_failed_codex_mcp_remove_is_reported_and_the_project_block_still_written() {
     let f = fixture(true, false);
     codex_fixed(
         &f,

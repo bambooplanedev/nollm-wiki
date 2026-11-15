@@ -320,7 +320,8 @@ pub fn detect(root: &Path) -> Vec<Agent> {
     if root.join(".cursor").is_dir() {
         a.push(Agent::Cursor);
     }
-    if root.join(".codex").is_dir() {
+    // Codex's own home (setup in the home folder) is no project's.
+    if root.join(".codex").is_dir() && !codex::codex_home(root) {
         a.push(Agent::Codex);
     }
     a

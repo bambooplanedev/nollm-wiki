@@ -44,15 +44,18 @@ fn read(root: &Path) -> Result<Option<String>, &'static str> {
 }
 
 /// Whether `root/.codex` is where Codex keeps its machine-wide config.
-fn codex_home(root: &Path) -> bool {
+pub(super) fn codex_home(root: &Path) -> bool {
     let home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
         .or_else(|| {
             let h = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
             Some(Path::new(&h).join(".codex"))
         });
-    // The folder may not exist yet: its parent is resolved.
-    let real = |p: &Path| Some(p.parent()?.canonicalize().ok()?.join(p.file_name()?));
+    // Resolved whole (`CODEX_HOME` may be a link); one that does not exist yet, by its parent.
+    let real = |p: &Path| {
+        let by_parent = || Some(p.parent()?.canonicalize().ok()?.join(p.file_name()?));
+        p.canonicalize().ok().or_else(by_parent)
+    };
     home.is_some_and(|h| real(&h).is_some_and(|h| Some(h) == real(&root.join(".codex"))))
 }
 
@@ -88,11 +91,12 @@ fn machine_get() -> Option<bool> {
 /// one reported.
 fn machine_wide(r: &mut Report, exact: bool, remove: bool) -> Result<(), WikiError> {
     if !exact {
-        let here = format!("; this project's {FILE} entry overrides it here");
-        return r.skip(
-            MACHINE,
-            &format!("{ANOTHER}{}", if remove { "" } else { &here }),
-        );
+        let why = if remove {
+            format!("{ANOTHER} machine-wide and runs in every Codex session; `codex mcp remove kalka` removes it")
+        } else {
+            format!("{ANOTHER} machine-wide and still runs in every other Codex session (`codex mcp remove kalka` removes it); this project's {FILE} entry was written and takes precedence here")
+        };
+        return r.skip(MACHINE, &why);
     }
     match cli("codex", &std::env::temp_dir(), &["mcp", "remove", "kalka"]) {
         // Gone in the meantime: nothing was removed.
