@@ -1010,6 +1010,21 @@ fn codexs_own_home_is_no_project_that_uses_codex() {
 }
 
 #[test]
+fn setup_codex_adds_its_table_beside_a_server_that_names_kalka() {
+    let f = fixture(true, false);
+    let p = f.root().join(".codex/config.toml");
+    fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let proxy =
+        "[mcp_servers.proxy]\ncommand = \"mcp-proxy\"\nargs = [\n  \"--name\",\n  \"kalka\",\n]\n";
+    fs::write(&p, proxy).unwrap();
+    f.setup(&CODEX_ONLY).success();
+    assert_eq!(read(&p), format!("{proxy}\n{CODEX_BLOCK}"));
+    f.setup(&[&["--remove"], &CODEX_ONLY[..]].concat())
+        .success();
+    assert_eq!(read(&p), proxy);
+}
+
+#[test]
 fn setup_codex_needs_no_codex_cli() {
     let f = fixture(true, false);
     let a = f.setup(&CODEX_ONLY).success();

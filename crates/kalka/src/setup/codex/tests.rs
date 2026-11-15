@@ -47,6 +47,37 @@ fn nothing_of_kalka_is_absent() {
     }
 }
 
+const PROXY: &str = "[mcp_servers.proxy]\ncommand = \"mcp-proxy\"\nargs = [\n  \"--name\",\n  \"kalka\",\n  \"kalka\"\n]\n";
+
+#[test]
+fn a_word_kalka_that_is_no_key_is_no_server() {
+    let prose = "[mcp_servers.docs]\ncommand = \"docs\"\n\n[profiles.x]\ndeveloper_instructions = \"\"\"\nkalka: use the wiki first\n\"\"\"\n";
+    for t in [PROXY, prose] {
+        assert_eq!(state(t, true), State::Absent, "{t:?}");
+        assert_eq!(
+            state(&t.replace('\n', "\r\n"), true),
+            State::Absent,
+            "{t:?}"
+        );
+    }
+    assert_eq!(
+        with_block(PROXY, true),
+        "[mcp_servers.proxy]\ncommand = \"mcp-proxy\"\nargs = [\n  \"--name\",\n  \"kalka\",\n  \"kalka\"\n]\n\n[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n"
+    );
+    // A key named kalka after any `[mcp_servers…]` header is still refused, however spelled.
+    for key in [
+        "kalka = { command = \"y\" }",
+        "kalka.command = \"y\"",
+        "\"kalka\" = { command = \"y\" }",
+        "'kalka'.command = \"y\"",
+        "kalka   = { command = \"y\" }",
+        "kalka .command = \"y\"",
+    ] {
+        let t = format!("{PROXY}[mcp_servers]\n{key}\n");
+        assert_eq!(state(&t, true), State::Other(ANOTHER), "{t:?}");
+    }
+}
+
 #[test]
 fn any_other_kalka_definition_is_another_server() {
     let body = "command = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n";

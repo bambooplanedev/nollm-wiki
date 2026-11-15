@@ -108,8 +108,12 @@ pub(super) fn state(text: &str, memory: bool) -> State {
             body.push(l.trim_end());
         } else {
             other = other.or(servers(&s, false));
-            // After any `[mcp_servers…]` header, a `kalka` key may be the server's.
-            if servers_seen && names_kalka(&s) {
+            // After any `[mcp_servers…]` header, a `kalka` key may be the server's. Squeezed, a
+            // key line always has `=` or `.` right after the key; an array item or prose has not.
+            let key = s
+                .strip_prefix("kalka")
+                .is_some_and(|r| r.starts_with(['=', '.']));
+            if servers_seen && key {
                 other = other.or(Some(ANOTHER));
             }
         }
