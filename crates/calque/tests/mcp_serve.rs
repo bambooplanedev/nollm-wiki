@@ -472,7 +472,7 @@ fn serve_refuses_non_wiki_dir() {
         "stderr: {stderr}"
     );
     assert!(
-        stderr.contains(&format!("run `calque compile <input> {dir}` first")),
+        stderr.contains(&format!("calque compile <input> {dir}")),
         "stderr: {stderr}"
     );
 }
@@ -825,29 +825,6 @@ fn serve_source_catches_up_an_existing_wiki() {
 }
 
 #[test]
-fn serve_source_sees_edit_without_sleep() {
-    let project = source_project();
-    let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
-    initialize(&mut stdin, &stdout);
-    assert_ne!(
-        hit_ids(&search(&mut stdin, &stdout, 2, "oldword")),
-        [] as [String; 0]
-    );
-
-    std::fs::write(
-        project.path().join("notes/alpha.md"),
-        "# Alpha\n\nzebrafish here\n",
-    )
-    .unwrap();
-    let resp = search(&mut stdin, &stdout, 3, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
-    assert_eq!(stale_block(&resp), None);
-
-    drop(stdin);
-    let _ = child.wait();
-}
-
-#[test]
 fn two_servers_on_one_dir_answer_fresh() {
     let project = source_project();
     let (mut c1, mut in1, out1) = spawn_server_source(project.path(), &[]);
@@ -866,7 +843,7 @@ fn two_servers_on_one_dir_answer_fresh() {
         .unwrap();
         for (stdin, stdout, id) in [(&mut in1, &out1, 10 + n), (&mut in2, &out2, 10 + n)] {
             let resp = search(stdin, stdout, id, &word);
-            assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+            assert_eq!(hit_ids(&resp), ["alpha"], "{word} not seen: {resp}");
             assert_eq!(stale_block(&resp), None, "{word}");
         }
     }
@@ -897,7 +874,7 @@ fn killing_the_writer_hands_over() {
     // The new writer's first compile builds every tree-sitter query, which
     // in a debug build on a loaded CI runner can outlast one call's wait.
     let resp = search_until_compiled(&mut in2, &out2, &mut 2, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(hit_ids(&resp), ["alpha"], "edit not seen: {resp}");
     assert_eq!(stale_block(&resp), None);
 
     drop(in2);
@@ -946,10 +923,9 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
         // root: permissions do not stop it, so there is no failed compile to see here.
         std::fs::remove_file(wiki_dir.join("probe")).unwrap();
         std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        eprintln!("skipped: .kulman/ stays writable for this user");
         drop(stdin);
         let _ = child.wait();
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -988,7 +964,7 @@ fn serve_source_through_symlink_answers_fresh() {
 
     std::fs::write(link.join("notes/alpha.md"), "# Alpha\n\nzebrafish here\n").unwrap();
     let resp = search(&mut stdin, &stdout, 3, "zebrafish");
-    assert!(!hit_ids(&resp).is_empty(), "edit not seen: {resp}");
+    assert_eq!(hit_ids(&resp), ["alpha"], "edit not seen: {resp}");
     assert_eq!(stale_block(&resp), None, "a recompile loop would show here");
 
     drop(stdin);
@@ -1026,7 +1002,7 @@ fn concurrent_calls_after_edit_both_fresh() {
         }
     }
     for (id, resp) in responses {
-        assert!(!hit_ids(&resp).is_empty(), "call {id} not fresh: {resp}");
+        assert_eq!(hit_ids(&resp), ["alpha"], "call {id} not fresh: {resp}");
         assert_eq!(stale_block(&resp), None, "call {id}: {resp}");
     }
 

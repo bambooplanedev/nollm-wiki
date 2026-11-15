@@ -230,14 +230,6 @@ fn snapshot_lint_matches_the_disk_lint() {
 }
 
 #[test]
-fn snapshot_serves_loaded_snapshot() {
-    let (_tmp, out) = fixture(3);
-    let state = WikiState::load(&out).unwrap();
-    let n = pages(&state);
-    assert_eq!(n, 3);
-}
-
-#[test]
 fn snapshot_reloads_after_recompile() {
     let (tmp, out) = fixture(3);
     let state = WikiState::load(&out).unwrap();

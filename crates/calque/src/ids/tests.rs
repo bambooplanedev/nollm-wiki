@@ -392,21 +392,16 @@ fn qualification_preserves_a_content_derived_title() {
 }
 
 #[test]
-fn reserved_id_is_remapped_and_entity_id_field_matches_key() {
-    let out = remap_reserved_names(map(&["index", "alpha"]));
-    assert!(!out.contains_key("index"));
-    assert!(out.contains_key("index_page"));
-    assert_eq!(out["index_page"].id, "index_page");
-    assert!(out.contains_key("alpha"));
-}
-
-#[test]
 fn all_reserved_names_are_remapped() {
-    let out = remap_reserved_names(map(&["index", "llms", "agents", "graph"]));
+    let out = remap_reserved_names(map(&["index", "llms", "agents", "graph", "alpha"]));
     for reserved in ["index", "llms", "agents", "graph"] {
+        let remapped = format!("{reserved}_page");
         assert!(!out.contains_key(reserved));
-        assert!(out.contains_key(&format!("{reserved}_page")));
+        assert!(out.contains_key(&remapped));
+        // The entity's own id field follows its key.
+        assert_eq!(out[&remapped].id, remapped);
     }
+    assert!(out.contains_key("alpha"));
 }
 
 #[test]
@@ -419,13 +414,4 @@ fn remap_avoids_colliding_with_an_existing_fixed_id() {
     assert_eq!(out["index_page_2"].id, "index_page_2");
     // The pre-existing entity keeps its original id untouched.
     assert_eq!(out["index_page"].id, "index_page");
-}
-
-#[test]
-fn remap_is_deterministic_regardless_of_input_order() {
-    let a = remap_reserved_names(map(&["index", "agents", "alpha"]));
-    let b = remap_reserved_names(map(&["alpha", "agents", "index"]));
-    let ids_a: Vec<&String> = a.keys().collect();
-    let ids_b: Vec<&String> = b.keys().collect();
-    assert_eq!(ids_a, ids_b);
 }

@@ -88,10 +88,10 @@ fn mentions_catch_the_name_in_backticks_and_not_plain_prose() {
 
 #[test]
 fn mentions_skip_a_folder_git_ignores() {
-    if crate::setup::find_on_path("git").is_none() {
-        eprintln!("skipped: no git");
-        return;
-    }
+    assert!(
+        crate::setup::find_on_path("git").is_some(),
+        "needs git on PATH"
+    );
     let d = dir(&[
         (".gitignore", b"vendor/\n"),
         ("vendor/CLAUDE.md", b"wiki page\n"),

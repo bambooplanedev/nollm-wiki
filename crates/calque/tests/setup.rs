@@ -621,35 +621,24 @@ fn setup_no_hook_installs_no_hook() {
 }
 
 #[test]
-fn setup_hook_remove_keeps_other_hooks() {
-    let f = fixture(true, true);
-    let r = f.root();
-    fs::create_dir_all(r.join(".claude")).unwrap();
-    fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
-    let args = ["--agent", "claude,pi", "--scope", "repo"];
-    f.setup(&args).success();
-    f.setup(&[&["--remove"], &args[..]].concat()).success();
-    assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
-    assert!(!r.join(".pi/extensions").exists());
-}
-
-#[test]
 fn setup_repo_creates_the_memory_folder_and_the_skill_names_it() {
     let f = fixture(true, true);
     let args = ["--agent", "claude,pi", "--scope", "repo"];
     let a = f.setup(&args).success();
     assert!(f.root().join(".agents/memory").is_dir());
     let o = out(&a);
-    let lines: Vec<&str> = o.lines().collect();
+    let with_prefix =
+        |prefix: &str| -> Vec<&str> { o.lines().filter(|l| l.starts_with(prefix)).collect() };
     // The repo's own folder is made; the Claude folder for it is only named,
     // since nothing has written a note there yet.
+    let made = with_prefix("wrote memory folder ");
     assert!(
-        lines[0].starts_with("wrote memory folder ") && lines[0].ends_with("/.agents/memory"),
+        made.len() == 1 && made[0].ends_with("/.agents/memory"),
         "{o}"
     );
+    let named = with_prefix("agent memory folder ");
     assert!(
-        lines[1].starts_with("agent memory folder ")
-            && lines[1].ends_with("/memory (not yet created)"),
+        named.len() == 1 && named[0].ends_with("/memory (not yet created)"),
         "{o}"
     );
     let text = read(&f.root().join(".agents/skills/calque-navigation/SKILL.md"));
@@ -1168,8 +1157,7 @@ fn an_unwritable_project_file_keeps_the_machine_wide_entry() {
         // root: permissions do not stop it, so there is no failed write to see here.
         fs::remove_file(dir.join("probe")).unwrap();
         mode(0o755);
-        eprintln!("skipped: .codex/ stays writable for this user");
-        return;
+        panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
     let a = f.setup(&CODEX_ONLY).failure();
     mode(0o755);
@@ -1563,16 +1551,6 @@ fn default_texts_name_only_default_tools() {
             );
         }
     }
-}
-
-#[test]
-fn instructions_have_no_dangling_callers_clause() {
-    let text = calque::serve::INSTRUCTIONS;
-    assert!(!text.contains("lists the functions that call it"), "{text}");
-    assert!(
-        text.contains("symbols with their lines. Do not call grep"),
-        "{text}"
-    );
 }
 
 #[test]

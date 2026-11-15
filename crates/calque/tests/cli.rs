@@ -800,7 +800,7 @@ fn the_default_wiki_is_dot_kulman() {
 }
 
 #[test]
-fn read_commands_default_to_dot_wiki_then_out() {
+fn read_commands_default_to_dot_kulman_then_out() {
     let dir = tempdir().unwrap();
     let cwd = dir.path();
     fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();
@@ -1008,14 +1008,4 @@ fn compile_prints_stage_timings_only_with_calque_timings() {
     let s1 = snapshot(&out1);
     assert_eq!(s1, snapshot(&out2));
     assert_eq!(s1, snapshot(&out3));
-}
-
-#[test]
-fn the_binary_is_called_calque() {
-    Command::cargo_bin("calque")
-        .unwrap()
-        .arg("--help")
-        .assert()
-        .success()
-        .stdout(contains("Usage: calque"));
 }

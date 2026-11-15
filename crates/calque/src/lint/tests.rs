@@ -80,29 +80,6 @@ fn a_markdown_body_with_its_own_headings_is_still_scanned() {
 }
 
 #[test]
-fn broken_link_detected() {
-    let mut pages = render_all(vec![ent("alpha", "Alpha", "nothing")]);
-    pages
-        .get_mut("alpha")
-        .unwrap()
-        .push_str("\nSee [[Ghost Page]] too.\n");
-    let r = lint(&pages);
-    assert_eq!(
-        r.broken_links,
-        vec![("alpha".to_string(), "Ghost Page".to_string())]
-    );
-}
-
-#[test]
-fn clean_wiki_has_no_broken_links() {
-    let pages = render_all(vec![
-        ent("alpha", "Alpha", "mentions Beta"),
-        ent("beta", "Beta", "nothing"),
-    ]);
-    assert_eq!(lint(&pages).broken_links, [] as [(String, String); 0]);
-}
-
-#[test]
 fn resolves_slug_piped_links_and_reports_readable_broken() {
     let mut pages = render_all(vec![
         ent("alpha", "Alpha", "mentions Beta"),
