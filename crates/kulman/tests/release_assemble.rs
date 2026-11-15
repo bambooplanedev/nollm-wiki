@@ -161,6 +161,28 @@ fn the_tree_holds_the_control_files_at_both_addresses() {
 }
 
 #[test]
+fn the_tree_carries_the_signatures_beside_what_they_sign() {
+    let (t, dir) = assets();
+    let sigs = ["SHA256SUMS.minisig", "manifest.json.minisig"];
+    for f in sigs {
+        fs::write(dir.join(f), format!("a signature of {f}\n")).unwrap();
+    }
+    assembled(t.path(), &dir);
+    for at in ["latest/download", "download/v0.7.0"] {
+        let at = t.path().join("tree").join(at);
+        for f in sigs {
+            assert_eq!(
+                fs::read(at.join(f)).unwrap(),
+                fs::read(dir.join(f)).unwrap(),
+                "{}",
+                at.join(f).display()
+            );
+        }
+        assert!(at.join("SHA256SUMS").is_file() && at.join("manifest.json").is_file());
+    }
+}
+
+#[test]
 fn a_failing_tree_leaves_the_directory_without_the_control_files() {
     let (t, dir) = assets();
     // A tree below a regular file cannot be made.

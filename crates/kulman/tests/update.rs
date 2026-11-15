@@ -75,6 +75,7 @@ fn status_lists_what_is_installed() {
             "plaz",
             hint.as_str(),
             export.as_str(),
+            "signature not checked: local release tree",
             "up to date"
         ]
     );
@@ -189,6 +190,7 @@ fn update_moves_every_module() {
     assert_eq!(
         lines(&out),
         [
+            "signature not checked: local release tree",
             "updated kalka 0.7.0 -> 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
@@ -249,7 +251,7 @@ fn update_repairs_a_half_finished_update() {
     fs::write(home.join("bin/kulman"), "old").unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out).len(), 4, "{}", stdout(&out));
+    assert_eq!(lines(&out).len(), 5, "{}", stdout(&out));
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})
@@ -265,7 +267,10 @@ fn update_when_current_says_up_to_date() {
     let before = snapshot(t.path());
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out), ["up to date"]);
+    assert_eq!(
+        lines(&out),
+        ["signature not checked: local release tree", "up to date"]
+    );
     assert_eq!(snapshot(t.path()), before);
 
     // A listed binary missing at the same version is put back.
@@ -276,6 +281,7 @@ fn update_when_current_says_up_to_date() {
     assert_eq!(
         lines(&out),
         [
+            "signature not checked: local release tree",
             "repaired kalka 0.7.0",
             "repaired plaz 0.7.0",
             "repaired kulman 0.7.0"
@@ -287,7 +293,10 @@ fn update_when_current_says_up_to_date() {
     fs::remove_file(home.join("manifest.json")).unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_ne!(lines(&out), ["up to date"]);
+    assert_ne!(
+        lines(&out),
+        ["signature not checked: local release tree", "up to date"]
+    );
     assert!(!stdout(&out).contains("restart"), "{}", stdout(&out));
     assert_eq!(snapshot(t.path()), before);
 }
@@ -315,6 +324,7 @@ fn update_installs_a_module_the_new_release_requires() {
     assert_eq!(
         lines(&out),
         [
+            "signature not checked: local release tree",
             "updated kalka 0.7.0 -> 0.8.0",
             "installed plaz 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
@@ -335,7 +345,10 @@ fn update_does_not_downgrade() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out),
-        ["installed 0.10.0 is newer than the latest release 0.7.0; nothing changed"]
+        [
+            "signature not checked: local release tree",
+            "installed 0.10.0 is newer than the latest release 0.7.0; nothing changed"
+        ]
     );
     assert_eq!(snapshot(t.path()), before);
 }
@@ -785,7 +798,10 @@ fn update_when_current_does_not_need_every_module_in_the_release() {
     let before = snapshot(t.path());
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out), ["up to date"]);
+    assert_eq!(
+        lines(&out),
+        ["signature not checked: local release tree", "up to date"]
+    );
     assert_eq!(snapshot(t.path()), before);
 }
 

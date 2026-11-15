@@ -8,9 +8,10 @@
 # <dir>/manifest.json from release/modules.json, and copies the repository's install.sh into
 # <dir>. With --tree it also lays out <out> as KULMAN_RELEASE_URL=file://<out> expects:
 # <out>/download/v<version>/ (archives, SHA256SUMS, manifest.json, install.sh) and
-# <out>/latest/download/ (SHA256SUMS, manifest.json, install.sh). <out> must not exist. The three
-# files reach <dir> only after the tree is built. Exit 0, or 1 with a line naming what is
-# wrong; nothing is written unless every check passes.
+# <out>/latest/download/ (SHA256SUMS, manifest.json, install.sh), and SHA256SUMS.minisig and
+# manifest.json.minisig at both places when <dir> holds them (this script makes no signature).
+# <out> must not exist. The three files reach <dir> only after the tree is built. Exit 0, or 1
+# with a line naming what is wrong; nothing is written unless every check passes.
 #
 # Needs jq, tar, and sha256sum or shasum.
 
@@ -112,6 +113,9 @@ if [ -n "$tree" ]; then
     done
     for at in "download/v$version" latest/download; do
         cp -- "$scratch/SHA256SUMS" "$scratch/manifest.json" "$scratch/install.sh" "$tree/$at/"
+        for f in SHA256SUMS.minisig manifest.json.minisig; do
+            [ ! -e "$dir/$f" ] || cp -- "$dir/$f" "$tree/$at/"
+        done
     done
 fi
 

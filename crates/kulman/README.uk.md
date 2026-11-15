@@ -13,7 +13,8 @@
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
 
-`install.sh` читає `SHA256SUMS` останнього релізу, завантажує архів `kulman` для цієї машини
+`install.sh` читає `SHA256SUMS` останнього релізу (і перевіряє його підпис, якщо встановлено
+`minisign`, див. [Підписи](#підписи)), завантажує архів `kulman` для цієї машини
 (`aarch64-apple-darwin` або `x86_64-unknown-linux-musl`; на будь-якій іншій системі — «no build»),
 перевіряє його за цим файлом і кладе бінарник у `~/.kulman-home/bin/kulman`. Йому потрібні `curl`,
 `tar`, `mktemp` і `sha256sum` або `shasum`; без інструмента для контрольних сум він зупиняється, а
@@ -25,9 +26,10 @@
 доводить модулі до версії щойно покладеного `kulman`. Збірка для Linux статична й працює однаково на
 системах із glibc і з musl.
 
-Те саме вручну: завантажте `kulman-v<version>-<target>.tar.gz` і `SHA256SUMS` зі сторінки релізу,
-потім
+Те саме вручну: завантажте `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` і
+`SHA256SUMS.minisig` зі сторінки релізу, потім
 
+    minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
     grep kulman-v<version>-<target>.tar.gz SHA256SUMS | sha256sum -c -   # на macOS: … | shasum -a 256 -c -
     tar -xzf kulman-v<version>-<target>.tar.gz kulman
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
@@ -193,7 +195,9 @@ errors: <modules>` і виходить з кодом першого модуля
 - `<module>-v<version>-<target>.tar.gz` і `kulman-v<version>-<target>.tar.gz`, у кожному один файл,
   названий за своїм бінарником;
 - `SHA256SUMS` — рядки `<sha256>  <file>`, для `install.sh` і для людей;
-- `install.sh`.
+- `install.sh`;
+- `manifest.json.minisig` і `SHA256SUMS.minisig` — підписи цих двох файлів (див.
+  [Підписи](#підписи)).
 
 `<base>/latest/download/` віддає ті самі файли останнього релізу. kulman читає маніфест звідти; з
 `download/v<version>/` — з `--version`; і з `download/v<installed>/` — для `install` поверх
@@ -226,3 +230,91 @@ errors: <modules>` і виходить з кодом першого модуля
 ```
 
 Невідомі поля ігноруються. Кожен архів перевіряється за своїм `sha256`, перш ніж його розпакувати.
+
+### Підписи
+
+Опублікований реліз містить 11 файлів: 6 архівів, `manifest.json`, `SHA256SUMS`, `install.sh` і
+два відокремлені підписи [minisign](https://jedisct1.github.io/minisign/), `manifest.json.minisig`
+і `SHA256SUMS.minisig`. Підписано лише `manifest.json` і `SHA256SUMS`; архіви захищені сумами
+SHA-256 усередині них. Ключ релізів — файл [`release/kulman.pub`](../../release/kulman.pub) у цьому
+репозиторії:
+
+```
+untrusted comment: minisign public key 87CC6E990C51AF83
+RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+```
+
+У `kulman` ключ вкомпільовано; жоден прапорець чи змінна його не змінює. До кожного `manifest.json`,
+який він читає, він завантажує `manifest.json.minisig`, що лежить поруч, і перевіряє його, перш ніж
+використати будь-що з маніфесту. Приймається лише форма, яку minisign робить за замовчуванням
+(prehashed), а не застаріла (`minisign -S -l`). Через `https://` підпис обовʼязковий, і маніфест без
+чинного підпису не використовується: `install` і `update` зупиняються з `kulman: manifest.json:
+signature is missing` (хост релізів відповідає 404), `kulman: manifest.json: signature could not be
+fetched: <cause>` (будь-яка інша помилка: тайм-аут, TLS, помилка сервера; у дереві `file://` —
+`.minisig`, який не вдається прочитати) або `kulman: manifest.json: signature does not verify`, далі
+`nothing changed`, код виходу 1. Там, де команда лише дивиться, чи є новіший реліз (`kulman status`
+та `install` поверх установленої версії), причину натомість наводить її рядок `could not check for a
+newer release (…)`. У дереві `file://` наявний підпис теж мусить пройти перевірку; відсутній
+дозволено, і `kulman` один раз каже `signature not checked: local release tree`.
+
+`install.sh` містить той самий ключ. Якщо `minisign` є в `PATH`, він завантажує `SHA256SUMS.minisig`
+і перевіряє ним `SHA256SUMS` (`minisign -VHm`: як і `kulman`, лише форму prehashed), перш ніж
+прочитати з нього бодай рядок; він зупиняється (код виходу 1) з `install.sh: SHA256SUMS: signature
+is missing` (через `https://` нічого не завантажено: підпису немає, сервер не відповідає або
+оголошує підпис, більший за 4 КіБ) або `install.sh: SHA256SUMS: signature does not verify` (так само
+для підпису, більшого за 4 КіБ, який завантажився частково, як із локального дерева чи із сервера,
+що не надсилає довжини). Для перевірки потрібен minisign, який знає `-H`; 0.11 і 0.12 його знають, а
+з версією, яка не знає, перевірка не проходить і `install.sh` зупиняється. У дереві `file://`
+відсутній підпис дозволено, з рядком `install.sh: signature not checked: local release tree`. Без
+`minisign` він іде далі лише за SHA-256 і каже про це: `install.sh: signature not checked (minisign
+not found); kulman checks it on every install and update`.
+
+Вручну, коли кожен файл і його `.minisig` лежать в одній теці:
+
+    minisign -Vm manifest.json -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+    minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
+
+Підписи зʼявилися раніше, ніж було опубліковано будь-який реліз `kulman`: кожен опублікований
+`kulman` їх перевіряє, тож кожен реліз мусить бути підписаний, інакше `install` і `update` його
+відхиляють.
+
+Як підписати реліз: пуш тегу `v*` створює чернетку релізу з 9 файлами (робочий процес релізу);
+секретного ключа в GitHub немає ніде. Потім власник у терміналі, у робочій копії, де є цей тег,
+запускає:
+
+    # з --key <secret key file>, якщо ключ не типовий для minisign
+    sh scripts/release-sign.sh <version>
+
+Скрипт перевіряє чернетку (вона мусить бути цього репозиторію, за адресою релізів, якою користується
+`kulman`; перед підписом він виводить репозиторій і адресу релізу; рівно 9 файлів; SHA-256 кожного
+архіву такий, як у `SHA256SUMS` і `manifest.json`; версію; `install.sh` такий, як на тезі), підписує
+обидва файли (minisign питає пароль ключа, по разу на файл), перевіряє обидва підписи ключем
+`release/kulman.pub` (підпис будь-яким іншим ключем зупиняє скрипт, і нічого не завантажується) і
+завантажує два файли `.minisig` у чернетку; `--replace` підписує наново чернетку, де вони вже є. Сам
+він не публікує: наприкінці він виводить команду, яка це робить, `gh release edit v<version>
+--draft=false`. Опублікований реліз стає останнім — тим, який беруть `install.sh` і `kulman update`.
+
+Щоб випробувати підписану чернетку до публікації, завантажте її в `$dl` (`gh release download v$v
+--dir "$dl"`, де `v` — версія) і розкладіть як дерево релізу в `$out`:
+
+    mkdir -p "$out/download/v$v" "$out/latest/download"
+    cp "$dl"/* "$out/download/v$v/"
+    cp "$dl"/SHA256SUMS "$dl"/SHA256SUMS.minisig "$dl"/manifest.json "$dl"/manifest.json.minisig \
+        "$dl"/install.sh "$out/latest/download/"
+
+Тоді з `KULMAN_RELEASE_URL=file://$out` `install.sh` і `kulman` встановлюють кандидата й
+перевіряють його підписи. Не запускайте `release-assemble.sh` на завантажених файлах: він
+переписує обидва підписані файли.
+
+Обмеження:
+
+- Один ключ, заміни ключа поки немає. Новий ключ може дійти до користувачів лише в релізі,
+  підписаному старим, тож якщо загубити секретний ключ (або його пароль), зробити реліз, який
+  прийме `kulman`, уже не вдасться: тримайте його резервну копію.
+- Підпис показує, що файли зробив власник, а не що вони найновіші. Той, хто контролює хост релізів,
+  може видати старіший підписаний реліз за останній: `kulman update` відмовляється повертатися до
+  старішої версії, але нове встановлення його прийме.
+- Сам `install.sh` надходить через HTTPS і не підписаний: хто контролює місце, звідки його
+  завантажують, той контролює цей перший крок, з `minisign` чи без нього. Підписи захищають те,
+  що `install.sh` і `kulman` завантажують після нього. Щоб не довіряти жодному хосту завантаження,
+  перевіряйте вручну (див. [Як отримати](#як-отримати)).

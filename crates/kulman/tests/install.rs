@@ -629,7 +629,9 @@ fn install_with_nothing_to_do_says_so_and_changes_nothing() {
         assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
         assert_eq!(
             stdout(&out),
-            format!("already installed: {names} (0.7.0)\n"),
+            format!(
+                "signature not checked: local release tree\nalready installed: {names} (0.7.0)\n"
+            ),
             "{args:?}"
         );
         assert_eq!(snapshot(t.path()), before, "{args:?}");

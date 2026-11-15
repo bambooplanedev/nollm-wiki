@@ -114,6 +114,16 @@ with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.jso
 lays out the `latest/download/` and `download/v<version>/` paths a `file://` `KULMAN_RELEASE_URL`
 reads. Needs `jq`, `tar` and `sha256sum` or `shasum`; tested in `crates/kulman/tests/release_assemble.rs`.
 
+`release-sign.sh <version> [--key <secret key file>] [--replace]` — the owner's signing step, run
+in a terminal in this checkout: checks that the draft release `v<version>` is this repository's
+(under the releases address in `crates/kulman/src/install.rs`), holds the 9 files the release
+workflow uploads and that they agree (each archive's SHA-256 in `SHA256SUMS` and
+`manifest.json`, the version, `install.sh` as at the tag), signs `manifest.json` and `SHA256SUMS`
+with minisign, verifies both with `release/kulman.pub` and uploads the two `.minisig` files to the
+draft. It does not publish; it prints the command that does. Needs `gh`, `minisign`, `jq`, `git`
+and `sha256sum` or `shasum`; tested with a fake `gh` and `minisign` in
+`crates/kulman/tests/release_sign.rs`.
+
 `install-check.sh <version> [<tree>]` — installs the release laid out at `<tree>` (default `/release`)
 the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `kulman install --yes`,
 checks each binary's `--version` and sets up a throwaway git project. The release workflow runs it
