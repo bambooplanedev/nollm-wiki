@@ -232,7 +232,61 @@ fn download(
     Ok(())
 }
 
-/// The manifest of `version`, or of the latest release; with its bytes as read.
+/// The release key (a minisign public key file), compiled in: there is no other.
+const PUBLIC_KEY: &str = include_str!("../../../release/kulman.pub");
+
+/// The most bytes read for `manifest.json.minisig` (one is about 300).
+const SIGNATURE_LIMIT: u64 = 4096;
+
+/// Checks that `signature` (a minisign signature file) is `public_key`'s (a minisign public key
+/// file: an `untrusted comment:` line and the key line) over `file`, trusted comment included.
+/// Only the prehashed form minisign makes by default is taken, not the legacy one.
+pub fn verify(public_key: &str, file: &[u8], signature: &str) -> Result<()> {
+    let key = match public_key.lines().collect::<Vec<_>>()[..] {
+        [comment, key] if comment.starts_with("untrusted comment: ") => {
+            minisign_verify::PublicKey::from_base64(key)
+        }
+        _ => Err(minisign_verify::Error::InvalidEncoding),
+    }
+    .map_err(|e| anyhow!("bad public key: {e}"))?;
+    let signature =
+        minisign_verify::Signature::decode(signature).map_err(|e| anyhow!("bad signature: {e}"))?;
+    key.verify(file, &signature, false)
+        .map_err(|e| anyhow!("{e}"))
+}
+
+/// Said once per run, however many manifests come from an unsigned local tree.
+static UNCHECKED: std::sync::Once = std::sync::Once::new();
+
+/// Checks `bytes`, fetched from `url`, against `<url>.minisig` and the release key. Over https
+/// the signature is required; in a `file://` tree an absent one is allowed and said once.
+fn check_signature(url: &str, bytes: &[u8], wait: Wait) -> Result<()> {
+    let url = format!("{url}.minisig");
+    if let Some(Ok(false)) = local_path(&url).map(|p| p.try_exists()) {
+        UNCHECKED.call_once(|| println!("signature not checked: local release tree"));
+        return Ok(());
+    }
+    let bad = || anyhow!("manifest.json: signature does not verify");
+    let mut sig = Vec::new();
+    if let Err(e) = download(
+        &url,
+        &mut sig,
+        SIGNATURE_LIMIT,
+        wait.connect,
+        Some(wait.whole),
+    ) {
+        // Past the limit (download copies one byte more before it fails): there, but no signature.
+        if sig.len() as u64 > SIGNATURE_LIMIT {
+            return Err(bad());
+        }
+        bail!("manifest.json: signature is missing: {url}: {e:#}");
+    }
+    let sig = String::from_utf8(sig).map_err(|_| bad())?;
+    verify(PUBLIC_KEY, bytes, &sig).map_err(|_| bad())
+}
+
+/// The manifest of `version`, or of the latest release; with its bytes as read. Nothing in them
+/// is read before their signature is checked.
 pub fn manifest(base: &str, version: Option<&str>, wait: Wait) -> Result<(Manifest, Vec<u8>)> {
     let url = match version {
         Some(v) => format!("{base}/download/v{v}/manifest.json"),
@@ -247,6 +301,7 @@ pub fn manifest(base: &str, version: Option<&str>, wait: Wait) -> Result<(Manife
         Some(wait.whole),
     )
     .with_context(|| format!("manifest.json: download failed: {url}"))?;
+    check_signature(&url, &bytes, wait)?;
     let m = Manifest::parse(&bytes)?;
     if let Some(v) = version {
         if m.version != v {
@@ -387,6 +442,95 @@ mod tests {
         .unwrap();
         assert_eq!(m.modules[0].summary, "");
         assert!(m.modules[0].options.is_empty());
+    }
+
+    /// The test key pair's public half and what it signed (the secret half was discarded).
+    const TEST_KEY: &str = include_str!("../tests/data/signing/test.pub");
+    const FILE: &[u8] = include_bytes!("../tests/data/signing/file.txt");
+    const SIGNATURE: &str = include_str!("../tests/data/signing/file.txt.minisig");
+
+    #[test]
+    fn the_compiled_in_key_parses() {
+        let err = verify(PUBLIC_KEY, FILE, SIGNATURE).unwrap_err();
+        // Parsed: refused for the key id, not for the key itself.
+        assert!(!err.to_string().starts_with("bad public key"), "{err}");
+    }
+
+    #[test]
+    fn a_signature_by_the_key_verifies() {
+        verify(TEST_KEY, FILE, SIGNATURE).unwrap();
+        // CRLF line ends: lines() strips them, so the same signature still verifies.
+        let crlf = SIGNATURE.replace('\n', "\r\n");
+        verify(&TEST_KEY.replace('\n', "\r\n"), FILE, &crlf).unwrap();
+    }
+
+    #[test]
+    fn anything_else_does_not_verify() {
+        let other = include_str!("../tests/data/signing/other.txt.minisig");
+        let legacy = include_str!("../tests/data/signing/file.txt.legacy.minisig");
+        let altered_file = [FILE, b"x"].concat();
+        let sig_line = SIGNATURE.lines().nth(1).unwrap();
+        let mut flipped = sig_line.as_bytes().to_vec();
+        flipped[20] = if flipped[20] == b'A' { b'B' } else { b'A' };
+        let altered_sig = SIGNATURE.replace(sig_line, std::str::from_utf8(&flipped).unwrap());
+        let altered_comment = SIGNATURE.replace("file:file.txt", "file:other.txt");
+        for (file, sig) in [
+            (&altered_file[..], SIGNATURE),
+            (FILE, altered_sig.as_str()),
+            (FILE, altered_comment.as_str()),
+            (FILE, other),
+            (FILE, legacy),
+            (FILE, "garbage"),
+            (FILE, ""),
+            (FILE, &SIGNATURE[..SIGNATURE.len() / 2]),
+        ] {
+            assert!(verify(TEST_KEY, file, sig).is_err(), "{sig}");
+        }
+        // By another key: the release key did not make the test signature.
+        assert!(verify(PUBLIC_KEY, FILE, SIGNATURE).is_err());
+    }
+
+    #[test]
+    fn a_manifest_is_not_parsed_before_its_signature_verifies() {
+        let dir = tempfile::tempdir().unwrap();
+        let latest = dir.path().join("latest/download");
+        fs::create_dir_all(&latest).unwrap();
+        fs::write(latest.join("manifest.json"), "attacker's text").unwrap();
+        fs::write(latest.join("manifest.json.minisig"), SIGNATURE).unwrap();
+        let base = format!("file://{}", dir.path().display());
+        let err = manifest(&base, None, WAIT).err().unwrap();
+        assert_eq!(
+            format!("{err:#}"),
+            "manifest.json: signature does not verify"
+        );
+    }
+
+    #[test]
+    fn over_https_a_signature_that_cannot_be_fetched_is_missing() {
+        // Nothing listens on the loopback discard port: refused at once, no network used.
+        let url = "https://127.0.0.1:9/latest/download/manifest.json";
+        let err = check_signature(url, b"{}", STATUS_WAIT).unwrap_err();
+        let text = format!("{err:#}");
+        let start = format!("manifest.json: signature is missing: {url}.minisig: ");
+        assert!(text.starts_with(&start), "{text}");
+    }
+
+    #[test]
+    fn a_public_key_is_exactly_a_comment_line_and_a_key_line() {
+        let key_line = TEST_KEY.lines().nth(1).unwrap();
+        for bad in [
+            key_line.to_string(),
+            format!("{TEST_KEY}\n"),
+            format!("comment\n{key_line}\n"),
+            format!("{TEST_KEY}extra\n"),
+            String::new(),
+        ] {
+            let err = verify(&bad, FILE, SIGNATURE).unwrap_err();
+            assert!(
+                err.to_string().starts_with("bad public key"),
+                "{bad}: {err}"
+            );
+        }
     }
 
     #[test]
