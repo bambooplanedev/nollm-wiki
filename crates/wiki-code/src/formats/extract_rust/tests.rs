@@ -33,11 +33,7 @@ fn rust_restricted_visibility_is_not_an_export() {
     let src = "pub fn public_one() {}\npub(crate) fn crate_only() {}\npub(super) fn super_only() {}\npub(crate) struct CrateType;\nstruct Holder;\nimpl Holder {\n    pub fn kept(&self) {}\n    pub(crate) fn impl_crate_only(&self) {}\n}\n";
     let e = crate::extract("t.rs", src);
     assert_has(&e.symbols, "pub fn public_one()");
-    assert!(
-        e.symbols.iter().any(|s| s.contains("kept")),
-        "a bare-pub inherent method must survive: {:?}",
-        e.symbols
-    );
+    assert_has(&e.symbols, "pub fn Holder::kept(&self)");
     for leaked in ["crate_only", "super_only", "CrateType", "impl_crate_only"] {
         // each name is not exported outside the crate
         assert_lacks(&e.symbols, leaked);

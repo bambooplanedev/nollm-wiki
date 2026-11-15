@@ -422,10 +422,9 @@ fn doc_text_keeps_the_whole_doc() {
             "/// Pure decision.\n///\n/// * `creds_present` — owner has a futures key.\npub fn decide() {}\n",
         );
     assert_eq!(doc.as_deref(), Some("Pure decision."));
-    let text = text.unwrap();
-    assert!(
-        text.contains("creds_present") && text.contains("futures key"),
-        "{text}"
+    assert_eq!(
+        text.as_deref(),
+        Some("Pure decision. * `creds_present` — owner has a futures key.")
     );
 }
 

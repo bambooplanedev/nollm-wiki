@@ -32,8 +32,26 @@ fn walk_no_ignore_includes_gitignored() {
     let root = dir.path();
     fs::write(root.join(".gitignore"), b"ignored.txt\n").unwrap();
     fs::write(root.join("ignored.txt"), b"nope").unwrap();
+    fs::write(root.join("a.txt"), b"a").unwrap();
+    fs::create_dir(root.join(".hidden")).unwrap();
+    fs::write(root.join(".hidden/x.rs"), b"x").unwrap();
+    fs::create_dir(root.join("node_modules")).unwrap();
+    fs::write(root.join("node_modules/m.js"), b"m").unwrap();
+    // The doc's promise: nothing is filtered, so the gitignored file, the hidden
+    // directory and a skipped-by-name directory all come back (and `.gitignore`
+    // itself, a hidden file).
     let files = walk(root, false, &all).files;
-    assert!(files.iter().any(|f| f.rel_path == "ignored.txt"));
+    let rels: Vec<_> = files.iter().map(|f| f.rel_path.as_str()).collect();
+    assert_eq!(
+        rels,
+        [
+            ".gitignore",
+            ".hidden/x.rs",
+            "a.txt",
+            "ignored.txt",
+            "node_modules/m.js"
+        ]
+    );
 }
 
 #[test]
