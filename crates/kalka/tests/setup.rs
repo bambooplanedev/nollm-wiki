@@ -831,11 +831,8 @@ fn setup_cursor_writes_the_project_mcp_json_and_says_to_approve_it() {
             ENTRY.replace('\n', "\n    ")
         )
     );
-    assert!(
-        out(&a).contains("cursor-agent mcp enable kalka"),
-        "{}",
-        out(&a)
-    );
+    let line = "Cursor: the editor lists the server under Settings → Tools & MCP; cursor-agent loads it only after `cursor-agent mcp enable kalka`.\n";
+    assert!(out(&a).ends_with(line), "{}", out(&a));
     f.setup(&["--remove", "--agent", "cursor", "--scope", "repo"])
         .success();
     assert!(!f.root().join(".cursor").exists());

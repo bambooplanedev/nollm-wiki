@@ -228,7 +228,7 @@ stderr and exits 0.
 - Either scope writes Codex's server into the project's own `.codex/config.toml`, and needs no
   `codex` CLI for it; see [Codex](#codex).
 - Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
-  stdout are both terminals.
+  stdout are both terminals; `--yes` is the same as having no terminal.
 - The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
   a `UserPromptSubmit` entry (`kalka hint --claude-hook`) in `.claude/settings.json`
   (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/kalka-hint/index.ts`. The
@@ -276,8 +276,8 @@ and reported; setup does the rest and exits 1. A JSON config setup edits is rewr
 pretty JSON with its keys and their order kept.
 
 After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
-print mode), and Cursor loads a new server only after you approve it (its MCP settings, or
-`cursor-agent mcp enable kalka`).
+print mode); `cursor-agent` loads a new server only after it is enabled
+(`cursor-agent mcp enable kalka`), and the Cursor editor lists it under Settings → Tools & MCP.
 
 #### Claude Code by hand
 
@@ -329,10 +329,10 @@ grep.
 { "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
-Cursor starts the server in the project directory, so `--source .` works. A new server stays off
-until you approve it, and Cursor drops that approval whenever the entry's command changes; the
-server then silently does not load. In our runs the agent called `search` and `callers` with no
-extra instructions.
+Cursor starts the server in the project directory, so `--source .` works. In `cursor-agent`, a new
+server stays off until you approve it, and `cursor-agent` drops that approval whenever the entry's
+command changes; the server then silently does not load. In our runs the agent called `search` and
+`callers` with no extra instructions.
 
 `cursor-agent -p` (non-interactive) rejects every MCP tool call unless it runs with `--force`;
 `--mode ask --force` lets the wiki tools run and still allows no edits. Checked with

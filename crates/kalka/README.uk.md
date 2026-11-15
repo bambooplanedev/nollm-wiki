@@ -239,7 +239,7 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 - Обидва варіанти записують сервер Codex у власний `.codex/config.toml` проєкту, і CLI `codex` для
   цього не потрібен; див. [Codex](#codex).
 - Без `--scope` setup питає в терміналі, а без термінала завершується з помилкою. Setup питає лише
-  тоді, коли і stdin, і stdout — термінали.
+  тоді, коли і stdin, і stdout — термінали; `--yes` — те саме, що відсутність термінала.
 - Хук запиту додає рядки коду з вікі до кожного запиту, перш ніж його побачить модель. Claude
   Code отримує запис `UserPromptSubmit` (`kalka hint --claude-hook`) у `.claude/settings.json`
   (`settings.local.json` з `--scope local`); pi — `.pi/extensions/kalka-hint/index.ts`. Хук мовчить,
@@ -289,8 +289,8 @@ Claude; глобальний сервер `wiki` у Codex; тека `.wiki/` і 
 редагує setup, переписується з відступом у 2 пробіли, ключі та їхній порядок зберігаються.
 
 Після setup: pi завантажує файли проєкту лише після того, як ви довірите проєкт (`/trust` або
-`--approve` у режимі print), а Cursor завантажує новий сервер лише після вашого схвалення (у
-налаштуваннях MCP або командою `cursor-agent mcp enable kalka`).
+`--approve` у режимі print), а `cursor-agent` завантажує новий сервер лише після того, як його
+ввімкнено (`cursor-agent mcp enable kalka`); редактор Cursor показує його в Settings → Tools & MCP.
 
 #### Claude Code вручну
 
@@ -342,10 +342,10 @@ whole files, whenever the task needs a function, type, handler or module locatio
 { "mcpServers": { "kalka": { "command":"kalka", "args": ["serve", "--source", "."] } } }
 ```
 
-Cursor запускає сервер у теці проєкту, тож `--source .` працює. Новий сервер вимкнений, доки ви
-його не схвалите, а Cursor скидає це схвалення щоразу, коли змінюється команда в записі; тоді сервер
-мовчки не завантажується. У наших прогонах агент викликав `search` і `callers` без додаткових
-інструкцій.
+Cursor запускає сервер у теці проєкту, тож `--source .` працює. У `cursor-agent` новий сервер
+вимкнений, доки ви його не схвалите, а `cursor-agent` скидає це схвалення щоразу, коли змінюється
+команда в записі; тоді сервер мовчки не завантажується. У наших прогонах агент викликав `search` і
+`callers` без додаткових інструкцій.
 
 `cursor-agent -p` (неінтерактивний режим) відхиляє кожен виклик MCP-інструмента, якщо не запущений з
 `--force`; `--mode ask --force` дозволяє інструменти вікі й однаково не дозволяє редагувати файли.
