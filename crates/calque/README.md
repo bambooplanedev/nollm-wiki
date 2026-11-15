@@ -210,7 +210,8 @@ stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/calque-navigation/SKILL.md`, and `.kulman/` in `.gitignore`.
+  `.agents/skills/calque-navigation/SKILL.md`, and `.kulman/` in `.gitignore`. For a file it wrote
+  that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json calque … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on; a
@@ -247,9 +248,9 @@ A `calque` installed by kulman (run as `~/.kulman-home/bin/calque`, or from `$KU
 has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` through `sh -c` (the
 prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
 `PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
-`~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"` or
-`$` is not supported by this line). An entry that starts plain
-`calque` counts as setup's own and is rewritten. Any other `calque` (built from source, installed
+`~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"`,
+`$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
+own and is rewritten to the form this `calque` writes. Any other `calque` (built from source, installed
 elsewhere) has every agent run the server as plain `calque`, so `calque` must be on `PATH`; setup
 warns when it is not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space

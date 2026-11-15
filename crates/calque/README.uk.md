@@ -219,7 +219,8 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/calque-navigation/SKILL.md` і `.kulman/` у `.gitignore`.
+  `.agents/skills/calque-navigation/SKILL.md` і `.kulman/` у `.gitignore`. Для файлу, який setup
+  записав, а git ігнорує, він друкує `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
   `claude mcp add-json calque … --scope local`, інші файли записуються, а ті, що setup створив,
   вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`, коли памʼять увімкнена; уже наявний
@@ -257,9 +258,9 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 агенти запускають як `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` через `sh -c` (хук промпту
 виконує цей рядок, розширення pi саме будує той самий шлях), тож жодному агентові не треба мати його
 в `PATH`, і нічий домашній шлях не потрапляє в спільний файл; з `KULMAN_HOME`, відмінним від
-`~/.kulman-home`, setup попереджає, що агентам потрібна і ця змінна (домашній шлях із `"` чи `$`
-цей рядок не підтримує). Запис, що запускає просто
-`calque`, setup вважає своїм і переписує. Будь-який інший `calque` (зібраний з коду, встановлений
+`~/.kulman-home`, setup попереджає, що агентам потрібна і ця змінна (домашній шлях із `"`, `$`,
+зворотним апострофом чи `\` цей рядок не підтримує). Запис в обох формах setup вважає своїм і
+переписує у форму, яку пише цей `calque`. Будь-який інший `calque` (зібраний з коду, встановлений
 деінде) кожен агент запускає просто як `calque`, тож `calque` має бути в `PATH`; setup попереджає,
 якщо його там немає. Запускати двічі безпечно. Запис, файл чи блок на тому самому місці з іншим
 вмістом лишається як є, і setup про нього повідомляє, робить решту й виходить з кодом 1.

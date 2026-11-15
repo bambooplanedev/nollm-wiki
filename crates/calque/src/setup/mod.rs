@@ -408,13 +408,12 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    // Own variants, this run's choice first; `--remove` takes any. From the kulman home, an
-    // entry that starts calque by name is calque's own too, and is rewritten.
+    // Own variants, this run's choice first; setup rewrites any of them and `--remove` takes any.
     let home = kulman_home();
     let cmds: &[&str] = if home.is_some() {
         &[LAUNCH, CMD]
     } else {
-        &[CMD]
+        &[CMD, LAUNCH]
     };
     let choice = [opts.memory, !opts.memory];
     let skills = choice.map(skill_text);

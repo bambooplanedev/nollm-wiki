@@ -2023,6 +2023,51 @@ fn setup_from_the_kulman_home_rewrites_a_bare_project_in_place_and_remove_takes_
 }
 
 #[test]
+fn setup_outside_the_kulman_home_rewrites_a_launch_project_in_place_and_remove_takes_it() {
+    let f = fixture(true, true);
+    codex_stub(&f);
+    let (r, exe) = (f.root(), f.home_calque());
+    let home = |args: &[&str]| f.run(&exe, args).assert().success();
+    let remove = [&["--remove"], &ALL_AGENTS[..]].concat();
+    f.setup(&ALL_AGENTS).success();
+    let bare = tree(&r);
+    f.setup(&remove).success();
+    let removed = tree(&r);
+    // The launch form, from a calque outside the home: rewritten, one entry and one hook per file.
+    home(&ALL_AGENTS);
+    assert_launch_files(&r);
+    f.setup(&ALL_AGENTS).success();
+    assert_eq!(read(&r.join(".mcp.json")), mcp_json(ENTRY));
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([hook_item()])
+    );
+    assert_eq!(tree(&r), bare);
+    // The launch form taken out from outside the home.
+    home(&ALL_AGENTS);
+    f.setup(&remove).success();
+    assert_eq!(tree(&r), removed);
+}
+
+#[test]
+fn setup_local_outside_the_kulman_home_replaces_a_launch_claude_entry_and_remove_takes_it() {
+    let f = fixture(true, true);
+    claude_stub_args(&f, "sh", LAUNCH_SHOWN);
+    fs::write(f.tmp.path().join("state"), "x").unwrap();
+    let args = ["--agent", "claude", "--scope", "local", "--no-hook"];
+    f.setup(&args).success();
+    let set = "mcp get calque\nmcp remove calque --scope local\nmcp add-json calque";
+    assert_eq!(
+        f.claude_log(),
+        format!("{set} {{\"command\":\"calque\",\"args\":[\"serve\",\"--source\",\".\"]}} --scope local\n")
+    );
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(f
+        .claude_log()
+        .ends_with("mcp get calque\nmcp remove calque --scope local\n"));
+}
+
+#[test]
 fn setup_from_a_kulman_home_elsewhere_says_the_agents_need_kulman_home() {
     let f = fixture(false, true);
     let elsewhere = f.tmp.path().join("my \"kulman\" $home: x");
@@ -2087,16 +2132,11 @@ fn setup_repo_warns_for_each_written_file_git_ignores() {
 }
 
 #[test]
-fn setup_warns_about_ignored_files_only_in_a_repository_with_git() {
+fn setup_does_not_warn_about_ignored_files_outside_a_repository() {
     // Not a repository: git exits 128.
     let f = ignoring_claude();
     real_git(&f);
     fs::remove_dir_all(f.root().join(".git")).unwrap();
-    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
-    assert_eq!(ignored_warnings(&a), Vec::<String>::new());
-    // Git is not on PATH (the fixture's default).
-    let f = ignoring_claude();
     let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
     assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
     assert_eq!(ignored_warnings(&a), Vec::<String>::new());
