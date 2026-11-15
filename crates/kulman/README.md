@@ -85,7 +85,9 @@ newer release).
     kulman update [--yes]
 
 Updates kulman and every installed module to the latest release, all or none. A release older
-than the installed one is not installed: nothing changes.
+than the installed one is not installed: nothing changes. Each module it moves is named with both
+versions (`updated <name> <old> -> <new>`), and the last line, when any was moved, is `restart
+running agent sessions; they keep the old binaries until then`.
 
     kulman remove [--modules <MODULES>] [--yes]
 

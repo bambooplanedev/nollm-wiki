@@ -166,9 +166,10 @@ fn update_moves_every_module() {
     assert_eq!(
         lines(&out),
         [
-            "updated kalka 0.8.0",
-            "updated plaz 0.8.0",
-            "updated kulman 0.8.0"
+            "updated kalka 0.7.0 -> 0.8.0",
+            "updated plaz 0.7.0 -> 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
         ]
     );
     assert_eq!(
@@ -225,7 +226,7 @@ fn update_repairs_a_half_finished_update() {
     fs::write(home.join("bin/kulman"), "old").unwrap();
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out).len(), 3, "{}", stdout(&out));
+    assert_eq!(lines(&out).len(), 4, "{}", stdout(&out));
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["kalka", "plaz"]})

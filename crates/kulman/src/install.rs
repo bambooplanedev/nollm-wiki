@@ -298,13 +298,24 @@ fn renew(
     let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
+    let old_modules = state.modules.clone();
     let state = State {
         version: latest.clone(),
         modules: modules.into_iter().collect(),
     };
     store::commit(home, &staged, raw, &state)?;
+    let mut updated = false;
     for s in &staged {
-        println!("updated {} {latest}", s.name);
+        // A module the release newly requires was not there before.
+        if s.name == "kulman" || old_modules.contains(&s.name) {
+            println!("updated {} {have} -> {latest}", s.name);
+            updated = true;
+        } else {
+            println!("installed {} {latest}", s.name);
+        }
+    }
+    if updated {
+        println!("restart running agent sessions; they keep the old binaries until then");
     }
     Ok(())
 }
