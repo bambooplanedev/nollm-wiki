@@ -520,7 +520,7 @@ fn render_page_applies_fixups_to_text_bodies_only() {
 
 /// A link left at the temporary path (a dead run, or planted) must not make the
 /// write land in the file it points at.
-#[cfg(unix)]
+#[cfg(unix)] // unix: needs a symlink
 #[test]
 fn write_atomic_does_not_write_through_a_link_at_the_temporary_path() {
     let out = tempfile::tempdir().unwrap();

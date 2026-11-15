@@ -1066,7 +1066,13 @@ fn a_codex_found_through_a_relative_path_entry_is_the_one_that_runs() {
         .code(1);
     // The project's stub answered from the temp dir, and its entry is reported.
     assert_eq!(codex_log(&f), "mcp get calque\n");
-    assert!(out(&a).contains("machine-wide"), "{}", out(&a));
+    assert!(
+        out(&a).contains(
+            "skipped Codex calque server (machine-wide): another \"calque\" server is configured machine-wide and still runs in every other Codex session (`codex mcp remove calque` removes it); this project's .codex/config.toml entry was written and takes precedence here\n"
+        ),
+        "{}",
+        out(&a)
+    );
 }
 
 #[test]

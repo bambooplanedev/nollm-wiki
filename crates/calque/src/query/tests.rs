@@ -96,7 +96,7 @@ fn body_counts_match_match_indices_and_find() {
 }
 
 #[test]
-fn query_tokens_keep_the_words_as_typed() {
+fn tokenize_keeps_the_words_as_typed() {
     assert_eq!(Wiki::tokenize("агента агентом"), ["агента", "агентом"]);
     assert_eq!(
         Wiki::tokenize("MCP token_estimate"),

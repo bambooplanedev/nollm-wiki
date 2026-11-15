@@ -423,7 +423,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     let (mut cursor_added, mut codex_added) = (false, false);
 
-    for agent in opts.agents.clone() {
+    for &agent in &opts.agents {
         let wrote = r.wrote;
         let pi = match agent {
             Agent::Claude => false,
@@ -572,6 +572,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 }
             }
         }
+        // Relies on: inside the pi iteration only pi's own items are written.
         r.wrote_pi |= pi && r.wrote > wrote;
     }
 
