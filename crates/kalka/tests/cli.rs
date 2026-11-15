@@ -535,6 +535,44 @@ fn compile_memory_dir_with_dotdot_gives_the_same_page_path() {
 }
 
 #[test]
+fn compile_fails_on_a_source_that_is_missing_or_no_folder_and_writes_nothing() {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("out");
+    let missing = dir.path().join("no-such-dir");
+    let file = dir.path().join("a.txt");
+    fs::write(&file, "# A\n").unwrap();
+    let run = |src: &std::path::Path| {
+        Command::cargo_bin("kalka")
+            .unwrap()
+            .args(["compile", src.to_str().unwrap(), out.to_str().unwrap()])
+            .assert()
+            .code(1)
+    };
+    let m = format!(
+        "Error: {}: No such file or directory (os error 2)\n",
+        missing.display()
+    );
+    run(&missing).stdout("").stderr(m);
+    let f = format!("Error: {}: not a directory\n", file.display());
+    run(&file).stdout("").stderr(f);
+    assert!(!out.exists(), "the output folder must not be created");
+}
+
+#[test]
+fn compile_of_an_empty_folder_still_succeeds_with_no_pages() {
+    let dir = tempdir().unwrap();
+    let (input, out) = (dir.path().join("raw"), dir.path().join("out"));
+    fs::create_dir_all(&input).unwrap();
+    Command::cargo_bin("kalka")
+        .unwrap()
+        .args(["compile", input.to_str().unwrap(), out.to_str().unwrap()])
+        .assert()
+        .success()
+        .stdout(contains("Compiled 0 pages"));
+    assert!(out.is_dir());
+}
+
+#[test]
 fn compile_memory_dir_that_does_not_exist_warns_and_continues() {
     let dir = tempdir().unwrap();
     let input = dir.path().join("raw");

@@ -57,7 +57,8 @@ kulman — набір інструментів для агентів, що пи�
 закомічені файли для всієї команди. `--scope local` пише свої файли лише в цю робочу копію й
 натомість вносить створені ним у `.git/info/exclude`; виняток — сервер kalka для Claude Code: його
 додає `claude mcp add-json … --scope local` у власну конфігурацію Claude Code, і для цього потрібен
-CLI `claude`. Сервер для Codex за будь-якого `--scope` лежить у `~/.codex/config.toml`.
+CLI `claude`. Сервер для Codex за будь-якого `--scope` потрапляє у власний `.codex/config.toml`
+проєкту, і Codex завантажує його лише в проєкті, якому довіряє.
 
 Згодом `kulman update` доводить усе до останнього релізу, `kulman setup --scope repo --remove`
 скасовує налаштування проєкту (з тим самим `--scope`, з яким його налаштовували), а `kulman remove`

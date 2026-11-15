@@ -1,5 +1,6 @@
 //! `kalka setup`: writes MCP config, skills and hooks into a project, and undoes exactly what it wrote.
 
+mod codex;
 pub mod edit;
 mod legacy;
 
@@ -29,7 +30,6 @@ pub enum Agent {
     Claude,
     Pi,
     Cursor,
-    /// Its MCP config is global (`~/.codex/config.toml`), so it is never detected.
     Codex,
 }
 
@@ -178,19 +178,24 @@ impl Report<'_> {
 }
 
 /// Runs the agent CLI `name` with `args` in `root`; the error is a short reason for the user.
-/// `mcp get` may fail: its status says whether the server exists.
+/// `mcp get` may fail: its status says whether the server exists, and its text is stdout. Any
+/// other call's text is stdout then stderr, whichever stream a CLI prints a note on.
 fn cli(name: &str, root: &Path, args: &[&str]) -> Result<(bool, String), String> {
     let exe = find_on_path(name).ok_or(format!("{name} is not on PATH"))?;
+    // Found through a relative `PATH` entry, it is resolved here: `root` may be another folder.
+    let exe = std::path::absolute(exe).map_err(|e| format!("could not run {name}: {e}"))?;
     let o = Command::new(exe)
         .args(args)
         .current_dir(root)
         .output()
         .map_err(|e| format!("could not run {name}: {e}"))?;
-    if o.status.success() || args[1] == "get" {
-        return Ok((
-            o.status.success(),
-            String::from_utf8_lossy(&o.stdout).into_owned(),
-        ));
+    let get = args[1] == "get";
+    if o.status.success() || get {
+        let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+        if !get {
+            text.push_str(&String::from_utf8_lossy(&o.stderr));
+        }
+        return Ok((o.status.success(), text));
     }
     let err = String::from_utf8_lossy(&o.stderr);
     Err(format!(
@@ -217,61 +222,6 @@ fn lost(e: &str) -> String {
         "kalka's server entry was removed and the new one could not be added ({e}); \
          run `kalka setup` again to add it"
     )
-}
-
-/// Codex's MCP server, through its CLI. Its config is global, so one entry serves every project:
-/// Codex starts the server in the directory it runs in.
-/// Either memory variant is ours; the other one is replaced only when `mcp get` shows nothing
-/// but what setup's own `mcp add` yields (the stdio lines, `cwd: -`, `env: -`, the remove hint).
-fn codex_mcp(root: &Path, remove: bool, memory: bool) -> Outcome {
-    let run = || -> Result<Outcome, String> {
-        let (found, text) = cli("codex", root, &["mcp", "get", "kalka"])?;
-        if found {
-            let has = |l: &str| text.lines().any(|t| t.trim() == l);
-            let args = |m| has(&format!("args: {}", serve_args(m).join(" ")));
-            if !(has(&format!("command: {CMD}")) && (args(true) || args(false))) {
-                return Ok(Outcome::Foreign(
-                    "another \"kalka\" server is configured".into(),
-                ));
-            }
-            if !remove && args(memory) {
-                return Ok(Outcome::AlreadyThere);
-            }
-            let own_line = |l: &str| {
-                [
-                    "kalka",
-                    "enabled: true",
-                    "transport: stdio",
-                    &format!("command: {CMD}"),
-                    &format!("args: {}", serve_args(true).join(" ")),
-                    &format!("args: {}", serve_args(false).join(" ")),
-                    "cwd: -",
-                    "env: -",
-                    "remove: codex mcp remove kalka",
-                ]
-                .contains(&l)
-            };
-            if !remove
-                && !text
-                    .lines()
-                    .map(str::trim)
-                    .all(|l| l.is_empty() || own_line(l))
-            {
-                return Ok(other_settings("codex mcp remove kalka"));
-            }
-            cli("codex", root, &["mcp", "remove", "kalka"])?;
-            if remove {
-                return Ok(Outcome::Done);
-            }
-        } else if remove {
-            return Ok(Outcome::AlreadyThere);
-        }
-        let mut add = vec!["mcp", "add", "kalka", "--", CMD];
-        add.extend(serve_args(memory));
-        cli("codex", root, &add).map_err(|e| if found { lost(&e) } else { e })?;
-        Ok(Outcome::Done)
-    };
-    run().unwrap_or_else(Outcome::Foreign)
 }
 
 /// Claude Code's own local-scope MCP config for the server `name`, through its CLI. Each of `own`
@@ -359,7 +309,7 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool, exact:
     run().unwrap_or_else(Outcome::Foreign)
 }
 
-/// The agents found in `root` (Codex never: its config is global).
+/// The agents found in `root`.
 pub fn detect(root: &Path) -> Vec<Agent> {
     let mut a = Vec::new();
     if root.join(".claude").exists()
@@ -371,9 +321,13 @@ pub fn detect(root: &Path) -> Vec<Agent> {
     if root.join(".pi").exists() || find_on_path("pi").is_some() {
         a.push(Agent::Pi);
     }
-    // Only the project folder: Cursor on PATH says nothing about this project.
+    // Only the project folder: Cursor or Codex on PATH says nothing about this project.
     if root.join(".cursor").is_dir() {
         a.push(Agent::Cursor);
+    }
+    // Codex's own home (setup in the home folder) is no project's.
+    if root.join(".codex").is_dir() && !codex::codex_home(root) {
+        a.push(Agent::Codex);
     }
     a
 }
@@ -481,7 +435,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     if opts.memory {
         ignore.push(format!("/{}/", memory::REPO_DIR));
     }
-    let mut cursor_added = false;
+    let (mut cursor_added, mut codex_added) = (false, false);
 
     for agent in agents {
         let (name, pi) = match agent {
@@ -507,8 +461,13 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 continue;
             }
             Agent::Codex => {
-                let o = codex_mcp(root, opts.remove, opts.memory);
-                r.item("Codex kalka server (~/.codex/config.toml)", false, Ok(o))?;
+                let before = root.join(codex::FILE).exists();
+                if codex::run(root, &mut r, opts.remove, opts.memory)? {
+                    codex_added |= !opts.remove;
+                    if !before {
+                        ignore.push(format!("/{}", codex::FILE));
+                    }
+                }
                 // The navigation steps, which Codex otherwise never reads.
                 let file = "AGENTS.md";
                 let path = root.join(file);
@@ -658,6 +617,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
     if cursor_added {
         r.line("Cursor loads the server only after you approve it: in its MCP settings, or `cursor-agent mcp enable kalka`.")?;
+    }
+    if codex_added {
+        r.line(codex::HINT)?;
     }
     // What the old `wiki` left for the person to decide, after setup's own lines.
     if let Some(found) = found {

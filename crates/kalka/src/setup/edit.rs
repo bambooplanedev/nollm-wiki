@@ -103,7 +103,7 @@ pub fn upsert_entry(path: &Path, parents: &[&str], key: &str, own: &[Value]) -> 
 }
 
 /// Removes the directories under `root` that `path`'s removal left empty, deepest first.
-fn prune_dirs(root: &Path, path: &Path) {
+pub(super) fn prune_dirs(root: &Path, path: &Path) {
     if !path.starts_with(root) {
         return;
     }
