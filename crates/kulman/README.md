@@ -93,11 +93,11 @@ any other file stays (with no `state.json`, nothing at all is, and a `bin/kulman
 put there is named for you to delete). Every path is checked before the first is deleted: a
 directory in place of a binary, or anything but a regular file in place of `manifest.json` or
 `state.json`, stops it with nothing deleted (exit 1), as does a module that another installed module
-requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both). `kulman` is not a module: `--modules kulman`
-is a usage error. At a terminal it asks first (default: no); without one it needs `--yes`, and
-otherwise changes nothing and exits 2. Removing everything while kalka is installed also says that
-projects set up with kulman still name `kalka` in their agent configs and need `kulman setup
---remove` first: before the question at a terminal, as the last line otherwise.
+requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both). `kulman` is not a
+module: `--modules kulman` is a usage error. At a terminal it asks first (default: no); without one
+it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while kalka is
+installed also says that projects set up with kulman still name `kalka` in their agent configs and
+need `kulman setup --remove` first: before the question at a terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--no-hook] [--remove] [--yes]

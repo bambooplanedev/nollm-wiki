@@ -398,6 +398,33 @@ fn install_refuses_a_malformed_state() {
 }
 
 #[test]
+fn an_unknown_module_is_usage_even_when_the_installed_version_differs() {
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    kulman(&home, &base)
+        .args(["install", "--modules", "kalka"])
+        .assert()
+        .success();
+    fs::write(
+        home.join("state.json"),
+        r#"{"version":"0.8.0","modules":["kalka"]}"#,
+    )
+    .unwrap();
+    let before = snapshot(t.path());
+    let out = kulman(&home, &base)
+        .args(["install", "--yes", "--modules", "nope"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("unknown module \"nope\""),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(snapshot(t.path()), before);
+}
+
+#[test]
 fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     let (t, base) = setup();
     let rel = t.path().join("release");
