@@ -4004,3 +4004,31 @@ fn an_inherited_constructor_using_leaves_the_base_placed() {
         ["go() → src/a.cpp:2"]
     );
 }
+
+#[test]
+fn a_using_declaration_of_a_global_class_inside_a_namespace_places_it() {
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let main = "#include \"g.h\"\nnamespace n {\nusing ::Cfg;\nvoid f() { Cfg c; c.load(); }\n}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/g.h", g), ("src/main.cpp", main)],
+            "src/main.cpp",
+            "f"
+        ),
+        ["c.load() → src/g.h:2"]
+    );
+}
+
+#[test]
+fn a_using_declaration_through_a_project_namespace_alias_is_not_outside() {
+    let d = "namespace proj { namespace detail {\nstruct Cfg {\n    void load() {}\n};\n} }\n";
+    let main = "#include \"d.h\"\nnamespace p = proj::detail;\nusing p::Cfg;\nvoid f() { Cfg c; c.load(); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/d.h", d), ("src/main.cpp", main)],
+            "src/main.cpp",
+            "f"
+        ),
+        ["c.load() → one of: src/d.h:3, or outside"]
+    );
+}

@@ -233,6 +233,8 @@ fn using(file: &mut File, n: Node, src: &str) {
     else {
         return;
     };
+    // `::Cfg` is `Cfg` of the global namespace.
+    let named = named.trim_start_matches("::").to_string();
     let mut around = std::iter::successors(n.parent(), Node::parent);
     let scope = around.find(|p| {
         matches!(p.kind(), "compound_statement" | "field_declaration_list")

@@ -300,11 +300,17 @@ impl<'a> Cpp<'a> {
             }];
             if scope.is_empty() {
                 // `using n::t;` names that one entity, before any other:
-                // with no project class, something outside.
+                // with no project class, something outside, unless `n` is
+                // rooted in a project namespace or namespace alias.
                 let declared = usings.iter().filter(|u| u.rsplit("::").next() == Some(t));
                 let declared: Vec<String> = declared.map(ToString::to_string).collect();
+                let project =
+                    |u: &String| self.namespaces.contains(u.split("::").next().unwrap_or(""));
                 if !declared.is_empty() {
-                    return at(&declared);
+                    return match at(&declared) {
+                        Step::Nothing if declared.iter().any(project) => Step::Unplaced,
+                        step @ (Step::Found(_) | Step::Unplaced | Step::Nothing) => step,
+                    };
                 }
                 // `using namespace n;` gives `n::t`.
                 wants.extend(usings.iter().map(|u| format!("{u}::{t}")));

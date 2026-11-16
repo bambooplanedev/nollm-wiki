@@ -59,7 +59,7 @@ pub struct File {
     /// namespaces left out.
     pub scopes: BTreeMap<usize, String>,
     /// What each `using namespace N;` and `using N::f;` of a C/C++ file
-    /// names: `N`, `N::f`, whitespace dropped.
+    /// names: `N`, `N::f`, whitespace and a leading `::` dropped.
     pub usings: BTreeSet<String>,
     /// The `usings` that stand at file scope: in no function body, class
     /// body or named namespace.
