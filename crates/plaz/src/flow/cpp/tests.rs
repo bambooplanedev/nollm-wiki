@@ -540,6 +540,15 @@ fn a_files_macros_are_each_define_once_with_whether_its_body_has_a_jump_token() 
     );
 }
 
+#[test]
+fn a_jump_after_a_quote_character_or_a_digit_separator_is_still_a_jump() {
+    let f = file(
+        "a.cpp",
+        "#define STOP_AT(c) if ((c) == '\"' || (c) > 1'000) return\n",
+    );
+    assert_eq!(f.macros, [("STOP_AT".to_string(), true)]);
+}
+
 /// The not-drawn counts and the call texts of `name` in `path` of a
 /// project of `files`.
 fn counted(
