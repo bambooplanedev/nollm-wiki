@@ -20,6 +20,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     let mut files = BTreeMap::new();
     let mut unreadable = Vec::new();
     let mut crates = BTreeSet::new();
+    let mut objc_paths = Vec::new();
     // C/C++ files with a class head the grammar misread, read again once
     // every file's macros are known: path, text, heads, file as read.
     let mut misread = Vec::new();
@@ -27,6 +28,10 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         if manifest(&path) {
             let dir = path.trim_end_matches("Cargo.toml").trim_end_matches('/');
             crates.extend(crate_names(&text).into_iter().map(|n| (n, dir.to_string())));
+            continue;
+        }
+        if objc(&path) {
+            objc_paths.push(path);
             continue;
         }
         let Some(a) = analyze(&path, &text) else {
@@ -58,10 +63,12 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();
+    objc_paths.sort();
     Project {
         files,
         unreadable,
         crates,
+        objc: objc_paths,
     }
 }
 
@@ -175,6 +182,16 @@ pub(crate) fn pointee(t: &str) -> (bool, &str) {
     }
 }
 
+/// An Objective-C or Objective-C++ file.
+fn objc(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let ext = name
+        .rsplit_once('.')
+        .filter(|n| !n.0.is_empty())
+        .map(|n| n.1);
+    ext.is_some_and(|e| e.eq_ignore_ascii_case("m") || e.eq_ignore_ascii_case("mm"))
+}
+
 fn manifest(path: &str) -> bool {
     path == "Cargo.toml" || path.ends_with("/Cargo.toml")
 }
@@ -204,7 +221,7 @@ pub fn load(root: &Path) -> Result<Project, Error> {
     if !root.is_dir() {
         return Err(Error::NotADirectory(root.to_path_buf()));
     }
-    let walked = walk(root, true, &|p| handles(p) || manifest(p));
+    let walked = walk(root, true, &|p| handles(p) || manifest(p) || objc(p));
     let mut p = project(
         walked
             .files

@@ -69,7 +69,7 @@ pub fn resolve(mut project: Project) -> Resolved {
         // Per type name: how many type items carry it, and is one a trait.
         let mut types: BTreeMap<&str, (usize, bool)> = BTreeMap::new();
         let py = Python::new(&project.files);
-        let cpp = Cpp::new(&project.files);
+        let cpp = Cpp::new(&project.files, &project.objc);
         for f in project.files.values() {
             for it in f
                 .code

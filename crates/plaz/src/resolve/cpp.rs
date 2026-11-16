@@ -41,10 +41,12 @@ pub(super) struct Cpp<'a> {
     /// of out-of-line definitions that are no namespace or misread.
     types: BTreeSet<&'a str>,
     classes: Classes<'a>,
+    /// The stems of the project's Objective-C and Objective-C++ files.
+    unread: BTreeSet<&'a str>,
 }
 
 impl<'a> Cpp<'a> {
-    pub fn new(files: &'a BTreeMap<String, File>) -> Cpp<'a> {
+    pub fn new(files: &'a BTreeMap<String, File>, objc: &'a [String]) -> Cpp<'a> {
         let pages: Vec<(&str, &File)> = files.iter().map(|(p, f)| (p.as_str(), f)).collect();
         let cpp = || {
             let all = pages.iter().enumerate();
@@ -73,6 +75,10 @@ impl<'a> Cpp<'a> {
                 .collect(),
             types: BTreeSet::new(),
             classes: Classes::default(),
+            unread: (objc.iter())
+                .filter_map(|p| p.rsplit('/').next()?.rsplit_once('.'))
+                .map(|s| s.0)
+                .collect(),
             pages: pages.clone(),
         };
         for (page, &(path, file)) in cpp() {
@@ -199,16 +205,23 @@ impl<'a> Cpp<'a> {
     /// declaration with neither stays. A free function's declarations none
     /// of whose definitions' files includes one (`extern int main(int,
     /// char**);` beside each program's `main`) may be any program's: each
-    /// definition of that name and arity, and the set is open.
+    /// definition of that name and arity, and the set is open. So is it
+    /// for a declaration in a header an unread Objective-C file shares a
+    /// stem with (`pad.hpp`, `pad.mm`).
     fn folded(&self, fns: Vec<FnRef>) -> (BTreeSet<FnRef>, bool) {
         let mut out = BTreeSet::new();
         // Per free function's key: a declaration, and is one tied?
         let mut tied: BTreeMap<Key, (FnRef, bool)> = BTreeMap::new();
+        let mut twin = false;
         for c in fns {
             let Some(key) = self.key(c).filter(|_| self.declared(c)) else {
                 out.insert(c);
                 continue;
             };
+            // An unread Objective-C file of the header's stem may define it.
+            let path = self.pages[c.0].0;
+            let stem = path.rsplit('/').next().and_then(|f| f.rsplit_once('.'));
+            twin |= source_rank(path) < 2 && stem.is_some_and(|s| self.unread.contains(s.0));
             let page = self.local(c).then_some(c.0);
             let defs = match page {
                 Some(p) => self.own.get(&(p, key)),
@@ -246,7 +259,7 @@ impl<'a> Cpp<'a> {
             let defs = named.flat_map(|(_, d)| d);
             out.extend(defs.filter(|&&d| self.item(d).arity == self.item(c).arity));
         }
-        (out, !loose.is_empty())
+        (out, twin || !loose.is_empty())
     }
 }
 

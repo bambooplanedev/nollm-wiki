@@ -200,7 +200,7 @@ impl Caller<'_, '_> {
             }
             Placed::Unplaced => {
                 let named = cpp.namesakes(written, sight).into_iter();
-                let fns = self.ids(named.flat_map(|c| cpp.members(c, site, None)));
+                let fns = self.ids(named.flat_map(|c| cpp.members(c, site, None).0));
                 if !fns.is_empty() {
                     return Evidence::Found { fns, open: true };
                 }

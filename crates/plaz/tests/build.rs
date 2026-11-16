@@ -4444,3 +4444,31 @@ fn a_class_head_whose_macro_word_cannot_be_told_is_left_unread() {
         .collect();
     assert_eq!(lines, [2, 10]);
 }
+
+#[test]
+fn a_declaration_whose_header_has_an_unread_objective_c_twin_is_open() {
+    let h = "bool touched(int f);\nstruct Pad {\n    bool held(int f);\n};\n";
+    let def = "#include \"../pad.hpp\"\nbool touched(int f) { return f > 0; }\nbool Pad::held(int f) { return f < 0; }\n";
+    let call = "#include \"pad.hpp\"\nbool any(Pad p) { return touched(1) || p.held(2); }\n";
+    let twin = "bool touched(int f) { return false; }\n";
+    let files = [
+        ("src/pad.hpp", h),
+        ("src/linux/pad.cpp", def),
+        ("src/use.cpp", call),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/use.cpp", "any"),
+        [
+            "touched(1) → src/linux/pad.cpp:2",
+            "p.held(2) → src/linux/pad.cpp:3"
+        ]
+    );
+    let files = [files[0], files[1], files[2], ("src/mac/pad.mm", twin)];
+    assert_eq!(
+        cpp_targets(&files, "src/use.cpp", "any"),
+        [
+            "touched(1) → one of: src/linux/pad.cpp:2, or outside",
+            "p.held(2) → one of: src/linux/pad.cpp:3, or outside"
+        ]
+    );
+}
