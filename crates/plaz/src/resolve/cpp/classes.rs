@@ -133,7 +133,7 @@ impl<'a> Cpp<'a> {
             at.insert(page, Vec::new());
         }
         for &(page, file) in &pages {
-            for a in &file.aliases {
+            for a in file.aliases.keys() {
                 let at = self.classes.aliases.entry(owner_key(a)).or_default();
                 at.push((page, a.as_str()));
             }
@@ -217,12 +217,7 @@ impl<'a> Cpp<'a> {
             return Placed::Nothing;
         }
         let seen = |page: usize, _: &str| sight.sees(page);
-        // Another file's class or alias is reachable when an includer may
-        // provide it: a header's, outside its anonymous namespaces.
-        let reachable = |page: usize, path: &str| {
-            let header = source_rank(self.pages[page].0) < 2;
-            sight.sees(page) || (header && !path.contains("(anonymous@"))
-        };
+        let reachable = |page: usize, path: &str| self.reaches(sight, page, path);
         let place = |usings: &[&str]| {
             let all = self.lookup_name(t, from, sight, &reachable, usings);
             let mine = self.lookup_name(t, from, sight, &seen, usings);
@@ -254,6 +249,24 @@ impl<'a> Cpp<'a> {
             (Placed::Class(one), Placed::Class(other)) => Placed::Either(one, other),
             _ => Placed::Unplaced,
         }
+    }
+
+    /// Is the class or alias at `path` in `page` in reach of the file of
+    /// `sight`: in a file it sees, or, as an includer may provide it, in a
+    /// header outside its anonymous namespaces?
+    fn reaches(&self, sight: Sight, page: usize, path: &str) -> bool {
+        let header = source_rank(self.pages[page].0) < 2;
+        sight.sees(page) || (header && !path.contains("(anonymous@"))
+    }
+
+    /// The types the project aliases named `name` in reach of the file of
+    /// `sight` name (`File::aliases`).
+    pub(super) fn alias_targets(&self, name: &str, sight: Sight) -> Vec<&'a str> {
+        let all = self.classes.aliases.get(name).into_iter().flatten();
+        let reached = all.filter(|a| self.reaches(sight, a.0, a.1));
+        reached
+            .filter_map(|a| self.pages[a.0].1.aliases.get(a.1).map(String::as_str))
+            .collect()
     }
 
     /// `place_name`'s lookup over the classes and aliases `keep` lets in

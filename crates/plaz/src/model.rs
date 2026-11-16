@@ -89,8 +89,12 @@ pub struct File {
     pub bases: BTreeMap<String, BTreeSet<(String, bool)>>,
     /// Every C/C++ type alias the file declares outside function bodies
     /// (`using X = …`, an alias template, `typedef … X`), by path as in
-    /// `classes`; a `typedef struct X X` is the class, no alias.
-    pub aliases: BTreeSet<String>,
+    /// `classes`, with the type it names as written, template arguments,
+    /// whitespace, `typename` and a leading `::` dropped (`std::vector` of
+    /// `typedef std::vector<int> Ints`); `""` for an unnamed class, a type
+    /// naming a template parameter, or two readings that differ; a
+    /// `typedef struct X X` is the class, no alias.
+    pub aliases: BTreeMap<String, String>,
     /// Per C/C++ class the file defines, by path as in `bases`: each data
     /// member its body declares, with its written type as a local's is
     /// read (`Flow::types`); none for a function pointer, a type naming a

@@ -286,10 +286,35 @@ fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
     };
     let body =
         std::iter::successors(n.parent(), Node::parent).any(|p| p.kind() == "compound_statement");
+    // A type naming a template parameter (`typename A::size_type`) is
+    // known only per instance: none.
+    let params = template_params(n, src);
+    let ty = n.child_by_field_name("type");
+    let ty = ty.map_or(String::new(), |t| match t.kind() {
+        "struct_specifier" | "class_specifier" | "union_specifier" | "enum_specifier" => t
+            .child_by_field_name("name")
+            .map_or(String::new(), |n| untemplated(text(n))),
+        _ => {
+            let t = text(t).trim_start();
+            let t = untemplated(t.strip_prefix("typename").unwrap_or(t));
+            let t = t.trim_start_matches("::");
+            let root = t.split("::").next().unwrap_or("");
+            if params.contains(root) {
+                String::new()
+            } else {
+                t.to_string()
+            }
+        }
+    });
     for name in names.into_iter().filter(|_| !body) {
         let mut path = enclosing(n, src, Some(anonymous));
         path.push(name.to_string());
-        file.aliases.insert(untemplated(&path.join("::")));
+        // An alias the file's two trees read differently names nothing known.
+        let kept = file.aliases.entry(untemplated(&path.join("::")));
+        let kept = kept.or_insert_with(|| ty.clone());
+        if *kept != ty {
+            kept.clear();
+        }
     }
 }
 

@@ -112,7 +112,7 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
         inner_usings: BTreeSet::new(),
         classes: BTreeMap::new(),
         bases: BTreeMap::new(),
-        aliases: BTreeSet::new(),
+        aliases: BTreeMap::new(),
         fields: BTreeMap::new(),
     };
     flow::attach(&mut file, a);

@@ -411,18 +411,50 @@ impl Caller<'_, '_> {
                         open: found.open,
                     }
                 }
-                Err(Missing::Outside) if !local => return or_free(Evidence::Outside),
-                Err(Missing::Unseen) if !local => return or_free(self.any_method(call)),
+                Err(Missing::Outside) if !local => {
+                    return or_free(self.made(name, Evidence::Outside))
+                }
+                Err(Missing::Unseen) if !local => {
+                    return or_free(self.made(name, self.any_method(call)))
+                }
                 Err(Missing::Outside | Missing::Unseen | Missing::Nowhere) => {}
             }
         }
         if let Some(found) = self.free(site, None) {
             return found;
         }
-        if self.cpp.macros.contains(name) || self.cpp.types.contains(name) {
+        self.made(name, Evidence::Outside)
+    }
+
+    /// `or`, a bare call of `name`, unless it reads outside the project
+    /// and `name` is a project macro or names a project type, which the
+    /// call constructs: then not visible. Not when no class of that name
+    /// is in reach and every project alias of it in reach names a type
+    /// shown to be from outside: of `std`, or qualified by no project
+    /// namespace or type.
+    fn made(&self, name: &str, or: Evidence) -> Evidence {
+        let outside = match &or {
+            Evidence::Outside => true,
+            Evidence::Found { fns, .. } => fns.is_empty(),
+            Evidence::Hidden => false,
+        };
+        if !outside {
+            return or;
+        }
+        let cpp = self.cpp;
+        let aliased = cpp.alias_targets(name, self.sight());
+        let outside = |t: &str| match t.split_once("::") {
+            Some(("std", _)) => true,
+            Some((root, _)) => !cpp.types.contains(root) && !cpp.namespaces.contains(root),
+            None => false,
+        };
+        let class = !cpp.namesakes(name, self.sight()).is_empty();
+        let foreign = !class && !aliased.is_empty() && aliased.iter().all(|t| outside(t));
+        let project = cpp.macros.contains(name) || cpp.types.contains(name) || !aliased.is_empty();
+        if !foreign && project {
             Evidence::Hidden
         } else {
-            Evidence::Outside
+            or
         }
     }
 

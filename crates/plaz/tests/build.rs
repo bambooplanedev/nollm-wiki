@@ -4490,3 +4490,58 @@ fn a_parameter_of_a_callable_project_class_called_bare_is_its_call_operator() {
         ["cmp(a, b) → src/a.cpp:2"]
     );
 }
+
+#[test]
+fn a_bare_call_of_an_alias_is_a_construction_of_its_type_wherever_the_caller_stands() {
+    let h = "#include <vector>\nnamespace geo {\ntemplate <typename T>\nstruct Duo {\n    T x, y;\n    Duo(T a, T b) : x(a), y(b) {}\n};\nusing DuoF = Duo<float>;\ntypedef Duo<int> DuoI;\ntemplate <typename T>\nusing Twin = Duo<T>;\n}\ntypedef std::vector<int> Ints;\n";
+    let src = "#include \"vec.h\"\n#include <string>\nusing Str = std::string;\nstruct Outer : std::vector<int> {\n    void m();\n};\nvoid f() { geo::DuoF(1, 2); Str(\"x\"); Ints(3); }\nvoid Outer::m() { using namespace geo; DuoF(1, 2); DuoI(1, 2); Twin<float>(1, 2); Str(\"x\"); }\nvoid Loose::h() { using namespace geo; DuoF(1, 2); Ints(3); }\n";
+    // Another file's alias of the name is out of this file's reach.
+    let other = "#include \"vec.h\"\nusing Str = geo::Duo<char>;\n";
+    let files = [("src/vec.h", h), ("src/a.cpp", src), ("src/b.cpp", other)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "f"),
+        [
+            "geo::DuoF(1, 2) → hidden",
+            "Str(\"x\") → outside",
+            "Ints(3) → outside"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "m"),
+        [
+            "DuoF(1, 2) → hidden",
+            "DuoI(1, 2) → hidden",
+            "Twin<float>(1, 2) → hidden",
+            "Str(\"x\") → outside"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "h"),
+        ["DuoF(1, 2) → hidden", "Ints(3) → outside"]
+    );
+}
+
+#[test]
+fn a_bare_call_of_an_alias_reads_outside_only_on_evidence_its_type_is_from_outside() {
+    let h = "template <class T>\nstruct Box {\n    using value_type = T;\n    value_type zero() { return value_type(0); }\n};\ntemplate <class A>\nstruct Holder {\n    using size_type = typename A::size_type;\n    size_type count() { return size_type(1); }\n};\nstruct Buf {\n    Buf(int n);\n};\n";
+    let other = "#include <vector>\nnamespace other {\nusing Buf = std::vector<char>;\n}\n";
+    let src = "#include \"box.h\"\n#include \"other.h\"\nstruct Walk : std::vector<int> {\n    void go();\n};\nvoid Walk::go() { Buf(3); }\n";
+    let files = [
+        ("src/box.h", h),
+        ("src/other.h", other),
+        ("src/use.cpp", src),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/box.h", "zero"),
+        ["value_type(0) → hidden"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/box.h", "count"),
+        ["size_type(1) → hidden"]
+    );
+    // A class of the name in reach beats a namesake alias of an outside type.
+    assert_eq!(
+        cpp_targets(&files, "src/use.cpp", "go"),
+        ["Buf(3) → hidden"]
+    );
+}
