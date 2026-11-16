@@ -129,10 +129,9 @@ impl Caller<'_, '_> {
     fn on_member(&self, call: &MapCall, field: Option<Field>, after: Option<&str>) -> Evidence {
         match field.and_then(|f| Some((f.ty?, f))) {
             Some((t, f)) => {
-                let included = self.cpp.closure(f.page);
                 let head = Sight {
                     page: f.page,
-                    included: &included,
+                    included: self.cpp.closure(f.page),
                 };
                 // A nested class the head only declares (`struct Impl;`) is
                 // defined where its members are called: in the caller's sight.

@@ -89,12 +89,8 @@ pub fn resolve(mut project: Project) -> Resolved {
             .map(|(page, (path, file))| {
                 let sees = sees(page, pages_of);
                 let in_scope = in_scope(path, file, &imports, &index, &py.roots, &project.crates);
-                let included = match file.family {
-                    Family::Cpp => cpp.closure(page),
-                    Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => {
-                        BTreeSet::new()
-                    }
-                };
+                // Empty but for a C/C++ file.
+                let included = cpp.closure(page);
                 let mut flows = file.flows.clone();
                 for (&item, flow) in &mut flows {
                     // An owner like `<W as Display>` has no key: no own methods.
@@ -108,7 +104,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         page,
                         py: &py,
                         cpp: &cpp,
-                        included: &included,
+                        included,
                         ns: file.scopes.get(&item).map_or("", String::as_str),
                         class: cpp.class_of(page, item),
                         misread: file.family == Family::Cpp && cpp.misread_method((page, item)),

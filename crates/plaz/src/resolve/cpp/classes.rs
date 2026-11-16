@@ -106,9 +106,6 @@ fn bare(path: &str) -> String {
     segs.collect::<Vec<_>>().join("::")
 }
 
-/// The include closure of a page that has none.
-static NO_PAGES: BTreeSet<usize> = BTreeSet::new();
-
 impl<'a> Cpp<'a> {
     /// Fills `classes` from every C/C++ file's heads, once the project's
     /// types and namespaces are known. Each head's bases are placed from
@@ -135,11 +132,10 @@ impl<'a> Cpp<'a> {
                 at.push((page, a.as_str()));
             }
         }
-        let closures: BTreeMap<usize, BTreeSet<usize>> =
-            pages.iter().map(|&(p, _)| (p, self.closure(p))).collect();
+        let closures = self.closures.clone();
         let sight = |page: usize| Sight {
             page,
-            included: closures.get(&page).unwrap_or(&NO_PAGES),
+            included: &closures[page],
         };
         // A base is named from the scope around its class.
         let parent = |c: &'a str| c.rsplit_once("::").map_or("", |p| p.0);

@@ -22,8 +22,8 @@ use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
 /// is a position in the project's key order, as in the index.
 pub(super) struct Cpp<'a> {
     pages: Vec<(&'a str, &'a File)>,
-    /// Per page: the pages its quoted includes name.
-    includes: Vec<Vec<usize>>,
+    /// Per page: the pages its file includes, directly or through another.
+    closures: Vec<BTreeSet<usize>>,
     /// The functions by name, a function both trees list once; an
     /// operator's name without spaces (`operator->` of `operator -> ()`).
     by_name: BTreeMap<String, Vec<FnRef>>,
@@ -62,7 +62,7 @@ impl<'a> Cpp<'a> {
                 .push(page);
         }
         let mut out = Cpp {
-            includes: vec![Vec::new(); pages.len()],
+            closures: Vec::new(),
             by_name: BTreeMap::new(),
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
@@ -88,6 +88,8 @@ impl<'a> Cpp<'a> {
                 .collect(),
             pages: pages.clone(),
         };
+        // Per page: the pages its quoted includes name.
+        let mut includes = vec![Vec::new(); pages.len()];
         for (page, &(path, file)) in cpp() {
             // `<a/b.h>` may name a project header; `<b.h>` a system one.
             let quoted = file
@@ -98,7 +100,7 @@ impl<'a> Cpp<'a> {
                     Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
                     None => Some(i.as_str()),
                 });
-            out.includes[page] = quoted
+            includes[page] = quoted
                 .flat_map(|i| out.include(&by_file, path, i))
                 .collect();
             for (i, it) in file.code.items.iter().enumerate() {
@@ -135,6 +137,17 @@ impl<'a> Cpp<'a> {
                 }
             }
         }
+        out.closures = (0..pages.len())
+            .map(|page| {
+                let (mut seen, mut todo) = (BTreeSet::new(), includes[page].clone());
+                while let Some(p) = todo.pop() {
+                    if seen.insert(p) {
+                        todo.extend(&includes[p]);
+                    }
+                }
+                seen
+            })
+            .collect();
         out.read_classes();
         out
     }
@@ -170,15 +183,8 @@ impl<'a> Cpp<'a> {
     }
 
     /// The pages the file of `page` includes, directly or through another.
-    pub fn closure(&self, page: usize) -> BTreeSet<usize> {
-        let mut seen = BTreeSet::new();
-        let mut todo = self.includes[page].clone();
-        while let Some(p) = todo.pop() {
-            if seen.insert(p) {
-                todo.extend(&self.includes[p]);
-            }
-        }
-        seen
+    pub fn closure(&self, page: usize) -> &BTreeSet<usize> {
+        &self.closures[page]
     }
 
     fn item(&self, c: FnRef) -> &'a CodeItem {
