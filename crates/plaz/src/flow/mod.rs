@@ -23,9 +23,11 @@ pub(crate) enum FlowNode<'a> {
         head: Option<String>,
         arms: Vec<ArmNode<'a>>,
         exhaustive: bool,
+        breakable: bool,
     },
     /// The children outside `body`, `each` and `orelse` are walked before
     /// the loop; `each`, run before every iteration, into its `pre`;
+    /// `post`, run after the body, into its `post`;
     /// `orelse` (Python's loop `else`) runs when the loop ends unbroken.
     Loop {
         header: String,
@@ -35,6 +37,8 @@ pub(crate) enum FlowNode<'a> {
         endless: bool,
         hidden_exit: bool,
         orelse: Option<Node<'a>>,
+        test_after: bool,
+        post: Option<Node<'a>>,
     },
     /// A `finally` clause: its children are the body.
     Finally,
@@ -58,6 +62,7 @@ pub(crate) struct ArmNode<'a> {
     pub at: Node<'a>,
     /// Walked in order as the arm's body.
     pub body: Vec<Node<'a>>,
+    pub falls: bool,
     /// Walked as the arm's `after`.
     pub after: Option<Node<'a>>,
 }
@@ -284,11 +289,19 @@ impl<'s> Walker<'s> {
                 endless,
                 hidden_exit,
                 orelse,
+                test_after,
+                post,
             } => {
-                let except: Vec<Node> = each.into_iter().chain([body]).chain(orelse).collect();
+                let except: Vec<Node> = each
+                    .into_iter()
+                    .chain([body])
+                    .chain(post)
+                    .chain(orelse)
+                    .collect();
                 let rest = self.around(n, &except, flow, out);
                 let pre = self.sub(each, flow);
                 let steps = self.sub([body], flow);
+                let post = self.sub(post, flow);
                 let after = self.sub(orelse, flow);
                 out.push(Step::Loop {
                     header,
@@ -300,6 +313,8 @@ impl<'s> Walker<'s> {
                     endless,
                     hidden_exit,
                     orelse: after,
+                    test_after,
+                    post,
                 });
                 out.extend(self.sub(rest, flow));
             }
@@ -307,6 +322,7 @@ impl<'s> Walker<'s> {
                 head,
                 arms,
                 exhaustive,
+                breakable,
             } => {
                 let inner: Vec<Node> = arms
                     .iter()
@@ -333,6 +349,7 @@ impl<'s> Walker<'s> {
                             comment,
                             pre,
                             body,
+                            falls: a.falls,
                             after: late,
                         }
                     })
@@ -342,6 +359,7 @@ impl<'s> Walker<'s> {
                     line: line(n),
                     arms,
                     exhaustive,
+                    breakable,
                 });
                 out.extend(self.sub(rest, flow));
             }
@@ -427,10 +445,15 @@ impl Flow {
                         }
                     }
                     Step::Loop {
-                        pre, body, orelse, ..
+                        pre,
+                        body,
+                        post,
+                        orelse,
+                        ..
                     } => {
                         walk(pre, chain, f);
                         walk(body, chain, f);
+                        walk(post, chain, f);
                         walk(orelse, chain, f);
                     }
                     Step::Finally { body, .. } => walk(body, chain, f),
@@ -466,10 +489,15 @@ impl Flow {
                         }
                     }
                     Step::Loop {
-                        pre, body, orelse, ..
+                        pre,
+                        body,
+                        post,
+                        orelse,
+                        ..
                     } => {
                         walk(pre, chain, f);
                         walk(body, chain, f);
+                        walk(post, chain, f);
                         walk(orelse, chain, f);
                     }
                     Step::Finally { body, .. } => walk(body, chain, f),
@@ -497,7 +525,76 @@ impl Flow {
 
 #[cfg(test)]
 pub(crate) mod testutil {
-    use crate::model::{File, Step};
+    use crate::model::{Arm, ExitKind, File, Flow, MapCall, Step, Target};
+    use wiki_code::model::{CallSite, CallVia};
+
+    /// A call of `name`, its target not visible.
+    pub fn call(name: &str) -> Step {
+        Step::Call(MapCall {
+            text: format!("{name}()"),
+            site: CallSite {
+                name: name.to_string(),
+                via: CallVia::Bare,
+                args: Some(0),
+                line: 1,
+            },
+            root: None,
+            target: Target::Hidden,
+        })
+    }
+
+    pub fn exit(kind: ExitKind) -> Step {
+        Step::Exit {
+            text: "exit".to_string(),
+            line: 1,
+            kind,
+        }
+    }
+
+    pub fn arm(cond: Option<&str>, body: Vec<Step>, falls: bool) -> Arm {
+        Arm {
+            cond: cond.map(str::to_string),
+            line: 1,
+            comment: None,
+            pre: Vec::new(),
+            body,
+            falls,
+            after: Vec::new(),
+        }
+    }
+
+    pub fn branch(arms: Vec<Arm>, breakable: bool) -> Step {
+        Step::Branch {
+            head: None,
+            line: 1,
+            arms,
+            exhaustive: false,
+            breakable,
+        }
+    }
+
+    pub fn looping(header: &str, body: Vec<Step>, post: Vec<Step>, test_after: bool) -> Step {
+        Step::Loop {
+            header: header.to_string(),
+            line: 1,
+            comment: None,
+            pre: Vec::new(),
+            body,
+            label: None,
+            endless: false,
+            hidden_exit: false,
+            orelse: Vec::new(),
+            test_after,
+            post,
+        }
+    }
+
+    pub fn flow_of(steps: Vec<Step>) -> Flow {
+        Flow {
+            steps,
+            ..Flow::default()
+        }
+    }
 
     pub fn file(path: &str, src: &str) -> File {
         crate::source::project([(path.to_string(), src.to_string())])
@@ -518,10 +615,15 @@ pub(crate) mod testutil {
             for s in steps {
                 match s {
                     Step::Branch {
-                        head, line, arms, ..
+                        head,
+                        line,
+                        arms,
+                        breakable,
+                        ..
                     } => {
                         let head = head.as_ref().map_or(String::new(), |h| format!(" {h}"));
-                        out.push(format!("{pad}branch{head} @{line}"));
+                        let breakable = if *breakable { " breakable" } else { "" };
+                        out.push(format!("{pad}branch{head} @{line}{breakable}"));
                         for a in arms {
                             let mut pre = Vec::new();
                             lines(&a.pre, depth + 1, &mut pre);
@@ -533,7 +635,8 @@ pub(crate) mod testutil {
                             let note = a.comment.as_ref().map_or(String::new(), |c| {
                                 format!(" # {}", c.text.replace('\n', "\\n"))
                             });
-                            out.push(format!("{pad}  arm {cond} @{}{note}", a.line));
+                            let falls = if a.falls { " falls" } else { "" };
+                            out.push(format!("{pad}  arm {cond} @{}{falls}{note}", a.line));
                             lines(&a.body, depth + 2, out);
                         }
                         for a in arms.iter().filter(|a| !a.after.is_empty()) {
@@ -554,9 +657,12 @@ pub(crate) mod testutil {
                         pre,
                         body,
                         orelse,
+                        test_after,
+                        post,
                         ..
                     } => {
-                        out.push(format!("{pad}loop {header} @{line}"));
+                        let after = if *test_after { " after" } else { "" };
+                        out.push(format!("{pad}loop {header} @{line}{after}"));
                         let mut p = Vec::new();
                         lines(pre, depth + 1, &mut p);
                         out.extend(
@@ -564,6 +670,12 @@ pub(crate) mod testutil {
                                 .map(|l| format!("{pad}  pre {}", &l[pad.len() + 2..])),
                         );
                         lines(body, depth + 1, out);
+                        let mut p = Vec::new();
+                        lines(post, depth + 1, &mut p);
+                        out.extend(
+                            p.into_iter()
+                                .map(|l| format!("{pad}  post {}", &l[pad.len() + 2..])),
+                        );
                         if !orelse.is_empty() {
                             out.push(format!("{pad}  else"));
                             lines(orelse, depth + 2, out);
@@ -594,5 +706,41 @@ pub(crate) mod testutil {
             .collect();
         v.sort();
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::testutil::{call, flow_of, looping};
+    use crate::model::{Step, Target};
+
+    fn calls(flow: &mut super::Flow) -> Vec<String> {
+        let mut seen = Vec::new();
+        flow.each_call(&mut |_, c| seen.push(c.site.name.clone()));
+        let mut seen_mut = Vec::new();
+        flow.each_call_mut(&mut |_, c| {
+            seen_mut.push(c.site.name.clone());
+            c.target = Target::Outside;
+        });
+        assert_eq!(seen, seen_mut);
+        seen
+    }
+
+    #[test]
+    fn a_loops_post_is_visited_after_its_body() {
+        let mut flow = flow_of(vec![looping(
+            "for",
+            vec![call("a")],
+            vec![call("u")],
+            false,
+        )]);
+        assert_eq!(calls(&mut flow), ["a", "u"]);
+        let Step::Loop { post, .. } = &flow.steps[0] else {
+            unreachable!()
+        };
+        let Step::Call(u) = &post[0] else {
+            unreachable!()
+        };
+        assert_eq!(u.target, Target::Outside);
     }
 }

@@ -132,6 +132,9 @@ pub enum Step {
         arms: Vec<Arm>,
         /// No way past the last arm (a Rust `match`).
         exhaustive: bool,
+        /// An unlabelled `break` in it, in no inner loop, leaves the branch
+        /// (a C `switch`); `continue` passes through to the loop.
+        breakable: bool,
     },
     Loop {
         header: String,
@@ -149,6 +152,12 @@ pub enum Step {
         hidden_exit: bool,
         /// Run when the loop ends without a `break` (Python's loop `else`).
         orelse: Vec<Step>,
+        /// The body runs before the header's test (`do … while`): the first
+        /// edge enters the body, `pre` and the header follow it.
+        test_after: bool,
+        /// Run after the body and before the header on every iteration (the
+        /// update of a C `for`); the body's fall-off and `continue` enter it.
+        post: Vec<Step>,
     },
     Call(MapCall),
     Exit {
@@ -190,6 +199,9 @@ pub struct Arm {
     /// Calls in the condition.
     pub pre: Vec<Step>,
     pub body: Vec<Step>,
+    /// The open ends of `body` join the next arm's body instead of leaving
+    /// the branch (a C `case` without `break`); the last arm's leave it.
+    pub falls: bool,
     /// Run right after `body`, written after every other arm: the `else`
     /// of Python's `try`.
     pub after: Vec<Step>,

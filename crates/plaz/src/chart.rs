@@ -45,6 +45,17 @@ pub(crate) fn relative(from: &str, to: &str) -> String {
 /// Open ends of a path: a node and the label of the edge that leaves it.
 type Ends = Vec<(usize, Option<&'static str>)>;
 
+/// A loop around the step being drawn.
+struct Scope {
+    label: Option<String>,
+    /// Where a `continue` goes; `None` when the loop's `post` or a test
+    /// after the body is drawn only after the body, which collects them.
+    again: Option<usize>,
+    /// The ends its `break`s leave open.
+    breaks: Ends,
+    continues: Ends,
+}
+
 struct Chart<'a> {
     path: &'a str,
     href: &'a dyn Fn(&FnId) -> String,
@@ -52,9 +63,12 @@ struct Chart<'a> {
     clicks: Vec<String>,
     next: usize,
     edges: usize,
-    /// The loops around the step being drawn, innermost last: label,
-    /// node, and the ends its `break`s leave open.
-    loops: Vec<(Option<String>, usize, Ends)>,
+    /// The loops around the step being drawn, innermost last.
+    loops: Vec<Scope>,
+    /// The breakable branches around the step being drawn, innermost last:
+    /// the number of loops around the branch, and the ends its `break`s
+    /// leave open.
+    branches: Vec<(usize, Ends)>,
 }
 
 impl Chart<'_> {
@@ -106,11 +120,13 @@ impl Chart<'_> {
     fn flow(&mut self, name: &str, steps: &[Step]) {
         let start = self.node(("([", "])"), name, &[]);
         let loops = std::mem::take(&mut self.loops);
+        let branches = std::mem::take(&mut self.branches);
         let (_, ends) = self.steps(steps, vec![(start, None)]);
         if !ends.is_empty() {
             self.node(("([", "])"), "end", &ends);
         }
         self.loops = loops;
+        self.branches = branches;
     }
 
     /// `steps` as a chart of their own, beside the path.
@@ -125,7 +141,10 @@ impl Chart<'_> {
     /// The index in `loops` of the loop labelled `label`, or the innermost.
     fn target(&self, label: Option<&String>) -> Option<usize> {
         match label {
-            Some(l) => self.loops.iter().rposition(|lp| lp.0.as_ref() == Some(l)),
+            Some(l) => self
+                .loops
+                .iter()
+                .rposition(|lp| lp.label.as_ref() == Some(l)),
             None => self.loops.len().checked_sub(1),
         }
     }
@@ -174,15 +193,27 @@ impl Chart<'_> {
                     // Outside any loop it is drawn, and ends there.
                     ExitKind::Break(label) => {
                         let id = self.node(("[", "]"), text, &ends);
-                        if let Some(i) = self.target(label.as_ref()) {
-                            self.loops[i].2.push((id, None));
+                        let depth = self.loops.len();
+                        match self.branches.last_mut() {
+                            // An unlabelled `break` with no loop inside
+                            // the branch leaves the branch.
+                            Some((d, out)) if label.is_none() && *d == depth => {
+                                out.push((id, None));
+                            }
+                            _ => {
+                                if let Some(i) = self.target(label.as_ref()) {
+                                    self.loops[i].breaks.push((id, None));
+                                }
+                            }
                         }
                     }
                     ExitKind::Continue(label) => {
                         let id = self.node(("[", "]"), text, &ends);
                         if let Some(i) = self.target(label.as_ref()) {
-                            let to = self.loops[i].1;
-                            self.edges_to(&[(id, None)], to);
+                            match self.loops[i].again {
+                                Some(to) => self.edges_to(&[(id, None)], to),
+                                None => self.loops[i].continues.push((id, None)),
+                            }
                         }
                     }
                 }
@@ -197,19 +228,44 @@ impl Chart<'_> {
                 endless,
                 hidden_exit,
                 orelse,
+                test_after,
+                post,
                 ..
             } => {
                 let shape = if *endless { ("[", "]") } else { ("{", "}") };
-                // A header run before every iteration is where each
-                // iteration starts.
-                let (entry, at) = self.steps(pre, ends);
-                let d = self.node(shape, header, &at);
-                let again = entry.unwrap_or(d);
-                self.note(comment.as_ref(), d);
-                self.loops.push((label.clone(), again, Vec::new()));
-                let (_, back) = self.steps(body, vec![(d, Some("loop"))]);
-                self.edges_to(&back, again);
-                let mut out = self.loops.pop().map(|lp| lp.2).unwrap_or_default();
+                let scope = |again| Scope {
+                    label: label.clone(),
+                    again,
+                    breaks: Vec::new(),
+                    continues: Vec::new(),
+                };
+                let (d, breaks) = if *test_after {
+                    // The body runs first; its fall-off and every
+                    // `continue` go on to `post`, then the header.
+                    self.loops.push(scope(None));
+                    let (entry, back) = self.steps(body, ends);
+                    let lp = self.loops.pop().unwrap_or_else(|| scope(None));
+                    let (_, back) = self.steps(post, [back, lp.continues].concat());
+                    let (_, at) = self.steps(pre, back);
+                    let d = self.node(shape, header, &at);
+                    self.note(comment.as_ref(), d);
+                    self.edges_to(&[(d, Some("loop"))], entry.unwrap_or(d));
+                    (d, lp.breaks)
+                } else {
+                    // A header run before every iteration is where each
+                    // iteration starts.
+                    let (entry, at) = self.steps(pre, ends);
+                    let d = self.node(shape, header, &at);
+                    let again = entry.unwrap_or(d);
+                    self.note(comment.as_ref(), d);
+                    self.loops.push(scope((post.is_empty()).then_some(again)));
+                    let (_, back) = self.steps(body, vec![(d, Some("loop"))]);
+                    let lp = self.loops.pop().unwrap_or_else(|| scope(None));
+                    let (_, back) = self.steps(post, [back, lp.continues].concat());
+                    self.edges_to(&back, again);
+                    (d, lp.breaks)
+                };
+                let mut out = breaks;
                 if !*endless {
                     // A `break` skips the `else`.
                     out.extend(self.steps(orelse, vec![(d, Some("done"))]).1);
@@ -228,34 +284,57 @@ impl Chart<'_> {
                 head,
                 arms,
                 exhaustive,
+                breakable,
                 ..
             } => {
                 let mut no = ends;
                 if let Some(h) = head {
                     no = vec![(self.node(("[", "]"), h, &no), None)];
                 }
+                if *breakable {
+                    self.branches.push((self.loops.len(), Vec::new()));
+                }
                 let mut out = Vec::new();
+                // The open ends of a falling arm, to join the next body.
+                let mut fell = Vec::new();
                 for a in arms {
                     let (_, at) = self.steps(&a.pre, no);
                     no = if let Some(cond) = &a.cond {
                         let d = self.node(("{", "}"), cond, &at);
                         self.note(a.comment.as_ref(), d);
-                        let (_, ends) = self.steps(&a.body, vec![(d, Some("yes"))]);
-                        out.extend(self.steps(&a.after, ends).1);
+                        let from = [vec![(d, Some("yes"))], fell].concat();
+                        let (_, ends) = self.steps(&a.body, from);
+                        let ends = self.steps(&a.after, ends).1;
+                        fell = Vec::new();
+                        if a.falls {
+                            fell = ends;
+                        } else {
+                            out.extend(ends);
+                        }
                         vec![(d, Some("no"))]
                     } else {
                         // No diamond: the note hangs off the body's
                         // first node, or the diamond that leads here.
-                        let (entry, ends) = self.steps(&a.body, at.clone());
-                        out.extend(self.steps(&a.after, ends).1);
+                        let from = [at.clone(), std::mem::take(&mut fell)].concat();
+                        let (entry, ends) = self.steps(&a.body, from);
+                        let ends = self.steps(&a.after, ends).1;
+                        if a.falls {
+                            fell = ends;
+                        } else {
+                            out.extend(ends);
+                        }
                         if let Some(to) = entry.or_else(|| at.first().map(|e| e.0)) {
                             self.note(a.comment.as_ref(), to);
                         }
                         Vec::new()
                     };
                 }
+                out.extend(fell);
                 if !*exhaustive {
                     out.extend(no);
+                }
+                if *breakable {
+                    out.extend(self.branches.pop().map(|b| b.1).unwrap_or_default());
                 }
                 out
             }
@@ -284,6 +363,7 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         next: 0,
         edges: 0,
         loops: Vec::new(),
+        branches: Vec::new(),
     };
     c.flow(name, &flow.steps);
     let mut body = String::from("flowchart TD\n");
@@ -321,10 +401,15 @@ pub(crate) fn coverage(flow: &Flow) -> String {
                     }
                 }
                 Step::Loop {
-                    pre, body, orelse, ..
+                    pre,
+                    body,
+                    post,
+                    orelse,
+                    ..
                 } => {
                     not_drawn(pre, into);
                     not_drawn(body, into);
+                    not_drawn(post, into);
                     not_drawn(orelse, into);
                 }
                 Step::Finally { body, .. } => not_drawn(body, into),
@@ -370,6 +455,275 @@ pub(crate) fn coverage(flow: &Flow) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::flow::testutil::{arm, branch, call, exit, flow_of, looping};
+    use crate::model::NotDrawn;
+
+    /// The node and edge lines of the chart of `steps`.
+    fn drawn(steps: Vec<Step>) -> Vec<String> {
+        chart("f", "a.c", &flow_of(steps), &|_| String::new())
+            .lines()
+            .filter(|l| l.starts_with("    n"))
+            .map(|l| l.trim().to_string())
+            .collect()
+    }
+
+    fn a_breakable_k(inside: Vec<Step>) -> Step {
+        looping(
+            "go",
+            vec![
+                branch(
+                    vec![
+                        arm(Some("k"), inside, false),
+                        arm(None, vec![call("b")], false),
+                    ],
+                    true,
+                ),
+                call("c"),
+            ],
+            Vec::new(),
+            false,
+        )
+    }
+
+    #[test]
+    fn a_break_in_a_breakable_branch_lands_on_what_follows_the_branch() {
+        let steps = vec![a_breakable_k(vec![call("a"), exit(ExitKind::Break(None))])];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1{\"go\"}",
+                "n0 --> n1",
+                "n2{\"k\"}",
+                "n1 -->|loop| n2",
+                "n3>\"a()\"]:::hidden",
+                "n2 -->|yes| n3",
+                "n4[\"exit\"]",
+                "n3 --> n4",
+                "n5>\"b()\"]:::hidden",
+                "n2 -->|no| n5",
+                "n6>\"c()\"]:::hidden",
+                "n5 --> n6",
+                "n4 --> n6",
+                "n6 --> n1",
+                "n7([\"end\"])",
+                "n1 -->|done| n7",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_continue_in_a_breakable_branch_goes_to_the_loop() {
+        let steps = vec![a_breakable_k(vec![
+            call("a"),
+            exit(ExitKind::Continue(None)),
+        ])];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1{\"go\"}",
+                "n0 --> n1",
+                "n2{\"k\"}",
+                "n1 -->|loop| n2",
+                "n3>\"a()\"]:::hidden",
+                "n2 -->|yes| n3",
+                "n4[\"exit\"]",
+                "n3 --> n4",
+                "n4 --> n1",
+                "n5>\"b()\"]:::hidden",
+                "n2 -->|no| n5",
+                "n6>\"c()\"]:::hidden",
+                "n5 --> n6",
+                "n6 --> n1",
+                "n7([\"end\"])",
+                "n1 -->|done| n7",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_break_in_a_loop_inside_a_breakable_branch_leaves_that_loop() {
+        let inner = looping(
+            "again",
+            vec![exit(ExitKind::Break(None))],
+            Vec::new(),
+            false,
+        );
+        let steps = vec![
+            branch(vec![arm(Some("k"), vec![inner, call("w")], false)], true),
+            call("c"),
+        ];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1{\"k\"}",
+                "n0 --> n1",
+                "n2{\"again\"}",
+                "n1 -->|yes| n2",
+                "n3[\"exit\"]",
+                "n2 -->|loop| n3",
+                "n4>\"w()\"]:::hidden",
+                "n3 --> n4",
+                "n2 -->|done| n4",
+                "n5>\"c()\"]:::hidden",
+                "n4 --> n5",
+                "n1 -->|no| n5",
+                "n6([\"end\"])",
+                "n5 --> n6",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_labelled_break_passes_through_a_breakable_branch() {
+        let mut outer = a_breakable_k(vec![exit(ExitKind::Break(Some("outer".into())))]);
+        if let Step::Loop { label, .. } = &mut outer {
+            *label = Some("outer".into());
+        }
+        assert_eq!(
+            drawn(vec![outer]),
+            [
+                "n0([\"f\"])",
+                "n1{\"go\"}",
+                "n0 --> n1",
+                "n2{\"k\"}",
+                "n1 -->|loop| n2",
+                "n3[\"exit\"]",
+                "n2 -->|yes| n3",
+                "n4>\"b()\"]:::hidden",
+                "n2 -->|no| n4",
+                "n5>\"c()\"]:::hidden",
+                "n4 --> n5",
+                "n5 --> n1",
+                "n6([\"end\"])",
+                "n3 --> n6",
+                "n1 -->|done| n6",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_falling_arm_joins_the_next_arms_body_and_not_the_join() {
+        let steps = vec![
+            branch(
+                vec![
+                    arm(Some("1"), vec![call("a")], true),
+                    arm(Some("2"), vec![call("b")], true),
+                ],
+                false,
+            ),
+            call("c"),
+        ];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1{\"1\"}",
+                "n0 --> n1",
+                "n2>\"a()\"]:::hidden",
+                "n1 -->|yes| n2",
+                "n3{\"2\"}",
+                "n1 -->|no| n3",
+                "n4>\"b()\"]:::hidden",
+                "n3 -->|yes| n4",
+                "n2 --> n4",
+                "n5>\"c()\"]:::hidden",
+                "n4 --> n5",
+                "n3 -->|no| n5",
+                "n6([\"end\"])",
+                "n5 --> n6",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_test_after_loop_enters_its_body_and_tests_after_it() {
+        let body = vec![
+            call("a"),
+            branch(
+                vec![arm(Some("k"), vec![exit(ExitKind::Continue(None))], false)],
+                false,
+            ),
+            call("b"),
+        ];
+        let steps = vec![looping("go", body, Vec::new(), true)];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1>\"a()\"]:::hidden",
+                "n0 --> n1",
+                "n2{\"k\"}",
+                "n1 --> n2",
+                "n3[\"exit\"]",
+                "n2 -->|yes| n3",
+                "n4>\"b()\"]:::hidden",
+                "n2 -->|no| n4",
+                "n5{\"go\"}",
+                "n4 --> n5",
+                "n3 --> n5",
+                "n5 -->|loop| n1",
+                "n6([\"end\"])",
+                "n5 -->|done| n6",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_post_runs_after_the_body_and_a_continue_before_the_header() {
+        let body = vec![
+            call("a"),
+            branch(
+                vec![arm(Some("k"), vec![exit(ExitKind::Continue(None))], false)],
+                false,
+            ),
+            call("b"),
+        ];
+        let steps = vec![looping("go", body, vec![call("u")], false)];
+        assert_eq!(
+            drawn(steps),
+            [
+                "n0([\"f\"])",
+                "n1{\"go\"}",
+                "n0 --> n1",
+                "n2>\"a()\"]:::hidden",
+                "n1 -->|loop| n2",
+                "n3{\"k\"}",
+                "n2 --> n3",
+                "n4[\"exit\"]",
+                "n3 -->|yes| n4",
+                "n5>\"b()\"]:::hidden",
+                "n3 -->|no| n5",
+                "n6>\"u()\"]:::hidden",
+                "n5 --> n6",
+                "n4 --> n6",
+                "n6 --> n1",
+                "n7([\"end\"])",
+                "n1 -->|done| n7",
+            ]
+        );
+    }
+
+    #[test]
+    fn calls_and_closures_in_a_post_are_counted() {
+        let mut nested = flow_of(vec![call("n")]);
+        nested.not_drawn.insert(NotDrawn::Closure, 1);
+        let post = vec![
+            call("u"),
+            Step::Nested {
+                name: "g".into(),
+                line: 1,
+                flow: nested,
+            },
+        ];
+        let flow = flow_of(vec![looping("go", vec![call("a")], post, false)]);
+        assert_eq!(
+            coverage(&flow),
+            "Coverage: 3 calls: 0 resolved, 0 one of, 0 outside, 3 hidden. Not drawn: 1 closure."
+        );
+    }
 
     #[test]
     fn relative_page_ids_climb_only_past_the_shared_directories() {
