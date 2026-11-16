@@ -1,11 +1,12 @@
 //! The source stage: files in, an analysed `Project` out.
 
 use crate::flow;
-use crate::model::{File, Project};
+use crate::model::{File, NotDrawn, Project};
 use crate::Error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use wiki_code::index::Family;
+use wiki_code::model::CallVia;
 use wiki_code::walk::walk;
 use wiki_code::{analyze, handles, pair_declarations};
 
@@ -51,16 +52,42 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             code: a.file.clone(),
             flows: BTreeMap::new(),
             declarations: BTreeMap::new(),
+            macros: if family == Family::Cpp {
+                flow::cpp_macros(&a)
+            } else {
+                Vec::new()
+            },
         };
         flow::attach(&mut file, &a);
         files.insert(path, file);
     }
     pair_declarations(&mut files);
+    hidden_jumps(&mut files);
     unreadable.sort();
     Project {
         files,
         unreadable,
         crates,
+    }
+}
+
+/// Counts in each C/C++ flow every bare call, nested flows' included, of
+/// a name some file of the project defines as a macro with a jump.
+fn hidden_jumps(files: &mut BTreeMap<String, File>) {
+    let jumps: BTreeSet<String> = (files.values().flat_map(|f| &f.macros))
+        .filter(|m| m.1)
+        .map(|m| m.0.clone())
+        .collect();
+    for f in files.values_mut().filter(|f| f.family == Family::Cpp) {
+        for flow in f.flows.values_mut() {
+            let mut n = 0;
+            flow.each_call(&mut |_, c| {
+                n += usize::from(c.site.via == CallVia::Bare && jumps.contains(&c.site.name));
+            });
+            if n > 0 {
+                *flow.not_drawn.entry(NotDrawn::HiddenJump).or_default() += n;
+            }
+        }
     }
 }
 

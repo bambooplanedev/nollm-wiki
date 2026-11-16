@@ -2755,3 +2755,19 @@ fn a_defaulted_or_deleted_function_says_so_and_has_no_chart() {
         "## pot_pot_2\n`Pot(const Pot&) = delete` · `src/pot.h:4-4`\n\nDeleted.\n\n"
     );
 }
+
+#[test]
+fn a_call_of_a_jumping_macro_from_another_file_is_on_the_coverage_line() {
+    let guard = "#define RETURN_UNLESS(c) do { if (!(c)) return; } while (0)\n";
+    let src = "void feed(int* p, int a) {\n    RETURN_UNLESS(a > 0);\n    use(p);\n}\n";
+    let (_d, vault) = common::built(&[("inc/guard.h", guard), ("src/a.cpp", src)]);
+    let feed = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "feed");
+    let coverage: Vec<&str> = feed
+        .lines()
+        .filter(|l| l.starts_with("Coverage: "))
+        .collect();
+    assert_eq!(
+        coverage,
+        ["Coverage: 2 calls: 0 resolved, 0 one of, 2 outside, 0 hidden. Not drawn: 1 macro jump."]
+    );
+}

@@ -5,7 +5,7 @@ mod cpp;
 mod python;
 mod rust;
 
-pub(crate) use cpp::module_code as cpp_module_code;
+pub(crate) use cpp::{macros as cpp_macros, module_code as cpp_module_code};
 pub(crate) use python::{module_code, module_imports};
 
 use crate::model::{Arm, Comment, ExitKind, File, Flow, MapCall, NotDrawn, Step, Target};

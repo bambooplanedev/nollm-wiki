@@ -39,6 +39,10 @@ pub struct File {
     /// A call or a decision at module level (Python), a declaration
     /// outside any function initialized by a call (C/C++): no flow shows it.
     pub module_code: bool,
+    /// Every `#define` name of a C/C++ file, once, sorted, and whether a
+    /// body of it holds a `return`, `goto`, `break`, `continue` or `throw`
+    /// token; empty for the other languages.
+    pub macros: Vec<(String, bool)>,
 }
 
 /// What a C/C++ function item has in place of a body.
@@ -122,6 +126,9 @@ pub enum NotDrawn {
     NestedCase,
     /// A statement in a switch before its first label: no arm holds it.
     BeforeCase,
+    /// A call of a project macro whose body holds a jump token: it may
+    /// leave the function, loop or switch unseen.
+    HiddenJump,
 }
 
 impl NotDrawn {
@@ -138,6 +145,7 @@ impl NotDrawn {
             NotDrawn::Untraced => "call not traced",
             NotDrawn::NestedCase => "nested case",
             NotDrawn::BeforeCase => "code before the first case",
+            NotDrawn::HiddenJump => "macro jump",
         }
     }
 }

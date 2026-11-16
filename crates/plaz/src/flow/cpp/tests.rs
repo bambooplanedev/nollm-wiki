@@ -1,6 +1,7 @@
 //! Tests for `flow::cpp`.
 use crate::flow::testutil::{file, flow_lines, not_drawn};
-use crate::model::{Bodiless, Step};
+use crate::model::{Bodiless, Flow, NotDrawn, Step};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The node and edge lines of the chart of `name` in the C++ file `src`.
 fn drawn(src: &str, name: &str) -> Vec<String> {
@@ -416,4 +417,177 @@ fn code_before_the_first_case_is_counted_not_drawn() {
         not_drawn("a.cpp", src, "pick"),
         [("code before the first case".to_string(), 2)]
     );
+}
+
+/// The flow of `name` in the C++ file `src`.
+fn flow(src: &str, name: &str) -> Flow {
+    let f = file("a.cpp", src);
+    let i = f.code.items.iter().position(|it| it.name == name).unwrap();
+    f.flows[&i].clone()
+}
+
+fn names<const N: usize>(n: [&str; N]) -> BTreeSet<String> {
+    n.map(String::from).into()
+}
+
+fn typed<const N: usize>(t: [(&str, &str); N]) -> BTreeMap<String, String> {
+    t.map(|(n, t)| (n.to_string(), t.to_string())).into()
+}
+
+#[test]
+fn bindings_cover_parameters_locals_conditions_loops_handlers_and_structured_bindings() {
+    let src = "void tally(Shelf* s, const Rule& r, int k) {\n    auto got = fetch();\n    Shelf spare;\n    for (auto& e : entries(s)) {}\n    for (Rule* w = first(); w; w = w->next) {}\n    if (auto* hit = probe()) {}\n    while (Shelf* nx = after(s)) {}\n    try {} catch (Fault& f) {}\n    auto [lo, hi] = bounds();\n    auto pick = [&](int m) {};\n}\n";
+    let fl = flow(src, "tally");
+    assert_eq!(
+        fl.locals,
+        names(["e", "f", "got", "hi", "hit", "k", "lo", "nx", "pick", "r", "s", "spare", "w"])
+    );
+    assert_eq!(
+        fl.types,
+        typed([
+            ("f", "Fault"),
+            ("nx", "Shelf"),
+            ("r", "Rule"),
+            ("s", "Shelf"),
+            ("spare", "Shelf"),
+            ("w", "Rule"),
+        ])
+    );
+}
+
+#[test]
+fn auto_is_typed_only_from_a_brace_literal_new_and_make_unique_or_shared() {
+    let src = "void stock() {\n    auto a = Crate{4};\n    auto* b = new Barrel(2);\n    auto c = std::make_unique<Pallet>(1);\n    auto d = make_shared<Bin>();\n    auto g;\n}\n";
+    let fl = flow(src, "stock");
+    assert_eq!(fl.locals, names(["a", "b", "c", "d", "g"]));
+    assert_eq!(
+        fl.types,
+        typed([
+            ("a", "Crate"),
+            ("b", "Barrel"),
+            ("c", "std::unique_ptr<Pallet>"),
+            ("d", "std::shared_ptr<Bin>"),
+        ])
+    );
+}
+
+#[test]
+fn auto_from_a_call_has_no_type_even_one_that_reads_like_a_constructor() {
+    let src = "void use_it() {\n    auto c = load();\n    c.get();\n    auto t = Tray(3);\n    Tray u = load();\n}\n";
+    let fl = flow(src, "use_it");
+    assert_eq!(fl.locals, names(["c", "t", "u"]));
+    assert_eq!(fl.types, typed([("u", "Tray")]));
+}
+
+#[test]
+fn template_parameters_and_local_types_are_rebound_and_type_nothing() {
+    let src = "template <typename K, int N>\nstruct Box {\n    template <class V, template <class> class W>\n    void put(K k, V v, Item i) {\n        struct Tag { int x; } t;\n        using Alias = Tag;\n        typedef Tag Wide;\n        Wide w;\n        K copy;\n    }\n};\n";
+    let fl = flow(src, "put");
+    assert_eq!(
+        fl.rebound,
+        names(["Alias", "K", "N", "Tag", "V", "W", "Wide"])
+    );
+    assert_eq!(fl.locals, names(["copy", "i", "k", "t", "v", "w"]));
+    assert_eq!(fl.types, typed([("i", "Item")]));
+}
+
+#[test]
+fn declarators_bind_their_name_and_a_function_declarator_types_nothing() {
+    let src = "template <class... Ts>\nvoid rig(void (*cb)(int z), Gear (*mk)(), int (&row)[4], struct Cog* c, int, Gear g[2], Ts... rest) {\n    Gear spare();\n    void (*alt)(int) = cb;\n}\n";
+    let fl = flow(src, "rig");
+    assert_eq!(
+        fl.locals,
+        names(["alt", "c", "cb", "g", "mk", "rest", "row"])
+    );
+    assert_eq!(fl.types, typed([("c", "Cog"), ("g", "Gear")]));
+}
+
+#[test]
+fn a_declaration_missing_its_name_binds_nothing() {
+    let fl = flow("void f() {\n    auto = 3;\n    Pen p;\n}\n", "f");
+    assert!(fl.syntax_errors);
+    assert_eq!(fl.locals, names(["p"]));
+}
+
+#[test]
+fn a_lambda_binds_its_parameters_and_captures_in_its_own_flow() {
+    let src = "void hook(Bus& bus) {\n    int base = 1;\n    auto on = [&, base, n = 2, this](Event ev) { bus.post(ev); };\n}\n";
+    let fl = flow(src, "hook");
+    assert_eq!(fl.locals, names(["base", "bus", "on"]));
+    let Step::Nested { flow: inner, .. } = &fl.steps[0] else {
+        panic!("{:?}", fl.steps)
+    };
+    assert_eq!(inner.locals, names(["base", "ev", "n"]));
+    assert_eq!(inner.types, typed([("ev", "Event")]));
+}
+
+#[test]
+fn a_files_macros_are_each_define_once_with_whether_its_body_has_a_jump_token() {
+    let src = format!(
+        "#define LIMIT 8\n#define BAIL(c) if (c) \\\n    return\n#define NOTE(x) keep(x, returned, on_break) // return\n#define SAY \"goto\" /* break */\n#ifdef FAST\n#define STEP(x) x\n#else\n#define STEP(x) continue\n#endif\n{SPLIT}"
+    );
+    let f = file("a.cpp", &src);
+    assert!(f.syntax_errors);
+    assert_eq!(
+        f.macros,
+        [
+            ("BAIL".to_string(), true),
+            ("LIMIT".to_string(), false),
+            ("NOTE".to_string(), false),
+            ("SAY".to_string(), false),
+            ("STEP".to_string(), true),
+        ]
+    );
+}
+
+/// The not-drawn counts and the call texts of `name` in `path` of a
+/// project of `files`.
+fn counted(
+    files: &[(&str, &str)],
+    path: &str,
+    name: &str,
+) -> (BTreeMap<NotDrawn, usize>, Vec<String>) {
+    let p = crate::source::project(files.iter().map(|(p, t)| (p.to_string(), t.to_string())));
+    let f = &p.files[path];
+    let i = f.code.items.iter().position(|it| it.name == name).unwrap();
+    let mut calls = Vec::new();
+    f.flows[&i].each_call(&mut |_, c| calls.push(c.text.clone()));
+    (f.flows[&i].not_drawn.clone(), calls)
+}
+
+#[test]
+fn a_call_of_a_project_macro_that_jumps_is_counted_and_stays_a_call() {
+    let guard = "#define RETURN_UNLESS(c) do { \\\n    if (!(c)) return; \\\n} while (0)\n";
+    let src = "void feed(int* p, int a) {\n    if (!p) { std::abort(); }\n    RETURN_UNLESS(a > 0);\n    use(p);\n}\n";
+    let (nd, calls) = counted(
+        &[("inc/guard.h", guard), ("src/a.cpp", src)],
+        "src/a.cpp",
+        "feed",
+    );
+    assert_eq!(nd, [(NotDrawn::HiddenJump, 1)].into());
+    assert_eq!(calls, ["std::abort()", "RETURN_UNLESS(a > 0)", "use(p)"]);
+}
+
+#[test]
+fn a_call_of_a_macro_without_a_jump_token_is_not_counted() {
+    let m = "#define NOTE(x) keep(x, returned, on_break)\n#define BAIL(c) if (c) goto out\n";
+    let src = "void f(int a) {\n    NOTE(a);\n    BAIL(a);\nout:\n    done();\n}\n";
+    let (nd, calls) = counted(&[("m.h", m), ("a.cpp", src)], "a.cpp", "f");
+    assert_eq!(nd, [(NotDrawn::HiddenJump, 1)].into());
+    assert_eq!(calls, ["NOTE(a)", "BAIL(a)", "done()"]);
+}
+
+#[test]
+fn a_macro_that_jumps_in_one_file_counts_wherever_it_is_defined_without() {
+    let files = [
+        ("a.h", "#define CHECK(c) if (!(c)) break\n"),
+        ("b.h", "#define CHECK(c) (void)(c)\n"),
+        ("a.cpp", "void f(int a) {\n    CHECK(a);\n}\n"),
+        ("a.py", "def f(a):\n    CHECK(a)\n"),
+    ];
+    assert_eq!(
+        counted(&files, "a.cpp", "f").0,
+        [(NotDrawn::HiddenJump, 1)].into()
+    );
+    assert_eq!(counted(&files, "a.py", "f").0, [].into());
 }
