@@ -69,6 +69,11 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         if let Some(c) = class.filter(|_| it.kind == CodeItemKind::Method) {
             file.classes.insert(i, untemplated(&c));
         }
+        if let Some(scope) = decl.and_then(|d| cast_scope(d, src.text())) {
+            let mut class = enclosing(node, src.text(), Some(&anon));
+            class.extend(scope.split("::").map(|s| s.trim().to_string()));
+            file.classes.insert(i, untemplated(&class.join("::")));
+        }
     }
     for s in &a.sources {
         let mut stack = vec![s.tree().root_node()];
@@ -82,6 +87,20 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             stack.extend(n.named_children(&mut n.walk()));
         }
     }
+}
+
+/// The class of `K::operator bool()` when the grammar reads the
+/// definition `d` (after `inline`) as a function `bool` of the type
+/// `K::operator`: no type is named `operator`, so the scope is `K`.
+fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
+    let ty = d
+        .child_by_field_name("type")
+        .filter(|t| t.kind() == "qualified_identifier")?;
+    let name = ty.child_by_field_name("name")?;
+    let scope = ty
+        .child_by_field_name("scope")
+        .filter(|_| &src[name.byte_range()] == "operator")?;
+    Some(&src[scope.byte_range()])
 }
 
 /// Records the names of the namespace or namespace alias `n` defines in

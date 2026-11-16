@@ -4627,3 +4627,16 @@ fn a_misread_call_operators_bare_call_is_never_certain_to_a_free_namesake() {
         ["run_short() → one of: src/run.cpp:2, src/run.cpp:3, or outside"]
     );
 }
+
+#[test]
+fn an_inline_conversion_operator_read_as_a_function_named_its_type_keeps_its_class() {
+    // `inline K::operator bool()` parses as a function `bool` of the type
+    // `K::operator`; its calls are still its class's.
+    let h = "struct Ent {\n    explicit operator bool() const;\n    int stat() const;\n};\ninline Ent::operator bool() const\n{\n    stat();\n    return true;\n}\n";
+    let src = "#include \"ent.h\"\nint Ent::stat() const { return 1; }\nint stat() { return 0; }\n";
+    let files = [("src/ent.h", h), ("src/ent.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/ent.h", "bool"),
+        ["stat() → src/ent.cpp:2"]
+    );
+}
