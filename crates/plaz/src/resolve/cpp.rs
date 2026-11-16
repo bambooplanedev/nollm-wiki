@@ -1,4 +1,5 @@
-//! C and C++'s own call rules: the files the quoted includes reach,
+//! C and C++'s own call rules: the files the includes reach (quoted
+//! ones, and angle ones naming a directory),
 //! functions local to their file, declarations folded onto their
 //! definitions, and the classes a method call may dispatch to.
 
@@ -88,7 +89,7 @@ impl<'a> Cpp<'a> {
                 .collect(),
             pages: pages.clone(),
         };
-        // Per page: the pages its quoted includes name.
+        // Per page: the pages its includes name.
         let mut includes = vec![Vec::new(); pages.len()];
         for (page, &(path, file)) in cpp() {
             // `<a/b.h>` may name a project header; `<b.h>` a system one.
