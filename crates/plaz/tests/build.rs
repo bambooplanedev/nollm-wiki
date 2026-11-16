@@ -3373,6 +3373,19 @@ fn a_typed_receiver_of_a_class_another_class_overrides_is_one_of_both() {
 }
 
 #[test]
+fn a_subclass_naming_its_base_through_an_alias_may_override_a_typed_receivers_method() {
+    let src = "struct Lamp {\n    virtual int glow() { return 0; }\n};\ntypedef Lamp LampBase;\ntypedef LampBase AnyLamp;\nstruct Torch : AnyLamp {\n    int glow() override { return 2; }\n};\nstruct Flare : Torch {\n    int glow() override { return 3; }\n};\nstruct Dial {\n    virtual int turn() { return 0; }\n};\nusing DialBase = Dial;\nstruct Knob : DialBase {\n    int turn() override { return 1; }\n};\nstruct Bell {\n    virtual int ring() { return 0; }\n};\nint use(Lamp* l, Dial& d, Bell* b) { return l->glow() + d.turn() + b->ring(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "use"),
+        [
+            "l->glow() → one of: src/a.cpp:2, src/a.cpp:7, src/a.cpp:10, or outside",
+            "d.turn() → one of: src/a.cpp:13, src/a.cpp:17, or outside",
+            "b->ring() → src/a.cpp:20",
+        ]
+    );
+}
+
+#[test]
 fn a_pure_virtual_method_called_on_a_typed_receiver_is_its_override() {
     let src = "struct Shape {\n    virtual int area() = 0;\n};\nstruct Square : Shape {\n    int area() override { return 1; }\n};\nint total(Shape* s) { return s->area(); }\n";
     assert_eq!(

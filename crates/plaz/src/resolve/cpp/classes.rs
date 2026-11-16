@@ -71,6 +71,9 @@ pub(super) struct Classes<'a> {
     derived: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per base name as written, by `owner_key`: the classes naming it.
     naming: BTreeMap<&'a str, BTreeSet<&'a str>>,
+    /// Per name (`owner_key`) of a base no head places, and of each type
+    /// an alias of that name leads to: the classes naming such a base.
+    unseen: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per class name (`owner_key`): the paths of the classes it names.
     by_key: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per alias name (`owner_key`): the page and path of each project
@@ -152,6 +155,25 @@ impl<'a> Cpp<'a> {
         for (page, class, written, base) in read {
             if let Base::Class(p, _) = base {
                 self.classes.derived.entry(p).or_default().insert(class);
+            }
+            if let Base::Unseen = base {
+                let mut keys = vec![owner_key(written)];
+                let mut i = 0;
+                while let Some(&k) = keys.get(i) {
+                    for t in self
+                        .alias_targets(k, sight(page))
+                        .into_iter()
+                        .map(owner_key)
+                    {
+                        if !t.is_empty() && !keys.contains(&t) {
+                            keys.push(t);
+                        }
+                    }
+                    i += 1;
+                }
+                for k in keys {
+                    self.classes.unseen.entry(k).or_default().insert(class);
+                }
             }
             let naming = self.classes.naming.entry(owner_key(written));
             naming.or_default().insert(class);
@@ -281,14 +303,20 @@ impl<'a> Cpp<'a> {
         Some(all)
     }
 
-    /// The project classes deriving from `class`, directly or not.
-    fn descendants(&self, class: &'a str) -> BTreeSet<&'a str> {
-        let mut out = BTreeSet::new();
-        let mut todo = vec![class];
-        while let Some(c) = todo.pop() {
-            for &sub in self.classes.derived.get(c).into_iter().flatten() {
-                if sub != class && out.insert(sub) {
-                    todo.push(sub);
+    /// The project classes deriving from `class`, directly or not, each
+    /// with whether every way down passed a base no head places whose
+    /// name is that of a class on the way or of an alias leading to it.
+    fn descendants(&self, class: &'a str) -> BTreeMap<&'a str, bool> {
+        let mut out: BTreeMap<&'a str, bool> = BTreeMap::new();
+        let mut todo = vec![(class, false)];
+        while let Some((c, unsure)) = todo.pop() {
+            let sure = self.classes.derived.get(c).into_iter().flatten();
+            let unseen = self.classes.unseen.get(owner_key(c)).into_iter().flatten();
+            let subs = sure.map(|&s| (s, unsure)).chain(unseen.map(|&s| (s, true)));
+            for (sub, unsure) in subs.filter(|s| s.0 != class) {
+                if out.get(sub).is_none_or(|&was| was && !unsure) {
+                    out.insert(sub, unsure);
+                    todo.push((sub, unsure));
                 }
             }
         }
@@ -299,7 +327,7 @@ impl<'a> Cpp<'a> {
     /// the type written `t` as a base, and of theirs.
     pub(super) fn deriving(&self, t: &str, site: &CallSite) -> BTreeSet<FnRef> {
         let named = self.classes.naming.get(owner_key(t)).into_iter().flatten();
-        let all = named.flat_map(|&c| self.descendants(c).into_iter().chain([c]));
+        let all = named.flat_map(|&c| self.descendants(c).into_keys().chain([c]));
         all.flat_map(|c| self.members(c, site, None).0).collect()
     }
 
@@ -329,8 +357,11 @@ impl<'a> Cpp<'a> {
             }
             if !found.is_empty() {
                 let subs = self.descendants(class).into_iter().filter(|_| dispatch);
-                let mut overrides = BTreeSet::new();
-                for (fns, open) in subs.map(|c| self.members(c, site, None)) {
+                // A subclass reached past an unplaced base may be none.
+                let (mut overrides, mut wide) = (BTreeSet::new(), false);
+                for (c, unsure) in subs {
+                    let (fns, open) = self.members(c, site, None);
+                    wide |= unsure && !fns.is_empty();
                     overrides.extend(fns);
                     loose |= open;
                 }
@@ -340,7 +371,7 @@ impl<'a> Cpp<'a> {
                 }
                 found.extend(overrides);
                 let loose = loose && !self.defined_in(&found, sight.page);
-                let open = pure || loose || (!settled && found.len() == 1);
+                let open = pure || loose || wide || (!settled && found.len() == 1);
                 return Ok(Found {
                     fns: found,
                     open,
