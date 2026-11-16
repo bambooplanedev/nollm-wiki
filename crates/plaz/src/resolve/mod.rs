@@ -8,6 +8,7 @@ use crate::flow::FlowScope;
 use crate::model::{File, FnId, MapCall, Project, Target};
 use crate::uses::{defines, in_scope, in_trait, is_trait, own_crate, standard, InScope};
 use cpp::Cpp;
+pub(crate) use cpp::{fold_scope, namespace_owners};
 use python::{Own, Python};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::imports::Imports;

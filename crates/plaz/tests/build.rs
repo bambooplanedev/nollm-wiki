@@ -2729,6 +2729,34 @@ fn same_arity_overloads_the_index_cannot_pair_are_one_of_their_definitions() {
 }
 
 #[test]
+fn a_declaration_is_defined_only_by_a_namesake_of_its_own_namespace() {
+    // `rise` has one namesake the index pairs it with, `fall` two.
+    let tide = "namespace tide { void rise(); void fall(); void ebb(); }\n";
+    let wave =
+        "namespace wave { void rise() {} void fall() {} }\nnamespace tide { void ebb() {} }\n";
+    let gust = "namespace gust { void fall() {} }\n";
+    let files = [
+        ("src/tide.h", tide),
+        ("src/wave.cpp", wave),
+        ("src/gust.cpp", gust),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/tide_h");
+    for name in ["rise", "fall"] {
+        assert_eq!(
+            common::fn_block(&page, name).trim_end(),
+            format!(
+                "## {name}\n`void {name}()` · `src/tide.h:1-1`\n\nNo definition in the project."
+            )
+        );
+    }
+    assert_eq!(
+        common::fn_block(&page, "ebb").trim_end(),
+        "## ebb\n`void ebb()` · `src/tide.h:1-1`\n\nDefined at [[map/src/wave_cpp#ebb|ebb]]"
+    );
+}
+
+#[test]
 fn a_function_both_trees_list_is_one_call_target_with_a_heading() {
     let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\nint use_it() { return span(1); }\n";
     let (_d, vault) = common::built(&[("a.cpp", src)]);
