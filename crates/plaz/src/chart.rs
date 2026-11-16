@@ -272,10 +272,13 @@ impl Chart<'_> {
             let (entry, back) = self.steps(body, ends);
             let lp = self.loops.pop().unwrap_or_else(|| scope(None));
             let (_, back) = self.steps(post, [back, lp.continues].concat());
-            let (_, at) = self.steps(pre, back);
+            let (test, at) = self.steps(pre, back);
             let d = self.node(shape, header, &at);
             self.note(comment.as_ref(), d);
-            self.edges_to(&[(d, Some("loop"))], entry.unwrap_or(d));
+            // Each pass starts at the body's first node, else what runs
+            // before the test.
+            let again = entry.or(test).unwrap_or(d);
+            self.edges_to(&[(d, Some("loop"))], again);
             (d, lp.breaks)
         } else {
             // A header run before every iteration is where each

@@ -763,3 +763,50 @@ fn a_statement_macro_without_a_semicolon_counts_the_call_it_swallows() {
         [("call not traced".to_string(), 1)]
     );
 }
+
+#[test]
+fn a_do_loop_whose_body_draws_nothing_goes_back_to_its_tests_first_call() {
+    let src = "void wait_ready(Port& p) {\n    do {\n        ++tries;\n    } while (!p.ready());\n    done();\n}\n";
+    assert_eq!(
+        drawn(src, "wait_ready"),
+        [
+            "n0([\"wait_ready\"])",
+            "n1>\"p.ready()\"]:::hidden",
+            "n0 --> n1",
+            "n2{\"while (!p.ready())\"}",
+            "n1 --> n2",
+            "n2 -->|loop| n1",
+            "n3>\"done()\"]:::hidden",
+            "n2 -->|done| n3",
+            "n4([\"end\"])",
+            "n3 --> n4",
+        ]
+    );
+}
+
+#[test]
+fn a_do_loop_whose_body_is_only_a_closure_goes_back_to_its_tests_first_call() {
+    let src = "void spin(Port& p) {\n    do {\n        auto f = [&] { poke(); };\n    } while (p.ready());\n}\n";
+    let lines = drawn(src, "spin");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.contains("-->|loop|"))
+            .collect::<Vec<_>>(),
+        ["n6 -->|loop| n5"]
+    );
+    assert!(lines.contains(&"n5>\"p.ready()\"]:::hidden".to_string()));
+}
+
+#[test]
+fn a_do_loop_with_no_call_anywhere_loops_on_its_test() {
+    let src = "void count(int n) {\n    do {\n        ++n;\n    } while (n < 9);\n}\n";
+    let lines = drawn(src, "count");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.contains("-->|loop|"))
+            .collect::<Vec<_>>(),
+        ["n1 -->|loop| n1"]
+    );
+}
