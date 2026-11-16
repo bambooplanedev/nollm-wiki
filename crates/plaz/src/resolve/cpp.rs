@@ -224,6 +224,26 @@ impl<'a> Cpp<'a> {
     }
 }
 
+/// The candidates of either of two classes a name may be, as found on
+/// each: never certain.
+fn either(one: Evidence, other: Evidence) -> Evidence {
+    let (mut fns, mut open) = (BTreeSet::new(), false);
+    for e in [one, other] {
+        match e {
+            Evidence::Found {
+                fns: more,
+                open: also,
+            } => {
+                fns.extend(more);
+                open |= also;
+            }
+            Evidence::Outside | Evidence::Hidden => open = true,
+        }
+    }
+    open |= fns.len() < 2;
+    Evidence::Found { fns, open }
+}
+
 /// Can `it` take `site`'s argument count?
 fn fits(it: &CodeItem, site: &CallSite) -> bool {
     match (it.arity, site.args) {
@@ -266,13 +286,27 @@ impl Caller<'_, '_> {
     /// lookup finds, else outside under a base from outside the project,
     /// else any project method `f`.
     fn on_class(&self, call: &MapCall, class: &str) -> Evidence {
-        match self.cpp.lookup(class, &call.site, self.sight()) {
+        match self.cpp.lookup(class, &call.site, self.sight(), true) {
             Ok(found) => Evidence::Found {
                 fns: self.ids(found.fns),
                 open: found.open,
             },
             Err(Missing::Outside) => Evidence::Outside,
             Err(Missing::Nowhere | Missing::Unseen) => self.any_method(call),
+        }
+    }
+
+    /// `Q::f()` on the class `Q`: what lookup finds in it or its bases,
+    /// with no dispatch; outside when an outside base may give it.
+    fn qualified(&self, call: &MapCall, class: &str) -> Evidence {
+        match self.cpp.lookup(class, &call.site, self.sight(), false) {
+            Ok(found) => Evidence::Found {
+                fns: self.ids(found.fns),
+                open: found.open,
+            },
+            Err(Missing::Outside) => Evidence::Outside,
+            Err(Missing::Unseen) => self.any_method(call),
+            Err(Missing::Nowhere) => Evidence::Hidden,
         }
     }
 
@@ -299,22 +333,7 @@ impl Caller<'_, '_> {
         match cpp.place_name(t, self.class.unwrap_or(self.ns), self.sight()) {
             Placed::Class(class) => self.on_class(call, class),
             Placed::Either(one, other) => {
-                match (self.on_class(call, one), self.on_class(call, other)) {
-                    (
-                        Evidence::Found { mut fns, open },
-                        Evidence::Found {
-                            fns: more,
-                            open: also,
-                        },
-                    ) => {
-                        fns.extend(more);
-                        Evidence::Found {
-                            fns,
-                            open: open || also,
-                        }
-                    }
-                    _ => self.any_method(call),
-                }
+                either(self.on_class(call, one), self.on_class(call, other))
             }
             Placed::Unplaced => self.any_method(call),
             Placed::Nothing => Evidence::Found {
@@ -356,18 +375,10 @@ impl Caller<'_, '_> {
         let callee = call.text.split('(').next().unwrap_or("");
         let callee = untemplated(callee);
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
-        let of = |c: &str| cpp.members(c, site, Some(sight));
         match cpp.place_name(written, self.class.unwrap_or(self.ns), sight) {
-            Placed::Class(class) => {
-                let fns = self.ids(of(class));
-                return Evidence::Found {
-                    open: !cpp.settled(class, Some(sight)) && fns.len() == 1,
-                    fns,
-                };
-            }
+            Placed::Class(class) => return self.qualified(call, class),
             Placed::Either(one, other) => {
-                let fns = self.ids(of(one).into_iter().chain(of(other)));
-                return Evidence::Found { fns, open: false };
+                return either(self.qualified(call, one), self.qualified(call, other));
             }
             Placed::Unplaced => {
                 let named = cpp.namesakes(written, sight).into_iter();
@@ -411,7 +422,7 @@ impl Caller<'_, '_> {
                 Some(Evidence::Found { fns, .. }) => Evidence::Found { fns, open: true },
                 Some(_) | None => or,
             };
-            match self.cpp.lookup(class, site, self.sight()) {
+            match self.cpp.lookup(class, site, self.sight(), true) {
                 // A bare call in a template does not search a dependent
                 // base: the free functions may be meant.
                 Ok(found) if found.dependent => {

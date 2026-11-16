@@ -3871,3 +3871,78 @@ fn an_alias_met_before_a_global_class_of_its_name_leaves_the_base_unplaced() {
         ["Cfg::load() → one of: src/b.cpp:3, src/b.cpp:8, or outside"]
     );
 }
+
+#[test]
+fn a_qualifier_either_class_may_be_is_never_certain() {
+    let n = "#include <ext/base.h>\nnamespace n {\nstruct Cfg : ext::Base {};\n}\n";
+    let b = "#include <n.h>\nstruct Cfg {\n    static int load() { return 1; }\n};\nnamespace n {\nint run() { return Cfg::load(); }\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/n.h", n), ("src/b.cpp", b)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/b.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_qualified_call_of_a_member_an_outside_base_gives_is_outside() {
+    let n = "#include <ext/base.h>\nnamespace n {\nstruct Cfg : ext::Base {};\n}\n";
+    let b = "#include \"n.h\"\nnamespace n {\nint run() { return Cfg::load(); }\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/n.h", n), ("src/b.cpp", b)], "src/b.cpp", "run"),
+        ["Cfg::load() → outside"]
+    );
+}
+
+#[test]
+fn a_typedef_of_a_qualified_name_is_an_alias() {
+    let src = "struct Cfg {\n    void load() {}\n};\nstruct App {\n    typedef ext::Cfg Cfg;\n    void run() { Cfg c; c.load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["c.load() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn an_alias_whose_path_ends_in_the_name_leaves_the_last_step_open() {
+    let u = "namespace lib {\nusing Cfg = ext::Thing;\n}\nusing namespace lib;\n";
+    let o = "namespace other {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let main = "#include \"u.h\"\n#include \"o.h\"\nvoid run() { Cfg c; c.load(); }\n";
+    let files = [("src/u.h", u), ("src/o.h", o), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["c.load() → one of: src/o.h:3, or outside"]
+    );
+}
+
+#[test]
+fn an_alias_in_another_source_file_does_not_reach_the_caller() {
+    let h = "struct Buffer {\n    void clear() {}\n};\n";
+    let a = "#include \"buf.h\"\nvoid run(Buffer& b) { b.clear(); }\n";
+    let other = "using Buffer = std::vector<char>;\n";
+    let files = [("src/buf.h", h), ("src/a.cpp", a), ("src/other.cpp", other)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["b.clear() → src/buf.h:2"]
+    );
+}
+
+#[test]
+fn a_using_declaration_of_a_class_places_its_name() {
+    let a = "namespace a {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let main = "#include \"a.h\"\nusing a::Cfg;\nvoid run() { Cfg c; c.load(); }\n";
+    let files = [("src/a.h", a), ("src/g.h", g), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["c.load() → src/a.h:3"]
+    );
+}
+
+#[test]
+fn a_qualifier_either_class_may_be_stays_open_when_one_class_has_none_of_its_own() {
+    let n = "#include <ext/base.h>\nnamespace n {\nstruct Cfg : ext::Base {};\n}\n";
+    let b = "#include <n.h>\nstruct Cfg {\n    static int load(int a) { return a; }\n    static int load(double a) { return 0; }\n};\nnamespace n {\nint run() { return Cfg::load(1); }\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/n.h", n), ("src/b.cpp", b)], "src/b.cpp", "run"),
+        ["Cfg::load(1) → one of: src/b.cpp:3, src/b.cpp:4, or outside"]
+    );
+}

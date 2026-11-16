@@ -235,8 +235,13 @@ fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
             .into_iter()
             .collect(),
         "type_definition" => {
-            let class = n
-                .child_by_field_name("type")
+            let specifier = |t: &Node| {
+                matches!(
+                    t.kind(),
+                    "struct_specifier" | "class_specifier" | "union_specifier" | "enum_specifier"
+                )
+            };
+            let class = (n.child_by_field_name("type").filter(specifier))
                 .and_then(|t| t.child_by_field_name("name"));
             let mut cursor = n.walk();
             let declared = n.children_by_field_name("declarator", &mut cursor);

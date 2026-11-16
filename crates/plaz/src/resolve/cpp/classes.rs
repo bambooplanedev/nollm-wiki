@@ -213,17 +213,13 @@ impl<'a> Cpp<'a> {
         if t.starts_with("std::") {
             return Placed::Nothing;
         }
-        let seen = |p: &str| {
-            let at = self.classes.heads.get(p).into_iter().flat_map(|h| h.keys());
-            at.into_iter().any(|&pg| sight.sees(pg))
+        let seen = |page: usize, _: &str| sight.sees(page);
+        // Another file's class or alias is reachable when an includer may
+        // provide it: a header's, outside its anonymous namespaces.
+        let reachable = |page: usize, path: &str| {
+            let header = source_rank(self.pages[page].0) < 2;
+            sight.sees(page) || (header && !path.contains("(anonymous@"))
         };
-        // Another file's class is reachable when an includer may provide
-        // it: a header's, outside its anonymous namespaces.
-        let header = |p: &str| {
-            let at = self.classes.heads.get(p).into_iter().flat_map(|h| h.keys());
-            at.into_iter().any(|&pg| source_rank(self.pages[pg].0) < 2)
-        };
-        let reachable = |p: &str| seen(p) || (header(p) && !p.contains("(anonymous@"));
         let all = self.lookup_name(t, from, sight, &reachable);
         let mine = self.lookup_name(t, from, sight, &seen);
         match (all, mine) {
@@ -235,21 +231,29 @@ impl<'a> Cpp<'a> {
         }
     }
 
-    /// `place_name`'s lookup over the classes `keep` lets in.
+    /// `place_name`'s lookup over the classes and aliases `keep` lets in
+    /// (by a page holding one and its path).
     fn lookup_name(
         &self,
         t: &str,
         from: &str,
         sight: Sight,
-        keep: &dyn Fn(&str) -> bool,
+        keep: &dyn Fn(usize, &str) -> bool,
     ) -> Step<'a> {
         let key = owner_key(t);
         let heads = self.classes.by_key.get(key).into_iter().flatten();
-        let cands: Vec<(&'a str, String)> =
-            heads.filter(|p| keep(p)).map(|&p| (p, bare(p))).collect();
+        let kept = |p: &&&'a str| {
+            let at = self
+                .classes
+                .heads
+                .get(**p)
+                .into_iter()
+                .flat_map(|h| h.keys());
+            at.into_iter().any(|&pg| keep(pg, p))
+        };
+        let cands: Vec<(&'a str, String)> = heads.filter(kept).map(|&p| (p, bare(p))).collect();
         let aliases = self.classes.aliases.get(key).into_iter().flatten();
-        let aliases: Vec<String> = aliases
-            .filter(|a| !a.1.contains("(anonymous@") || sight.sees(a.0))
+        let aliases: Vec<String> = (aliases.filter(|a| keep(a.0, a.1)))
             .map(|a| bare(a.1))
             .collect();
         // What the paths `wants` name: a class, nothing, or unplaced.
@@ -272,6 +276,13 @@ impl<'a> Cpp<'a> {
                 s => format!("{s}::{t}"),
             }];
             if scope.is_empty() {
+                // `using n::t;` names that one entity, before any other.
+                let declared = usings.iter().filter(|u| u.rsplit("::").next() == Some(t));
+                match at(&declared.cloned().collect::<Vec<_>>()) {
+                    Step::Nothing => {}
+                    found @ (Step::Found(_) | Step::Unplaced) => return found,
+                }
+                // `using namespace n;` gives `n::t`.
                 wants.extend(usings.iter().map(|u| format!("{u}::{t}")));
             }
             match at(&wants) {
@@ -293,6 +304,9 @@ impl<'a> Cpp<'a> {
             scope = scope.rsplit_once("::").map_or("", |s| s.0);
         }
         let ends = format!("::{t}");
+        if aliases.iter().any(|a| a == t || a.ends_with(&ends)) {
+            return Step::Unplaced;
+        }
         let mut named = cands.iter().filter(|c| c.1 == t || c.1.ends_with(&ends));
         match (named.next(), named.next()) {
             (None, _) => Step::Nothing,
@@ -439,13 +453,14 @@ impl<'a> Cpp<'a> {
     /// What a call of `site`'s name on an object of `class`, in the file
     /// `sight` sees from, may reach: the methods name lookup finds in the
     /// class or its nearest project bases, with each project subclass's
-    /// own; a pure virtual declaration only while no subclass defines the
-    /// name.
+    /// own when `dispatch`; a pure virtual declaration only while no
+    /// subclass defines the name.
     pub(super) fn lookup(
         &self,
         class: &'a str,
         site: &CallSite,
         sight: Sight,
+        dispatch: bool,
     ) -> Result<Found, Missing> {
         let mut seen = BTreeSet::from([class]);
         let mut level = vec![(class, false)];
@@ -459,7 +474,7 @@ impl<'a> Cpp<'a> {
                 found.extend(fns);
             }
             if !found.is_empty() {
-                let subs = self.descendants(class).into_iter();
+                let subs = self.descendants(class).into_iter().filter(|_| dispatch);
                 let overrides: BTreeSet<FnRef> =
                     subs.flat_map(|c| self.members(c, site, None)).collect();
                 let pure = overrides.is_empty() && found.iter().all(|&c| self.pure(c));
