@@ -1,6 +1,7 @@
 //! The decision flowchart of one function and its coverage line.
 
 use crate::model::{Arm, Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 
 /// `s` as the text of a double-quoted Mermaid label: every char that could
@@ -69,6 +70,9 @@ struct Chart<'a> {
     /// the number of loops around the branch, and the ends its `break`s
     /// leave open.
     branches: Vec<(usize, Ends)>,
+    /// `closed` of each arm list asked already, by its address: shared
+    /// with the scratch charts, so each list is drawn once to tell.
+    closed: &'a RefCell<BTreeMap<*const Arm, bool>>,
 }
 
 impl Chart<'_> {
@@ -313,6 +317,9 @@ impl Chart<'_> {
     /// Can no arm of `arms` fall off its end? Drawn on a scratch chart
     /// with no loop around: a `break` or `continue` leaves too.
     fn closed(&self, arms: &[Arm]) -> bool {
+        if let Some(&known) = self.closed.borrow().get(&arms.as_ptr()) {
+            return known;
+        }
         let mut scratch = Chart {
             path: self.path,
             href: self.href,
@@ -322,9 +329,11 @@ impl Chart<'_> {
             edges: 0,
             loops: Vec::new(),
             branches: Vec::new(),
+            closed: self.closed,
         };
-        arms.iter()
-            .all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty())
+        let closed = (arms.iter()).all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty());
+        self.closed.borrow_mut().insert(arms.as_ptr(), closed);
+        closed
     }
 
     /// A branch: a diamond per arm, the open ends of every arm joined.
@@ -406,6 +415,7 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         edges: 0,
         loops: Vec::new(),
         branches: Vec::new(),
+        closed: &RefCell::new(BTreeMap::new()),
     };
     c.flow(name, &flow.steps);
     let mut body = String::from("flowchart TD\n");
