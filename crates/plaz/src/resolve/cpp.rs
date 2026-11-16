@@ -196,10 +196,14 @@ impl<'a> Cpp<'a> {
     /// `fns`, each declaration taken as the definitions of its key: of its
     /// own file when it is local, else those no file keeps to itself; with
     /// none, its file's one definition of that name (and arity, in C++); a
-    /// declaration with neither stays.
-    fn folded(&self, fns: Vec<FnRef>) -> BTreeSet<FnRef> {
+    /// declaration with neither stays. A free function's declarations none
+    /// of whose definitions' files includes one (`extern int main(int,
+    /// char**);` beside each program's `main`) may be any program's: each
+    /// definition of that name and arity, and the set is open.
+    fn folded(&self, fns: Vec<FnRef>) -> (BTreeSet<FnRef>, bool) {
         let mut out = BTreeSet::new();
-        let mut done = BTreeSet::new();
+        // Per free function's key: a declaration, and is one tied?
+        let mut tied: BTreeMap<Key, (FnRef, bool)> = BTreeMap::new();
         for c in fns {
             let Some(key) = self.key(c).filter(|_| self.declared(c)) else {
                 out.insert(c);
@@ -210,27 +214,39 @@ impl<'a> Cpp<'a> {
                 Some(p) => self.own.get(&(p, key)),
                 None => self.shared.get(&key),
             };
-            match defs {
-                Some(defs) if done.insert((page, key)) => out.extend(defs),
-                Some(_) => {}
-                None => {
-                    // Spelled otherwise: the file's one definition of that
-                    // name, of that arity in C++ (C has one signature).
-                    let named = self
-                        .file_defs
-                        .get(&(c.0, key.0, key.1))
-                        .into_iter()
-                        .flatten();
-                    let mut same = named
-                        .filter(|&&d| self.is_c(c.0) || self.item(d).arity == self.item(c).arity);
-                    match (same.next(), same.next()) {
-                        (Some(&d), None) => out.insert(d),
-                        _ => out.insert(c),
-                    };
+            if let Some(defs) = defs {
+                out.extend(defs);
+                if page.is_none() && self.item(c).kind == CodeItemKind::Fn {
+                    let includes = |d: &FnRef| d.0 == c.0 || self.closure(d.0).contains(&c.0);
+                    tied.entry(key).or_insert((c, false)).1 |= defs.iter().any(includes);
                 }
+                continue;
             }
+            // Spelled otherwise: the file's one definition of that name, of
+            // that arity in C++ (C has one signature).
+            let named = self
+                .file_defs
+                .get(&(c.0, key.0, key.1))
+                .into_iter()
+                .flatten();
+            let mut same =
+                named.filter(|&&d| self.is_c(c.0) || self.item(d).arity == self.item(c).arity);
+            match (same.next(), same.next()) {
+                (Some(&d), None) => out.insert(d),
+                _ => out.insert(c),
+            };
         }
-        out
+        let loose: Vec<(Key, FnRef)> = (tied.into_iter())
+            .filter(|t| !t.1 .1)
+            .map(|(key, (c, _))| (key, c))
+            .collect();
+        for &((scope, name, _), c) in &loose {
+            let named = (self.shared.range((scope, name, "")..))
+                .take_while(|(k, _)| (k.0, k.1) == (scope, name));
+            let defs = named.flat_map(|(_, d)| d);
+            out.extend(defs.filter(|&&d| self.item(d).arity == self.item(c).arity));
+        }
+        (out, !loose.is_empty())
     }
 }
 
@@ -437,9 +453,13 @@ impl Caller<'_, '_> {
                 } else {
                     (shown, open)
                 };
-                let fns = self.ids(cpp.folded(fns));
+                let (fns, loose) = cpp.folded(fns);
+                let fns = self.ids(fns);
                 if !fns.is_empty() {
-                    return Some(Evidence::Found { fns, open });
+                    return Some(Evidence::Found {
+                        fns,
+                        open: open || loose,
+                    });
                 }
             }
         }

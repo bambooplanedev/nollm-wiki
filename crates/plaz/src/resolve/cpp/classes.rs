@@ -454,7 +454,7 @@ impl<'a> Cpp<'a> {
         // a declaration with none of its own class's stays.
         let mine = |c: &FnRef| self.classes.placed.get(c).is_none_or(|p| *p == class);
         own.flat_map(|c| {
-            let defs = self.folded(vec![c]).into_iter();
+            let defs = self.folded(vec![c]).0.into_iter();
             let defs: BTreeSet<FnRef> = defs.filter(|d| mine(d) && of(*d)).collect();
             if defs.is_empty() {
                 BTreeSet::from([c])

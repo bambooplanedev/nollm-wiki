@@ -186,7 +186,7 @@ impl Caller<'_, '_> {
                 && fits(it, site)
         });
         // An alias may name any class.
-        let fns = self.ids(cpp.folded(members.collect()));
+        let fns = self.ids(cpp.folded(members.collect()).0);
         if fns.is_empty() {
             return self.any_method(call);
         }

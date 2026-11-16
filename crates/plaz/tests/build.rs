@@ -2896,8 +2896,9 @@ fn a_function_in_the_include_closure_is_certain_when_one_and_one_of_when_several
     let top = "#include \"../lib/mid.h\"\n";
     let mid = "#include \"deep.h\"\nint pair_of(int a);\n";
     let deep = "int sink(int a);\nint pair_of(long a);\n";
-    // The definitions, in a file no include reaches.
-    let elsewhere = "int sink(int a) { return a; }\nint sink(long a) { return 1; }\n";
+    // The definitions, in a file no include reaches; it includes the
+    // declaring header, so they are the declaration's.
+    let elsewhere = "#include \"../lib/deep.h\"\nint sink(int a) { return a; }\nint sink(long a) { return 1; }\n";
     let src = "#include \"top.h\"\nint run() { return sink(1) + pair_of(2); }\n";
     assert_eq!(
         cpp_targets(
@@ -2914,7 +2915,7 @@ fn a_function_in_the_include_closure_is_certain_when_one_and_one_of_when_several
             "run"
         ),
         [
-            "sink(1) → other/sink.c:1",
+            "sink(1) → other/sink.c:2",
             "pair_of(2) → one of: lib/deep.h:2, lib/mid.h:2"
         ]
     );
@@ -4343,5 +4344,37 @@ fn a_bare_call_in_a_method_of_a_class_no_head_shows_lists_its_methods_beside_the
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "open"),
         ["setBlocking(h > 0) → one of: src/a.cpp:2, src/a.cpp:4, or outside"]
+    );
+}
+
+#[test]
+fn a_declaration_no_definitions_file_includes_is_any_programs_definition() {
+    let entry =
+        "extern int main(int argc, char* argv[]);\nint start() { return main(0, nullptr); }\n";
+    let one = "int main(int argc, char* argv[]) { return 0; }\n";
+    let two = "int main(int argc, char** argv) { return 1; }\n";
+    let none = "int main() { return 2; }\n";
+    let files = [
+        ("lib/entry.cpp", entry),
+        ("demo/one.cpp", one),
+        ("demo/two.cpp", two),
+        ("demo/none.cpp", none),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "lib/entry.cpp", "start"),
+        ["main(0, nullptr) → one of: demo/one.cpp:1, demo/two.cpp:1, or outside"]
+    );
+    // The header and source split: the defining file includes the header.
+    let h = "int count(int n);\n";
+    let def = "#include \"count.h\"\nint count(int n) { return n; }\n";
+    let call = "#include \"count.h\"\nint run() { return count(1); }\n";
+    let files = [
+        ("src/count.h", h),
+        ("src/count.cpp", def),
+        ("src/run.cpp", call),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/run.cpp", "run"),
+        ["count(1) → src/count.cpp:2"]
     );
 }
