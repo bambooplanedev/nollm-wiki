@@ -296,9 +296,9 @@ impl Caller<'_, '_> {
             }
             _ => t,
         };
-        match cpp.resolve(t, self.class.unwrap_or(self.ns)) {
+        match cpp.resolve(t, self.class.unwrap_or(self.ns), self.sight()) {
             Some(class) => self.on_class(call, class),
-            None if cpp.is_type(t) => self.any_method(call),
+            None if cpp.is_type(t, self.sight()) => self.any_method(call),
             None => Evidence::Found {
                 fns: self.ids(cpp.deriving(t, site)),
                 open: true,
@@ -338,7 +338,7 @@ impl Caller<'_, '_> {
         let callee = call.text.split('(').next().unwrap_or("");
         let callee = untemplated(callee);
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
-        if let Some(class) = cpp.resolve(written, self.class.unwrap_or(self.ns)) {
+        if let Some(class) = cpp.resolve(written, self.class.unwrap_or(self.ns), self.sight()) {
             let fns = self.ids(cpp.members(class, site, Some(self.sight())));
             let settled = cpp.settled(class, Some(self.sight()));
             return Evidence::Found {
@@ -346,7 +346,7 @@ impl Caller<'_, '_> {
                 fns,
             };
         }
-        let namesakes = cpp.namesakes(written);
+        let namesakes = cpp.namesakes(written, self.sight(), false);
         if namesakes.is_empty() && cpp.namespaces.contains(q) {
             return self.free(site, Some(q)).unwrap_or(Evidence::Hidden);
         }

@@ -3645,7 +3645,7 @@ fn a_base_is_named_from_outside_its_class() {
 fn an_out_of_line_method_of_a_class_no_head_settles_has_no_certain_member() {
     let a = "namespace a {\nstruct Node {\n    void tick() {}\n    void step();\n};\n}\n";
     let b = "namespace b {\nstruct Node {\n    void tick();\n};\n}\n";
-    let a_src = "#include \"a.h\"\nvoid Node::step() { tick(); }\n";
+    let a_src = "#include \"a.h\"\n#include \"b.h\"\nvoid Node::step() { tick(); }\n";
     let b_src = "#include \"b.h\"\nvoid Node::tick() {}\n";
     let files = [
         ("src/a.h", a),
@@ -3709,5 +3709,93 @@ fn a_base_several_project_classes_may_be_hides_type_names_from_certainty() {
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
         ["Cfg::load() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn an_out_of_line_method_of_an_anonymous_class_is_not_a_global_namesakes() {
+    let a = "namespace {\nstruct Unit {\n    void step();\n    void tick() {}\n};\n}\nvoid Unit::step() { tick(); }\n";
+    let b = "struct Unit {\n    void tick() {}\n};\n";
+    let files = [("src/a.cpp", a), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "step"),
+        ["tick() → src/a.cpp:4"]
+    );
+}
+
+#[test]
+fn a_type_name_in_a_files_code_is_its_own_anonymous_class_not_an_unseen_global() {
+    let a = "struct Pen {\n    void draw() {}\n};\n";
+    let b = "namespace {\nstruct Pen {\n    void draw() {}\n};\nvoid first() { Pen p; p.draw(); }\n}\nvoid second() { Pen q; q.draw(); }\n";
+    let files = [("src/a.cpp", a), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "first"),
+        ["p.draw() → src/b.cpp:3"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "second"),
+        ["q.draw() → src/b.cpp:3"]
+    );
+}
+
+#[test]
+fn a_type_name_no_file_in_view_defines_is_outside() {
+    let b = "namespace {\nstruct Pen {\n    void draw() {}\n};\n}\n";
+    let c = "#include <lib/pen.h>\nvoid run(Pen& p) { p.draw(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/b.cpp", b), ("src/c.cpp", c)], "src/c.cpp", "run"),
+        ["p.draw() → outside"]
+    );
+}
+
+#[test]
+fn a_qualifier_is_placed_through_the_bases_the_callers_file_sees() {
+    let common =
+        "struct Base {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n";
+    let app = "#include \"common.h\"\nstruct Cfg {\n    static int load() { return 1; }\n};\nstruct App {\n    int run() { return Cfg::load(); }\n};\n";
+    let tool = "#include \"common.h\"\nstruct App : Base {\n    int go() { return 0; }\n};\n";
+    let files = [
+        ("src/common.h", common),
+        ("src/app.cpp", app),
+        ("src/tool.cpp", tool),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/app.cpp", "run"),
+        ["Cfg::load() → src/app.cpp:3"]
+    );
+}
+
+#[test]
+fn a_files_anonymous_class_and_a_global_namesake_it_sees_are_not_told_apart() {
+    let g = "struct Pen {\n    void draw() {}\n};\n";
+    let b = "#include \"pen.h\"\nnamespace {\nstruct Pen {\n    void draw() {}\n};\nvoid first() { Pen p; p.draw(); }\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/pen.h", g), ("src/b.cpp", b)], "src/b.cpp", "first"),
+        ["p.draw() → one of: src/b.cpp:4, src/pen.h:2, or outside"]
+    );
+}
+
+#[test]
+fn a_base_the_project_declares_as_an_alias_is_not_read_as_outside() {
+    let h = "namespace detail {\nstruct Impl {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n}\nnamespace lib {\nusing Base = detail::Impl;\n}\n";
+    let src = "#include \"a.h\"\nstruct Cfg {\n    static int load() { return 1; }\n};\nnamespace other {\nstruct Base {};\n}\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.h", h), ("src/b.cpp", src)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/a.h:4, src/b.cpp:3"]
+    );
+}
+
+#[test]
+fn anonymous_classes_of_two_files_with_out_of_line_methods_are_each_their_own() {
+    let a = "namespace {\nstruct Impl {\n    void tick();\n    void step();\n};\nvoid Impl::tick() {}\nvoid Impl::step() { tick(); }\n}\n";
+    let b = "namespace {\nstruct Impl {\n    void tick();\n    void step();\n};\nvoid Impl::tick() {}\nvoid Impl::step() { tick(); }\n}\n";
+    let files = [("src/a.cpp", a), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "step"),
+        ["tick() → src/a.cpp:6"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "step"),
+        ["tick() → src/b.cpp:6"]
     );
 }
