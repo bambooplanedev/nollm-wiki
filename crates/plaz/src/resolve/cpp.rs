@@ -1,10 +1,13 @@
-//! C and C++'s own call rules for `f()` and `q::f()`: the files the quoted
-//! includes reach, functions local to their file, and declarations folded
-//! onto their definitions.
+//! C and C++'s own call rules: the files the quoted includes reach,
+//! functions local to their file, declarations folded onto their
+//! definitions, and the classes a method call may dispatch to.
+
+mod classes;
 
 use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
+use classes::{Classes, Missing};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
@@ -31,9 +34,10 @@ pub(super) struct Cpp<'a> {
     file_defs: BTreeMap<(usize, &'a str, &'a str), Vec<FnRef>>,
     namespaces: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
-    /// Type names, and owners of out-of-line definitions that are no
-    /// namespace.
+    /// Type names, the names of the classes the heads define, and owners
+    /// of out-of-line definitions that are no namespace or misread.
     types: BTreeSet<&'a str>,
+    classes: Classes<'a>,
 }
 
 impl<'a> Cpp<'a> {
@@ -65,6 +69,7 @@ impl<'a> Cpp<'a> {
                 .map(|m| m.0.as_str())
                 .collect(),
             types: BTreeSet::new(),
+            classes: Classes::default(),
             pages: pages.clone(),
         };
         for (page, &(path, file)) in cpp() {
@@ -85,8 +90,9 @@ impl<'a> Cpp<'a> {
                     out.types.insert(&it.name);
                 }
                 let owner = it.owner.as_deref().map(owner_key);
+                let misread = it.kind == CodeItemKind::Method && !file.classes.contains_key(&i);
                 out.types
-                    .extend(owner.filter(|o| !out.namespaces.contains(o)));
+                    .extend(owner.filter(|o| !misread && !out.namespaces.contains(o)));
                 if !matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) || it.nested {
                     continue;
                 }
@@ -105,6 +111,7 @@ impl<'a> Cpp<'a> {
                 }
             }
         }
+        out.read_classes();
         out
     }
 
@@ -225,13 +232,74 @@ fn fits(it: &CodeItem, site: &CallSite) -> bool {
 }
 
 impl Caller<'_, '_> {
-    /// The target of `f()` or `q::f()` in a C/C++ function.
+    /// The target of a call in a C/C++ function.
     pub(super) fn cpp(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
+        match &call.site.via {
+            CallVia::Bare => self.cpp_bare(chain, call),
+            CallVia::Path(q) => self.cpp_path(chain, call, q),
+            CallVia::SelfRecv => match self.class {
+                Some(class) => self.on_class(call, class),
+                None => self.any_method(call),
+            },
+            // The innermost flow binding `x` gives its type.
+            CallVia::Member(Some(x)) => {
+                let binder = chain.iter().rev().find(|f| f.locals.contains(x));
+                match binder.and_then(|f| f.types.get(x)) {
+                    Some(t) => self.on_typed(call, x, t),
+                    None => self.any_method(call),
+                }
+            }
+            CallVia::Member(None) => self.any_method(call),
+        }
+    }
+
+    /// A call of `f` on an object of the project class `class`: what
+    /// lookup finds, else outside under a base from outside the project,
+    /// else any project method `f`.
+    fn on_class(&self, call: &MapCall, class: &str) -> Evidence {
+        match self.cpp.lookup(class, &call.site) {
+            Ok((fns, open)) => Evidence::Found {
+                fns: self.ids(fns),
+                open,
+            },
+            Err(Missing::Outside) => Evidence::Outside,
+            Err(Missing::Nowhere | Missing::Unseen) => self.any_method(call),
+        }
+    }
+
+    /// `x.f()` or `x->f()` on `x` of the written type `t`. A smart pointer
+    /// is itself with `.`, its pointee with `->`. A project class, found
+    /// from the caller's class or namespace: as `on_class`. A project type
+    /// no head places: any project method `f`. Any other type: the project
+    /// classes deriving from it that define `f`, or something outside.
+    fn on_typed(&self, call: &MapCall, x: &str, t: &str) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
-        let CallVia::Path(q) = &site.via else {
-            return self.cpp_bare(chain, site);
+        let (head, arg) = t.split_once('<').unwrap_or((t, ""));
+        let head = head.trim();
+        let t = match head.strip_prefix("std::").unwrap_or(head) {
+            "unique_ptr" | "shared_ptr" => {
+                let rest = call.text.strip_prefix(x).unwrap_or("");
+                if !rest.trim_start().starts_with("->") {
+                    return Evidence::Outside;
+                }
+                let arg = arg.rsplit_once('>').map_or(arg, |a| a.0);
+                arg.split(',').next().unwrap_or("").trim()
+            }
+            _ => t,
         };
-        let q = q.as_str();
+        match cpp.resolve(t, self.class.unwrap_or(self.ns)) {
+            Some(class) => self.on_class(call, class),
+            None if cpp.is_type(t) => self.any_method(call),
+            None => Evidence::Found {
+                fns: self.ids(cpp.deriving(t, site)),
+                open: true,
+            },
+        }
+    }
+
+    /// `q::f()`.
+    fn cpp_path(&self, chain: &[FlowScope], call: &MapCall, q: &str) -> Evidence {
+        let (cpp, site) = (self.cpp, &call.site);
         // `Box<int>` of `Box<int>::f()` is the type `Box`.
         let root = call.root.as_deref().map_or(q, owner_key);
         let project =
@@ -261,14 +329,32 @@ impl Caller<'_, '_> {
         }
     }
 
-    fn cpp_bare(&self, chain: &[FlowScope], site: &CallSite) -> Evidence {
+    /// `f()`: a binding, a member of the caller's class, else a free
+    /// function, a macro or type, or something outside.
+    fn cpp_bare(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
+        let site = &call.site;
         let name = site.name.as_str();
         if (chain.iter()).any(|f| f.locals.contains(name) || f.rebound.contains(name)) {
             return Evidence::Hidden;
         }
-        // Until the class rules: a method's call may name a member.
-        if self.item.kind == CodeItemKind::Method && !self.scope.methods_anywhere(site).is_empty() {
-            return Evidence::Hidden;
+        // `::f()` names no member.
+        if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
+            // A member the class may inherit hides the free functions.
+            let or_free = |or: Evidence| match self.free(site, None) {
+                Some(Evidence::Found { fns, .. }) => Evidence::Found { fns, open: true },
+                Some(_) | None => or,
+            };
+            match self.cpp.lookup(class, site) {
+                Ok((fns, open)) => {
+                    return Evidence::Found {
+                        fns: self.ids(fns),
+                        open,
+                    }
+                }
+                Err(Missing::Outside) => return or_free(Evidence::Outside),
+                Err(Missing::Unseen) => return or_free(self.any_method(call)),
+                Err(Missing::Nowhere) => {}
+            }
         }
         if let Some(found) = self.free(site, None) {
             return found;

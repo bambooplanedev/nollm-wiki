@@ -63,6 +63,8 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             namespaces: BTreeSet::new(),
             scopes: BTreeMap::new(),
             usings: BTreeSet::new(),
+            classes: BTreeMap::new(),
+            bases: BTreeMap::new(),
         };
         flow::attach(&mut file, &a);
         if family == Family::Cpp {
@@ -101,8 +103,9 @@ fn hidden_jumps(files: &mut BTreeMap<String, File>) {
 }
 
 /// What a C/C++ file's trees show that its items do not: which functions
-/// are file-local, each function's parameter types and namespace, the
-/// file's namespace names and `using`s.
+/// are file-local, each function's parameter types and namespace, each
+/// method's class, the file's classes and their bases, namespace names
+/// and `using`s.
 fn cpp_facts(file: &mut File, a: &Analyzed) {
     let items = file.code.items.iter().zip(&a.defs).enumerate();
     for (i, (it, def)) in items.filter(|(_, (it, _))| !it.nested) {
@@ -134,17 +137,7 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             file.params.insert(i, p);
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
-        let mut path = Vec::new();
-        for n in std::iter::successors(node.parent(), Node::parent) {
-            let inline = text(n).starts_with("inline");
-            if let Some(name) = n
-                .child_by_field_name("name")
-                .filter(|_| n.kind() == "namespace_definition" && !inline)
-            {
-                let segs = segments(text(name)).filter(|s| !s.1).map(|s| s.0);
-                path.splice(0..0, segs);
-            }
-        }
+        let mut path = enclosing(node, src.text(), false);
         let declared = f.and_then(|f| f.child_by_field_name("declarator"));
         let qualifier = declared
             .and_then(|d| text(d).rsplit_once("::"))
@@ -153,11 +146,23 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             qualifier
                 .into_iter()
                 .flat_map(|q| q.split("::"))
-                .map(str::trim),
+                .map(|s| s.trim().to_string()),
         );
         path.retain(|s| !s.is_empty());
         if !path.is_empty() {
             file.scopes.insert(i, path.join("::"));
+        }
+        let in_class = std::iter::successors(node.parent(), Node::parent)
+            .any(|n| n.kind() == "field_declaration_list");
+        let names_owner =
+            |o: &String| declared.is_some_and(|d| text(d).contains(&format!("{o}::")));
+        let class = if in_class {
+            Some(enclosing(node, src.text(), true).join("::"))
+        } else {
+            (it.owner.as_ref().is_some_and(names_owner)).then(|| path.join("::"))
+        };
+        if let Some(c) = class.filter(|_| it.kind == CodeItemKind::Method) {
+            file.classes.insert(i, untemplated(&c));
         }
     }
     for s in &a.sources {
@@ -173,6 +178,31 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
                 let segs = segments(&s.text()[name.byte_range()]);
                 file.namespaces.extend(segs.map(|g| g.0.to_string()));
             }
+            let name = (n.child_by_field_name("body").is_some())
+                .then(|| n.child_by_field_name("name"))
+                .flatten();
+            let class = matches!(
+                n.kind(),
+                "class_specifier" | "struct_specifier" | "union_specifier"
+            );
+            if let Some(name) = name.filter(|_| class) {
+                let text = |n: Node| &s.text()[n.byte_range()];
+                let clause = n
+                    .children(&mut n.walk())
+                    .find(|c| c.kind() == "base_class_clause");
+                let named = clause.map(|c| c.named_children(&mut c.walk()).collect::<Vec<_>>());
+                let bases = named
+                    .into_iter()
+                    .flatten()
+                    .filter(|b| b.kind() != "access_specifier");
+                let mut path = enclosing(n, s.text(), true);
+                path.push(text(name).to_string());
+                let class = untemplated(&path.join("::"));
+                file.bases
+                    .entry(class)
+                    .or_default()
+                    .extend(bases.map(|b| untemplated(text(b))));
+            }
             if n.kind() == "using_declaration" {
                 let named = n.named_children(&mut n.walk()).last();
                 let named = named.map(|u| s.text()[u.byte_range()].split_whitespace().collect());
@@ -181,6 +211,45 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             stack.extend(n.named_children(&mut n.walk()));
         }
     }
+}
+
+/// The names of the named namespaces (inline ones left out) around
+/// `node`, outermost first, and with `classes` those of its classes,
+/// structs and unions.
+fn enclosing(node: Node, src: &str, classes: bool) -> Vec<String> {
+    let mut path = Vec::new();
+    for n in std::iter::successors(node.parent(), Node::parent) {
+        let Some(name) = n.child_by_field_name("name") else {
+            continue;
+        };
+        let name = &src[name.byte_range()];
+        match n.kind() {
+            "namespace_definition" if !src[n.byte_range()].starts_with("inline") => {
+                let segs = segments(name).filter(|s| !s.1);
+                path.splice(0..0, segs.map(|s| s.0.to_string()));
+            }
+            "class_specifier" | "struct_specifier" | "union_specifier" if classes => {
+                path.insert(0, name.to_string());
+            }
+            _ => {}
+        }
+    }
+    path
+}
+
+/// `t` with its template arguments and whitespace dropped:
+/// `a::Box<T>::Node` is `a::Box::Node`.
+pub(crate) fn untemplated(t: &str) -> String {
+    let mut depth = 0usize;
+    let kept = t.chars().filter(|&c| {
+        match c {
+            '<' => depth += 1,
+            '>' => depth = depth.saturating_sub(1),
+            _ => return depth == 0 && !c.is_whitespace(),
+        }
+        false
+    });
+    kept.collect()
 }
 
 /// The segments of a namespace name as written (`a::inline b`), each with

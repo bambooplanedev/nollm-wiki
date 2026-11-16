@@ -61,6 +61,16 @@ pub struct File {
     /// What each `using namespace N;` and `using N::f;` of a C/C++ file
     /// names: `N`, `N::f`, whitespace dropped.
     pub usings: BTreeSet<String>,
+    /// Per C/C++ method item, by index into `code.items`: its class as a
+    /// path (`n::Outer::Inner`), template arguments and whitespace dropped
+    /// (`untemplated`): the enclosing namespaces and classes of a method in
+    /// a class body, `File::scopes` of one defined outside. None when the
+    /// declarator does not name the owner (a macro before the return type
+    /// made the return type the owner).
+    pub classes: BTreeMap<usize, String>,
+    /// Per C/C++ class, struct or union the file defines, by path as in
+    /// `classes`: the bases its heads name, as written, `untemplated`.
+    pub bases: BTreeMap<String, BTreeSet<String>>,
 }
 
 /// What a C/C++ function item has in place of a body.

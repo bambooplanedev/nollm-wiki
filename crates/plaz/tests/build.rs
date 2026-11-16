@@ -2818,23 +2818,6 @@ fn a_cpp_call_of_a_bound_name_is_hidden_beside_a_same_named_function() {
 }
 
 #[test]
-fn a_bare_call_in_a_method_naming_a_project_method_is_hidden_until_class_rules() {
-    let h = "struct Oven {\n    void heat();\n    void tick() { heat(); warm(); }\n};\n";
-    let warm = "void warm() {}\n";
-    assert_eq!(
-        cpp_targets(
-            &[("src/oven.h", h), ("src/warm.cpp", warm)],
-            "src/oven.h",
-            "tick"
-        ),
-        [
-            "heat() → hidden",
-            "warm() → one of: src/warm.cpp:1, or outside"
-        ]
-    );
-}
-
-#[test]
 fn a_c_definition_in_the_callers_file_wins_over_an_included_declaration() {
     // Valid C: one function, its header declaration spelled differently.
     let h = "int count(char *argv[]);\n";
@@ -3218,5 +3201,285 @@ fn a_namespace_named_like_inline_keeps_its_name() {
             "run"
         ),
         ["inline_math::sq(2) → src/m.h:2"]
+    );
+}
+
+#[test]
+fn a_cpp_lambda_capturing_by_default_calls_a_local_of_the_enclosing_function_unseen() {
+    let src = "int pick() { return 0; }\nint handler(int v) { return v; }\nvoid run() {\n    auto handler = pick();\n    auto go = [&] { handler(1); };\n    go();\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "pick() → src/a.cpp:1",
+            "handler(1) → hidden",
+            "go() → hidden"
+        ]
+    );
+}
+
+#[test]
+fn a_cpp_method_reaches_members_free_functions_and_typed_receivers() {
+    // REPORT T11, with names of its own.
+    let h = "#pragma once\nnamespace acct { namespace ledger {\nint tally(int x);\nint pick(int a);\nint pick(double a);\nint pick(int a, int b);\nclass Ledger {\npublic:\n    virtual void post(int q);\n    void close_day(int q, int (*hook)(int));\n    void settle(int n);\nprivate:\n    void recount_();\n};\nstruct Branch : public Ledger {\n    void post(int q) override;\n};\n}}\n";
+    let src = "#include \"ledger.h\"\n#include \"util/note.h\"\n#include <fmtx/core.h>\n#include <algorithm>\nnamespace acct { namespace ledger {\nvoid Ledger::recount_() {}\nvoid Ledger::post(int q) {}\nvoid Branch::post(int q) { Ledger::post(q); }\nint tally(int x) { return x; }\nint pick(int a) { return a; }\nint pick(double a) { return 0; }\nint pick(int a, int b) { return a + b; }\nvoid Ledger::settle(int n) {}\nvoid Ledger::close_day(int q, int (*hook)(int)) {\n    auto dbl = [](int v) { return v; };\n    Ledger& other = *this;\n    Branch c;\n    recount_();\n    this->recount_();\n    post(q);\n    dbl(3);\n    hook(7);\n    tally(q);\n    util::note(\"day\");\n    acct::ledger::tally(1);\n    std::sort(nullptr, nullptr);\n    fmtx::print(\"x\");\n    other.settle(1);\n    c.post(1);\n    pick(1);\n}\n}}\n";
+    let files = [
+        ("src/ledger.h", h),
+        ("src/ledger.cpp", src),
+        (
+            "src/util/note.h",
+            "namespace util {\nvoid note(const char* m);\n}\n",
+        ),
+        (
+            "src/util/note.cpp",
+            "#include \"note.h\"\nnamespace util {\nvoid note(const char* m) {}\n}\n",
+        ),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/ledger.cpp", "close_day"),
+        [
+            "recount_() → src/ledger.cpp:6",
+            "this->recount_() → src/ledger.cpp:6",
+            "post(q) → one of: src/ledger.cpp:7, src/ledger.cpp:8",
+            "dbl(3) → hidden",
+            "hook(7) → hidden",
+            "tally(q) → src/ledger.cpp:9",
+            "util::note(\"day\") → src/util/note.cpp:3",
+            "acct::ledger::tally(1) → src/ledger.cpp:9",
+            "std::sort(nullptr, nullptr) → outside",
+            "fmtx::print(\"x\") → outside",
+            "other.settle(1) → src/ledger.cpp:13",
+            "c.post(1) → src/ledger.cpp:8",
+            "pick(1) → one of: src/ledger.cpp:10, src/ledger.cpp:11, src/ledger.cpp:12",
+        ]
+    );
+}
+
+#[test]
+fn a_bare_call_in_a_method_reaches_the_nearest_base_that_defines_it() {
+    let src = "struct Top {\n    void lift() {}\n    void drop() {}\n};\nstruct Mid : Top {\n    void lift() {}\n};\nstruct Low : public Mid {\n    void run() { lift(); drop(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["lift() → src/a.cpp:6", "drop() → src/a.cpp:3"]
+    );
+}
+
+#[test]
+fn a_member_a_subclass_of_the_base_also_defines_is_one_of_both() {
+    let src = "struct Top {\n    virtual void lift() {}\n};\nstruct Mid : Top {\n    void run() { lift(); }\n};\nstruct Low : Mid {\n    void lift() override {}\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["lift() → one of: src/a.cpp:2, src/a.cpp:8"]
+    );
+}
+
+#[test]
+fn a_class_with_an_outside_base_calls_a_bare_name_as_maybe_inherited() {
+    let h = "int flush(int n);\n";
+    let src = "#include \"flush.h\"\nstruct Sink : public lib::Stream<int> {\n    void run() { flush(1); sync(); }\n};\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/flush.h", h), ("src/sink.cpp", src)],
+            "src/sink.cpp",
+            "run"
+        ),
+        [
+            "flush(1) → one of: src/flush.h:1, or outside",
+            "sync() → outside"
+        ]
+    );
+}
+
+#[test]
+fn a_base_outside_the_project_counts_through_a_project_base() {
+    let h = "int flush(int n);\n";
+    let src = "#include \"flush.h\"\nstruct Mid : std::streambuf {};\nstruct Sink : Mid {\n    void run() { flush(1); }\n};\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/flush.h", h), ("src/sink.cpp", src)],
+            "src/sink.cpp",
+            "run"
+        ),
+        ["flush(1) → one of: src/flush.h:1, or outside"]
+    );
+}
+
+#[test]
+fn this_arrow_a_name_the_class_lacks_is_outside_under_an_outside_base() {
+    let src = "struct Pane : ui::Widget {\n    void draw() { this->paint(); }\n};\nstruct Ink {\n    void paint() {}\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "draw"),
+        ["this->paint() → outside"]
+    );
+}
+
+#[test]
+fn this_arrow_a_name_the_class_lacks_under_project_bases_is_any_project_method() {
+    let src = "struct Card {\n    void show() { this->paint(); }\n};\nstruct Ink {\n    void paint() {}\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "show"),
+        ["this->paint() → one of: src/a.cpp:5, or outside"]
+    );
+}
+
+#[test]
+fn a_namespace_owner_is_no_class_even_when_a_type_shares_its_name() {
+    let h = "namespace text {\nstruct text {\n    void trim();\n};\nint lines();\n}\n";
+    let src = "#include \"text.h\"\nint text::lines() { trim(); return 0; }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/text.h", h), ("src/text.cpp", src)],
+            "src/text.cpp",
+            "lines"
+        ),
+        ["trim() → outside"]
+    );
+}
+
+#[test]
+fn a_macro_before_a_return_type_naming_a_project_class_makes_no_member_call() {
+    let h = "struct Store {\n    void stock();\n    struct Shelf {};\n};\n";
+    let src = "#include \"shelf.h\"\nAPI Store::Shelf restock() { stock(); return {}; }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/shelf.h", h), ("src/shelf.cpp", src)],
+            "src/shelf.cpp",
+            "restock"
+        ),
+        ["stock() → outside"]
+    );
+}
+
+#[test]
+fn a_smart_pointer_receiver_is_outside_with_a_dot_and_its_pointee_with_an_arrow() {
+    let src = "struct Book {\n    void apply() {}\n    void reset() {}\n};\nvoid run() {\n    auto p = std::make_unique<Book>();\n    p.reset();\n    p->apply();\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "std::make_unique<Book>() → outside",
+            "p.reset() → outside",
+            "p->apply() → src/a.cpp:2"
+        ]
+    );
+}
+
+#[test]
+fn a_typed_receiver_of_a_class_another_class_overrides_is_one_of_both() {
+    let src = "struct Shape {\n    virtual int area() { return 0; }\n};\nstruct Square : Shape {\n    int area() override { return 1; }\n};\nint total(Shape& s) { return s.area(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "total"),
+        ["s.area() → one of: src/a.cpp:2, src/a.cpp:5"]
+    );
+}
+
+#[test]
+fn a_pure_virtual_method_called_on_a_typed_receiver_is_its_override() {
+    let src = "struct Shape {\n    virtual int area() = 0;\n};\nstruct Square : Shape {\n    int area() override { return 1; }\n};\nint total(Shape* s) { return s->area(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "total"),
+        ["s->area() → src/a.cpp:5"]
+    );
+}
+
+#[test]
+fn a_typed_receiver_lacking_the_method_is_outside_under_an_outside_base() {
+    let src = "struct Shape : gfx::Node {};\nstruct Ink {\n    void paint() {}\n};\nvoid run(Shape& s) { s.paint(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["s.paint() → outside"]
+    );
+}
+
+#[test]
+fn a_typed_receiver_lacking_the_method_under_project_bases_is_any_project_method() {
+    let src = "struct Shape {};\nstruct Ink {\n    void paint() {}\n};\nvoid run(Shape& s) { s.paint(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["s.paint() → one of: src/a.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_std_typed_receiver_is_outside_beside_a_project_method_of_that_name() {
+    let src = "struct Stack {\n    void push_back(int v) {}\n};\nvoid run(std::vector<int>& v) { v.push_back(1); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["v.push_back(1) → outside"]
+    );
+}
+
+#[test]
+fn an_outside_typed_receiver_may_be_a_project_class_deriving_from_it() {
+    let src = "struct Fault : std::exception {\n    const char* what() const noexcept override { return \"f\"; }\n};\nvoid run() {\n    try {\n    } catch (const std::exception& e) {\n        e.what();\n    }\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["e.what() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_receiver_with_no_type_is_any_project_method_of_that_name() {
+    let src = "struct Ink {\n    void paint() {}\n    void show() { auto x = make(); x.paint(); (*this).paint(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "show"),
+        [
+            "make() → outside",
+            "x.paint() → one of: src/a.cpp:2, or outside",
+            "(*this).paint() → one of: src/a.cpp:2, or outside"
+        ]
+    );
+}
+
+#[test]
+fn a_nested_class_reaches_a_member_of_its_project_base() {
+    let h = "struct Ctx {\n    int make() const;\n};\nstruct Model {\n    struct Graph : public Ctx {\n        Graph(int p);\n    };\n};\n";
+    let src = "#include \"model.h\"\nint Ctx::make() const { return 0; }\nModel::Graph::Graph(int p) { make(); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/model.h", h), ("src/model.cpp", src)],
+            "src/model.cpp",
+            "Graph"
+        ),
+        ["make() → src/model.cpp:2"]
+    );
+}
+
+#[test]
+fn a_method_of_a_class_whose_head_no_file_shows_may_call_an_inherited_name() {
+    let src = "int flush(int n) { return n; }\nvoid Gen::run() { flush(1); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/gen.cpp", src)], "src/gen.cpp", "run"),
+        ["flush(1) → one of: src/gen.cpp:1, or outside"]
+    );
+}
+
+#[test]
+fn a_receiver_typed_by_a_project_alias_is_any_project_method_of_that_name() {
+    let src = "struct Book {\n    void apply() {}\n};\nusing BookPtr = std::unique_ptr<Book>;\nvoid run(BookPtr p) { p->apply(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["p->apply() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_class_is_told_from_a_namesake_in_another_class_or_namespace() {
+    let src = "struct Base {\n    void fold() {}\n};\nstruct Left {\n    struct Node {\n        void fold() {}\n    };\n};\nstruct Right {\n    struct Node : Base {\n        void run() { fold(); }\n    };\n};\nnamespace x {\nstruct Cfg {\n    void fold() {}\n};\n}\nnamespace y {\nstruct Cfg : Base {\n    void load() { fold(); }\n};\n}\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["fold() → src/a.cpp:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "load"),
+        ["fold() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_the_global_scope_is_no_member_call() {
+    let src = "int flush(int n) { return n; }\nstruct Sink : lib::Stream {\n    void run() { ::flush(1); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["::flush(1) → src/a.cpp:1"]
     );
 }

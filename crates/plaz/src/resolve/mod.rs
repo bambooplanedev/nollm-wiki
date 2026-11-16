@@ -109,6 +109,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         cpp: &cpp,
                         included: &included,
                         ns: file.scopes.get(&item).map_or("", String::as_str),
+                        class: cpp.class_of(page, item),
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
@@ -140,6 +141,8 @@ struct Caller<'i, 'a> {
     included: &'i BTreeSet<usize>,
     /// A C/C++ caller's namespace path, its qualifier included (`File::scopes`).
     ns: &'a str,
+    /// A C/C++ method's own class (`Cpp::class_of`).
+    class: Option<&'a str>,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,
@@ -234,9 +237,7 @@ impl Caller<'_, '_> {
         let rebound = |x: &str| chain.iter().any(|f| f.rebound.contains(x));
         let python = self.file.family == Family::Python;
         match &site.via {
-            CallVia::Bare | CallVia::Path(_) if self.file.family == Family::Cpp => {
-                self.cpp(chain, call)
-            }
+            _ if self.file.family == Family::Cpp => self.cpp(chain, call),
             CallVia::Bare
                 if binder(&site.name).is_some()
                     || rebound(&site.name)
@@ -330,8 +331,8 @@ impl Caller<'_, '_> {
             Family::Rust if own.is_empty() || rebound(own) => Evidence::Hidden,
             Family::Rust => self.of_type(call, own, false),
             Family::Python => return self.py_on_self(call, own, Own::Object),
-            // A subclass may override `f`: the subclass-by-text rule comes
-            // with these languages' flows. Until then, no certainty.
+            // C++ calls are `Caller::cpp`'s. In the others a subclass may
+            // override `f`: no certainty.
             Family::Cpp | Family::Ecma | Family::Go | Family::Shell => return Evidence::Hidden,
         };
         match found {
