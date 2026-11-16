@@ -206,6 +206,9 @@ pub struct Flow {
     /// Names that mean something else here than in the file: the generic
     /// parameters in scope and the items declared in the body.
     pub rebound: BTreeSet<String>,
+    /// A C++ method of a class declared in a function body, drawn inside
+    /// that function: its members are the local class's.
+    pub local_class: bool,
     pub syntax_errors: bool,
 }
 

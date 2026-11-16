@@ -1,6 +1,7 @@
 //! The names a C/C++ function or lambda binds.
 
 use crate::flow::{text, Bindings};
+use crate::source::pointee;
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
@@ -64,28 +65,29 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         }
         stack.extend(n.named_children(&mut n.walk()));
     }
-    let keep = |t: &String| !rebound.contains(class_head(t));
+    let keep = |t: &String| !rebound.contains(class_root(t));
     // A missing name of a damaged declaration is empty.
     let binds = (binds.into_iter())
         .filter(|(n, _)| !n.is_empty())
         .map(|(n, t)| (n, t.filter(keep)));
     let joined = Bindings::join(binds);
-    Bindings { rebound, ..joined }
+    // Only a local class's method is a function definition in a body.
+    let in_body = std::iter::successors(root.parent(), Node::parent)
+        .any(|n| n.kind() == "compound_statement");
+    Bindings {
+        rebound,
+        local_class: root.kind() == "function_definition" && in_body,
+        ..joined
+    }
 }
 
 /// The first segment of the class a call on the written type `t` lands
-/// in: of the pointee of a `std::unique_ptr` or `std::shared_ptr` (`T` of
-/// `std::unique_ptr<const T>`), else of `t` itself (`a` of `a::B<C>`).
+/// in (`pointee`): `T` of `std::unique_ptr<T const>`, `a` of `a::B<C>`.
 /// A template parameter or local type there makes `t` no project class;
 /// other template arguments do not change the class.
-fn class_head(t: &str) -> &str {
-    let (head, arg) = t.split_once('<').unwrap_or((t, ""));
-    let named = match head.trim().trim_start_matches("std::") {
-        "unique_ptr" | "shared_ptr" => arg,
-        _ => t,
-    };
-    let first = named.split(['<', '>', ',', ':']).next().unwrap_or("");
-    first.split_whitespace().last().unwrap_or("")
+fn class_root(t: &str) -> &str {
+    let class = pointee(t).1;
+    class.split(['<', ':']).next().unwrap_or("").trim()
 }
 
 /// The data members the class body `body` declares, those in `#if`
@@ -106,7 +108,7 @@ pub(crate) fn fields(
             continue;
         }
         let ty = n.child_by_field_name("type").and_then(|t| written(t, src));
-        let ty = ty.filter(|t| !params.contains(class_head(t)));
+        let ty = ty.filter(|t| !params.contains(class_root(t)));
         for d in n.children_by_field_name("declarator", &mut n.walk()) {
             // `int* f();` declares a method; `int (*f)();` a member.
             let method = declared(d).is_some_and(|(i, function)| {

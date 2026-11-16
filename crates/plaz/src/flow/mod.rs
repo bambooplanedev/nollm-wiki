@@ -75,6 +75,8 @@ pub(crate) struct Bindings {
     pub types: BTreeMap<String, String>,
     /// See `Flow::rebound`.
     pub rebound: BTreeSet<String>,
+    /// See `Flow::local_class`.
+    pub local_class: bool,
 }
 
 impl Bindings {
@@ -98,6 +100,7 @@ impl Bindings {
                 .collect(),
             names: seen.into_keys().collect(),
             rebound: BTreeSet::new(),
+            local_class: false,
         }
     }
 }
@@ -258,6 +261,7 @@ impl<'s> Walker<'s> {
             locals: b.names,
             types: b.types,
             rebound: b.rebound,
+            local_class: b.local_class,
             syntax_errors: root.has_error(),
             ..Flow::default()
         };
@@ -484,6 +488,7 @@ pub struct FlowScope {
     pub locals: BTreeSet<String>,
     pub types: BTreeMap<String, String>,
     pub rebound: BTreeSet<String>,
+    pub local_class: bool,
 }
 
 impl Flow {
@@ -578,6 +583,7 @@ impl Flow {
                 locals: flow.locals.clone(),
                 types: flow.types.clone(),
                 rebound: flow.rebound.clone(),
+                local_class: flow.local_class,
             });
             walk(&mut flow.steps, chain, f);
             chain.pop();

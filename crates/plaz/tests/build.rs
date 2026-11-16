@@ -4155,6 +4155,11 @@ fn a_smart_pointer_of_a_template_parameter_is_no_project_class() {
         open
     );
     assert_eq!(cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"), open);
+    let late = "struct Engine {\n    void start() {}\n};\ntemplate <class Engine>\nvoid boot(std::unique_ptr<Engine const> e) { e->start(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", late)], "src/a.cpp", "boot"),
+        open
+    );
 }
 
 #[test]
@@ -4163,5 +4168,44 @@ fn a_project_class_with_a_template_parameter_argument_keeps_its_type() {
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "count"),
         ["b.size() → src/a.cpp:3"]
+    );
+}
+
+#[test]
+fn a_member_in_a_class_local_to_a_method_is_not_the_methods_class_field() {
+    let src = "struct Lock {\n    void unlock() {}\n};\nstruct Spin {\n    void unlock() {}\n};\nstruct Shelf {\n    Lock mutex_;\n    std::function<void()> notify;\n    void run() {\n        struct Guard {\n            Spin& mutex_;\n            void notify() {}\n            ~Guard() { mutex_.unlock(); notify(); }\n        };\n        mutex_.unlock();\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "mutex_.unlock() → one of: src/a.cpp:2, src/a.cpp:5, or outside",
+            "notify() → outside",
+            "mutex_.unlock() → src/a.cpp:2"
+        ]
+    );
+}
+
+#[test]
+fn an_arrow_on_a_class_with_an_arrow_operator_is_not_its_own_method() {
+    let src = "struct Book {\n    void reset() {}\n};\nstruct Handle {\n    Book* operator->();\n    void reset() {}\n};\nstruct Base {\n    Book* operator->();\n};\nstruct Ref : Base {\n    void reset() {}\n};\nstruct Shelf {\n    Handle h_;\n    void run(Ref r) { h_->reset(); h_.reset(); r->reset(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "h_->reset() → one of: src/a.cpp:2, src/a.cpp:6, src/a.cpp:12, or outside",
+            "h_.reset() → src/a.cpp:6",
+            "r->reset() → one of: src/a.cpp:2, src/a.cpp:6, src/a.cpp:12, or outside"
+        ]
+    );
+}
+
+#[test]
+fn a_smart_pointer_to_a_const_project_class_is_its_pointee() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Shelf {\n    std::shared_ptr<const Book> w_;\n    std::unique_ptr<Book const> u_;\n    void run(std::unique_ptr<const Book> p) { w_->apply(); u_->apply(); p->apply(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "w_->apply() → src/a.cpp:2",
+            "u_->apply() → src/a.cpp:2",
+            "p->apply() → src/a.cpp:2"
+        ]
     );
 }

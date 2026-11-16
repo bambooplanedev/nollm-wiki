@@ -366,6 +366,31 @@ pub(crate) fn untemplated(t: &str) -> String {
     kept.collect()
 }
 
+/// What a call on a value of the written type `t` lands in: whether `t`
+/// is a `std::unique_ptr` or `std::shared_ptr`, and the class it names,
+/// the pointee's for one, `const` and `volatile` dropped (`Book` of
+/// `std::unique_ptr<Book const>`).
+pub(crate) fn pointee(t: &str) -> (bool, &str) {
+    let (head, arg) = t.split_once('<').unwrap_or((t, ""));
+    let (smart, mut class) = match head.trim().trim_start_matches("std::") {
+        "unique_ptr" | "shared_ptr" => {
+            let arg = arg.rsplit_once('>').map_or(arg, |a| a.0);
+            (true, arg.split(',').next().unwrap_or("").trim())
+        }
+        _ => (false, t.trim()),
+    };
+    let cv = |w: &str| matches!(w, "const" | "volatile");
+    loop {
+        if let Some((_, rest)) = class.split_once(' ').filter(|w| cv(w.0)) {
+            class = rest.trim_start();
+        } else if let Some((rest, _)) = class.rsplit_once(' ').filter(|w| cv(w.1)) {
+            class = rest.trim_end();
+        } else {
+            return (smart, class);
+        }
+    }
+}
+
 /// The segments of a namespace name as written (`a::inline b`), each with
 /// whether it names an inline namespace.
 fn segments(name: &str) -> impl Iterator<Item = (&str, bool)> {

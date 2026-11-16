@@ -7,7 +7,7 @@ mod classes;
 use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
-use crate::source::untemplated;
+use crate::source::{pointee, untemplated};
 use classes::{Classes, Missing, Placed, Sight};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
@@ -290,11 +290,11 @@ impl Caller<'_, '_> {
                         ),
                         None => self.any_method(call),
                     },
-                    None => self.on_field(call, x, after),
+                    None => self.on_field(chain, call, x, after),
                 }
             }
             CallVia::Member(None) => match this_field(&call.text, &call.site.name) {
-                Some((x, after)) => self.on_field(call, x, after),
+                Some((x, after)) => self.on_field(chain, call, x, after),
                 None => self.any_method(call),
             },
         }
@@ -303,8 +303,10 @@ impl Caller<'_, '_> {
     /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
     /// it) of the caller's class: as on a local of the member's type, the
     /// type placed from the class declaring it, in the file of its head.
-    fn on_field(&self, call: &MapCall, x: &str, after: &str) -> Evidence {
-        let field = self.class.and_then(|c| self.cpp.field(c, x, self.sight()));
+    fn on_field(&self, chain: &[FlowScope], call: &MapCall, x: &str, after: &str) -> Evidence {
+        let field = self
+            .member_of(chain)
+            .and_then(|c| self.cpp.field(c, x, self.sight()));
         match field.and_then(|f| Some((f.ty?, f))) {
             Some((t, f)) => {
                 let included = self.cpp.closure(f.page);
@@ -316,6 +318,12 @@ impl Caller<'_, '_> {
             }
             None => self.any_method(call),
         }
+    }
+
+    /// The class whose data members a name in the innermost flow of
+    /// `chain` may be: the caller's, unless a local class's method holds it.
+    fn member_of(&self, chain: &[FlowScope]) -> Option<&str> {
+        self.class.filter(|_| !chain.iter().any(|f| f.local_class))
     }
 
     /// What the caller's file sees.
@@ -362,23 +370,25 @@ impl Caller<'_, '_> {
     /// that define `f`, or something outside.
     fn on_typed(&self, call: &MapCall, after: &str, t: &str, from: &str, sight: Sight) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
-        let (head, arg) = t.split_once('<').unwrap_or((t, ""));
-        let head = head.trim();
-        let t = match head.strip_prefix("std::").unwrap_or(head) {
-            "unique_ptr" | "shared_ptr" => {
-                if !after.trim_start().starts_with("->") {
-                    return Evidence::Outside;
-                }
-                let arg = arg.rsplit_once('>').map_or(arg, |a| a.0);
-                arg.split(',').next().unwrap_or("").trim()
-            }
-            _ => t,
+        let arrow = after.trim_start().starts_with("->");
+        let (smart, t) = pointee(t);
+        if smart && !arrow {
+            return Evidence::Outside;
+        }
+        // `->` on a class with `operator->` (its own or a project base's)
+        // reaches whatever that returns.
+        let op = CallSite {
+            name: "operator->".to_string(),
+            args: None,
+            ..site.clone()
+        };
+        let on = |class| match cpp.lookup(class, &op, self.sight(), false) {
+            Ok(_) if arrow && !smart => self.any_method(call),
+            Ok(_) | Err(_) => self.on_class(call, class),
         };
         match cpp.place_name(t, from, sight) {
-            Placed::Class(class) => self.on_class(call, class),
-            Placed::Either(one, other) => {
-                either(self.on_class(call, one), self.on_class(call, other))
-            }
+            Placed::Class(class) => on(class),
+            Placed::Either(one, other) => either(on(one), on(other)),
             Placed::Unplaced => self.any_method(call),
             Placed::Nothing => Evidence::Found {
                 fns: self.ids(cpp.deriving(t, site)),
@@ -462,7 +472,10 @@ impl Caller<'_, '_> {
         // `::f()` names no member.
         if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
             // A data member called is its own call operator.
-            if self.cpp.field(class, name, self.sight()).is_some() {
+            let field = self
+                .member_of(chain)
+                .and_then(|c| self.cpp.field(c, name, self.sight()));
+            if field.is_some() {
                 return Evidence::Hidden;
             }
             // A member the class may inherit hides the free functions.
