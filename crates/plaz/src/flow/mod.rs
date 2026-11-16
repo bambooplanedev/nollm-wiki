@@ -285,8 +285,11 @@ impl<'s> Walker<'s> {
     }
 
     /// Walks `kids` in order. A run of them in the first branch of a
-    /// directive group opening in `within` is that group's one arm when it
-    /// has a step: the group's other branches skip it.
+    /// directive group opening in `within`, when it has a step, is that
+    /// group's one arm if the group has no other branch: the way past it
+    /// skips the run. A group with other branches stays counted; its run
+    /// is drawn in line, or, when the run cannot fall through, as the arm
+    /// of a branch whose way past it is not drawn.
     fn run(&self, kids: &[Node], within: &Range<usize>, flow: &mut Flow, out: &mut Vec<Step>) {
         let mut kids = kids.iter().copied().peekable();
         while let Some(c) = kids.next() {
@@ -301,10 +304,14 @@ impl<'s> Walker<'s> {
             let mut steps = Vec::new();
             self.run(&body, &g.body, flow, &mut steps);
             // A group holding no step (a `#define`) stays counted.
-            if steps.is_empty() {
+            let exits = matches!(steps.last(), Some(Step::Exit { .. }));
+            if steps.is_empty() || !(g.only || exits) {
+                out.extend(steps);
                 continue;
             }
-            self.drawn.borrow_mut().insert(i);
+            if g.only {
+                self.drawn.borrow_mut().insert(i);
+            }
             out.push(Step::Branch {
                 head: None,
                 line: g.line,
@@ -319,6 +326,7 @@ impl<'s> Walker<'s> {
                 }],
                 exhaustive: false,
                 breakable: false,
+                unseen: !g.only,
             });
         }
     }
@@ -470,6 +478,7 @@ impl<'s> Walker<'s> {
                     arms,
                     exhaustive,
                     breakable,
+                    unseen: false,
                 });
                 out.extend(self.sub(rest, flow));
             }
@@ -685,6 +694,7 @@ pub(crate) mod testutil {
             arms,
             exhaustive: false,
             breakable,
+            unseen: false,
         }
     }
 

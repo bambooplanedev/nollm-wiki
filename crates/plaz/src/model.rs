@@ -226,6 +226,9 @@ pub enum Step {
         /// An unlabelled `break` in it, in no inner loop, leaves the branch
         /// (a C `switch`); `continue` passes through to the loop.
         breakable: bool,
+        /// The way past the arms runs through branches not drawn (a
+        /// directive group's others, in a first-branch chart).
+        unseen: bool,
     },
     Loop {
         header: String,

@@ -308,6 +308,7 @@ impl Chart<'_> {
             arms,
             exhaustive,
             breakable,
+            unseen,
             ..
         } = s
         else {
@@ -357,7 +358,8 @@ impl Chart<'_> {
         }
         out.extend(fell);
         if !*exhaustive {
-            out.extend(no);
+            let way = |(d, l)| (d, if *unseen { Some("exit not drawn") } else { l });
+            out.extend(no.into_iter().map(way));
         }
         if *breakable {
             out.extend(self.branches.pop().map(|b| b.1).unwrap_or_default());

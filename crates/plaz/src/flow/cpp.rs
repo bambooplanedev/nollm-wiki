@@ -421,6 +421,8 @@ pub(super) struct Group {
     pub at: usize,
     pub line: usize,
     pub body: Range<usize>,
+    /// The first branch runs to the `#endif`: no `#elif` or `#else`.
+    pub only: bool,
 }
 
 /// The conditional directive groups with a line starting in `range` of
@@ -443,8 +445,9 @@ pub(super) fn directive_groups(text: &str, range: Range<usize>) -> Vec<Group> {
         );
         // A group's first branch ends at its first `#elif`, `#else` or `#endif`.
         if let Some(&g) = open.last().filter(|_| last) {
-            let body = &mut all[g].body;
-            body.end = body.end.min(at);
+            let g = &mut all[g];
+            g.body.end = g.body.end.min(at);
+            g.only &= word == Some("endif") && g.body.end == at;
         }
         let group = match word {
             Some("if" | "ifdef" | "ifndef") => {
@@ -453,6 +456,7 @@ pub(super) fn directive_groups(text: &str, range: Range<usize>) -> Vec<Group> {
                     at,
                     line: row + 1,
                     body: at + line.len()..usize::MAX,
+                    only: true,
                 });
                 open.push(all.len() - 1);
                 open.last().copied()

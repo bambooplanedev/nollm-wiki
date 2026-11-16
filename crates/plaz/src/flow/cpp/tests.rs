@@ -257,6 +257,38 @@ fn a_whole_block_under_a_group_in_a_first_branch_chart_is_a_branch_its_group_may
 }
 
 #[test]
+fn a_first_branch_group_with_other_branches_stays_counted_and_drawn_in_line() {
+    let src = format!("void mix(float * MY_RESTRICT s) {{\n#if defined(USE_A)\n    {{ fast_mix(s); }}\n#elif defined(USE_B)\n    wide_mix(s);\n#else\n    plain_mix(s);\n#endif\n    finish(s);\n}}\n\n{SPLIT}");
+    assert_eq!(
+        flow_lines("a.cpp", &src, "mix"),
+        ["call fast_mix(s) @3", "call finish(s) @9"]
+    );
+    assert_eq!(not_drawn("a.cpp", &src, "mix"), [("#if".to_string(), 1)]);
+}
+
+#[test]
+fn a_first_branch_ending_in_return_beside_unseen_branches_leaves_by_an_unseen_way() {
+    let src = format!("int pick(float * MY_RESTRICT s) {{\n#if defined(USE_A)\n    {{ fast(s); return 1; }}\n#else\n    {{ slow(s); return 2; }}\n#endif\n    tail(s);\n    return 0;\n}}\n\n{SPLIT}");
+    assert_eq!(
+        drawn(&src, "pick"),
+        [
+            "n0([\"pick\"])",
+            "n1{\"#35;if defined(USE_A)\"}",
+            "n0 --> n1",
+            "n2>\"fast(s)\"]:::hidden",
+            "n1 -->|yes| n2",
+            "n3([\"return 1;\"])",
+            "n2 --> n3",
+            "n4>\"tail(s)\"]:::hidden",
+            "n1 -->|exit not drawn| n4",
+            "n5([\"return 0;\"])",
+            "n4 --> n5",
+        ]
+    );
+    assert_eq!(not_drawn("a.cpp", &src, "pick"), [("#if".to_string(), 1)]);
+}
+
+#[test]
 fn a_function_both_trees_list_gets_one_flow() {
     let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\n";
     let f = file("a.cpp", src);
