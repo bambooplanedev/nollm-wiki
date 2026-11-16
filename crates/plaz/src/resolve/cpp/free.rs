@@ -83,7 +83,8 @@ impl Caller<'_, '_> {
 
     /// Is the function `c` in view of a bare call of `name` here: in no
     /// namespace, in the caller's or an enclosing one, or named by one of
-    /// the file's `using`s?
+    /// the file's `using`s: exactly by one at file scope only, else by
+    /// the end of its path (an inner one may name a nested namespace)?
     pub(super) fn in_view(&self, c: FnRef, name: &str) -> bool {
         let at = self.cpp.pages[c.0]
             .1
@@ -91,11 +92,13 @@ impl Caller<'_, '_> {
             .get(&c.1)
             .map_or("", String::as_str);
         let encloses = self.ns == at || self.ns.starts_with(&format!("{at}::"));
-        let names = |u: &str| at == u || at.ends_with(&format!("::{u}"));
+        let file = self.file;
+        let names = |u: &str, exact: bool| at == u || (!exact && at.ends_with(&format!("::{u}")));
         let using = |u: &String| {
+            let exact = file.file_usings.contains(u) && !file.inner_usings.contains(u);
             let of = u.strip_suffix(name).and_then(|n| n.strip_suffix("::"));
-            names(u) || of.is_some_and(names)
+            names(u, exact) || of.is_some_and(|n| names(n, exact))
         };
-        at.is_empty() || encloses || self.file.usings.iter().any(using)
+        at.is_empty() || encloses || file.usings.iter().any(using)
     }
 }

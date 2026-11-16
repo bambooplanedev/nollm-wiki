@@ -3245,6 +3245,23 @@ fn a_call_qualified_by_a_block_scope_alias_is_any_project_method_of_that_name() 
 }
 
 #[test]
+fn a_file_scope_using_directive_names_its_namespace_exactly_an_inner_one_by_suffix() {
+    let h = "namespace io {\nint put(int v);\n}\nnamespace net { namespace io {\nint put(int v);\n} }\n";
+    let top = "#include \"io.h\"\nusing namespace io;\nint run() { return put(1); }\n";
+    let inner =
+        "#include \"io.h\"\nnamespace net {\nusing namespace io;\nint go() { return put(2); }\n}\n";
+    let files = [("src/io.h", h), ("src/a.cpp", top), ("src/b.cpp", inner)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["put(1) → src/io.h:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "go"),
+        ["put(2) → one of: src/io.h:2, src/io.h:5"]
+    );
+}
+
+#[test]
 fn a_bare_call_reaches_a_namespace_function_only_from_that_namespace_or_a_using() {
     let h = "namespace io {\nint close(int fd);\nstruct Pipe { void drain(int fd); };\n}\n";
     let shut = "#include <unistd.h>\n#include \"fdutil.h\"\nvoid shut(int fd) { close(fd); }\nnamespace io {\nvoid again(int fd) { close(fd); }\n}\nvoid io::Pipe::drain(int fd) { close(fd); }\n";
