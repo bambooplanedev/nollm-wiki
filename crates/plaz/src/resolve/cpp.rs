@@ -99,7 +99,8 @@ impl<'a> Cpp<'a> {
                     continue;
                 }
                 let c = (page, i);
-                // `operator -> ()` is `operator->`; `operator new` keeps its space.
+                // `operator -> ()` is `operator->`: an operator name with a symbol
+                // loses its spaces (`operator new[]` too); `operator new` keeps them.
                 let op = it.name.strip_prefix("operator");
                 let op = op.filter(|o| o.contains(|c: char| c.is_ascii_punctuation()));
                 let name = op.map_or_else(

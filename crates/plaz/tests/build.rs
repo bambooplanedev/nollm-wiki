@@ -4263,3 +4263,17 @@ fn an_items_own_flow_marked_as_a_local_class_method_still_reaches_its_class() {
     };
     assert_eq!(out, [plaz::model::Target::Resolved(flush)]);
 }
+
+#[test]
+fn a_local_class_method_under_if_or_as_a_template_is_still_the_local_classs() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Ink {\n    void apply() {}\n};\nstruct Shelf {\n    Book book_;\n    void flush() {}\n    void run() {\n        struct Guard {\n            Ink book_;\n#ifdef DEBUG\n            void go() { flush(); book_.apply(); this->flush(); }\n#endif\n            template <class T>\n            void put(T t) { book_.apply(); }\n            void flush() {}\n        };\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "flush() → one of: src/a.cpp:9, or outside",
+            "book_.apply() → one of: src/a.cpp:2, src/a.cpp:5, or outside",
+            "this->flush() → one of: src/a.cpp:9, or outside",
+            "book_.apply() → one of: src/a.cpp:2, src/a.cpp:5, or outside"
+        ]
+    );
+}

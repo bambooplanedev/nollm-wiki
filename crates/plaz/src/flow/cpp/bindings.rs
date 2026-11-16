@@ -71,12 +71,13 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         .filter(|(n, _)| !n.is_empty())
         .map(|(n, t)| (n, t.filter(keep)));
     let joined = Bindings::join(binds);
-    // A method in a class body inside a function body (a macro block such
-    // as `EACH(x) { … }` is a function definition in no class body).
+    // A method in a class body inside a function body: the nearer of the
+    // two around it is a class body (past `#if` groups, `template <…>` and
+    // `friend`); a macro block such as `EACH(x) { … }` is in a body.
     let mut around = std::iter::successors(root.parent(), Node::parent);
-    let in_class = root
-        .parent()
-        .is_some_and(|p| p.kind() == "field_declaration_list");
+    let scope =
+        around.find(|n| matches!(n.kind(), "field_declaration_list" | "compound_statement"));
+    let in_class = scope.is_some_and(|n| n.kind() == "field_declaration_list");
     Bindings {
         rebound,
         local_class: in_class && around.any(|n| n.kind() == "compound_statement"),
