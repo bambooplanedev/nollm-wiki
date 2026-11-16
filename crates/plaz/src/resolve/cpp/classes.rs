@@ -5,6 +5,8 @@
 mod field;
 mod place;
 
+pub(super) use field::Field;
+
 use super::{fits, Cpp, Loose};
 use crate::source::untemplated;
 use std::collections::{BTreeMap, BTreeSet};

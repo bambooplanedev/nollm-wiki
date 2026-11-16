@@ -1,7 +1,7 @@
 //! Calls on an object or a class: a data member's, a typed value's, a
 //! qualifier's.
 
-use super::classes::{Missing, Placed, Sight};
+use super::classes::{Field, Missing, Placed, Sight};
 use super::{fits, Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::MapCall;
@@ -30,24 +30,54 @@ pub(super) fn either(one: Evidence, other: Evidence) -> Evidence {
     Evidence::Found { fns, open }
 }
 
-/// `x` and the text after it, of a call written `this->x.f()` or
-/// `this->x->f()` of the name `f`.
-pub(super) fn this_field<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
-    let rest = text.strip_prefix("this")?.trim_start().strip_prefix("->")?;
+/// The data member `a` and the text after it, of the text after a
+/// receiver that goes on past `a` (`.a.f()`, `->a->f()`).
+fn member_step(after: &str) -> Option<(&str, &str)> {
+    let op = after.trim_start();
+    let rest = op.strip_prefix("->").or_else(|| op.strip_prefix('.'))?;
     let rest = rest.trim_start();
     let end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
-    let (x, after) = rest.split_at(end);
-    let op = after.trim_start();
+    let (a, tail) = rest.split_at(end);
+    let tail = tail.trim_start();
+    let on = tail.starts_with('.') || tail.starts_with("->");
+    (!a.is_empty() && on).then_some((a, tail))
+}
+
+/// The first name `x` and the text after it, of a call of `f` written as
+/// a path of names (`x.f()`, `x->a.f()`, `this->a.f()`) whose own
+/// arguments end the text, or run past its clipped end.
+pub(super) fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
+    let end = text.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
+    let (x, after) = text.split_at(end);
+    let mut rest = after;
+    while let Some((_, tail)) = member_step(rest) {
+        rest = tail;
+    }
+    let op = rest.trim_start();
     let called = op.strip_prefix("->").or_else(|| op.strip_prefix('.'))?;
     let called = called.trim_start().strip_prefix(f)?.trim_start();
-    (!x.is_empty() && called.starts_with(['(', '<'])).then_some((x, after))
+    // `f<T>(…)`: the arguments, to the parenthesis closing them.
+    let args = called
+        .find('(')
+        .filter(|_| called.starts_with(['(', '<']))?;
+    let mut depth = 0usize;
+    for (i, c) in called[args..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = depth.saturating_sub(1),
+            _ => continue,
+        }
+        if depth == 0 {
+            let past = called[args + i + 1..].trim();
+            return (!x.is_empty() && past.is_empty()).then_some((x, after));
+        }
+    }
+    (!x.is_empty() && text.ends_with('…')).then_some((x, after))
 }
 
 impl Caller<'_, '_> {
     /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
-    /// it) of the caller's class, or `x(…)` with no `after`: as on a local
-    /// of the member's type, the type placed from the class declaring it,
-    /// in the file of its head.
+    /// it) of the caller's class, or `x(…)` with no `after`: as `on_member`.
     pub(super) fn on_field(
         &self,
         chain: &[FlowScope],
@@ -58,6 +88,14 @@ impl Caller<'_, '_> {
         let field = self
             .member_of(chain)
             .and_then(|c| self.cpp.field(c, x, self.sight()));
+        self.on_member(call, field, after)
+    }
+
+    /// A call on the data member `field` (`after` the text after it), or
+    /// of it with no `after`: as on a local of the member's type, the type
+    /// placed from the class declaring it, in the file of its head. With
+    /// no type, a member called is not visible.
+    fn on_member(&self, call: &MapCall, field: Option<Field>, after: Option<&str>) -> Evidence {
         match field.and_then(|f| Some((f.ty?, f))) {
             Some((t, f)) => {
                 let included = self.cpp.closure(f.page);
@@ -113,30 +151,58 @@ impl Caller<'_, '_> {
     }
 
     /// A call of `f` on an object of the project class `class`: what
-    /// lookup finds, else outside under a base from outside the project,
-    /// else any project method `f`.
+    /// lookup finds, else a data member `f` lookup finds (`on_member`),
+    /// else outside under a base from outside the project, else any
+    /// project method `f`.
     pub(super) fn on_class(&self, call: &MapCall, class: &str) -> Evidence {
         match self.cpp.lookup(class, &call.site, self.sight(), true) {
             Ok(found) => Evidence::Found {
                 fns: self.ids(found.fns),
                 open: found.open,
             },
-            Err(Missing::Outside) => Evidence::Outside,
-            Err(Missing::Nowhere | Missing::Unseen) => self.any_method(call),
+            Err(missing) => self.on_data(call, class).unwrap_or_else(|| match missing {
+                Missing::Outside => Evidence::Outside,
+                Missing::Nowhere | Missing::Unseen => self.any_method(call),
+            }),
         }
     }
 
     /// `Q::f()` on the class `Q`: what lookup finds in it or its bases,
-    /// with no dispatch; outside when an outside base may give it.
+    /// with no dispatch; else a data member `f` lookup finds; outside when
+    /// an outside base may give it.
     pub(super) fn qualified(&self, call: &MapCall, class: &str) -> Evidence {
         match self.cpp.lookup(class, &call.site, self.sight(), false) {
             Ok(found) => Evidence::Found {
                 fns: self.ids(found.fns),
                 open: found.open,
             },
-            Err(Missing::Outside) => Evidence::Outside,
-            Err(Missing::Unseen) => self.any_method(call),
-            Err(Missing::Nowhere) => Evidence::Hidden,
+            Err(missing) => self.on_data(call, class).unwrap_or_else(|| match missing {
+                Missing::Outside => Evidence::Outside,
+                Missing::Unseen => self.any_method(call),
+                Missing::Nowhere => Evidence::Hidden,
+            }),
+        }
+    }
+
+    /// A call of the data member of the call's name that lookup from
+    /// `class` finds, if one: its own call operator.
+    fn on_data(&self, call: &MapCall, class: &str) -> Option<Evidence> {
+        let field = self.cpp.field(class, &call.site.name, self.sight())?;
+        Some(self.on_member(call, Some(field), None))
+    }
+
+    /// `x.a.f()` on an object of `class`, `after` the text after `x`: with
+    /// a data member `a` before the called name, as on the member (`a`
+    /// untyped or no data member: any project method `f`); else as
+    /// `on_class`.
+    pub(super) fn on_step(&self, call: &MapCall, after: &str, class: &str) -> Evidence {
+        let Some((a, tail)) = member_step(after) else {
+            return self.on_class(call, class);
+        };
+        let field = self.cpp.field(class, a, self.sight());
+        match field.filter(|f| f.ty.is_some()) {
+            Some(f) => self.on_member(call, Some(f), Some(tail)),
+            None => self.any_method(call),
         }
     }
 
@@ -169,12 +235,14 @@ impl Caller<'_, '_> {
         };
         let on = |class| match cpp.lookup(class, &op, self.sight(), false) {
             Ok(_) if arrow && !smart => self.any_method(call),
-            Ok(_) | Err(_) => self.on_class(call, class),
+            Ok(_) | Err(_) => self.on_step(call, after, class),
         };
         match cpp.place_name(t, from, sight) {
             Placed::Class(class) => on(class),
             Placed::Either(one, other) => either(on(one), on(other)),
             Placed::Unplaced => self.any_method(call),
+            // `x.a.f()`: `a` may be a project class's.
+            Placed::Nothing if member_step(after).is_some() => self.any_method(call),
             Placed::Nothing => Evidence::Found {
                 fns: self.ids(cpp.deriving(t, site)),
                 open: true,

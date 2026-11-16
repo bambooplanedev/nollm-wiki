@@ -11,7 +11,7 @@ use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
 use crate::source::untemplated;
 use classes::{Classes, Missing, Sight};
-use members::this_field;
+use members::member_path;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
@@ -373,11 +373,22 @@ impl Caller<'_, '_> {
                 Some(class) => self.on_class(call, class),
                 None => self.any_method(call),
             },
-            // The innermost flow binding `x` gives its type; with none, a
-            // data member of that name.
-            CallVia::Member(Some(x)) => {
-                let after = call.text.strip_prefix(x.as_str()).unwrap_or("");
+            // `x.f()`, `x->a.f()`: the innermost flow binding `x` gives its
+            // type; with none, a data member of that name. `this->a.f()`:
+            // the caller's class.
+            CallVia::Member(x) => {
+                let path = match x {
+                    Some(x) => Some((x.as_str(), call.text.strip_prefix(x.as_str()).unwrap_or(""))),
+                    None => member_path(&call.text, &call.site.name),
+                };
+                let Some((x, after)) = path else {
+                    return self.any_method(call);
+                };
                 match chain.iter().rev().find(|f| f.locals.contains(x)) {
+                    _ if x == "this" => match self.member_of(chain) {
+                        Some(class) => self.on_step(call, after, class),
+                        None => self.any_method(call),
+                    },
                     Some(f) => match f.types.get(x) {
                         Some(t) => self.on_typed(
                             call,
@@ -391,10 +402,6 @@ impl Caller<'_, '_> {
                     None => self.on_field(chain, call, x, Some(after)),
                 }
             }
-            CallVia::Member(None) => match this_field(&call.text, &call.site.name) {
-                Some((x, after)) => self.on_field(chain, call, x, Some(after)),
-                None => self.any_method(call),
-            },
         }
     }
 

@@ -4171,6 +4171,71 @@ fn a_field_of_a_type_a_subclass_overrides_is_one_of_both() {
 }
 
 #[test]
+fn a_data_member_called_through_a_typed_receiver_is_not_visible() {
+    let c = "struct port {\n    int (*send)(int);\n};\nint flush(struct port *p) { return p->send(3); }\n";
+    let cpp = "#include <functional>\n#include <relay.h>\nstruct Valve : Relay {\n    void (*shut)(int);\n    std::function<void(int)> on_drip;\n    int open() { return 1; }\n};\nint drain(Valve& v) {\n    v.shut(2);\n    v.on_drip(1);\n    return v.open();\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/port.c", c)], "src/port.c", "flush"),
+        ["p->send(3) → hidden"]
+    );
+    assert_eq!(
+        cpp_targets(&[("src/valve.cpp", cpp)], "src/valve.cpp", "drain"),
+        [
+            "v.shut(2) → hidden",
+            "v.on_drip(1) → hidden",
+            "v.open() → src/valve.cpp:6"
+        ]
+    );
+}
+
+#[test]
+fn a_static_data_member_called_through_its_class_is_not_visible() {
+    let src = "#include <relay.h>\nstruct Log : Relay {\n    static void (*sink)(const char*);\n};\nvoid say() { Log::sink(\"x\"); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/log.cpp", src)], "src/log.cpp", "say"),
+        ["Log::sink(\"x\") → hidden"]
+    );
+}
+
+#[test]
+fn a_call_on_a_calls_result_is_not_a_method_of_the_receivers_class() {
+    let src = "struct Leaf {\n    int next() { return 0; }\n};\nstruct Node {\n    Leaf* next() { return nullptr; }\n};\nint walk(Node* n) { return n->next()->next(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "walk"),
+        [
+            "n->next() → src/a.cpp:5",
+            "n->next()->next() → one of: src/a.cpp:2, src/a.cpp:5, or outside"
+        ]
+    );
+}
+
+#[test]
+fn a_call_through_a_path_of_data_members_reads_the_last_member() {
+    let c = "struct ops {\n    int (*shut)(int);\n};\nstruct dev {\n    struct ops table;\n};\nint stop(struct dev *d) { return d->table.shut(4); }\n";
+    let cpp = "#include <utility>\nstruct Pump {\n    int (*prime)(int);\n    int start() { return 0; }\n};\nstruct Rig {\n    Pump pump;\n    int boot() { return this->pump.prime(1); }\n};\nint run(Rig* r) {\n    r->pump.prime(2);\n    return r->pump.start();\n}\nint spare(std::pair<Pump, int>& q) { return q.first.start(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/dev.c", c)], "src/dev.c", "stop"),
+        ["d->table.shut(4) → hidden"]
+    );
+    assert_eq!(
+        cpp_targets(&[("src/rig.cpp", cpp)], "src/rig.cpp", "run"),
+        [
+            "r->pump.prime(2) → hidden",
+            "r->pump.start() → src/rig.cpp:4"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&[("src/rig.cpp", cpp)], "src/rig.cpp", "boot"),
+        ["this->pump.prime(1) → hidden"]
+    );
+    // A member of a type from outside the project may be a project class.
+    assert_eq!(
+        cpp_targets(&[("src/rig.cpp", cpp)], "src/rig.cpp", "spare"),
+        ["q.first.start() → one of: src/rig.cpp:4, or outside"]
+    );
+}
+
+#[test]
 fn a_smart_pointer_field_is_outside_with_a_dot_and_its_pointee_with_an_arrow() {
     let src = "struct Book {\n    void apply() {}\n    void reset() {}\n};\nstruct Shelf {\n    std::unique_ptr<Book> book_ = nullptr;\n    void run() {\n        book_->apply();\n        this->book_->apply();\n        book_.reset();\n    }\n};\n";
     assert_eq!(
