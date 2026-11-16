@@ -61,6 +61,8 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             local: BTreeSet::new(),
             params: BTreeMap::new(),
             namespaces: BTreeSet::new(),
+            scopes: BTreeMap::new(),
+            usings: BTreeSet::new(),
         };
         flow::attach(&mut file, &a);
         if family == Family::Cpp {
@@ -99,7 +101,8 @@ fn hidden_jumps(files: &mut BTreeMap<String, File>) {
 }
 
 /// What a C/C++ file's trees show that its items do not: which functions
-/// are file-local, each function's parameter types, its namespace names.
+/// are file-local, each function's parameter types and namespace, the
+/// file's namespace names and `using`s.
 fn cpp_facts(file: &mut File, a: &Analyzed) {
     let items = file.code.items.iter().zip(&a.defs).enumerate();
     for (i, (it, def)) in items.filter(|(_, (it, _))| !it.nested) {
@@ -126,8 +129,35 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
         if it.kind == CodeItemKind::Fn && (is_static || anonymous) {
             file.local.insert(i);
         }
-        if let Some(p) = params(node, &it.name, src.text()) {
+        let f = declarator(node, &it.name, src.text());
+        if let Some(p) = f.and_then(|f| params(f, src.text())) {
             file.params.insert(i, p);
+        }
+        // The enclosing named namespaces, then the qualifier of `a::B::f`.
+        let mut path = Vec::new();
+        for n in std::iter::successors(node.parent(), Node::parent) {
+            let inline = text(n).starts_with("inline");
+            if let Some(name) = n
+                .child_by_field_name("name")
+                .filter(|_| n.kind() == "namespace_definition" && !inline)
+            {
+                let segs = segments(text(name)).filter(|s| !s.1).map(|s| s.0);
+                path.splice(0..0, segs);
+            }
+        }
+        let declared = f.and_then(|f| f.child_by_field_name("declarator"));
+        let qualifier = declared
+            .and_then(|d| text(d).rsplit_once("::"))
+            .map(|q| q.0);
+        path.extend(
+            qualifier
+                .into_iter()
+                .flat_map(|q| q.split("::"))
+                .map(str::trim),
+        );
+        path.retain(|s| !s.is_empty());
+        if !path.is_empty() {
+            file.scopes.insert(i, path.join("::"));
         }
     }
     for s in &a.sources {
@@ -140,35 +170,55 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             .then(|| n.child_by_field_name("name"))
             .flatten()
             {
-                let segs = s.text()[name.byte_range()].split("::");
-                let segs = segs.map(|g| g.trim().trim_start_matches("inline").trim());
-                file.namespaces
-                    .extend(segs.filter(|g| !g.is_empty()).map(String::from));
+                let segs = segments(&s.text()[name.byte_range()]);
+                file.namespaces.extend(segs.map(|g| g.0.to_string()));
+            }
+            if n.kind() == "using_declaration" {
+                let named = n.named_children(&mut n.walk()).last();
+                let named = named.map(|u| s.text()[u.byte_range()].split_whitespace().collect());
+                file.usings.extend(named);
             }
             stack.extend(n.named_children(&mut n.walk()));
         }
     }
 }
 
-/// The parameter types of the function declarator under `node` that
-/// declares `name`, outside any body: each parameter's text with its name,
-/// default value, whitespace, `struct`-like keywords and a by-value
-/// parameter's `const` dropped, joined by `,`; `(void)` is `()`.
-fn params(node: Node, name: &str, src: &str) -> Option<String> {
-    let text = |n: Node| &src[n.byte_range()];
+/// The segments of a namespace name as written (`a::inline b`), each with
+/// whether it names an inline namespace.
+fn segments(name: &str) -> impl Iterator<Item = (&str, bool)> {
+    let segs = name.split("::").map(|g| {
+        let g = g.trim();
+        let word = g
+            .strip_prefix("inline")
+            .filter(|r| r.starts_with(char::is_whitespace));
+        word.map_or((g, false), |r| (r.trim(), true))
+    });
+    segs.filter(|g| !g.0.is_empty())
+}
+
+/// The function declarator under `node` that declares `name`, outside any
+/// body.
+fn declarator<'t>(node: Node<'t>, name: &str, src: &str) -> Option<Node<'t>> {
     let mut stack = vec![node];
-    let f = loop {
+    loop {
         let n = stack.pop()?;
         let declares = n
             .child_by_field_name("declarator")
-            .is_some_and(|d| text(d).ends_with(name));
+            .is_some_and(|d| src[d.byte_range()].ends_with(name));
         if n.kind() == "function_declarator" && declares {
-            break n;
+            return Some(n);
         }
         if n.kind() != "compound_statement" {
             stack.extend(n.named_children(&mut n.walk()));
         }
-    };
+    }
+}
+
+/// The parameter types of the function declarator `f`: each parameter's
+/// text with its name, default value, whitespace, `struct`-like keywords
+/// and a by-value parameter's `const` dropped, joined by `,`; `(void)` is
+/// `()`.
+fn params(f: Node, src: &str) -> Option<String> {
     let list = f.child_by_field_name("parameters")?;
     let mut out = Vec::new();
     for p in list.children(&mut list.walk()) {
@@ -189,13 +239,27 @@ fn params(node: Node, name: &str, src: &str) -> Option<String> {
         let kept = [&src[p.start_byte()..cut.start], &src[cut.end..end]].concat();
         // `struct T*` and `T*` are one type in C++; so are `const T` and
         // `T` passed by value.
+        // Words are dropped wherever they stand (`vector<enum E>`).
         let by_value = !kept.contains(['*', '&', '[', '(', '<']);
-        let words = kept.split_whitespace();
-        let kept: String = words
-            .filter(|w| !matches!(*w, "struct" | "class" | "union" | "enum"))
-            .filter(|w| !(by_value && matches!(*w, "const" | "volatile")))
-            .collect();
-        out.push(kept.trim_end_matches('=').to_string());
+        let dropped = |w: &str| {
+            matches!(w, "struct" | "class" | "union" | "enum")
+                || (by_value && matches!(w, "const" | "volatile"))
+        };
+        let (mut typed, mut word) = (String::new(), String::new());
+        for c in kept.chars().chain([' ']) {
+            if c.is_alphanumeric() || c == '_' {
+                word.push(c);
+                continue;
+            }
+            if !dropped(&word) {
+                typed.push_str(&word);
+            }
+            word.clear();
+            if !c.is_whitespace() {
+                typed.push(c);
+            }
+        }
+        out.push(typed.trim_end_matches('=').to_string());
     }
     let all = out.join(",");
     Some(if all == "void" { String::new() } else { all })

@@ -108,6 +108,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         py: &py,
                         cpp: &cpp,
                         included: &included,
+                        ns: file.scopes.get(&item).map_or("", String::as_str),
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
@@ -137,6 +138,8 @@ struct Caller<'i, 'a> {
     cpp: &'i Cpp<'a>,
     /// The pages a C/C++ caller's file includes, directly or not.
     included: &'i BTreeSet<usize>,
+    /// A C/C++ caller's namespace path, its qualifier included (`File::scopes`).
+    ns: &'a str,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,

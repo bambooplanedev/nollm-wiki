@@ -2835,12 +2835,27 @@ fn a_bare_call_in_a_method_naming_a_project_method_is_hidden_until_class_rules()
 }
 
 #[test]
-fn a_free_function_in_the_callers_file_wins_over_an_included_one() {
-    let h = "int step(double d);\n";
-    let src = "#include \"step.h\"\nint step(int a) { return a; }\nint run() { return step(1); }\n";
+fn a_c_definition_in_the_callers_file_wins_over_an_included_declaration() {
+    // Valid C: one function, its header declaration spelled differently.
+    let h = "int count(char *argv[]);\n";
+    let src = "#include \"count.h\"\nint count(char **argv) { return argv != 0; }\nint run(char **v) { return count(v); }\n";
     assert_eq!(
-        cpp_targets(&[("src/step.h", h), ("src/a.c", src)], "src/a.c", "run"),
-        ["step(1) → src/a.c:2"]
+        cpp_targets(&[("src/count.h", h), ("src/a.c", src)], "src/a.c", "run"),
+        ["count(v) → src/a.c:2"]
+    );
+}
+
+#[test]
+fn a_cpp_callers_own_overload_and_an_included_one_are_one_candidate_set() {
+    let h = "int step(double d);\n";
+    let src = "#include \"step.h\"\nstatic int step(int a) { return a; }\nint run() { return step(1.5); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/step.h", h), ("src/step.cpp", src)],
+            "src/step.cpp",
+            "run"
+        ),
+        ["step(1.5) → one of: src/step.cpp:2, src/step.h:1"]
     );
 }
 
@@ -2856,10 +2871,10 @@ fn a_forward_declaration_folds_onto_its_definition_in_the_same_file() {
 
 #[test]
 fn a_header_declaration_folds_onto_its_definition_with_names_and_defaults_dropped() {
-    let h = "int scale(const struct grid* g, int value, int by = 2);\n";
+    let h = "int scale(const struct grid* g, const std::vector<enum mode>& ms, int value, int by = 2);\n";
     let def =
-        "#include \"scale.h\"\nint scale(const grid *g, const int v, int k) { return v * k; }\n";
-    let main = "#include \"scale.h\"\nint run() { return scale(nullptr, 3); }\n";
+        "#include \"scale.h\"\nint scale(const grid *g, const std::vector<mode> &m, const int v, int k) { return v * k; }\n";
+    let main = "#include \"scale.h\"\nint run() { return scale(nullptr, {}, 3); }\n";
     assert_eq!(
         cpp_targets(
             &[
@@ -2870,7 +2885,7 @@ fn a_header_declaration_folds_onto_its_definition_with_names_and_defaults_droppe
             "src/main.cpp",
             "run"
         ),
-        ["scale(nullptr, 3) → src/scale.cpp:2"]
+        ["scale(nullptr, {}, 3) → src/scale.cpp:2"]
     );
 }
 
@@ -3134,5 +3149,74 @@ fn a_call_qualified_by_a_block_scope_alias_is_any_project_method_of_that_name() 
             "X::fill(1) → one of: src/box.h:3, or outside",
             "Box<int>::fill(2) → src/box.h:3"
         ]
+    );
+}
+
+#[test]
+fn a_bare_call_reaches_a_namespace_function_only_from_that_namespace_or_a_using() {
+    let h = "namespace io {\nint close(int fd);\nstruct Pipe { void drain(int fd); };\n}\n";
+    let shut = "#include <unistd.h>\n#include \"fdutil.h\"\nvoid shut(int fd) { close(fd); }\nnamespace io {\nvoid again(int fd) { close(fd); }\n}\nvoid io::Pipe::drain(int fd) { close(fd); }\n";
+    let used = "#include \"fdutil.h\"\nusing namespace io;\nvoid done(int fd) { close(fd); }\n";
+    let files = [
+        ("src/fdutil.h", h),
+        ("src/shut.cpp", shut),
+        ("src/used.cpp", used),
+    ];
+    let decl = "close(fd) → src/fdutil.h:2";
+    assert_eq!(
+        cpp_targets(&files, "src/shut.cpp", "shut"),
+        ["close(fd) → one of: src/fdutil.h:2, or outside"]
+    );
+    assert_eq!(cpp_targets(&files, "src/shut.cpp", "again"), [decl]);
+    assert_eq!(cpp_targets(&files, "src/shut.cpp", "drain"), [decl]);
+    assert_eq!(cpp_targets(&files, "src/used.cpp", "done"), [decl]);
+}
+
+#[test]
+fn an_angle_include_with_a_directory_reaches_a_project_header() {
+    let h = "static inline int clampi(int v) { return v < 0 ? 0 : v; }\n";
+    let with = "#include <proj/util.h>\nint run(int v) { return clampi(v); }\n";
+    let bare = "#include <util.h>\nint other(int v) { return clampi(v); }\n";
+    let files = [
+        ("include/proj/util.h", h),
+        ("src/angle.c", with),
+        ("src/bare.c", bare),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/angle.c", "run"),
+        ["clampi(v) → include/proj/util.h:1"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/bare.c", "other"),
+        ["clampi(v) → outside"]
+    );
+}
+
+#[test]
+fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
+    let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
+    // C++: the definition of the same arity, not the overload.
+    let cpp = "int tally(int v[]);\nint run(int *v) { return tally(v); }\nint tally(int *v) { return *v; }\nint tally() { return 0; }\n";
+    assert_eq!(
+        cpp_targets(&[("src/fwd.c", c)], "src/fwd.c", "run"),
+        ["count(v) → src/fwd.c:3"]
+    );
+    assert_eq!(
+        cpp_targets(&[("src/fwd.cpp", cpp)], "src/fwd.cpp", "run"),
+        ["tally(v) → src/fwd.cpp:3"]
+    );
+}
+
+#[test]
+fn a_namespace_named_like_inline_keeps_its_name() {
+    let h = "namespace inline_math {\nint sq(int v);\n}\n";
+    let src = "#include \"m.h\"\nint run() { return inline_math::sq(2); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/m.h", h), ("src/run.cpp", src)],
+            "src/run.cpp",
+            "run"
+        ),
+        ["inline_math::sq(2) → src/m.h:2"]
     );
 }

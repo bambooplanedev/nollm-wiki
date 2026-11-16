@@ -27,6 +27,8 @@ pub(super) struct Cpp<'a> {
     shared: BTreeMap<Key<'a>, Vec<FnRef>>,
     /// Every definition, by page and key.
     own: BTreeMap<(usize, Key<'a>), Vec<FnRef>>,
+    /// Every definition, by page, scope and name.
+    file_defs: BTreeMap<(usize, &'a str, &'a str), Vec<FnRef>>,
     namespaces: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
     /// Type names, and owners of out-of-line definitions that are no
@@ -53,6 +55,7 @@ impl<'a> Cpp<'a> {
             by_name: BTreeMap::new(),
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
+            file_defs: BTreeMap::new(),
             namespaces: cpp()
                 .flat_map(|(_, (_, f))| &f.namespaces)
                 .map(String::as_str)
@@ -65,7 +68,15 @@ impl<'a> Cpp<'a> {
             pages: pages.clone(),
         };
         for (page, &(path, file)) in cpp() {
-            let quoted = file.code.imports.iter().filter(|i| !i.starts_with('<'));
+            // `<a/b.h>` may name a project header; `<b.h>` a system one.
+            let quoted = file
+                .code
+                .imports
+                .iter()
+                .filter_map(|i| match i.strip_prefix('<') {
+                    Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
+                    None => Some(i.as_str()),
+                });
             out.includes[page] = quoted
                 .flat_map(|i| out.include(&by_file, path, i))
                 .collect();
@@ -87,6 +98,8 @@ impl<'a> Cpp<'a> {
                             out.shared.entry(key).or_default().push(c);
                         }
                         out.own.entry((page, key)).or_default().push(c);
+                        let named = out.file_defs.entry((page, key.0, key.1));
+                        named.or_default().push(c);
                     }
                     Some(_) | None => {}
                 }
@@ -141,6 +154,11 @@ impl<'a> Cpp<'a> {
         &self.pages[c.0].1.code.items[c.1]
     }
 
+    fn is_c(&self, page: usize) -> bool {
+        // `.C` is C++.
+        std::path::Path::new(self.pages[page].0).extension() == Some("c".as_ref())
+    }
+
     fn local(&self, c: FnRef) -> bool {
         self.pages[c.0].1.local.contains(&c.1)
     }
@@ -158,8 +176,9 @@ impl<'a> Cpp<'a> {
     }
 
     /// `fns`, each declaration taken as the definitions of its key: of its
-    /// own file when it is local, else those no file keeps to itself; a
-    /// declaration with none stays.
+    /// own file when it is local, else those no file keeps to itself; with
+    /// none, its file's one definition of that name (and arity, in C++); a
+    /// declaration with neither stays.
     fn folded(&self, fns: Vec<FnRef>) -> BTreeSet<FnRef> {
         let mut out = BTreeSet::new();
         let mut done = BTreeSet::new();
@@ -177,7 +196,19 @@ impl<'a> Cpp<'a> {
                 Some(defs) if done.insert((page, key)) => out.extend(defs),
                 Some(_) => {}
                 None => {
-                    out.insert(c);
+                    // Spelled otherwise: the file's one definition of that
+                    // name, of that arity in C++ (C has one signature).
+                    let named = self
+                        .file_defs
+                        .get(&(c.0, key.0, key.1))
+                        .into_iter()
+                        .flatten();
+                    let mut same = named
+                        .filter(|&&d| self.is_c(c.0) || self.item(d).arity == self.item(c).arity);
+                    match (same.next(), same.next()) {
+                        (Some(&d), None) => out.insert(d),
+                        _ => out.insert(c),
+                    };
                 }
             }
         }
@@ -250,10 +281,12 @@ impl Caller<'_, '_> {
     }
 
     /// The free functions `site` names, of the namespace `ns` when given:
-    /// those of the caller's file, else of the files it includes, else any
-    /// other not local to its file (in a header, called from a header, it
-    /// may be), which may also be something outside.
-    /// None by argument count: the same over the variadic ones.
+    /// in C those of the caller's file first; those of the caller's file
+    /// and the files it includes; else any other not local to its file (in
+    /// a header, called from a header, it may be), which may also be
+    /// something outside. A bare call's set keeps the functions in view,
+    /// or with none in view is open. None by argument count: the same over
+    /// the variadic ones.
     fn free(&self, site: &CallSite, ns: Option<&str>) -> Option<Evidence> {
         let cpp = self.cpp;
         let in_ns = |it: &CodeItem| match ns {
@@ -285,13 +318,26 @@ impl Caller<'_, '_> {
             // A header's file-local function may be in every unit that
             // includes the calling header too.
             let header = |page: usize| source_rank(cpp.pages[page].0) < 2;
-            let visible = |c: FnRef| !cpp.local(c) || (header(self.page) && header(c.0));
+            let reachable = |c: FnRef| !cpp.local(c) || (header(self.page) && header(c.0));
+            let own = |c: FnRef| c.0 == self.page;
+            // In C a name has one signature: the caller's own is the one.
+            let c_file = cpp.is_c(self.page);
             let tiers = [
-                (tier(&|c| c.0 == self.page), false),
-                (tier(&|c| c.0 != self.page && seen(c)), false),
-                (tier(&|c| c.0 != self.page && !seen(c) && visible(c)), true),
+                (tier(&|c| c_file && own(c)), false),
+                (tier(&|c| own(c) || seen(c)), false),
+                (tier(&|c| !own(c) && !seen(c) && reachable(c)), true),
             ];
             for (fns, open) in tiers {
+                // A bare call sees a namespace's function from in it or
+                // through a `using`; argument-dependent lookup, any.
+                let shown: Vec<FnRef> = (fns.iter().copied())
+                    .filter(|&c| ns.is_some() || self.in_view(c, &site.name))
+                    .collect();
+                let (fns, open) = if shown.is_empty() {
+                    (fns, true)
+                } else {
+                    (shown, open)
+                };
                 let fns = self.ids(cpp.folded(fns));
                 if !fns.is_empty() {
                     return Some(Evidence::Found { fns, open });
@@ -299,5 +345,23 @@ impl Caller<'_, '_> {
             }
         }
         None
+    }
+
+    /// Is the function `c` in view of a bare call of `name` here: in no
+    /// namespace, in the caller's or an enclosing one, or named by one of
+    /// the file's `using`s?
+    fn in_view(&self, c: FnRef, name: &str) -> bool {
+        let at = self.cpp.pages[c.0]
+            .1
+            .scopes
+            .get(&c.1)
+            .map_or("", String::as_str);
+        let encloses = self.ns == at || self.ns.starts_with(&format!("{at}::"));
+        let names = |u: &str| at == u || at.ends_with(&format!("::{u}"));
+        let using = |u: &String| {
+            let of = u.strip_suffix(name).and_then(|n| n.strip_suffix("::"));
+            names(u) || of.is_some_and(names)
+        };
+        at.is_empty() || encloses || self.file.usings.iter().any(using)
     }
 }
