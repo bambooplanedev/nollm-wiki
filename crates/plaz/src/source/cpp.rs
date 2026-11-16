@@ -291,9 +291,10 @@ fn using(file: &mut File, n: Node, src: &str) {
 /// unless it declares a function, but one in parentheses (`(*say)(const
 /// char*)`).
 fn variables(file: &mut File, n: Node, src: &str) {
-    let body = std::iter::successors(n.parent(), Node::parent)
-        .any(|p| matches!(p.kind(), "compound_statement" | "field_declaration_list"));
-    if n.kind() != "declaration" || body {
+    if n.kind() != "declaration"
+        || std::iter::successors(n.parent(), Node::parent)
+            .any(|p| matches!(p.kind(), "compound_statement" | "field_declaration_list"))
+    {
         return;
     }
     for mut d in n.children_by_field_name("declarator", &mut n.walk()) {
