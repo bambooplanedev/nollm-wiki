@@ -82,6 +82,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             class_head(file, n, s.text(), &anon);
             alias(file, n, s.text(), &anon);
             specialization(file, n, s.text());
+            variables(file, n, s.text());
             if n.kind() == "using_declaration" {
                 using(file, n, s.text());
             }
@@ -283,6 +284,42 @@ fn using(file: &mut File, n: Node, src: &str) {
         Some(_) => file.inner_usings.insert(named.clone()),
     };
     file.usings.insert(named);
+}
+
+/// Records in `File::variables` the names the declaration `n` outside any
+/// function or class body declares as variables: each declarator's name
+/// unless it declares a function, but one in parentheses (`(*say)(const
+/// char*)`).
+fn variables(file: &mut File, n: Node, src: &str) {
+    let body = std::iter::successors(n.parent(), Node::parent)
+        .any(|p| matches!(p.kind(), "compound_statement" | "field_declaration_list"));
+    if n.kind() != "declaration" || body {
+        return;
+    }
+    for mut d in n.children_by_field_name("declarator", &mut n.walk()) {
+        loop {
+            let inner = d
+                .child_by_field_name("declarator")
+                .or_else(|| d.named_child(0));
+            match (d.kind(), inner) {
+                ("identifier", _) => {
+                    file.variables.insert(src[d.byte_range()].to_string());
+                    break;
+                }
+                ("function_declarator", Some(i)) if i.kind() != "parenthesized_declarator" => break,
+                (
+                    "init_declarator"
+                    | "array_declarator"
+                    | "function_declarator"
+                    | "pointer_declarator"
+                    | "parenthesized_declarator"
+                    | "reference_declarator",
+                    Some(i),
+                ) => d = i,
+                _ => break,
+            }
+        }
+    }
 }
 
 /// Records in `File::specialized` the function template the explicit

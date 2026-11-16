@@ -2837,6 +2837,22 @@ fn cpp_targets(files: &[(&str, &str)], path: &str, name: &str) -> Vec<String> {
 }
 
 #[test]
+fn a_call_of_a_file_scope_variable_in_sight_is_not_visible() {
+    let h = "extern void (*on_halt)(int);\n";
+    let src = "#include \"hooks.h\"\n#include <stdio.h>\ntypedef int (*order_t)(int, int);\nstatic void quiet(const char* m) {}\nstatic void (*say)(const char*) = quiet;\norder_t rank;\nvoid speak(const char* m) {\n    say(m);\n    rank(1, 2);\n    on_halt(0);\n    quiet(m);\n    puts(m);\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/hooks.h", h), ("src/a.c", src)], "src/a.c", "speak"),
+        [
+            "say(m) → hidden",
+            "rank(1, 2) → hidden",
+            "on_halt(0) → hidden",
+            "quiet(m) → src/a.c:4",
+            "puts(m) → outside"
+        ]
+    );
+}
+
+#[test]
 fn a_cpp_call_of_a_bound_name_is_hidden_beside_a_same_named_function() {
     let src = "int pick(int v) { return v; }\nint run(int (*pick)(int)) { return pick(2); }\n";
     assert_eq!(

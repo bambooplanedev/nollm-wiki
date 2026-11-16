@@ -101,6 +101,10 @@ pub struct File {
     /// template parameter of the class, or one the file's trees type
     /// differently.
     pub fields: BTreeMap<String, BTreeMap<String, Option<String>>>,
+    /// The variables a C/C++ file declares outside function and class
+    /// bodies, function pointers included (`say` of `static void
+    /// (*say)(const char*);`): a call of one is no function's.
+    pub variables: BTreeSet<String>,
     /// The function templates a C/C++ file explicitly specializes, whose
     /// specializations have no item: each by its path, the enclosing
     /// named namespaces then the name as written, template arguments

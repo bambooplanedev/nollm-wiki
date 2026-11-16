@@ -432,6 +432,12 @@ impl Caller<'_, '_> {
             return or;
         }
         let cpp = self.cpp;
+        // A variable of the file or its includes: a function pointer, an
+        // object with a call operator.
+        let mut pages = std::iter::once(&self.page).chain(self.included);
+        if pages.any(|&p| cpp.pages[p].1.variables.contains(name)) {
+            return Evidence::Hidden;
+        }
         // A function whose name a macro before its return type misread as
         // a method's: any of those, or something outside.
         let named = cpp.by_name.get(name).into_iter().flatten();

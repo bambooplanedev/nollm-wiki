@@ -115,6 +115,7 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
         bases: BTreeMap::new(),
         aliases: BTreeMap::new(),
         fields: BTreeMap::new(),
+        variables: BTreeSet::new(),
         specialized: BTreeSet::new(),
     };
     flow::attach(&mut file, a);
