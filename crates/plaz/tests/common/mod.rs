@@ -55,3 +55,8 @@ pub fn fn_block(page: &str, anchor: &str) -> String {
     let rest: Vec<&str> = lines.take_while(|l| !l.starts_with("## ")).collect();
     format!("{first}\n{}\n", rest.join("\n"))
 }
+
+/// The headings (`## …`) of a page, in order.
+pub fn headings(page: &str) -> Vec<&str> {
+    page.lines().filter_map(|l| l.strip_prefix("## ")).collect()
+}
