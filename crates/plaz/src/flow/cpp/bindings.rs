@@ -73,14 +73,18 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     Bindings { rebound, ..joined }
 }
 
-/// The names of the template parameters of each template around `root`.
+/// The names of the template parameters of each template around `root`,
+/// and of `root` and each lambda around it.
 fn template_params(root: Node, src: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let mut at = root.parent();
+    let mut at = Some(root);
     while let Some(t) = at {
-        if let Some(ps) =
-            (t.child_by_field_name("parameters")).filter(|_| t.kind() == "template_declaration")
-        {
+        let ps = match t.kind() {
+            "template_declaration" => t.child_by_field_name("parameters"),
+            "lambda_expression" => t.child_by_field_name("template_parameters"),
+            _ => None,
+        };
+        if let Some(ps) = ps {
             for p in ps.named_children(&mut ps.walk()) {
                 out.extend(template_param(p).map(|n| text(n, src).to_string()));
             }

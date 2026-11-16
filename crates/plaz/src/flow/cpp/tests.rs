@@ -522,6 +522,19 @@ fn a_lambda_binds_its_parameters_and_captures_in_its_own_flow() {
 }
 
 #[test]
+fn a_template_lambdas_own_template_parameters_are_rebound() {
+    let src =
+        "void scan() {\n    auto each = []<class Item, int K>(Item i, Probe p) { i.load(); };\n}\n";
+    let fl = flow(src, "scan");
+    let Step::Nested { flow: inner, .. } = &fl.steps[0] else {
+        panic!("{:?}", fl.steps)
+    };
+    assert_eq!(inner.rebound, names(["Item", "K"]));
+    assert_eq!(inner.locals, names(["i", "p"]));
+    assert_eq!(inner.types, typed([("p", "Probe")]));
+}
+
+#[test]
 fn a_files_macros_are_each_define_once_with_whether_its_body_has_a_jump_token() {
     let src = format!(
         "#define LIMIT 8\n#define BAIL(c) if (c) \\\n    return\n#define NOTE(x) keep(x, returned, on_break) // return\n#define SAY \"goto\" /* break */\n#ifdef FAST\n#define STEP(x) x\n#else\n#define STEP(x) continue\n#endif\n{SPLIT}"
