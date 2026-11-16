@@ -450,10 +450,19 @@ impl<'a> Cpp<'a> {
             let placed = self.classes.placed.get(&c);
             it.kind == CodeItemKind::Method && placed == Some(&class) && fits(it, site) && of(c)
         });
-        // Declarations fold by owner name: drop another class's definitions.
-        let folded = self.folded(own.collect()).into_iter();
+        // Declarations fold by owner name: drop another class's definitions;
+        // a declaration with none of its own class's stays.
         let mine = |c: &FnRef| self.classes.placed.get(c).is_none_or(|p| *p == class);
-        folded.filter(|c| mine(c) && of(*c)).collect()
+        own.flat_map(|c| {
+            let defs = self.folded(vec![c]).into_iter();
+            let defs: BTreeSet<FnRef> = defs.filter(|d| mine(d) && of(*d)).collect();
+            if defs.is_empty() {
+                BTreeSet::from([c])
+            } else {
+                defs
+            }
+        })
+        .collect()
     }
 
     /// The bases of `class`: with heads in several files and one `sight`

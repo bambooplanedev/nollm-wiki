@@ -4277,3 +4277,71 @@ fn a_local_class_method_under_if_or_as_a_template_is_still_the_local_classs() {
         ]
     );
 }
+
+#[test]
+fn a_class_head_with_a_macro_before_its_name_is_a_class() {
+    let h = "#define KIT_API\nnamespace kit {\nclass KIT_API Base {\npublic:\n    bool isOpen() const;\n};\nclass KIT_API Pane final : public Base {\npublic:\n    class KIT_API Part {\n    public:\n        void tick();\n    };\n    void setBlocking(bool on);\n    void open(int h);\n};\n}\n";
+    let src = "#include \"pane.h\"\nnamespace kit {\nbool Base::isOpen() const { return true; }\nvoid Pane::setBlocking(bool on) {}\nvoid Pane::open(int h) { setBlocking(h > 0); }\nvoid Pane::Part::tick() {}\n}\nvoid setBlocking(int fd, bool on) {}\nvoid run() {\n    kit::Pane p;\n    p.isOpen();\n    kit::Pane::Part q;\n    q.tick();\n}\n";
+    let files = [("src/pane.h", h), ("src/pane.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/pane.cpp", "open"),
+        ["setBlocking(h > 0) → src/pane.cpp:4"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/pane.cpp", "run"),
+        ["p.isOpen() → src/pane.cpp:3", "q.tick() → src/pane.cpp:6"]
+    );
+}
+
+#[test]
+fn a_methods_declaration_stays_its_classs_beside_a_namesake_classs_definition() {
+    let h = "struct Shape {\n    int area() const;\n    int twice() const;\n};\n";
+    let src = "#include \"shape.h\"\nint Shape::twice() const { return 2 * area(); }\n";
+    let other = "namespace {\nstruct Shape {\n    int area() const { return 1; }\n};\n}\n";
+    let files = [
+        ("src/shape.h", h),
+        ("src/shape.cpp", src),
+        ("src/other.cpp", other),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/shape.cpp", "twice"),
+        ["area() → src/shape.h:2"]
+    );
+}
+
+#[test]
+fn a_field_of_a_nested_class_the_head_only_declares_is_placed_where_it_is_defined() {
+    let h = "#include <memory>\nclass Pane {\npublic:\n    void draw();\nprivate:\n    struct Impl;\n    std::unique_ptr<Impl> m_impl;\n};\n";
+    let src = "#include \"pane.h\"\nstruct Pane::Impl {\n    void paint() {}\n};\nvoid Pane::draw() { m_impl->paint(); }\n";
+    let files = [("src/pane.h", h), ("src/pane.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/pane.cpp", "draw"),
+        ["m_impl->paint() → src/pane.cpp:3"]
+    );
+    // An outside type the caller's file has a namesake of elsewhere is not it.
+    let h = "class Pane {\npublic:\n    void draw();\nprivate:\n    Gadget* m_gadget;\n};\n";
+    let src = "#include \"pane.h\"\nnamespace detail {\nstruct Gadget {\n    void paint() {}\n};\n}\nvoid Pane::draw() { m_gadget->paint(); }\n";
+    let files = [("src/pane.h", h), ("src/pane.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/pane.cpp", "draw"),
+        ["m_gadget->paint() → outside"]
+    );
+}
+
+#[test]
+fn an_elaborated_type_with_a_brace_initialiser_is_no_class_head() {
+    let src = "struct Clock {\n    void tick();\n};\nvoid Clock::tick() {}\nvoid run() {\n    struct Clock c{};\n    c.tick();\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["c.tick() → src/a.cpp:4"]
+    );
+}
+
+#[test]
+fn a_bare_call_in_a_method_of_a_class_no_head_shows_lists_its_methods_beside_the_free_ones() {
+    let src = "#include <kit/pane.h>\nvoid Pane::setBlocking(bool on) {}\nvoid Pane::open(int h) { setBlocking(h > 0); }\nvoid setBlocking(int fd, bool on) {}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "open"),
+        ["setBlocking(h > 0) → one of: src/a.cpp:2, src/a.cpp:4, or outside"]
+    );
+}

@@ -60,9 +60,19 @@ impl Caller<'_, '_> {
         match field.and_then(|f| Some((f.ty?, f))) {
             Some((t, f)) => {
                 let included = self.cpp.closure(f.page);
-                let sight = Sight {
+                let head = Sight {
                     page: f.page,
                     included: &included,
+                };
+                // A nested class the head only declares (`struct Impl;`) is
+                // defined where its members are called: in the caller's sight.
+                let place = |sight| self.cpp.place_name(pointee(t).1, f.class, sight);
+                let nested =
+                    |p| matches!(p, Placed::Class(c) if c.starts_with(&format!("{}::", f.class)));
+                let sight = if place(head) == Placed::Nothing && nested(place(self.sight())) {
+                    self.sight()
+                } else {
+                    head
                 };
                 self.on_typed(call, after, t, f.class, sight)
             }

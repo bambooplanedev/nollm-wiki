@@ -331,10 +331,16 @@ impl Caller<'_, '_> {
             if !local && self.cpp.field(class, name, self.sight()).is_some() {
                 return Evidence::Hidden;
             }
-            // A member the class may inherit hides the free functions.
-            let or_free = |or: Evidence| match self.free(site, None) {
-                Some(Evidence::Found { fns, .. }) => Evidence::Found { fns, open: true },
-                Some(_) | None => or,
+            // A member the class may inherit hides the free functions; one
+            // of a class no head shows may be any method.
+            let or_free = |or: Evidence| match (self.free(site, None), or) {
+                (Some(Evidence::Found { mut fns, .. }), or) => {
+                    if let Evidence::Found { fns: more, .. } = or {
+                        fns.extend(more);
+                    }
+                    Evidence::Found { fns, open: true }
+                }
+                (Some(_) | None, or) => or,
             };
             match self.cpp.lookup(class, site, self.sight(), true) {
                 // A bare call in a template does not search a dependent

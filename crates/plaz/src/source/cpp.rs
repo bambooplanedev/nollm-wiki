@@ -92,6 +92,49 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
     }
 }
 
+/// The file's text with each macro between `class` (`struct`, `union`)
+/// and the class's name blanked, when there is one: the grammar reads
+/// `class API Win : public Base {` as no class head. The copy has the
+/// same bytes and newlines, as the first-branch tree has.
+pub(super) fn unmacroed(a: &Analyzed) -> Option<String> {
+    let mut out: Option<Vec<u8>> = None;
+    for s in &a.sources {
+        let mut stack = vec![s.tree().root_node()];
+        while let Some(n) = stack.pop() {
+            stack.extend(n.named_children(&mut n.walk()));
+            if let Some(m) = head_macro(n, s.text()) {
+                let text = out.get_or_insert_with(|| s.text().as_bytes().to_vec());
+                text[m.byte_range()].fill(b' ');
+            }
+        }
+    }
+    String::from_utf8(out?).ok()
+}
+
+/// The macro of `n` when `n` is the `class API` of a head the grammar
+/// misread: a class with no body, then a name, maybe `final`, and a base
+/// clause or a body, in a broken declaration (one with an error, or a
+/// function whose declarator is a bare name). `struct tm t{}` is none.
+fn head_macro<'t>(n: Node<'t>, src: &str) -> Option<Node<'t>> {
+    let class = matches!(
+        n.kind(),
+        "class_specifier" | "struct_specifier" | "union_specifier"
+    );
+    let name = n.child_by_field_name("name");
+    let name = name.filter(|m| class && m.kind() == "type_identifier");
+    let name = name.filter(|_| n.child_by_field_name("body").is_none())?;
+    let p = n.parent()?;
+    let bare = p.kind() == "function_definition"
+        && (p.child_by_field_name("declarator")).is_some_and(|d| d.kind() == "identifier");
+    let broken = bare || p.has_error();
+    let rest = src[n.end_byte()..].trim_start();
+    let word = rest.find(|c: char| !(c.is_alphanumeric() || c == '_'));
+    let rest = rest[word.filter(|&w| w > 0)?..].trim_start();
+    let rest = rest.strip_prefix("final").map_or(rest, str::trim_start);
+    let head = rest.starts_with('{') || (rest.starts_with(':') && !rest.starts_with("::"));
+    (broken && head).then_some(name)
+}
+
 /// Records the class head `n` (a class, struct or union with a body) in
 /// `File::bases` and its data members in `File::fields`; `anonymous`
 /// names the file's anonymous namespaces.

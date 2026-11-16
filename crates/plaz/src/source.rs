@@ -26,13 +26,20 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             crates.extend(crate_names(&text).into_iter().map(|n| (n, dir.to_string())));
             continue;
         }
-        let Some(a) = analyze(&path, &text) else {
+        let Some(mut a) = analyze(&path, &text) else {
             if handles(&path) {
                 unreadable.push(path);
             }
             continue;
         };
         let family = Family::of(Some(&a.file.lang));
+        if let Some(b) = (family == Family::Cpp)
+            .then(|| cpp::unmacroed(&a))
+            .flatten()
+            .and_then(|t| analyze(&path, &t))
+        {
+            a = b;
+        }
         let python = match family {
             Family::Python => true,
             Family::Rust | Family::Cpp | Family::Go | Family::Shell | Family::Ecma => false,
