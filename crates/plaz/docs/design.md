@@ -2,7 +2,7 @@
 
 Approved 2026-11-13.
 
-Status: function charts for Rust and Python, call targets, `plaz build` and `plaz setup` exist (a preview, installed with kulman). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
+Status: function charts for Rust, Python and C/C++, call targets, `plaz build` and `plaz setup` exist (a preview, installed with kulman). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
 
 ## Why
 
@@ -46,7 +46,7 @@ The code is deterministic, so an undetermined target is written as what it is: "
 
 The node text is always the literal call (`ask(messages)`); the form only decides the link. When unsure: Hidden.
 
-Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches not drawn as diamonds (Rust `?`, `unwrap_or`, conditions inside closures or ternaries).
+Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
 
 ## What changed in the logic (planned, not built)
 
@@ -92,7 +92,7 @@ Made during design (open to change):
 
 ## Constraints
 
-- Every language `wiki-code` supports (Rust, Python, C++, Go, JS/TS incl. Vue/Svelte scripts, bash) at full depth for flowcharts; shapes not handled yet get an explicit "not covered" note. Rust and Python are charted today (a preview); the others are planned.
+- Every language `wiki-code` supports (Rust, Python, C/C++, Go, JS/TS incl. Vue/Svelte scripts, bash) at full depth for flowcharts; shapes not handled yet get an explicit "not covered" note. Rust, Python and C/C++ are charted today (a preview); the others are planned.
 - Research before extending; no tuning to one author's tree.
 - Text in English.
 
