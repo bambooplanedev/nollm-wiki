@@ -8,7 +8,7 @@ use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
 use crate::source::untemplated;
-use classes::{Classes, Missing, Sight};
+use classes::{Classes, Missing, Placed, Sight};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
@@ -296,10 +296,28 @@ impl Caller<'_, '_> {
             }
             _ => t,
         };
-        match cpp.resolve(t, self.class.unwrap_or(self.ns), self.sight()) {
-            Some(class) => self.on_class(call, class),
-            None if cpp.is_type(t, self.sight()) => self.any_method(call),
-            None => Evidence::Found {
+        match cpp.place_name(t, self.class.unwrap_or(self.ns), self.sight()) {
+            Placed::Class(class) => self.on_class(call, class),
+            Placed::Either(one, other) => {
+                match (self.on_class(call, one), self.on_class(call, other)) {
+                    (
+                        Evidence::Found { mut fns, open },
+                        Evidence::Found {
+                            fns: more,
+                            open: also,
+                        },
+                    ) => {
+                        fns.extend(more);
+                        Evidence::Found {
+                            fns,
+                            open: open || also,
+                        }
+                    }
+                    _ => self.any_method(call),
+                }
+            }
+            Placed::Unplaced => self.any_method(call),
+            Placed::Nothing => Evidence::Found {
                 fns: self.ids(cpp.deriving(t, site)),
                 open: true,
             },
@@ -328,53 +346,54 @@ impl Caller<'_, '_> {
     }
 
     /// `Q::f()` with `Q` a project type names that one function, no
-    /// dispatch: the member of the class `Q` names from the caller's
-    /// scope; with several classes it may name, one of theirs, never
-    /// certain; with no class head, the functions of a namespace `Q`, else
-    /// the methods of an owner `Q`, or with none (an alias) any project
-    /// method `f`, or something outside.
+    /// dispatch: the member of the class `Q` lands on (`place_name`); of
+    /// either class, never certain; unplaced, of the classes it may be, or
+    /// something outside; with no class, the functions of a namespace `Q`,
+    /// else the methods of an owner `Q`, or with none any project method
+    /// `f`, or something outside.
     fn on_qualifier(&self, call: &MapCall, q: &str) -> Evidence {
-        let (cpp, site) = (self.cpp, &call.site);
+        let (cpp, site, sight) = (self.cpp, &call.site, self.sight());
         let callee = call.text.split('(').next().unwrap_or("");
         let callee = untemplated(callee);
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
-        if let Some(class) = cpp.resolve(written, self.class.unwrap_or(self.ns), self.sight()) {
-            let fns = self.ids(cpp.members(class, site, Some(self.sight())));
-            let settled = cpp.settled(class, Some(self.sight()));
-            return Evidence::Found {
-                open: !settled && fns.len() == 1,
-                fns,
-            };
-        }
-        let namesakes = cpp.namesakes(written, self.sight(), false);
-        if namesakes.is_empty() && cpp.namespaces.contains(q) {
-            return self.free(site, Some(q)).unwrap_or(Evidence::Hidden);
-        }
-        if namesakes.is_empty() {
-            let named = cpp.by_name.get(site.name.as_str()).into_iter().flatten();
-            let members = named.copied().filter(|&c| {
-                let it = cpp.item(c);
-                it.kind == CodeItemKind::Method
-                    && it.owner.as_deref().map(owner_key) == Some(q)
-                    && fits(it, site)
-            });
-            // An alias may name any class.
-            let fns = self.ids(cpp.folded(members.collect()));
-            if fns.is_empty() {
-                return self.any_method(call);
+        let of = |c: &str| cpp.members(c, site, Some(sight));
+        match cpp.place_name(written, self.class.unwrap_or(self.ns), sight) {
+            Placed::Class(class) => {
+                let fns = self.ids(of(class));
+                return Evidence::Found {
+                    open: !cpp.settled(class, Some(sight)) && fns.len() == 1,
+                    fns,
+                };
             }
-            return Evidence::Found { fns, open: true };
+            Placed::Either(one, other) => {
+                let fns = self.ids(of(one).into_iter().chain(of(other)));
+                return Evidence::Found { fns, open: false };
+            }
+            Placed::Unplaced => {
+                let named = cpp.namesakes(written, sight).into_iter();
+                let fns = self.ids(named.flat_map(|c| cpp.members(c, site, None)));
+                if !fns.is_empty() {
+                    return Evidence::Found { fns, open: true };
+                }
+            }
+            Placed::Nothing if cpp.namespaces.contains(q) => {
+                return self.free(site, Some(q)).unwrap_or(Evidence::Hidden);
+            }
+            Placed::Nothing => {}
         }
-        let fns = self.ids(
-            namesakes
-                .into_iter()
-                .flat_map(|c| cpp.members(c, site, None)),
-        );
-        // One member of several classes it may name: maybe another's.
-        Evidence::Found {
-            open: fns.len() == 1,
-            fns,
+        let named = cpp.by_name.get(site.name.as_str()).into_iter().flatten();
+        let members = named.copied().filter(|&c| {
+            let it = cpp.item(c);
+            it.kind == CodeItemKind::Method
+                && it.owner.as_deref().map(owner_key) == Some(q)
+                && fits(it, site)
+        });
+        // An alias may name any class.
+        let fns = self.ids(cpp.folded(members.collect()));
+        if fns.is_empty() {
+            return self.any_method(call);
         }
+        Evidence::Found { fns, open: true }
     }
 
     /// `f()`: a binding, a member of the caller's class, else a free

@@ -74,6 +74,10 @@ pub struct File {
     /// with whether its template arguments name a template parameter of
     /// the class or of a class around it (a dependent base).
     pub bases: BTreeMap<String, BTreeSet<(String, bool)>>,
+    /// Every C/C++ type alias the file declares outside function bodies
+    /// (`using X = …`, an alias template, `typedef … X`), by path as in
+    /// `classes`; a `typedef struct X X` is the class, no alias.
+    pub aliases: BTreeSet<String>,
 }
 
 /// What a C/C++ function item has in place of a body.

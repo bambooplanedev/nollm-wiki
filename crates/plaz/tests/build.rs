@@ -3494,7 +3494,7 @@ fn a_call_qualified_by_a_class_name_two_classes_share_is_the_one_in_view() {
     );
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "other"),
-        ["Cfg::load() → one of: src/a.cpp:3, src/a.cpp:9"]
+        ["Cfg::load() → one of: src/a.cpp:3, src/a.cpp:9, or outside"]
     );
 }
 
@@ -3781,7 +3781,7 @@ fn a_base_the_project_declares_as_an_alias_is_not_read_as_outside() {
     let src = "#include \"a.h\"\nstruct Cfg {\n    static int load() { return 1; }\n};\nnamespace other {\nstruct Base {};\n}\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
     assert_eq!(
         cpp_targets(&[("src/a.h", h), ("src/b.cpp", src)], "src/b.cpp", "run"),
-        ["Cfg::load() → one of: src/a.h:4, src/b.cpp:3"]
+        ["Cfg::load() → one of: src/a.h:4, src/b.cpp:3, or outside"]
     );
 }
 
@@ -3797,5 +3797,77 @@ fn anonymous_classes_of_two_files_with_out_of_line_methods_are_each_their_own() 
     assert_eq!(
         cpp_targets(&files, "src/b.cpp", "step"),
         ["tick() → src/b.cpp:6"]
+    );
+}
+
+#[test]
+fn a_class_an_includer_provides_is_not_hidden_by_a_namesake_the_header_sees() {
+    let n = "namespace n {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let usage = "#include \"g.h\"\nnamespace n {\ninline void f() { Cfg c; c.load(); }\n}\n";
+    let main = "#include \"n.h\"\n#include \"use.h\"\nint main() { return 0; }\n";
+    let files = [
+        ("src/n.h", n),
+        ("src/g.h", g),
+        ("src/use.h", usage),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/use.h", "f"),
+        ["c.load() → one of: src/g.h:2, src/n.h:3"]
+    );
+}
+
+#[test]
+fn a_class_out_of_view_that_lookup_meets_first_keeps_the_one_in_view_uncertain() {
+    let n = "namespace n {\nstruct Cfg {\n    static int load() { return 2; }\n    int size() { return 0; }\n};\n}\n";
+    let b = "#include <n.h>\nstruct Cfg {\n    static int load() { return 1; }\n    int size() { return 1; }\n};\nnamespace n {\nint run() { return Cfg::load(); }\nint go() { Cfg c; return c.size(); }\n}\n";
+    let files = [("src/n.h", n), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/b.cpp:3, src/n.h:3"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "go"),
+        ["c.size() → one of: src/b.cpp:4, src/n.h:4"]
+    );
+}
+
+#[test]
+fn a_base_through_an_alias_template_leaves_a_type_name_open() {
+    let h = "namespace detail {\nstruct Impl {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n}\nnamespace lib {\ntemplate <class T>\nusing Base = detail::Impl;\n}\n";
+    let src = "#include \"a.h\"\nstruct Cfg {\n    static int load() { return 1; }\n};\nstruct App : lib::Base<int> {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.h", h), ("src/b.cpp", src)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/a.h:4, src/b.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_base_through_an_alias_out_of_view_leaves_a_type_name_open() {
+    let h = "namespace detail {\nstruct Impl {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n}\nnamespace lib {\nusing Base = detail::Impl;\n}\n";
+    let src = "#include <a.h>\nstruct Cfg {\n    static int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.h", h), ("src/b.cpp", src)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/a.h:4, src/b.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_base_through_an_alias_of_an_outside_class_leaves_a_type_name_open() {
+    let h = "#include <ext/thing.h>\nnamespace lib {\nusing Base = ext::Thing;\n}\nnamespace other {\nstruct Cfg {\n    static int load() { return 2; }\n};\n}\n";
+    let src = "#include \"a.h\"\nstruct Cfg {\n    static int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.h", h), ("src/b.cpp", src)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/a.h:7, src/b.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn an_alias_met_before_a_global_class_of_its_name_leaves_the_base_unplaced() {
+    let src = "struct Base {};\nstruct Cfg {\n    static int load() { return 1; }\n};\nnamespace detail {\nstruct Impl {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n}\nnamespace lib {\nusing Base = detail::Impl;\nstruct App : Base {\n    int run() { return Cfg::load(); }\n};\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/b.cpp", src)], "src/b.cpp", "run"),
+        ["Cfg::load() → one of: src/b.cpp:3, src/b.cpp:8, or outside"]
     );
 }

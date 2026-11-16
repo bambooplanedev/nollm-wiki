@@ -65,6 +65,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             usings: BTreeSet::new(),
             classes: BTreeMap::new(),
             bases: BTreeMap::new(),
+            aliases: BTreeSet::new(),
         };
         flow::attach(&mut file, &a);
         if family == Family::Cpp {
@@ -177,6 +178,7 @@ fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
                 file.namespaces.extend(segs.map(|g| g.0.to_string()));
             }
             class_head(file, n, s.text(), &anon);
+            alias(file, n, s.text(), &anon);
             if n.kind() == "using_declaration" {
                 let named = n.named_children(&mut n.walk()).last();
                 let named = named.map(|u| s.text()[u.byte_range()].split_whitespace().collect());
@@ -220,6 +222,46 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let class = untemplated(&path.join("::"));
     let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
     file.bases.entry(class).or_default().extend(bases);
+}
+
+/// Records the type alias `n` declares, if it is one outside any body,
+/// in `File::aliases`.
+fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
+    let text = |n: Node| &src[n.byte_range()];
+    let names: Vec<&str> = match n.kind() {
+        "alias_declaration" => n
+            .child_by_field_name("name")
+            .map(text)
+            .into_iter()
+            .collect(),
+        "type_definition" => {
+            let class = n
+                .child_by_field_name("type")
+                .and_then(|t| t.child_by_field_name("name"));
+            let mut cursor = n.walk();
+            let declared = n.children_by_field_name("declarator", &mut cursor);
+            let found = declared.filter_map(|mut d| {
+                while d.kind() != "type_identifier" {
+                    d = d.child_by_field_name("declarator")?;
+                }
+                Some(text(d))
+            });
+            // `typedef struct X X` names the class itself.
+            let found: Vec<&str> = found.collect();
+            found
+                .into_iter()
+                .filter(|&d| class.map(text) != Some(d))
+                .collect()
+        }
+        _ => return,
+    };
+    let body =
+        std::iter::successors(n.parent(), Node::parent).any(|p| p.kind() == "compound_statement");
+    for name in names.into_iter().filter(|_| !body) {
+        let mut path = enclosing(n, src, Some(anonymous));
+        path.push(name.to_string());
+        file.aliases.insert(untemplated(&path.join("::")));
+    }
 }
 
 /// The names of the template parameters of the templates around `n`.
