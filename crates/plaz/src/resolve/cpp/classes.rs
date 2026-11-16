@@ -77,6 +77,7 @@ pub(super) struct Classes<'a> {
 }
 
 /// Where a written type name lands.
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Placed<'a> {
     /// This project class.
     Class(&'a str),
@@ -220,14 +221,36 @@ impl<'a> Cpp<'a> {
             let header = source_rank(self.pages[page].0) < 2;
             sight.sees(page) || (header && !path.contains("(anonymous@"))
         };
-        let all = self.lookup_name(t, from, sight, &reachable);
-        let mine = self.lookup_name(t, from, sight, &seen);
-        match (all, mine) {
-            (Step::Unplaced, _) | (_, Step::Unplaced) => Placed::Unplaced,
-            (Step::Found(a), Step::Found(m)) if a != m => Placed::Either(a, m),
-            (Step::Found(a), _) => Placed::Class(a),
-            (Step::Nothing, Step::Found(m)) => Placed::Class(m),
-            (Step::Nothing, Step::Nothing) => Placed::Nothing,
+        let place = |usings: &[&str]| {
+            let all = self.lookup_name(t, from, sight, &reachable, usings);
+            let mine = self.lookup_name(t, from, sight, &seen, usings);
+            match (all, mine) {
+                (Step::Unplaced, _) | (_, Step::Unplaced) => Placed::Unplaced,
+                (Step::Found(a), Step::Found(m)) if a != m => Placed::Either(a, m),
+                (Step::Found(a), _) => Placed::Class(a),
+                (Step::Nothing, Step::Found(m)) => Placed::Class(m),
+                (Step::Nothing, Step::Nothing) => Placed::Nothing,
+            }
+        };
+        // Usings in a body or a named namespace may or may not reach
+        // `from`: place with them and without.
+        let file = self.pages[sight.page].1;
+        let outer: Vec<&str> = file.file_usings.iter().map(String::as_str).collect();
+        let inner = file.inner_usings.iter();
+        let inner = inner.filter(|u| !file.file_usings.contains(*u));
+        let all: Vec<&str> = outer
+            .iter()
+            .copied()
+            .chain(inner.map(String::as_str))
+            .collect();
+        let without = place(&outer);
+        if all.len() == outer.len() {
+            return without;
+        }
+        match (without, place(&all)) {
+            (one, other) if one == other => one,
+            (Placed::Class(one), Placed::Class(other)) => Placed::Either(one, other),
+            _ => Placed::Unplaced,
         }
     }
 
@@ -239,6 +262,7 @@ impl<'a> Cpp<'a> {
         from: &str,
         sight: Sight,
         keep: &dyn Fn(usize, &str) -> bool,
+        usings: &[&str],
     ) -> Step<'a> {
         let key = owner_key(t);
         let heads = self.classes.by_key.get(key).into_iter().flatten();
@@ -268,7 +292,6 @@ impl<'a> Cpp<'a> {
                 (Some(_), Some(_)) => Step::Unplaced,
             }
         };
-        let usings = &self.pages[sight.page].1.usings;
         let mut scope = from;
         loop {
             let mut wants = vec![match bare(scope).as_str() {
@@ -276,11 +299,12 @@ impl<'a> Cpp<'a> {
                 s => format!("{s}::{t}"),
             }];
             if scope.is_empty() {
-                // `using n::t;` names that one entity, before any other.
+                // `using n::t;` names that one entity, before any other:
+                // with no project class, something outside.
                 let declared = usings.iter().filter(|u| u.rsplit("::").next() == Some(t));
-                match at(&declared.cloned().collect::<Vec<_>>()) {
-                    Step::Nothing => {}
-                    found @ (Step::Found(_) | Step::Unplaced) => return found,
+                let declared: Vec<String> = declared.map(ToString::to_string).collect();
+                if !declared.is_empty() {
+                    return at(&declared);
                 }
                 // `using namespace n;` gives `n::t`.
                 wants.extend(usings.iter().map(|u| format!("{u}::{t}")));

@@ -61,6 +61,12 @@ pub struct File {
     /// What each `using namespace N;` and `using N::f;` of a C/C++ file
     /// names: `N`, `N::f`, whitespace dropped.
     pub usings: BTreeSet<String>,
+    /// The `usings` that stand at file scope: in no function body, class
+    /// body or named namespace.
+    pub file_usings: BTreeSet<String>,
+    /// The other `usings`, but those in a class body (they bring members,
+    /// such as inherited constructors).
+    pub inner_usings: BTreeSet<String>,
     /// Per C/C++ method item, by index into `code.items`: its class as a
     /// path (`n::Outer::Inner`), template arguments and whitespace dropped
     /// (`untemplated`), an anonymous namespace a segment of its own per

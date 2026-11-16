@@ -3946,3 +3946,61 @@ fn a_qualifier_either_class_may_be_stays_open_when_one_class_has_none_of_its_own
         ["Cfg::load(1) → one of: src/b.cpp:3, src/b.cpp:4, or outside"]
     );
 }
+
+#[test]
+fn a_using_declaration_inside_a_function_does_not_place_the_name_for_the_file() {
+    let a = "namespace a {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let main = "#include \"a.h\"\n#include \"g.h\"\nvoid f() {\n    using a::Cfg;\n    Cfg c;\n    c.load();\n}\nvoid g() {\n    Cfg c;\n    c.load();\n}\n";
+    let files = [("src/a.h", a), ("src/g.h", g), ("src/main.cpp", main)];
+    let either = ["c.load() → one of: src/a.h:3, src/g.h:2"];
+    assert_eq!(cpp_targets(&files, "src/main.cpp", "f"), either);
+    assert_eq!(cpp_targets(&files, "src/main.cpp", "g"), either);
+}
+
+#[test]
+fn a_using_declaration_inside_a_namespace_does_not_place_the_name_for_the_file() {
+    let a = "namespace a {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let main = "#include \"a.h\"\n#include \"g.h\"\nnamespace x {\nusing a::Cfg;\n}\nvoid g() {\n    Cfg c;\n    c.load();\n}\n";
+    let files = [("src/a.h", a), ("src/g.h", g), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "g"),
+        ["c.load() → one of: src/a.h:3, src/g.h:2"]
+    );
+}
+
+#[test]
+fn a_file_scope_using_declaration_of_an_outside_class_makes_the_name_outside() {
+    let g = "struct Cfg {\n    void load() {}\n};\n";
+    let main = "#include <ext/cfg.h>\nusing ext::Cfg;\nvoid run() { Cfg c; c.load(); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/g.h", g), ("src/main.cpp", main)],
+            "src/main.cpp",
+            "run"
+        ),
+        ["c.load() → outside"]
+    );
+}
+
+#[test]
+fn a_using_directive_inside_a_function_does_not_place_the_name_for_the_file() {
+    let a = "namespace a {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let b = "namespace b {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let main = "#include \"a.h\"\n#include \"b.h\"\nvoid f() {\n    using namespace a;\n    Cfg c;\n    c.load();\n}\nvoid g() {\n    Cfg c;\n    c.load();\n}\n";
+    let files = [("src/a.h", a), ("src/b.h", b), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "g"),
+        ["c.load() → one of: src/a.h:3, src/b.h:3, or outside"]
+    );
+}
+
+#[test]
+fn an_inherited_constructor_using_leaves_the_base_placed() {
+    let src = "struct Base {\n    void go() {}\n};\nstruct Kid : Base {\n    using Base::Base;\n    void run() { go(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["go() → src/a.cpp:2"]
+    );
+}

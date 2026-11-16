@@ -63,6 +63,8 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             namespaces: BTreeSet::new(),
             scopes: BTreeMap::new(),
             usings: BTreeSet::new(),
+            file_usings: BTreeSet::new(),
+            inner_usings: BTreeSet::new(),
             classes: BTreeMap::new(),
             bases: BTreeMap::new(),
             aliases: BTreeSet::new(),
@@ -180,9 +182,7 @@ fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             class_head(file, n, s.text(), &anon);
             alias(file, n, s.text(), &anon);
             if n.kind() == "using_declaration" {
-                let named = n.named_children(&mut n.walk()).last();
-                let named = named.map(|u| s.text()[u.byte_range()].split_whitespace().collect());
-                file.usings.extend(named);
+                using(file, n, s.text());
             }
             stack.extend(n.named_children(&mut n.walk()));
         }
@@ -222,6 +222,28 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let class = untemplated(&path.join("::"));
     let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
     file.bases.entry(class).or_default().extend(bases);
+}
+
+/// Records what the `using` declaration or directive `n` names in
+/// `File::usings`, and by where it stands in `file_usings` or
+/// `inner_usings`.
+fn using(file: &mut File, n: Node, src: &str) {
+    let named = n.named_children(&mut n.walk()).last();
+    let Some(named) = named.map(|u| src[u.byte_range()].split_whitespace().collect::<String>())
+    else {
+        return;
+    };
+    let mut around = std::iter::successors(n.parent(), Node::parent);
+    let scope = around.find(|p| {
+        matches!(p.kind(), "compound_statement" | "field_declaration_list")
+            || (p.kind() == "namespace_definition" && p.child_by_field_name("name").is_some())
+    });
+    match scope.map(|p| p.kind()) {
+        None => file.file_usings.insert(named.clone()),
+        Some("field_declaration_list") => false,
+        Some(_) => file.inner_usings.insert(named.clone()),
+    };
+    file.usings.insert(named);
 }
 
 /// Records the type alias `n` declares, if it is one outside any body,
