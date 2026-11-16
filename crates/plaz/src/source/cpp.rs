@@ -4,6 +4,7 @@ use super::untemplated;
 use crate::flow;
 use crate::model::File;
 use std::collections::BTreeSet;
+use std::ops::Range;
 use wiki_code::model::CodeItemKind;
 use wiki_code::tree_sitter::Node;
 use wiki_code::Analyzed;
@@ -99,30 +100,26 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
     }
 }
 
-/// The file's text with each macro between `class` (`struct`, `union`)
-/// and the class's name blanked, when there is one: the grammar reads
-/// `class API Win : public Base {` as no class head. The copy has the
-/// same bytes and newlines, as the first-branch tree has.
-pub(super) fn unmacroed(a: &Analyzed) -> Option<String> {
-    let mut out: Option<Vec<u8>> = None;
+/// The class heads the grammar misread in a file (`class API Win :
+/// public Base {` or `class Win API {`): the bytes of the two words
+/// between `class` (`struct`, `union`) and the base clause or body.
+pub(super) fn misread_heads(a: &Analyzed) -> Vec<[Range<usize>; 2]> {
+    let mut out = Vec::new();
     for s in &a.sources {
         let mut stack = vec![s.tree().root_node()];
         while let Some(n) = stack.pop() {
             stack.extend(n.named_children(&mut n.walk()));
-            if let Some(m) = head_macro(n, s.text()) {
-                let text = out.get_or_insert_with(|| s.text().as_bytes().to_vec());
-                text[m.byte_range()].fill(b' ');
-            }
+            out.extend(misread_head(n, s.text()).filter(|h| !out.contains(h)));
         }
     }
-    String::from_utf8(out?).ok()
+    out
 }
 
-/// The macro of `n` when `n` is the `class API` of a head the grammar
+/// `n`'s two words when `n` is the `class A` of a head the grammar
 /// misread: a class with no body, then a name, maybe `final`, and a base
 /// clause or a body, in a broken declaration (one with an error, or a
 /// function whose declarator is a bare name). `struct tm t{}` is none.
-fn head_macro<'t>(n: Node<'t>, src: &str) -> Option<Node<'t>> {
+fn misread_head(n: Node, src: &str) -> Option<[Range<usize>; 2]> {
     let class = matches!(
         n.kind(),
         "class_specifier" | "struct_specifier" | "union_specifier"
@@ -134,12 +131,50 @@ fn head_macro<'t>(n: Node<'t>, src: &str) -> Option<Node<'t>> {
     let bare = p.kind() == "function_definition"
         && (p.child_by_field_name("declarator")).is_some_and(|d| d.kind() == "identifier");
     let broken = bare || p.has_error();
-    let rest = src[n.end_byte()..].trim_start();
-    let word = rest.find(|c: char| !(c.is_alphanumeric() || c == '_'));
-    let rest = rest[word.filter(|&w| w > 0)?..].trim_start();
+    let after = &src[n.end_byte()..];
+    let start = n.end_byte() + after.len() - after.trim_start().len();
+    let word = src[start..].find(|c: char| !(c.is_alphanumeric() || c == '_'));
+    let end = start + word.filter(|&w| w > 0)?;
+    let rest = src[end..].trim_start();
     let rest = rest.strip_prefix("final").map_or(rest, str::trim_start);
     let head = rest.starts_with('{') || (rest.starts_with(':') && !rest.starts_with("::"));
-    (broken && head).then_some(name)
+    (broken && head).then_some([name.byte_range(), start..end])
+}
+
+/// `text` with the macro of each misread head in `heads` blanked, when
+/// one was told: the word a project file `#define`s, else the word in
+/// capitals beside one that is not; with both or neither, none. The copy
+/// has the same bytes and newlines, as the first-branch tree has.
+pub(super) fn unmacroed(
+    text: &str,
+    heads: &[[Range<usize>; 2]],
+    macros: &BTreeSet<String>,
+) -> Option<String> {
+    let caps = |w: &str| {
+        w.contains(|c: char| c.is_ascii_uppercase())
+            && w.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    };
+    let mut out = text.as_bytes().to_vec();
+    let mut any = false;
+    for [one, other] in heads {
+        let (a, b) = (&text[one.clone()], &text[other.clone()]);
+        let pick = match (macros.contains(a), macros.contains(b)) {
+            (true, false) => Some(one),
+            (false, true) => Some(other),
+            (true, true) => None,
+            (false, false) => match (caps(a), caps(b)) {
+                (true, false) => Some(one),
+                (false, true) => Some(other),
+                (true, true) | (false, false) => None,
+            },
+        };
+        if let Some(r) = pick {
+            out[r.clone()].fill(b' ');
+            any = true;
+        }
+    }
+    any.then(|| String::from_utf8(out).ok()).flatten()
 }
 
 /// Records the class head `n` (a class, struct or union with a body) in

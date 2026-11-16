@@ -11,7 +11,7 @@ use std::path::Path;
 use wiki_code::index::Family;
 use wiki_code::model::CallVia;
 use wiki_code::walk::walk;
-use wiki_code::{analyze, handles, pair_declarations};
+use wiki_code::{analyze, handles, pair_declarations, Analyzed};
 
 /// `(relative path, text)` pairs in, `Project` out. A code file the parser
 /// fails on is not in `files`; it is listed in `unreadable`. Other non-code
@@ -20,71 +20,40 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     let mut files = BTreeMap::new();
     let mut unreadable = Vec::new();
     let mut crates = BTreeSet::new();
+    // C/C++ files with a class head the grammar misread, read again once
+    // every file's macros are known: path, text, heads, file as read.
+    let mut misread = Vec::new();
     for (path, text) in sources {
         if manifest(&path) {
             let dir = path.trim_end_matches("Cargo.toml").trim_end_matches('/');
             crates.extend(crate_names(&text).into_iter().map(|n| (n, dir.to_string())));
             continue;
         }
-        let Some(mut a) = analyze(&path, &text) else {
+        let Some(a) = analyze(&path, &text) else {
             if handles(&path) {
                 unreadable.push(path);
             }
             continue;
         };
-        let family = Family::of(Some(&a.file.lang));
-        if let Some(b) = (family == Family::Cpp)
-            .then(|| cpp::unmacroed(&a))
-            .flatten()
-            .and_then(|t| analyze(&path, &t))
-        {
-            a = b;
-        }
-        let python = match family {
-            Family::Python => true,
-            Family::Rust | Family::Cpp | Family::Go | Family::Shell | Family::Ecma => false,
+        let file = file(&path, &text, &a);
+        let heads = match file.family {
+            Family::Cpp => cpp::misread_heads(&a),
+            Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => Vec::new(),
         };
-        let mut file = File {
-            imports: if python {
-                flow::module_imports(&a)
-            } else {
-                Vec::new()
-            },
-            module_code: match family {
-                Family::Python => flow::module_code(&a),
-                Family::Cpp => flow::cpp_module_code(&a),
-                Family::Rust | Family::Go | Family::Shell | Family::Ecma => false,
-            },
-            test_fns: 0,
-            family,
-            syntax_errors: a.sources.iter().any(|s| s.tree().root_node().has_error()),
-            lines: text.lines().count().max(1),
-            code: a.file.clone(),
-            flows: BTreeMap::new(),
-            declarations: BTreeMap::new(),
-            macros: if family == Family::Cpp {
-                flow::cpp_macros(&a)
-            } else {
-                Vec::new()
-            },
-            local: BTreeSet::new(),
-            params: BTreeMap::new(),
-            namespaces: BTreeSet::new(),
-            namespace_aliases: BTreeMap::new(),
-            scopes: BTreeMap::new(),
-            usings: BTreeSet::new(),
-            file_usings: BTreeSet::new(),
-            inner_usings: BTreeSet::new(),
-            classes: BTreeMap::new(),
-            bases: BTreeMap::new(),
-            aliases: BTreeSet::new(),
-            fields: BTreeMap::new(),
-        };
-        flow::attach(&mut file, &a);
-        if family == Family::Cpp {
-            cpp_facts(&mut file, &a, &path);
+        if heads.is_empty() {
+            files.insert(path, file);
+        } else {
+            misread.push((path, text, heads, file));
         }
-        files.insert(path, file);
+    }
+    let macros: BTreeSet<String> = (files.values().chain(misread.iter().map(|m| &m.3)))
+        .flat_map(|f| f.macros.iter().map(|m| m.0.clone()))
+        .collect();
+    for (path, text, heads, read) in misread {
+        let blanked = cpp::unmacroed(&text, &heads, &macros);
+        let a = blanked.and_then(|t| analyze(&path, &t));
+        let f = a.map_or(read, |a| file(&path, &text, &a));
+        files.insert(path, f);
     }
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
@@ -94,6 +63,56 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         unreadable,
         crates,
     }
+}
+
+/// The file at `path` of the text `text`, analysed as `a`.
+fn file(path: &str, text: &str, a: &Analyzed) -> File {
+    let family = Family::of(Some(&a.file.lang));
+    let python = match family {
+        Family::Python => true,
+        Family::Rust | Family::Cpp | Family::Go | Family::Shell | Family::Ecma => false,
+    };
+    let mut file = File {
+        imports: if python {
+            flow::module_imports(a)
+        } else {
+            Vec::new()
+        },
+        module_code: match family {
+            Family::Python => flow::module_code(a),
+            Family::Cpp => flow::cpp_module_code(a),
+            Family::Rust | Family::Go | Family::Shell | Family::Ecma => false,
+        },
+        test_fns: 0,
+        family,
+        syntax_errors: a.sources.iter().any(|s| s.tree().root_node().has_error()),
+        lines: text.lines().count().max(1),
+        code: a.file.clone(),
+        flows: BTreeMap::new(),
+        declarations: BTreeMap::new(),
+        macros: if family == Family::Cpp {
+            flow::cpp_macros(a)
+        } else {
+            Vec::new()
+        },
+        local: BTreeSet::new(),
+        params: BTreeMap::new(),
+        namespaces: BTreeSet::new(),
+        namespace_aliases: BTreeMap::new(),
+        scopes: BTreeMap::new(),
+        usings: BTreeSet::new(),
+        file_usings: BTreeSet::new(),
+        inner_usings: BTreeSet::new(),
+        classes: BTreeMap::new(),
+        bases: BTreeMap::new(),
+        aliases: BTreeSet::new(),
+        fields: BTreeMap::new(),
+    };
+    flow::attach(&mut file, a);
+    if family == Family::Cpp {
+        cpp_facts(&mut file, a, path);
+    }
+    file
 }
 
 /// Counts in each C/C++ flow every bare call, nested flows' included, of

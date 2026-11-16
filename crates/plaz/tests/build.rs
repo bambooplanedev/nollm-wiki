@@ -4412,3 +4412,35 @@ fn a_member_or_local_of_a_project_class_called_bare_is_its_call_operator() {
         ["cmp(a, b) → src/a.cpp:3", "p(a, b) → hidden"]
     );
 }
+
+#[test]
+fn a_class_head_with_a_macro_after_its_name_keeps_its_name() {
+    let h = "#define TOY_FINAL final\nstruct Gear {\n    void spin() {}\n};\nclass Crank TOY_FINAL : public Gear {\npublic:\n    void start() { spin(); }\n};\nclass Wheel TOY_FINAL {\npublic:\n    void spin() {}\n};\nvoid roll() {\n    Wheel w;\n    w.spin();\n}\n#define toy_api\nclass toy_api Lever : public Gear {\npublic:\n    void pull() { spin(); }\n};\n";
+    let files = [("src/toy.h", h)];
+    assert_eq!(
+        cpp_targets(&files, "src/toy.h", "start"),
+        ["spin() → src/toy.h:3"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/toy.h", "roll"),
+        ["w.spin() → src/toy.h:11"]
+    );
+    // A lower-case word a project file defines is the macro too.
+    assert_eq!(
+        cpp_targets(&files, "src/toy.h", "pull"),
+        ["spin() → src/toy.h:3"]
+    );
+}
+
+#[test]
+fn a_class_head_whose_macro_word_cannot_be_told_is_left_unread() {
+    // Neither word is a project macro or in capitals: the head stays
+    // misread, so its body's method is no item.
+    let h = "struct Gear {\n    void spin() {}\n};\nclass Crank quiet : public Gear {\npublic:\n    void start() { spin(); }\n};\nclass Wheel {\npublic:\n    void spin() {}\n};\n";
+    let p = plaz::source::project([("src/toy.h".to_string(), h.to_string())]);
+    let lines: Vec<usize> = (p.files["src/toy.h"].code.items.iter())
+        .filter(|it| it.name == "spin" || it.name == "start")
+        .map(|it| it.start_line)
+        .collect();
+    assert_eq!(lines, [2, 10]);
+}
