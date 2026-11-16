@@ -204,7 +204,10 @@ impl Caller<'_, '_> {
         let root = call.root.as_deref().unwrap_or(q);
         let project =
             cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
-        if root == "std" || !project {
+        if (chain.iter()).any(|f| f.rebound.contains(root)) {
+            // A template parameter or a local type: any type's method.
+            self.any_method(call)
+        } else if root == "std" || !project {
             Evidence::Outside
         } else if cpp.types.contains(q) {
             // `Base::f()` names that one function: no dispatch.

@@ -3100,3 +3100,22 @@ fn a_headers_call_of_a_static_inline_in_a_header_it_does_not_include_may_be_it()
         ["halve(v) → outside"]
     );
 }
+
+#[test]
+fn a_call_qualified_by_a_template_parameter_is_any_project_method_of_that_name() {
+    let h = "struct Cell {\n    static int make(int n);\n};\n";
+    let src = "#include \"cell.h\"\ntemplate <typename T>\nint build(int n) { return T::make(n) + T::drop(n) + Cell::make(n) + std::abs(n); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/cell.h", h), ("src/build.cpp", src)],
+            "src/build.cpp",
+            "build"
+        ),
+        [
+            "T::make(n) → one of: src/cell.h:2, or outside",
+            "T::drop(n) → outside",
+            "Cell::make(n) → src/cell.h:2",
+            "std::abs(n) → outside"
+        ]
+    );
+}
