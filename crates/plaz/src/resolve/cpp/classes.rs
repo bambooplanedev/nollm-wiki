@@ -115,10 +115,19 @@ impl<'a> Cpp<'a> {
         self.classes.placed.extend(placed);
     }
 
+    /// What the base written `written` of a class in the scope `from` is:
+    /// a project type no head places when several classes may be it or
+    /// no class has its name (an alias); a name only classes elsewhere
+    /// have is outside.
     fn base(&self, written: &str, from: &str, dependent: bool) -> Base<'a> {
+        let headless = !self
+            .classes
+            .by_key
+            .contains_key(owner_key(&untemplated(written)));
         match self.resolve(written, from) {
             Some(p) => Base::Class(p, dependent),
-            None if self.is_type(written) => Base::Unseen,
+            None if self.namesakes(written).len() > 1 => Base::Unseen,
+            None if headless && self.is_type(written) => Base::Unseen,
             None => Base::Outside,
         }
     }
@@ -147,8 +156,9 @@ impl<'a> Cpp<'a> {
 
     /// The project class the type written `t` names from the scope `from`
     /// (a path): at each scope from `from` outward, a class nested in it,
-    /// else in its nearest project bases (none when a base on the way is
-    /// no project class); else the one class whose path ends in `t`.
+    /// the class itself by its own name, else a class nested in its
+    /// nearest project bases (none past a base no head places); else the
+    /// one class whose path ends in `t`.
     pub(super) fn resolve(&self, t: &str, from: &str) -> Option<&'a str> {
         let t = untemplated(t);
         let t = t.trim_start_matches("::");
@@ -187,8 +197,8 @@ impl<'a> Cpp<'a> {
 
     /// The class `want(base)` is for the nearest project bases of the
     /// class `scope` that have one, `Ok(None)` when no base has one; `Err`
-    /// when a base on the way is no project class or one level has
-    /// several.
+    /// when a base on the way is a project type no head places or one
+    /// level has several.
     fn in_bases(&self, scope: &str, want: &dyn Fn(&str) -> String) -> Result<Option<&'a str>, ()> {
         let mut level = vec![scope];
         let mut seen = BTreeSet::from([scope]);
@@ -198,8 +208,9 @@ impl<'a> Cpp<'a> {
             for &b in bases.flat_map(|h| h.values()).flatten() {
                 match b {
                     Base::Class(p, _) if seen.insert(p) => next.push(p),
-                    Base::Class(..) => {}
-                    Base::Outside | Base::Unseen => return Err(()),
+                    // An outside base hides no project type name.
+                    Base::Class(..) | Base::Outside => {}
+                    Base::Unseen => return Err(()),
                 }
             }
             let found: BTreeSet<&'a str> = (next.iter())

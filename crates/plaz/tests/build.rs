@@ -3600,11 +3600,21 @@ fn a_type_name_in_a_class_is_first_a_class_nested_in_its_bases() {
 }
 
 #[test]
-fn a_type_name_in_a_class_with_an_outside_base_is_not_placed_certainly() {
-    let src = "struct Cfg {\n    static int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
+fn a_typed_receiver_in_a_class_with_an_outside_base_is_its_project_class() {
+    let src = "struct Cfg {\n    int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run(Cfg& c) { return c.load(); }\n};\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
-        ["Cfg::load() → one of: src/a.cpp:2, or outside"]
+        ["c.load() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn an_anonymous_namespace_class_is_not_a_global_namesake_its_file_sees() {
+    let b = "struct Helper : lib::Out {};\n";
+    let a = "#include \"b.h\"\nnamespace {\nstruct Helper {\n    void go() {}\n    void run() { go(); }\n};\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/b.h", b), ("src/a.h", a)], "src/a.h", "run"),
+        ["go() → src/a.h:4"]
     );
 }
 
@@ -3672,5 +3682,32 @@ fn a_class_names_itself_inside_its_body_under_an_outside_base() {
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "next"),
         ["Reader::peek() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn a_type_name_in_a_class_whose_base_no_head_places_is_not_placed_certainly() {
+    let src = "struct Cfg {\n    static int load() { return 1; }\n};\nusing Mixin = lib::Mixin;\nstruct App : Mixin {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["Cfg::load() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_base_named_like_the_class_but_qualified_by_an_outer_namespace_is_outside() {
+    let src = "struct Cfg {\n    int load() { return 1; }\n};\nnamespace lib {\nnamespace front {\nnamespace mine {\nstruct Ctx : front::Ctx {\n    int run(Cfg& c) { return c.load(); }\n};\n}\n}\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["c.load() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn a_base_several_project_classes_may_be_hides_type_names_from_certainty() {
+    let src = "struct Cfg {\n    static int load() { return 1; }\n};\nnamespace a {\nstruct Node {};\n}\nnamespace b {\nstruct Node {};\n}\nstruct App : Node {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["Cfg::load() → one of: src/a.cpp:2, or outside"]
     );
 }
