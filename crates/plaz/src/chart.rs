@@ -219,125 +219,8 @@ impl Chart<'_> {
                 }
                 Vec::new()
             }
-            Step::Loop {
-                header,
-                comment,
-                pre,
-                body,
-                label,
-                endless,
-                hidden_exit,
-                orelse,
-                test_after,
-                post,
-                ..
-            } => {
-                let shape = if *endless { ("[", "]") } else { ("{", "}") };
-                let scope = |again| Scope {
-                    label: label.clone(),
-                    again,
-                    breaks: Vec::new(),
-                    continues: Vec::new(),
-                };
-                let (d, breaks) = if *test_after {
-                    // The body runs first; its fall-off and every
-                    // `continue` go on to `post`, then the header.
-                    self.loops.push(scope(None));
-                    let (entry, back) = self.steps(body, ends);
-                    let lp = self.loops.pop().unwrap_or_else(|| scope(None));
-                    let (_, back) = self.steps(post, [back, lp.continues].concat());
-                    let (_, at) = self.steps(pre, back);
-                    let d = self.node(shape, header, &at);
-                    self.note(comment.as_ref(), d);
-                    self.edges_to(&[(d, Some("loop"))], entry.unwrap_or(d));
-                    (d, lp.breaks)
-                } else {
-                    // A header run before every iteration is where each
-                    // iteration starts.
-                    let (entry, at) = self.steps(pre, ends);
-                    let d = self.node(shape, header, &at);
-                    let again = entry.unwrap_or(d);
-                    self.note(comment.as_ref(), d);
-                    self.loops.push(scope((post.is_empty()).then_some(again)));
-                    let (_, back) = self.steps(body, vec![(d, Some("loop"))]);
-                    let lp = self.loops.pop().unwrap_or_else(|| scope(None));
-                    let (_, back) = self.steps(post, [back, lp.continues].concat());
-                    self.edges_to(&back, again);
-                    (d, lp.breaks)
-                };
-                let mut out = breaks;
-                if !*endless {
-                    // A `break` skips the `else`.
-                    out.extend(self.steps(orelse, vec![(d, Some("done"))]).1);
-                } else if !orelse.is_empty() {
-                    self.beside("else, never run", orelse);
-                }
-                if *endless && out.is_empty() && (next || *hidden_exit) {
-                    // A way out the flow cannot see: code right after
-                    // the loop would be dead without one, and a macro
-                    // with a `break` token may hold one.
-                    out.push((d, Some("exit not drawn")));
-                }
-                out
-            }
-            Step::Branch {
-                head,
-                arms,
-                exhaustive,
-                breakable,
-                ..
-            } => {
-                let mut no = ends;
-                if let Some(h) = head {
-                    no = vec![(self.node(("[", "]"), h, &no), None)];
-                }
-                if *breakable {
-                    self.branches.push((self.loops.len(), Vec::new()));
-                }
-                let mut out = Vec::new();
-                // The open ends of a falling arm, to join the next body.
-                let mut fell = Vec::new();
-                for a in arms {
-                    let (_, at) = self.steps(&a.pre, no);
-                    no = if let Some(cond) = &a.cond {
-                        let d = self.node(("{", "}"), cond, &at);
-                        self.note(a.comment.as_ref(), d);
-                        let from = [vec![(d, Some("yes"))], fell].concat();
-                        let (_, ends) = self.steps(&a.body, from);
-                        let ends = self.steps(&a.after, ends).1;
-                        fell = Vec::new();
-                        if a.falls {
-                            fell = ends;
-                        } else {
-                            out.extend(ends);
-                        }
-                        vec![(d, Some("no"))]
-                    } else {
-                        // No diamond: the note hangs off the body's
-                        // first node, or the diamond that leads here.
-                        let from = [at.clone(), std::mem::take(&mut fell)].concat();
-                        let (entry, ends) = self.steps(&a.body, from);
-                        let ends = self.steps(&a.after, ends).1;
-                        if a.falls {
-                            fell = ends;
-                        } else {
-                            out.extend(ends);
-                        }
-                        if let Some(to) = entry.or_else(|| at.first().map(|e| e.0)) {
-                            self.note(a.comment.as_ref(), to);
-                        }
-                        Vec::new()
-                    };
-                }
-                out.extend(fell);
-                if !*exhaustive {
-                    out.extend(no);
-                }
-                if *breakable {
-                    out.extend(self.branches.pop().map(|b| b.1).unwrap_or_default());
-                }
-                out
-            }
+            Step::Loop { .. } => self.looped(s, ends, next),
+            Step::Branch { .. } => self.branched(s, ends),
             Step::Nested { name, flow, .. } => {
                 self.beside(name, &flow.steps);
                 ends
@@ -349,6 +232,137 @@ impl Chart<'_> {
             }
             Step::Finally { body, .. } => self.steps(body, ends).1,
         }
+    }
+
+    /// A loop: the header, the body, the `post`, and the ways out.
+    fn looped(&mut self, s: &Step, ends: Ends, next: bool) -> Ends {
+        let Step::Loop {
+            header,
+            comment,
+            pre,
+            body,
+            label,
+            endless,
+            hidden_exit,
+            orelse,
+            test_after,
+            post,
+            ..
+        } = s
+        else {
+            return ends;
+        };
+        let shape = if *endless { ("[", "]") } else { ("{", "}") };
+        let scope = |again| Scope {
+            label: label.clone(),
+            again,
+            breaks: Vec::new(),
+            continues: Vec::new(),
+        };
+        let (d, breaks) = if *test_after {
+            // The body runs first; its fall-off and every
+            // `continue` go on to `post`, then the header.
+            self.loops.push(scope(None));
+            let (entry, back) = self.steps(body, ends);
+            let lp = self.loops.pop().unwrap_or_else(|| scope(None));
+            let (_, back) = self.steps(post, [back, lp.continues].concat());
+            let (_, at) = self.steps(pre, back);
+            let d = self.node(shape, header, &at);
+            self.note(comment.as_ref(), d);
+            self.edges_to(&[(d, Some("loop"))], entry.unwrap_or(d));
+            (d, lp.breaks)
+        } else {
+            // A header run before every iteration is where each
+            // iteration starts.
+            let (entry, at) = self.steps(pre, ends);
+            let d = self.node(shape, header, &at);
+            let again = entry.unwrap_or(d);
+            self.note(comment.as_ref(), d);
+            self.loops.push(scope((post.is_empty()).then_some(again)));
+            let (_, back) = self.steps(body, vec![(d, Some("loop"))]);
+            let lp = self.loops.pop().unwrap_or_else(|| scope(None));
+            let (_, back) = self.steps(post, [back, lp.continues].concat());
+            self.edges_to(&back, again);
+            (d, lp.breaks)
+        };
+        let mut out = breaks;
+        if !*endless {
+            // A `break` skips the `else`.
+            out.extend(self.steps(orelse, vec![(d, Some("done"))]).1);
+        } else if !orelse.is_empty() {
+            self.beside("else, never run", orelse);
+        }
+        if *endless && out.is_empty() && (next || *hidden_exit) {
+            // A way out the flow cannot see: code right after
+            // the loop would be dead without one, and a macro
+            // with a `break` token may hold one.
+            out.push((d, Some("exit not drawn")));
+        }
+        out
+    }
+
+    /// A branch: a diamond per arm, the open ends of every arm joined.
+    fn branched(&mut self, s: &Step, ends: Ends) -> Ends {
+        let Step::Branch {
+            head,
+            arms,
+            exhaustive,
+            breakable,
+            ..
+        } = s
+        else {
+            return ends;
+        };
+        let mut no = ends;
+        if let Some(h) = head {
+            no = vec![(self.node(("[", "]"), h, &no), None)];
+        }
+        if *breakable {
+            self.branches.push((self.loops.len(), Vec::new()));
+        }
+        let mut out = Vec::new();
+        // The open ends of a falling arm, to join the next body.
+        let mut fell = Vec::new();
+        for a in arms {
+            let (_, at) = self.steps(&a.pre, no);
+            no = if let Some(cond) = &a.cond {
+                let d = self.node(("{", "}"), cond, &at);
+                self.note(a.comment.as_ref(), d);
+                let from = [vec![(d, Some("yes"))], fell].concat();
+                let (_, ends) = self.steps(&a.body, from);
+                let ends = self.steps(&a.after, ends).1;
+                fell = Vec::new();
+                if a.falls {
+                    fell = ends;
+                } else {
+                    out.extend(ends);
+                }
+                vec![(d, Some("no"))]
+            } else {
+                // No diamond: the note hangs off the body's
+                // first node, or the diamond that leads here.
+                let from = [at.clone(), std::mem::take(&mut fell)].concat();
+                let (entry, ends) = self.steps(&a.body, from);
+                let ends = self.steps(&a.after, ends).1;
+                if a.falls {
+                    fell = ends;
+                } else {
+                    out.extend(ends);
+                }
+                if let Some(to) = entry.or_else(|| at.first().map(|e| e.0)) {
+                    self.note(a.comment.as_ref(), to);
+                }
+                Vec::new()
+            };
+        }
+        out.extend(fell);
+        if !*exhaustive {
+            out.extend(no);
+        }
+        if *breakable {
+            out.extend(self.branches.pop().map(|b| b.1).unwrap_or_default());
+        }
+        out
     }
 }
 
