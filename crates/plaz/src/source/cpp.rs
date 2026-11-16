@@ -122,17 +122,15 @@ pub(super) fn misread_heads(a: &Analyzed) -> Vec<[Range<usize>; 2]> {
 
 /// The words before a function's name when the grammar misread a macro
 /// before its return type (`API ret_t f(…)` read as `ret_t::f` of the
-/// type `API`): the declaration's type and the scope that has no `::`.
+/// type `API`, `API ret_t K::f(…)` as `ret_t K::f`): the declaration's
+/// type and the scope that no `::` follows.
 fn misread_name(n: Node, src: &str) -> Option<[Range<usize>; 2]> {
     let named = n
         .child_by_field_name("declarator")
         .filter(|_| n.kind() == "function_declarator");
     let named = named.filter(|d| d.kind() == "qualified_identifier")?;
-    let (scope, name) = (
-        named.child_by_field_name("scope")?,
-        named.child_by_field_name("name")?,
-    );
-    let spaced = src[scope.end_byte()..name.start_byte()].trim().is_empty();
+    let scope = named.child_by_field_name("scope")?;
+    let spaced = !src[scope.end_byte()..].trim_start().starts_with("::");
     let ty = n.parent()?.child_by_field_name("type");
     let ty = ty.filter(|t| spaced && t.kind() == "type_identifier")?;
     Some([ty.byte_range(), scope.byte_range()])

@@ -189,6 +189,16 @@ impl<'a> Cpp<'a> {
         file.code.items[c.1].kind == CodeItemKind::Method && !file.classes.contains_key(&c.1)
     }
 
+    /// Is `c` misread and written with a qualifier right before its name
+    /// and parameters (`ret_t Kern::f(…)`): a method of a class no fact
+    /// names?
+    pub(super) fn misread_method(&self, c: FnRef) -> bool {
+        let (it, sig) = (self.item(c), self.item(c).signature.as_str());
+        let named = format!("::{}", it.name);
+        let mut at = sig.match_indices(&named).map(|(i, _)| i + named.len());
+        self.misread(c) && at.any(|i| sig[i..].trim_start().starts_with('('))
+    }
+
     fn local(&self, c: FnRef) -> bool {
         self.pages[c.0].1.local.contains(&c.1)
     }
@@ -375,6 +385,11 @@ impl Caller<'_, '_> {
         if (chain.iter()).any(|f| f.rebound.contains(name)) {
             return Evidence::Hidden;
         }
+        // A method whose qualified name the grammar misread has no known
+        // class: as one no head shows.
+        if self.class.is_none() && self.misread && !call.text.starts_with("::") {
+            return self.or_free(site, self.made(name, self.any_method(call)));
+        }
         // `::f()` names no member.
         if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
             // In a local class's method the enclosing class's members are
@@ -384,17 +399,7 @@ impl Caller<'_, '_> {
             if !local && self.cpp.field(class, name, self.sight()).is_some() {
                 return self.on_field(chain, call, name, None);
             }
-            // A member the class may inherit hides the free functions; one
-            // of a class no head shows may be any method.
-            let or_free = |or: Evidence| match (self.free(site, None), or) {
-                (Some(Evidence::Found { mut fns, .. }), or) => {
-                    if let Evidence::Found { fns: more, .. } = or {
-                        fns.extend(more);
-                    }
-                    Evidence::Found { fns, open: true }
-                }
-                (Some(_) | None, or) => or,
-            };
+            let or_free = |or| self.or_free(site, or);
             match self.cpp.lookup(class, site, self.sight(), true) {
                 // A bare call in a template does not search a dependent
                 // base: the free functions may be meant.
@@ -472,6 +477,21 @@ impl Caller<'_, '_> {
             Evidence::Hidden
         } else {
             or
+        }
+    }
+
+    /// `or`, a bare call of `site` in a method: a member the class may
+    /// inherit hides the free functions, so they are the call's, open; one
+    /// of a class no head shows (`or` found) may be any method too.
+    fn or_free(&self, site: &CallSite, or: Evidence) -> Evidence {
+        match (self.free(site, None), or) {
+            (Some(Evidence::Found { mut fns, .. }), or) => {
+                if let Evidence::Found { fns: more, .. } = or {
+                    fns.extend(more);
+                }
+                Evidence::Found { fns, open: true }
+            }
+            (Some(_) | None, or) => or,
         }
     }
 

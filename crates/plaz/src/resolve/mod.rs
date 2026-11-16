@@ -110,6 +110,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         included: &included,
                         ns: file.scopes.get(&item).map_or("", String::as_str),
                         class: cpp.class_of(page, item),
+                        misread: file.family == Family::Cpp && cpp.misread_method((page, item)),
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
@@ -143,6 +144,9 @@ struct Caller<'i, 'a> {
     ns: &'a str,
     /// A C/C++ method's own class (`Cpp::class_of`).
     class: Option<&'a str>,
+    /// A C/C++ method whose qualified name the grammar misread
+    /// (`Cpp::misread_method`): no class is known.
+    misread: bool,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,

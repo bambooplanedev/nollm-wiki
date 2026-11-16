@@ -4576,3 +4576,54 @@ fn a_function_with_a_macro_before_its_return_type_is_a_function() {
         ]
     );
 }
+
+#[test]
+fn a_method_with_a_macro_before_its_return_type_is_its_classs() {
+    let h = "#define RUN_API\ntypedef unsigned int knob_u32;\ntypedef int outcome_kind_long;\nstruct Kern {\n    knob_u32 step(int a);\n    knob_u32 other_one(int a);\n};\nstruct Runner {\n    RUN_API outcome_kind_long run();\n    outcome_kind_long run_it();\n    outcome_kind_long run_short();\n};\n";
+    let src = "#include \"kern.h\"\nknob_u32 Kern::other_one(int a) { return a; }\nFORCE_INLINE knob_u32 Kern::step(int a) { return other_one(a) + this->other_one(a); }\noutcome_kind_long Runner::run_short() { return 0; }\nRUN_API outcome_kind_long Runner::run_it() { return run_short(); }\nRUN_API outcome_kind_long Runner::run() { return 1; }\nint use(Kern k, Runner r) { return k.step(1) + r.run(); }\n";
+    let files = [("src/kern.h", h), ("src/kern.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/kern.cpp", "step"),
+        [
+            "other_one(a) → src/kern.cpp:2",
+            "this->other_one(a) → src/kern.cpp:2"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/kern.cpp", "run_it"),
+        ["run_short() → src/kern.cpp:4"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/kern.cpp", "use"),
+        ["k.step(1) → src/kern.cpp:3", "r.run() → src/kern.cpp:6"]
+    );
+}
+
+#[test]
+fn a_misread_methods_bare_call_is_never_certain_to_a_free_namesake() {
+    // Neither word is told the macro: the method stays misread, with no class.
+    let h = "typedef int outcome_kind;\ntypedef int outcome_kind_long;\nstruct Runner {\n    outcome_kind_long run_it();\n    outcome_kind_long run_short();\n};\noutcome_kind_long run_short();\n";
+    let src = "#include \"run.h\"\noutcome_kind_long Runner::run_short() { return 0; }\noutcome_kind_long run_short() { return 1; }\noutcome_kind outcome_kind_long Runner::run_it() { return run_short(); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/run.h", h), ("src/run.cpp", src)],
+            "src/run.cpp",
+            "run_it"
+        ),
+        ["run_short() → one of: src/run.cpp:2, src/run.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_misread_call_operators_bare_call_is_never_certain_to_a_free_namesake() {
+    let h = "typedef int outcome_kind;\ntypedef int outcome_kind_long;\nstruct Runner {\n    outcome_kind_long operator()(int a);\n    outcome_kind_long run_short();\n};\noutcome_kind_long run_short();\n";
+    let src = "#include \"run.h\"\noutcome_kind_long Runner::run_short() { return 0; }\noutcome_kind_long run_short() { return 1; }\noutcome_kind outcome_kind_long Runner::operator()(int a) { return run_short(); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/run.h", h), ("src/run.cpp", src)],
+            "src/run.cpp",
+            "operator()"
+        ),
+        ["run_short() → one of: src/run.cpp:2, src/run.cpp:3, or outside"]
+    );
+}
