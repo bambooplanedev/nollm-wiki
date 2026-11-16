@@ -3,10 +3,12 @@
 
 use crate::chart::{chart, coverage, relative};
 use crate::flow::hooks;
-use crate::model::{FnId, Target};
+use crate::model::{File, FnId, Project, Target};
 use crate::names::Names;
 use crate::resolve::Resolved;
 use crate::write::Links;
+use wiki_code::index::{owner_key, Family, Index};
+use wiki_code::model::{CallSite, CallVia};
 
 pub use crate::chart::mermaid_label;
 
@@ -64,6 +66,7 @@ pub struct Page {
 
 pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
     let p = r.project();
+    let index = Index::new(&p.files);
     let link = |f: &FnId| {
         let it = &p.files[&f.path].code.items[f.item];
         format!(
@@ -111,20 +114,45 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     file.test_fns
                 ));
             }
-            for (&item, flow) in &file.flows {
+            let mut items: Vec<usize> = file
+                .flows
+                .keys()
+                .chain(&file.declarations)
+                .copied()
+                .collect();
+            items.sort_unstable();
+            for item in items {
                 let it = &file.code.items[item];
                 let me = FnId {
                     path: path.clone(),
                     item,
                 };
                 out.push_str(&format!(
-                    "\n## {}\n{} · {}\n\n**Called from**\n",
+                    "\n## {}\n{} · {}\n\n",
                     names.anchor(&me),
                     inline_code(&it.signature),
                     links.code(path, it.start_line, it.end_line)
                 ));
+                let Some(flow) = file.flows.get(&item) else {
+                    out.push_str(&match definition(&index, p, &me) {
+                        Some(d) => format!("Defined at {}\n", link(&d)),
+                        None => "No definition in the project.\n".to_string(),
+                    });
+                    continue;
+                };
+                out.push_str("**Called from**\n");
                 let callers = names.callers(&me);
-                if callers.is_empty() {
+                // A C++ constructor, destructor or operator is mostly called
+                // by code no call site shows.
+                let unseen = file.family == Family::Cpp
+                    && (it.name.starts_with('~')
+                        || it.owner.as_deref().map(owner_key) == Some(it.name.as_str())
+                        || it.name.strip_prefix("operator").is_some_and(|r| {
+                            !r.starts_with(|c: char| c.is_alphanumeric() || c == '_')
+                        }));
+                if callers.is_empty() && unseen {
+                    out.push_str("- constructions and operator uses are not traced\n");
+                } else if callers.is_empty() {
                     out.push_str("- none found\n");
                 }
                 for (caller, line, certain) in callers {
@@ -184,6 +212,27 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
             }
         })
         .collect()
+}
+
+/// The definition the index takes the declaration `me` as, when that has
+/// a section of its own.
+fn definition(index: &Index<File>, p: &Project, me: &FnId) -> Option<FnId> {
+    let page = index.page_of(&me.path)?;
+    let it = &p.files[&me.path].code.items[me.item];
+    let site = CallSite {
+        name: it.name.clone(),
+        via: CallVia::Bare,
+        args: None,
+        line: it.start_line,
+    };
+    (index
+        .pick(page, &site, |c| c == (page, me.item))
+        .into_iter())
+    .map(|(pg, item)| FnId {
+        path: index.key(pg).to_string(),
+        item,
+    })
+    .find(|d| d != me && p.files[&d.path].flows.contains_key(&d.item))
 }
 
 #[cfg(test)]

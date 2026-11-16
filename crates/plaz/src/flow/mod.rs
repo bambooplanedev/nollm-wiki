@@ -1,19 +1,21 @@
 //! The flow stage: each function body as a decision flow, walked by one
 //! walker that asks a language's `Hooks` what each node is.
 
+mod cpp;
 mod python;
 mod rust;
 
+pub(crate) use cpp::module_code as cpp_module_code;
 pub(crate) use python::{module_code, module_imports};
 
 use crate::model::{Arm, Comment, ExitKind, File, Flow, MapCall, NotDrawn, Step, Target};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use wiki_code::index::Family;
-use wiki_code::model::{CallVia, CodeItemKind};
+use wiki_code::model::{CallSite, CallVia, CodeItemKind};
 use wiki_code::support::{clip, one_line};
 use wiki_code::tree_sitter::Node;
-use wiki_code::{Analyzed, Source};
+use wiki_code::{Analyzed, Def, Source};
 
 /// What one node is to the flow.
 pub(crate) enum FlowNode<'a> {
@@ -103,40 +105,81 @@ impl Bindings {
 pub(crate) struct Hooks {
     pub flow_node: for<'a> fn(Node<'a>, &str) -> FlowNode<'a>,
     pub bindings: fn(Node, &str) -> Bindings,
+    /// A call site that is no call to chart (a C++ cast).
+    pub skips_call: fn(&CallSite) -> bool,
 }
 
 pub(crate) fn hooks(family: Family) -> Option<&'static Hooks> {
     match family {
         Family::Rust => Some(&rust::HOOKS),
         Family::Python => Some(&python::HOOKS),
-        Family::Cpp | Family::Go | Family::Shell | Family::Ecma => None,
+        Family::Cpp => Some(&cpp::HOOKS),
+        Family::Go | Family::Shell | Family::Ecma => None,
     }
 }
 
 /// Fill `file.flows` for every function item that is not a test, not nested
-/// and has a node; count the tests in `file.test_fns`.
+/// and has a node that is a function definition, and `file.declarations`
+/// for those whose node is a declaration; count the tests in
+/// `file.test_fns`.
+///
+/// With two trees (C/C++, `sources` being `[first-branch copy, main]`), a
+/// function of the copy is walked in the main tree when its range there
+/// is a whole function definition; otherwise in the copy, with the
+/// directive groups in its range counted. A main-tree item overlapping a
+/// copy function is that function read from another branch: skipped.
 pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
     let Some(hooks) = hooks(file.family) else {
         return;
     };
-    for (i, (it, def)) in file.code.items.iter().zip(&analyzed.defs).enumerate() {
-        let is_fn = matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method);
-        let Some(def) = def.as_ref().filter(|_| is_fn && !it.nested) else {
+    let main = analyzed.sources.len().saturating_sub(1);
+    let fn_defs: Vec<(usize, &Def)> = (file.code.items.iter().zip(&analyzed.defs))
+        .enumerate()
+        .filter(|(_, (it, _))| matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method))
+        .filter_map(|(i, (it, d))| Some((i, d.as_ref().filter(|_| !it.nested)?)))
+        .collect();
+    for &(i, def) in &fn_defs {
+        let it = &file.code.items[i];
+        let twice = main > 0
+            && def.source == main
+            && (fn_defs.iter()).any(|(_, c)| {
+                c.source < main && c.start_byte < def.end_byte && def.start_byte < c.end_byte
+            });
+        let mut source = &analyzed.sources[def.source];
+        let Some(mut node) = source.node(def).filter(|_| !twice) else {
             continue;
         };
+        if file.family == Family::Cpp && node.kind() != "function_definition" {
+            if !it.test {
+                file.declarations.insert(i);
+            }
+            continue;
+        }
         if it.test {
             file.test_fns += 1;
             continue;
         }
-        let source = &analyzed.sources[def.source];
-        if let Some(node) = source.node(def) {
-            let w = Walker {
-                source,
-                hooks,
-                comments: comments(source, node),
-            };
-            file.flows.insert(i, w.flow(node));
+        let mut hidden = 0;
+        if def.source < main {
+            let whole = &analyzed.sources[main];
+            match whole
+                .node(def)
+                .filter(|m| m.kind() == "function_definition" && !m.has_error())
+            {
+                Some(m) => (source, node) = (whole, m),
+                None => hidden = cpp::directive_groups(source.text(), def.start_byte..def.end_byte),
+            }
         }
+        let w = Walker {
+            source,
+            hooks,
+            comments: comments(source, node),
+        };
+        let mut flow = w.flow(node);
+        if hidden > 0 {
+            *flow.not_drawn.entry(NotDrawn::Preprocessor).or_default() += hidden;
+        }
+        file.flows.insert(i, flow);
     }
 }
 
@@ -369,6 +412,9 @@ impl<'s> Walker<'s> {
     fn calls(&self, n: Node, out: &mut Vec<Step>) {
         let text = self.source.text();
         for c in self.source.calls_at(n) {
+            if (self.hooks.skips_call)(&c.site) {
+                continue;
+            }
             let lit = &text[c.start_byte..c.end_byte];
             let root = matches!(c.site.via, CallVia::Path(_))
                 .then(|| lit.split("::").next().unwrap_or("").trim().to_string());

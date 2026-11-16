@@ -2632,3 +2632,62 @@ fn build_leaves_a_compiled_wiki_alone() {
         assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), text);
     }
 }
+
+const KILN_H: &str = "class Kiln {\npublic:\n    Kiln();\n    void fire(int t);\n    void vent();\n    int heat() const {\n        if (hot_) { return 9; }\n        return 0;\n    }\nprivate:\n    bool hot_;\n};\n";
+const KILN_CPP: &str = "#include \"kiln.h\"\nstatic int budget = start_budget();\nKiln::Kiln() : hot_(false) {}\nvoid Kiln::fire(int t) {\n    if (t == 3) { hot_ = true; }\n}\n";
+
+#[test]
+fn c_and_cpp_functions_are_charted_in_sources_and_headers() {
+    let (_d, vault) = common::built(&[("src/kiln.h", KILN_H), ("src/kiln.cpp", KILN_CPP)]);
+    let cpp = common::map_page(&vault, "map/src/kiln_cpp");
+    assert!(!cpp.contains("Not covered yet"), "{cpp}");
+    assert_eq!(headings(&cpp), ["kiln_kiln", "kiln_fire"]);
+    let fire = common::fn_block(&cpp, "kiln_fire");
+    assert!(fire.contains("    n1{\"t == 3\"}\n"), "{fire}");
+    assert!(
+        fire.contains(
+            "\nCoverage: 0 calls: 0 resolved, 0 one of, 0 outside, 0 hidden. Not drawn: none.\n"
+        ),
+        "{fire}"
+    );
+    let h = common::map_page(&vault, "map/src/kiln_h");
+    let heat = common::fn_block(&h, "kiln_heat");
+    assert!(heat.contains("    n1{\"hot_\"}\n"), "{heat}");
+}
+
+#[test]
+fn a_declaration_links_its_definition_or_says_there_is_none() {
+    let (_d, vault) = common::built(&[("src/kiln.h", KILN_H), ("src/kiln.cpp", KILN_CPP)]);
+    let h = common::map_page(&vault, "map/src/kiln_h");
+    assert_eq!(
+        headings(&h),
+        ["kiln_kiln", "kiln_fire", "kiln_vent", "kiln_heat"]
+    );
+    assert_eq!(
+        common::fn_block(&h, "kiln_fire"),
+        "## kiln_fire\n`void fire(int t)` · `src/kiln.h:4-4`\n\nDefined at [[map/src/kiln_cpp#kiln_fire|Kiln::fire]]\n\n"
+    );
+    assert_eq!(
+        common::fn_block(&h, "kiln_vent"),
+        "## kiln_vent\n`void vent()` · `src/kiln.h:5-5`\n\nNo definition in the project.\n\n"
+    );
+    let cpp = common::map_page(&vault, "map/src/kiln_cpp");
+    assert!(cpp.contains("\n## kiln_fire\n"), "{cpp}");
+}
+
+#[test]
+fn a_constructor_says_constructions_are_not_traced_and_file_level_calls_are_noted() {
+    let (_d, vault) = common::built(&[("src/kiln.h", KILN_H), ("src/kiln.cpp", KILN_CPP)]);
+    let cpp = common::map_page(&vault, "map/src/kiln_cpp");
+    assert_eq!(
+        common::fn_section(&cpp, "kiln_kiln", "Called from"),
+        ["constructions and operator uses are not traced"]
+    );
+    assert_eq!(
+        common::fn_section(&cpp, "kiln_fire", "Called from"),
+        ["none found"]
+    );
+    let module = "\nModule-level code is not charted.\n";
+    assert!(cpp.contains(module), "{cpp}");
+    assert!(!common::map_page(&vault, "map/src/kiln_h").contains(module));
+}

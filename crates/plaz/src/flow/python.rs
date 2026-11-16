@@ -10,6 +10,7 @@ use wiki_code::Analyzed;
 pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
+    skips_call: |_| false,
 };
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {

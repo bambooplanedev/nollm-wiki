@@ -39,13 +39,18 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             } else {
                 Vec::new()
             },
-            module_code: python && flow::module_code(&a),
+            module_code: match family {
+                Family::Python => flow::module_code(&a),
+                Family::Cpp => flow::cpp_module_code(&a),
+                Family::Rust | Family::Go | Family::Shell | Family::Ecma => false,
+            },
             test_fns: 0,
             family,
             syntax_errors: a.sources.iter().any(|s| s.tree().root_node().has_error()),
             lines: text.lines().count().max(1),
             code: a.file.clone(),
             flows: BTreeMap::new(),
+            declarations: BTreeSet::new(),
         };
         flow::attach(&mut file, &a);
         files.insert(path, file);

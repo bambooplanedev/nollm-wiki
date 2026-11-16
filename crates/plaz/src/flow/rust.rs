@@ -9,6 +9,7 @@ use wiki_code::tree_sitter::Node;
 pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
+    skips_call: |_| false,
 };
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];

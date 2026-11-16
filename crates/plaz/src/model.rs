@@ -24,6 +24,9 @@ pub struct File {
     pub family: Family,
     /// Keyed by index into `code.items`.
     pub flows: BTreeMap<usize, Flow>,
+    /// The function items whose node is a body-less declaration (C/C++),
+    /// by index into `code.items`: a section each, with no flow.
+    pub declarations: BTreeSet<usize>,
     /// True when any of the file's trees has an error node.
     pub syntax_errors: bool,
     /// The file's line count, at least 1.
@@ -33,7 +36,8 @@ pub struct File {
     pub imports: Vec<Import>,
     /// Functions left out of `flows` as test code.
     pub test_fns: usize,
-    /// Python: a call or a decision at module level, which no flow shows.
+    /// A call or a decision at module level (Python), a declaration
+    /// outside any function initialized by a call (C/C++): no flow shows it.
     pub module_code: bool,
 }
 
@@ -97,6 +101,11 @@ pub enum NotDrawn {
     Ternary,
     TryBlock,
     ShortCircuit,
+    Goto,
+    /// A conditional directive group drawn as if unconditional.
+    Preprocessor,
+    /// A call with no call site: `new T(…)`, a call through an expression.
+    Untraced,
 }
 
 impl NotDrawn {
@@ -108,6 +117,9 @@ impl NotDrawn {
             NotDrawn::Ternary => "ternary",
             NotDrawn::TryBlock => "try",
             NotDrawn::ShortCircuit => "&&/||",
+            NotDrawn::Goto => "goto",
+            NotDrawn::Preprocessor => "#if",
+            NotDrawn::Untraced => "call not traced",
         }
     }
 }
