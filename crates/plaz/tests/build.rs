@@ -3066,6 +3066,61 @@ fn a_call_qualified_by_a_project_namespace_reaches_its_free_function() {
 }
 
 #[test]
+fn a_declaration_does_not_fold_onto_a_namesake_in_another_outer_namespace() {
+    let h = "namespace snow { namespace util {\nint melt(int v);\n} }\n";
+    let def = "#include \"snow.h\"\nnamespace rain { namespace util {\nint melt(int v) { return v; }\n} }\n";
+    let main = "#include \"snow.h\"\nint thaw() { return snow::util::melt(2); }\nnamespace snow {\nint drip() { return util::melt(1); }\n}\n";
+    let files = [
+        ("src/snow.h", h),
+        ("src/rain.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "thaw"),
+        ["snow::util::melt(2) → src/snow.h:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "drip"),
+        ["util::melt(1) → src/snow.h:2"]
+    );
+}
+
+#[test]
+fn a_method_of_a_class_named_like_its_namespace_folds_onto_its_definition() {
+    let h = "namespace kiosk {\nstruct kiosk {\n    void open(int n);\n};\n}\n";
+    let def = "#include \"kiosk.h\"\nnamespace kiosk {\nvoid kiosk::open(int n) {}\n}\n";
+    let main = "#include \"kiosk.h\"\nvoid start(kiosk::kiosk& k) { k.open(1); }\n";
+    let files = [
+        ("src/kiosk.h", h),
+        ("src/kiosk.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "start"),
+        ["k.open(1) → src/kiosk.cpp:3"]
+    );
+}
+
+#[test]
+fn a_qualified_call_reaches_only_functions_of_the_namespace_path_it_writes() {
+    let snow = "namespace snow { namespace util {\nint melt(int v);\n} }\n";
+    let rain = "namespace rain { namespace util {\nint melt(int v);\n} }\n";
+    let def = "#include \"rain.h\"\nnamespace rain { namespace util {\nint melt(int v) { return v; }\n} }\n";
+    // A header relying on its includer for `snow.h`.
+    let side = "#include \"rain.h\"\ninline int puddle() { return snow::util::melt(3); }\n";
+    let files = [
+        ("src/snow.h", snow),
+        ("src/rain.h", rain),
+        ("src/rain.cpp", def),
+        ("src/side.h", side),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/side.h", "puddle"),
+        ["snow::util::melt(3) → one of: src/snow.h:2, or outside"]
+    );
+}
+
+#[test]
 fn a_prototype_offers_no_static_definition_of_another_file() {
     let proto = "int measure(int v);\nint run(int v) { return measure(v); }\n";
     let shared = "int measure(int v) { return v; }\n";

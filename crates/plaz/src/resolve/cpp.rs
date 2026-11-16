@@ -9,6 +9,7 @@ mod members;
 use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
+use crate::source::untemplated;
 use classes::{Classes, Missing, Sight};
 use members::this_field;
 use std::collections::{BTreeMap, BTreeSet};
@@ -16,10 +17,38 @@ use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
 use wiki_code::support::source_rank;
 
-/// What a declaration shares with its definition: the owner key, else the
-/// namespace (`core` both of `int core::run(int)` and of a `run` declared
-/// in `namespace core`); the name; the parameter types.
+/// What a declaration shares with its definition: its scope
+/// (`fold_scope`); the name; the parameter types.
 type Key<'a> = (&'a str, &'a str, &'a str);
+
+/// The names of the C/C++ files of `files`' namespaces and namespace
+/// aliases no class head is named: what owns a function as a namespace
+/// (`core` of `int core::run(int)`) for `fold_scope`.
+pub(crate) fn namespace_owners<'a>(files: impl Iterator<Item = &'a File>) -> BTreeSet<&'a str> {
+    let files: Vec<&File> = files.filter(|f| f.family == Family::Cpp).collect();
+    let classes: BTreeSet<&str> = (files.iter().flat_map(|f| f.bases.keys()))
+        .map(|c| owner_key(c))
+        .collect();
+    let names = files.iter().flat_map(|f| &f.namespaces);
+    names
+        .map(String::as_str)
+        .filter(|n| !classes.contains(n))
+        .collect()
+}
+
+/// The scope a C/C++ function item `i` of `file` shares with its
+/// declarations, `owners` as `namespace_owners` gives: a class method's
+/// owner key (`K` of `void n::K::f()` and of `f` declared in `K`); else
+/// the namespace path, a qualifier included (`File::scopes`: `a::core` of
+/// `int a::core::run(int)` and of a `run` declared in `namespace a {
+/// namespace core {…} }`).
+pub(crate) fn fold_scope<'f>(file: &'f File, i: usize, owners: &BTreeSet<&str>) -> &'f str {
+    let owner = file.code.items[i].owner.as_deref().map(owner_key);
+    match owner.filter(|o| !owners.contains(o)) {
+        Some(class) => class,
+        None => file.scopes.get(&i).map_or("", String::as_str),
+    }
+}
 
 /// What the project's C/C++ files say before any call is looked at. A page
 /// is a position in the project's key order, as in the index.
@@ -37,6 +66,8 @@ pub(super) struct Cpp<'a> {
     /// Every definition, by page, scope and name.
     file_defs: BTreeMap<(usize, &'a str, &'a str), Vec<FnRef>>,
     namespaces: BTreeSet<&'a str>,
+    /// `namespace_owners`.
+    owners: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
     /// Type names, the names of the classes the heads define, and owners
     /// of out-of-line definitions that are no namespace or misread.
@@ -70,6 +101,7 @@ impl<'a> Cpp<'a> {
                 .flat_map(|(_, (_, f))| &f.namespaces)
                 .map(String::as_str)
                 .collect(),
+            owners: namespace_owners(files.values()),
             macros: cpp()
                 .flat_map(|(_, (_, f))| &f.macros)
                 .map(|m| m.0.as_str())
@@ -215,11 +247,10 @@ impl<'a> Cpp<'a> {
     }
 
     fn key(&self, c: FnRef) -> Option<Key<'a>> {
-        let it = self.item(c);
-        let owner = it.owner.as_deref().map(owner_key);
-        let scope = owner.or(it.namespace.as_deref()).unwrap_or("");
-        let params = self.pages[c.0].1.params.get(&c.1)?;
-        Some((scope, it.name.as_str(), params.as_str()))
+        let file = self.pages[c.0].1;
+        let params = file.params.get(&c.1)?;
+        let scope = fold_scope(file, c.1, &self.owners);
+        Some((scope, self.item(c).name.as_str(), params.as_str()))
     }
 
     /// `fns`, each declaration taken as the definitions of its key: of its
@@ -351,12 +382,19 @@ impl Caller<'_, '_> {
         }
     }
 
+    /// The namespace `name` names as a namespace alias of the caller's
+    /// file or its includes.
+    fn aliased(&self, name: &str) -> Option<&str> {
+        let mut pages = std::iter::once(&self.page).chain(self.included);
+        let alias = pages.find_map(|&p| self.cpp.pages[p].1.namespace_aliases.get(name));
+        alias.map(String::as_str)
+    }
+
     /// The first segment of the namespace a path rooted at `root` names:
     /// through a namespace alias of the caller's file or its includes.
     fn unaliased<'r>(&'r self, root: &'r str) -> &'r str {
-        let mut pages = std::iter::once(&self.page).chain(self.included);
-        let alias = pages.find_map(|&p| self.cpp.pages[p].1.namespace_aliases.get(root));
-        alias.map_or(root, |a| a.split("::").next().unwrap_or(""))
+        self.aliased(root)
+            .map_or(root, |a| a.split("::").next().unwrap_or(""))
     }
 
     /// Does a using-declaration of the caller's file (at file scope or in
@@ -383,15 +421,20 @@ impl Caller<'_, '_> {
         let root = self.unaliased(root);
         let project =
             cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
+        // `a::b` of `::a::b::f<T>(…)`.
+        let callee = untemplated(call.text.split('(').next().unwrap_or(""));
+        let written = callee
+            .rsplit_once("::")
+            .map_or(q, |w| w.0.trim_start_matches("::"));
         if (chain.iter()).any(|f| f.rebound.contains(root)) {
             // A template parameter or a local type: any type's method.
             self.any_method(call)
         } else if root == "std" || !project {
             Evidence::Outside
         } else if cpp.types.contains(q) {
-            self.on_qualifier(call, q)
+            self.on_qualifier(call, q, written)
         } else if cpp.namespaces.contains(q) {
-            self.free(site, Some(q)).unwrap_or(Evidence::Hidden)
+            self.free(site, Some(written)).unwrap_or(Evidence::Hidden)
         } else {
             Evidence::Hidden
         }

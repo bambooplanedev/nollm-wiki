@@ -5,7 +5,7 @@ use super::classes::{Missing, Placed, Sight};
 use super::{fits, Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::MapCall;
-use crate::source::{pointee, untemplated};
+use crate::source::pointee;
 use std::collections::BTreeSet;
 use wiki_code::index::owner_key;
 use wiki_code::model::{CallSite, CodeItemKind};
@@ -182,17 +182,15 @@ impl Caller<'_, '_> {
         }
     }
 
-    /// `Q::f()` with `Q` a project type names that one function, no
+    /// `Q::f()` (`written` its qualifier, `Q` its last segment) with `Q`
+    /// a project type names that one function, no
     /// dispatch: the member of the class `Q` lands on (`place_name`); of
     /// either class, never certain; unplaced, of the classes it may be, or
     /// something outside; with no class, the functions of a namespace `Q`,
     /// else the methods of an owner `Q`, or with none any project method
     /// `f`, or something outside.
-    pub(super) fn on_qualifier(&self, call: &MapCall, q: &str) -> Evidence {
+    pub(super) fn on_qualifier(&self, call: &MapCall, q: &str, written: &str) -> Evidence {
         let (cpp, site, sight) = (self.cpp, &call.site, self.sight());
-        let callee = call.text.split('(').next().unwrap_or("");
-        let callee = untemplated(callee);
-        let written = callee.rsplit_once("::").map_or(q, |w| w.0);
         match cpp.place_name(written, self.class.unwrap_or(self.ns), sight) {
             Placed::Class(class) => return self.qualified(call, class),
             Placed::Either(one, other) => {
@@ -206,7 +204,7 @@ impl Caller<'_, '_> {
                 }
             }
             Placed::Nothing if cpp.namespaces.contains(q) => {
-                return self.free(site, Some(q)).unwrap_or(Evidence::Hidden);
+                return self.free(site, Some(written)).unwrap_or(Evidence::Hidden);
             }
             Placed::Nothing => {}
         }

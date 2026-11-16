@@ -1,31 +1,37 @@
 //! The free functions a call may name: by tier, in view of the caller.
 
-use super::{fits, Caller, Evidence};
-use wiki_code::index::{owner_key, FnRef};
+use super::{fits, fold_scope, Caller, Evidence};
+use wiki_code::index::FnRef;
 use wiki_code::model::{CallSite, CodeItem, CodeItemKind};
 use wiki_code::support::source_rank;
 
 impl Caller<'_, '_> {
-    /// The free functions `site` names, of the namespace `ns` when given:
-    /// in C those of the caller's file first; those of the caller's file
-    /// and the files it includes; else any other not local to its file (in
-    /// a header, called from a header, it may be), which may also be
-    /// something outside. A bare call's set keeps the functions in view,
-    /// or with none in view is open. None by argument count: the same over
-    /// the variadic ones.
+    /// The free functions `site` names, of a namespace whose path ends in
+    /// `ns` (the qualifier as written) when given: in C those of the
+    /// caller's file first; those of the caller's file and the files it
+    /// includes; else any other not local to its file (in a header, called
+    /// from a header, it may be), which may also be something outside. A
+    /// bare call's set keeps the functions in view, or with none in view
+    /// is open. None by argument count: the same over the variadic ones.
     pub(super) fn free(&self, site: &CallSite, ns: Option<&str>) -> Option<Evidence> {
         let cpp = self.cpp;
-        let in_ns = |it: &CodeItem| match ns {
-            None => it.kind == CodeItemKind::Fn,
-            Some(q) => match it.kind {
-                CodeItemKind::Fn => it.namespace.as_deref() == Some(q),
-                // `int core::run(int)` is `run` of the namespace `core`.
-                CodeItemKind::Method => it.owner.as_deref().map(owner_key) == Some(q),
-                CodeItemKind::Type
-                | CodeItemKind::Value
-                | CodeItemKind::Module
-                | CodeItemKind::TopLevel => false,
-            },
+        // `k::b` under `namespace k = a;` is `a::b`.
+        let ns = ns.map(|w| {
+            let (root, rest) = w.split_once("::").map_or((w, None), |(r, t)| (r, Some(t)));
+            match (self.aliased(root), rest) {
+                (Some(a), Some(rest)) => format!("{a}::{rest}"),
+                (Some(a), None) => a.to_string(),
+                (None, _) => w.to_string(),
+            }
+        });
+        let ns = ns.as_deref();
+        let in_ns = |c: FnRef| match ns {
+            None => cpp.item(c).kind == CodeItemKind::Fn,
+            // `int a::core::run(int)` is `run` of the namespace `a::core`.
+            Some(q) => {
+                let at = fold_scope(cpp.pages[c.0].1, c.1, &cpp.owners);
+                at == q || at.ends_with(&format!("::{q}"))
+            }
         };
         let named = cpp
             .by_name
@@ -35,7 +41,7 @@ impl Caller<'_, '_> {
         let variadic = |it: &CodeItem| it.signature.contains("...");
         for keep in [&by_arity as &dyn Fn(&CodeItem) -> bool, &variadic] {
             let all: Vec<FnRef> = (named.iter().copied())
-                .filter(|&c| in_ns(cpp.item(c)) && keep(cpp.item(c)))
+                .filter(|&c| in_ns(c) && keep(cpp.item(c)))
                 .collect();
             let tier = |pick: &dyn Fn(FnRef) -> bool| -> Vec<FnRef> {
                 all.iter().copied().filter(|&c| pick(c)).collect()
