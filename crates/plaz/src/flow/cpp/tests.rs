@@ -630,3 +630,16 @@ fn a_macro_that_jumps_in_one_file_counts_wherever_it_is_defined_without() {
     );
     assert_eq!(counted(&files, "a.py", "f").0, [].into());
 }
+
+#[test]
+fn a_statement_macro_without_a_semicolon_counts_the_call_it_swallows() {
+    let src = "void sort_rows(const struct params * p, struct tensor * dst) {\n    TENSOR_LOCALS\n    CHECK(nb0 == size(p));\n    MUTEX_GUARD lock(dst);\n    rows(dst);\n}\n";
+    assert_eq!(
+        flow_lines("a.cpp", src, "sort_rows"),
+        ["call size(p) @3", "call rows(dst) @5"]
+    );
+    assert_eq!(
+        not_drawn("a.cpp", src, "sort_rows"),
+        [("call not traced".to_string(), 1)]
+    );
+}

@@ -103,8 +103,36 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             _ => FlowNode::NotDrawn(NotDrawn::Untraced),
         },
         "new_expression" => FlowNode::NotDrawn(NotDrawn::Untraced),
+        "declaration" if swallowed(n, src) => FlowNode::NotDrawn(NotDrawn::Untraced),
         _ => FlowNode::Plain,
     }
+}
+
+/// Is the declaration `n` a statement-like macro written without a
+/// semicolon and the call after it (`LOCALS` above `CHECK(x);`): its type
+/// a lone name in capitals, its one declarator call-shaped and on a later
+/// line?
+fn swallowed(n: Node, src: &str) -> bool {
+    let ty = n.child_by_field_name("type");
+    let ty = ty.filter(|t| t.kind() == "type_identifier");
+    let caps = ty.is_some_and(|t| {
+        let w = text(t, src);
+        w.contains(|c: char| c.is_ascii_uppercase())
+            && w.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    });
+    let mut cursor = n.walk();
+    let mut ds = n.children_by_field_name("declarator", &mut cursor);
+    let call = match (ds.next(), ds.next(), ty) {
+        (Some(d), None, Some(t)) => {
+            let value = d.child_by_field_name("value");
+            let shaped = d.kind() == "function_declarator"
+                || value.is_some_and(|v| v.kind() == "argument_list");
+            shaped && d.start_position().row > t.end_position().row
+        }
+        _ => false,
+    };
+    caps && call
 }
 
 /// `while`, `for` (its update the `post`), range `for`, or `do` (tested
