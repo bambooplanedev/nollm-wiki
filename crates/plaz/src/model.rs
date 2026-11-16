@@ -84,6 +84,12 @@ pub struct File {
     /// (`using X = …`, an alias template, `typedef … X`), by path as in
     /// `classes`; a `typedef struct X X` is the class, no alias.
     pub aliases: BTreeSet<String>,
+    /// Per C/C++ class the file defines, by path as in `bases`: each data
+    /// member its body declares, with its written type as a local's is
+    /// read (`Flow::types`); none for a function pointer, a type naming a
+    /// template parameter of the class, or one the file's trees type
+    /// differently.
+    pub fields: BTreeMap<String, BTreeMap<String, Option<String>>>,
 }
 
 /// What a C/C++ function item has in place of a body.

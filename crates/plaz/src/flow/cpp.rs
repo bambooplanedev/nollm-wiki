@@ -514,5 +514,6 @@ fn jumps(body: &str) -> bool {
 }
 
 mod bindings;
+pub(crate) use bindings::fields;
 #[cfg(test)]
 mod tests;

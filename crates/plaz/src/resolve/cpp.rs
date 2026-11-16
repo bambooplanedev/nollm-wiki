@@ -244,6 +244,19 @@ fn either(one: Evidence, other: Evidence) -> Evidence {
     Evidence::Found { fns, open }
 }
 
+/// `x` and the text after it, of a call written `this->x.f()` or
+/// `this->x->f()` of the name `f`.
+fn this_field<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
+    let rest = text.strip_prefix("this")?.trim_start().strip_prefix("->")?;
+    let rest = rest.trim_start();
+    let end = rest.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
+    let (x, after) = rest.split_at(end);
+    let op = after.trim_start();
+    let called = op.strip_prefix("->").or_else(|| op.strip_prefix('.'))?;
+    let called = called.trim_start().strip_prefix(f)?.trim_start();
+    (!x.is_empty() && called.starts_with(['(', '<'])).then_some((x, after))
+}
+
 /// Can `it` take `site`'s argument count?
 fn fits(it: &CodeItem, site: &CallSite) -> bool {
     match (it.arity, site.args) {
@@ -262,15 +275,46 @@ impl Caller<'_, '_> {
                 Some(class) => self.on_class(call, class),
                 None => self.any_method(call),
             },
-            // The innermost flow binding `x` gives its type.
+            // The innermost flow binding `x` gives its type; with none, a
+            // data member of that name.
             CallVia::Member(Some(x)) => {
-                let binder = chain.iter().rev().find(|f| f.locals.contains(x));
-                match binder.and_then(|f| f.types.get(x)) {
-                    Some(t) => self.on_typed(call, x, t),
-                    None => self.any_method(call),
+                let after = call.text.strip_prefix(x.as_str()).unwrap_or("");
+                match chain.iter().rev().find(|f| f.locals.contains(x)) {
+                    Some(f) => match f.types.get(x) {
+                        Some(t) => self.on_typed(
+                            call,
+                            after,
+                            t,
+                            self.class.unwrap_or(self.ns),
+                            self.sight(),
+                        ),
+                        None => self.any_method(call),
+                    },
+                    None => self.on_field(call, x, after),
                 }
             }
-            CallVia::Member(None) => self.any_method(call),
+            CallVia::Member(None) => match this_field(&call.text, &call.site.name) {
+                Some((x, after)) => self.on_field(call, x, after),
+                None => self.any_method(call),
+            },
+        }
+    }
+
+    /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
+    /// it) of the caller's class: as on a local of the member's type, the
+    /// type placed from the class declaring it, in the file of its head.
+    fn on_field(&self, call: &MapCall, x: &str, after: &str) -> Evidence {
+        let field = self.class.and_then(|c| self.cpp.field(c, x, self.sight()));
+        match field.and_then(|f| Some((f.ty?, f))) {
+            Some((t, f)) => {
+                let included = self.cpp.closure(f.page);
+                let sight = Sight {
+                    page: f.page,
+                    included: &included,
+                };
+                self.on_typed(call, after, t, f.class, sight)
+            }
+            None => self.any_method(call),
         }
     }
 
@@ -310,19 +354,19 @@ impl Caller<'_, '_> {
         }
     }
 
-    /// `x.f()` or `x->f()` on `x` of the written type `t`. A smart pointer
-    /// is itself with `.`, its pointee with `->`. A project class, found
-    /// from the caller's class or namespace: as `on_class`. A project type
-    /// no head places: any project method `f`. Any other type: the project
-    /// classes deriving from it that define `f`, or something outside.
-    fn on_typed(&self, call: &MapCall, x: &str, t: &str) -> Evidence {
+    /// `x.f()` or `x->f()` on `x` of the written type `t`, `after` the text
+    /// after `x`. A smart pointer is itself with `.`, its pointee with
+    /// `->`. A project class, found from the scope `from` in the file of
+    /// `sight`: as `on_class`. A project type no head places: any project
+    /// method `f`. Any other type: the project classes deriving from it
+    /// that define `f`, or something outside.
+    fn on_typed(&self, call: &MapCall, after: &str, t: &str, from: &str, sight: Sight) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
         let (head, arg) = t.split_once('<').unwrap_or((t, ""));
         let head = head.trim();
         let t = match head.strip_prefix("std::").unwrap_or(head) {
             "unique_ptr" | "shared_ptr" => {
-                let rest = call.text.strip_prefix(x).unwrap_or("");
-                if !rest.trim_start().starts_with("->") {
+                if !after.trim_start().starts_with("->") {
                     return Evidence::Outside;
                 }
                 let arg = arg.rsplit_once('>').map_or(arg, |a| a.0);
@@ -330,7 +374,7 @@ impl Caller<'_, '_> {
             }
             _ => t,
         };
-        match cpp.place_name(t, self.class.unwrap_or(self.ns), self.sight()) {
+        match cpp.place_name(t, from, sight) {
             Placed::Class(class) => self.on_class(call, class),
             Placed::Either(one, other) => {
                 either(self.on_class(call, one), self.on_class(call, other))
@@ -417,6 +461,10 @@ impl Caller<'_, '_> {
         }
         // `::f()` names no member.
         if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
+            // A data member called is its own call operator.
+            if self.cpp.field(class, name, self.sight()).is_some() {
+                return Evidence::Hidden;
+            }
             // A member the class may inherit hides the free functions.
             let or_free = |or: Evidence| match self.free(site, None) {
                 Some(Evidence::Found { fns, .. }) => Evidence::Found { fns, open: true },

@@ -73,6 +73,44 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     Bindings { rebound, ..joined }
 }
 
+/// The data members the class body `body` declares, those in `#if`
+/// groups included, each typed as a local is; a function pointer member,
+/// or one whose type names a template parameter in `params`, untyped.
+pub(crate) fn fields(
+    body: Node,
+    src: &str,
+    params: &BTreeSet<&str>,
+) -> Vec<(String, Option<String>)> {
+    let mut out = Vec::new();
+    let mut stack: Vec<Node> = body.named_children(&mut body.walk()).collect();
+    while let Some(n) = stack.pop() {
+        if n.kind().starts_with("preproc_") {
+            stack.extend(n.named_children(&mut n.walk()));
+        }
+        if n.kind() != "field_declaration" {
+            continue;
+        }
+        let ty = n.child_by_field_name("type").and_then(|t| written(t, src));
+        let ty = ty.filter(|t| {
+            let mut words = t.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+            !words.any(|w| params.contains(w))
+        });
+        for d in n.children_by_field_name("declarator", &mut n.walk()) {
+            // `int* f();` declares a method; `int (*f)();` a member.
+            let method = declared(d).is_some_and(|(i, function)| {
+                function
+                    && i.parent()
+                        .is_some_and(|p| p.kind() == "function_declarator")
+            });
+            if !method {
+                bind(d, ty.clone(), src, &mut out);
+            }
+        }
+    }
+    out.retain(|(n, _)| !n.is_empty());
+    out
+}
+
 /// The names of the template parameters of each template around `root`,
 /// and of `root` and each lambda around it.
 fn template_params(root: Node, src: &str) -> BTreeSet<String> {
@@ -137,9 +175,10 @@ fn declared(mut d: Node) -> Option<(Node, bool)> {
     let mut function = false;
     loop {
         match d.kind() {
-            "identifier" | "type_identifier" | "structured_binding_declarator" => {
-                return Some((d, function))
-            }
+            "identifier"
+            | "field_identifier"
+            | "type_identifier"
+            | "structured_binding_declarator" => return Some((d, function)),
             "function_declarator" => function = true,
             "pointer_declarator"
             | "reference_declarator"

@@ -68,6 +68,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             classes: BTreeMap::new(),
             bases: BTreeMap::new(),
             aliases: BTreeSet::new(),
+            fields: BTreeMap::new(),
         };
         flow::attach(&mut file, &a);
         if family == Family::Cpp {
@@ -190,16 +191,16 @@ fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
 }
 
 /// Records the class head `n` (a class, struct or union with a body) in
-/// `File::bases`; `anonymous` names the file's anonymous namespaces.
+/// `File::bases` and its data members in `File::fields`; `anonymous`
+/// names the file's anonymous namespaces.
 fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let class = matches!(
         n.kind(),
         "class_specifier" | "struct_specifier" | "union_specifier"
     );
-    let name = (n.child_by_field_name("body").is_some())
-        .then(|| n.child_by_field_name("name"))
-        .flatten();
-    let Some(name) = name.filter(|_| class) else {
+    let body = n.child_by_field_name("body");
+    let name = body.and_then(|_| n.child_by_field_name("name"));
+    let (Some(name), Some(body)) = (name.filter(|_| class), body) else {
         return;
     };
     let text = |n: Node| &src[n.byte_range()];
@@ -221,7 +222,15 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     path.push(text(name).to_string());
     let class = untemplated(&path.join("::"));
     let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
-    file.bases.entry(class).or_default().extend(bases);
+    file.bases.entry(class.clone()).or_default().extend(bases);
+    // A member the file's two trees type differently has no type.
+    let fields = file.fields.entry(class).or_default();
+    for (name, ty) in flow::cpp_fields(body, src, &params) {
+        let kept = fields.entry(name).or_insert_with(|| ty.clone());
+        if *kept != ty {
+            *kept = None;
+        }
+    }
 }
 
 /// Records what the `using` declaration or directive `n` names in

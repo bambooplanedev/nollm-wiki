@@ -4032,3 +4032,116 @@ fn a_using_declaration_through_a_project_namespace_alias_is_not_outside() {
         ["c.load() → one of: src/d.h:3, or outside"]
     );
 }
+
+#[test]
+fn a_field_of_a_project_type_is_certain_with_or_without_this() {
+    let h =
+        "#include \"book.h\"\nstruct Shelf {\n    void run();\n    const Book* top_, *low_;\n};\n";
+    let book = "struct Book {\n    void apply() {}\n};\n";
+    let src = "#include \"shelf.h\"\nvoid Shelf::run() {\n    top_->apply();\n    this->low_->apply();\n    auto go = [this] { top_->apply(); };\n}\n";
+    let files = [
+        ("src/book.h", book),
+        ("src/shelf.h", h),
+        ("src/shelf.cpp", src),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/shelf.cpp", "run"),
+        [
+            "top_->apply() → src/book.h:2",
+            "this->low_->apply() → src/book.h:2",
+            "top_->apply() → src/book.h:2"
+        ]
+    );
+}
+
+#[test]
+fn a_field_of_a_type_a_subclass_overrides_is_one_of_both() {
+    let src = "struct Shape {\n    virtual int area() { return 0; }\n};\nstruct Square : Shape {\n    int area() override { return 1; }\n};\nstruct Canvas {\n    Shape* shape_;\n    int run() { return shape_->area(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["shape_->area() → one of: src/a.cpp:2, src/a.cpp:5"]
+    );
+}
+
+#[test]
+fn a_smart_pointer_field_is_outside_with_a_dot_and_its_pointee_with_an_arrow() {
+    let src = "struct Book {\n    void apply() {}\n    void reset() {}\n};\nstruct Shelf {\n    std::unique_ptr<Book> book_ = nullptr;\n    void run() {\n        book_->apply();\n        this->book_->apply();\n        book_.reset();\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "book_->apply() → src/a.cpp:2",
+            "this->book_->apply() → src/a.cpp:2",
+            "book_.reset() → outside"
+        ]
+    );
+}
+
+#[test]
+fn a_field_a_project_base_declares_is_typed_by_it() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Ink {\n    void apply() {}\n};\nstruct Base {\n    Book book_;\n};\nstruct Mid : Base {};\nstruct Shelf : public Mid {\n    void run() { book_.apply(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["book_.apply() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn a_field_behind_a_nearer_base_no_head_places_is_not_certain() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Ink {\n    void apply() {}\n};\nstruct Top {\n    Book book_;\n};\nstruct Mid : Top {};\nusing Other = Ink;\nstruct Shelf : Other, Mid {\n    void run() { book_.apply(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["book_.apply() → one of: src/a.cpp:2, src/a.cpp:5, or outside"]
+    );
+}
+
+#[test]
+fn a_function_field_called_bare_is_hidden_beside_a_free_function_of_its_name() {
+    let src = "void notify(int v) {}\nstruct Shelf {\n    std::function<void(int)> notify;\n    void run() { notify(1); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["notify(1) → hidden"]
+    );
+}
+
+#[test]
+fn a_local_named_like_a_field_is_the_local() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Ink {\n    void apply() {}\n};\nstruct Shelf {\n    Book book_;\n    void run(Ink book_) { book_.apply(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["book_.apply() → src/a.cpp:5"]
+    );
+}
+
+#[test]
+fn a_field_type_is_placed_from_the_class_not_from_the_callers_file() {
+    let h = "struct Cfg {\n    void load() {}\n};\nstruct Shelf {\n    Cfg cfg_;\n    void run();\n};\n";
+    let b = "namespace b {\nstruct Cfg {\n    void load() {}\n};\n}\n";
+    let src = "#include \"shelf.h\"\n#include \"b.h\"\nusing namespace b;\nvoid Shelf::run() { cfg_.load(); }\n";
+    let files = [("src/shelf.h", h), ("src/b.h", b), ("src/shelf.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/shelf.cpp", "run"),
+        ["cfg_.load() → src/shelf.h:2"]
+    );
+}
+
+#[test]
+fn a_field_typed_by_a_template_parameter_is_no_project_class() {
+    let src = "struct Book {\n    void apply() {}\n};\ntemplate <class Book>\nstruct Box {\n    Book item_;\n    void run() { item_.apply(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["item_.apply() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_method_returning_a_pointer_or_reference_is_no_data_member() {
+    let src = "struct Shelf {\n    int* top();\n    const int& low() const;\n    int (*pick_)(int);\n    void run() { top(); low(); pick_(1); }\n};\nint* Shelf::top() { return nullptr; }\nconst int& Shelf::low() const { return *top(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "top() → src/a.cpp:7",
+            "low() → src/a.cpp:8",
+            "pick_(1) → hidden"
+        ]
+    );
+}
