@@ -8,6 +8,7 @@ use crate::model::{Bodiless, File, MapCall};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
+use wiki_code::support::source_rank;
 
 /// What a declaration shares with its definition: the owner key, else the
 /// namespace (`core` both of `int core::run(int)` and of a `run` declared
@@ -246,7 +247,8 @@ impl Caller<'_, '_> {
 
     /// The free functions `site` names, of the namespace `ns` when given:
     /// those of the caller's file, else of the files it includes, else any
-    /// other not local to its file, which may also be something outside.
+    /// other not local to its file (in a header, called from a header, it
+    /// may be), which may also be something outside.
     /// None by argument count: the same over the variadic ones.
     fn free(&self, site: &CallSite, ns: Option<&str>) -> Option<Evidence> {
         let cpp = self.cpp;
@@ -276,13 +278,14 @@ impl Caller<'_, '_> {
                 all.iter().copied().filter(|&c| pick(c)).collect()
             };
             let seen = |c: FnRef| self.included.contains(&c.0);
+            // A header's file-local function may be in every unit that
+            // includes the calling header too.
+            let header = |page: usize| source_rank(cpp.pages[page].0) < 2;
+            let visible = |c: FnRef| !cpp.local(c) || (header(self.page) && header(c.0));
             let tiers = [
                 (tier(&|c| c.0 == self.page), false),
                 (tier(&|c| c.0 != self.page && seen(c)), false),
-                (
-                    tier(&|c| c.0 != self.page && !seen(c) && !cpp.local(c)),
-                    true,
-                ),
+                (tier(&|c| c.0 != self.page && !seen(c) && visible(c)), true),
             ];
             for (fns, open) in tiers {
                 let fns = self.ids(cpp.folded(fns));

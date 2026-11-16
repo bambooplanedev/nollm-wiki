@@ -3081,3 +3081,22 @@ fn a_prototype_offers_no_static_definition_of_another_file() {
         "## measure\n`int measure(int v)` · `src/proto.c:1-1`\n\nDefined at [[map/src/shared_c#measure|measure]]\n\n"
     );
 }
+
+#[test]
+fn a_headers_call_of_a_static_inline_in_a_header_it_does_not_include_may_be_it() {
+    let b = "static inline int halve(int v) { return v / 2; }\n";
+    let a = "static inline int quarter(int v) { return halve(halve(v)); }\n";
+    let src = "int run(int v) { return halve(v); }\n";
+    let files = [("inc/b.h", b), ("inc/a.h", a), ("src/run.c", src)];
+    assert_eq!(
+        cpp_targets(&files, "inc/a.h", "quarter"),
+        [
+            "halve(v) → one of: inc/b.h:1, or outside",
+            "halve(halve(v)) → one of: inc/b.h:1, or outside"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/run.c", "run"),
+        ["halve(v) → outside"]
+    );
+}
