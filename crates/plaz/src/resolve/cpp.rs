@@ -298,7 +298,13 @@ impl Caller<'_, '_> {
     /// The target of a call in a C/C++ function.
     pub(super) fn cpp(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
         match &call.site.via {
-            CallVia::Bare => self.cpp_bare(chain, call),
+            CallVia::Bare => match self.cpp_bare(chain, call) {
+                // A `using std::f;` of the file may bring in another `f`.
+                Evidence::Found { fns, .. } if self.foreign_using(&call.site.name) => {
+                    Evidence::Found { fns, open: true }
+                }
+                e @ (Evidence::Found { .. } | Evidence::Outside | Evidence::Hidden) => e,
+            },
             CallVia::Path(q) => self.cpp_path(chain, call, q),
             CallVia::SelfRecv => match self.member_of(chain) {
                 Some(class) => self.on_class(call, class),
@@ -345,6 +351,28 @@ impl Caller<'_, '_> {
         }
     }
 
+    /// The first segment of the namespace a path rooted at `root` names:
+    /// through a namespace alias of the caller's file or its includes.
+    fn unaliased<'r>(&'r self, root: &'r str) -> &'r str {
+        let mut pages = std::iter::once(&self.page).chain(self.included);
+        let alias = pages.find_map(|&p| self.cpp.pages[p].1.namespace_aliases.get(root));
+        alias.map_or(root, |a| a.split("::").next().unwrap_or(""))
+    }
+
+    /// Does a using-declaration of the caller's file (at file scope or in
+    /// a body: scopes of usings are not modelled) name a function `name`
+    /// of a namespace from outside the project: `std`, or one no project
+    /// namespace or type roots?
+    fn foreign_using(&self, name: &str) -> bool {
+        let cpp = self.cpp;
+        let usings = self.file.usings.iter();
+        let mut declared = usings.filter_map(|u| u.rsplit_once("::").filter(|u| u.1 == name));
+        declared.any(|(q, _)| {
+            let root = self.unaliased(q.split("::").next().unwrap_or(""));
+            root == "std" || !(cpp.namespaces.contains(root) || cpp.types.contains(root))
+        })
+    }
+
     /// `q::f()`.
     fn cpp_path(&self, chain: &[FlowScope], call: &MapCall, q: &str) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
@@ -352,9 +380,7 @@ impl Caller<'_, '_> {
         let root = call.root.as_deref().map_or(q, owner_key);
         // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
         // `filesystem`) starts at `std`.
-        let mut pages = std::iter::once(&self.page).chain(self.included);
-        let alias = pages.find_map(|&p| cpp.pages[p].1.namespace_aliases.get(root));
-        let root = alias.map_or(root, |a| a.split("::").next().unwrap_or(""));
+        let root = self.unaliased(root);
         let project =
             cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
         if (chain.iter()).any(|f| f.rebound.contains(root)) {

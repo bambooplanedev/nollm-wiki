@@ -4640,3 +4640,31 @@ fn an_inline_conversion_operator_read_as_a_function_named_its_type_keeps_its_cla
         ["stat() → src/ent.cpp:2"]
     );
 }
+
+#[test]
+fn a_bare_call_a_using_declaration_of_an_outside_function_reaches_may_be_outside() {
+    // A project `namespace std` block is still no project function's.
+    let h = "#include <string>\nnamespace std {\ntemplate <> struct hash<int>;\n}\nnamespace util {\nstd::string to_text(int x);\ntemplate <typename T>\nstd::string to_text(const T& t)\n{\n    using std::to_text;\n    return to_text(t);\n}\n}\n";
+    let def =
+        "#include \"conv.h\"\nnamespace util {\nstd::string to_text(int x) { return {}; }\n}\n";
+    let at_file = "#include \"conv.h\"\nnamespace ol = other_lib;\nusing ol::to_text;\nusing namespace util;\nstd::string show(int x) { return to_text(x); }\n";
+    let own = "#include \"conv.h\"\nusing util::to_text;\nstd::string mine(int x) { return to_text(x); }\n";
+    let files = [
+        ("src/conv.h", h),
+        ("src/conv.cpp", def),
+        ("src/show.cpp", at_file),
+        ("src/mine.cpp", own),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/conv.h", "to_text"),
+        ["to_text(t) → one of: src/conv.cpp:3, src/conv.h:7, or outside"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/show.cpp", "show"),
+        ["to_text(x) → one of: src/conv.cpp:3, src/conv.h:7, or outside"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/mine.cpp", "mine"),
+        ["to_text(x) → one of: src/conv.cpp:3, src/conv.h:7"]
+    );
+}
