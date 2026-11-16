@@ -260,10 +260,63 @@ fn a_whole_block_under_a_group_in_a_first_branch_chart_is_a_branch_its_group_may
 fn a_first_branch_group_with_other_branches_stays_counted_and_drawn_in_line() {
     let src = format!("void mix(float * MY_RESTRICT s) {{\n#if defined(USE_A)\n    {{ fast_mix(s); }}\n#elif defined(USE_B)\n    wide_mix(s);\n#else\n    plain_mix(s);\n#endif\n    finish(s);\n}}\n\n{SPLIT}");
     assert_eq!(
-        flow_lines("a.cpp", &src, "mix"),
-        ["call fast_mix(s) @3", "call finish(s) @9"]
+        drawn(&src, "mix"),
+        [
+            "n0([\"mix\"])",
+            "n1>\"fast_mix(s)\"]:::hidden",
+            "n0 --> n1",
+            "n2>\"finish(s)\"]:::hidden",
+            "n1 --> n2",
+            "n3([\"end\"])",
+            "n2 --> n3",
+        ]
     );
     assert_eq!(not_drawn("a.cpp", &src, "mix"), [("#if".to_string(), 1)]);
+}
+
+#[test]
+fn a_first_branch_that_cannot_fall_through_without_a_final_exit_leaves_by_an_unseen_way() {
+    let src = format!("int fold(float * MY_RESTRICT s, int n) {{\n#if defined(USE_A)\n    if (n) {{\n        return 1;\n    }} else {{\n        return 2;\n    }}\n#else\n    lean(s);\n#endif\n    rest(s);\n    return 0;\n}}\n\nint pick(float * MY_RESTRICT s, int n) {{\n#ifdef USE_B\n    switch (n) {{\n    case 1: return 1;\n    default: return 2;\n    }}\n#else\n    lean(s);\n#endif\n    rest(s);\n    return 0;\n}}\n\n{SPLIT}");
+    assert_eq!(
+        drawn(&src, "fold"),
+        [
+            "n0([\"fold\"])",
+            "n1{\"#35;if defined(USE_A)\"}",
+            "n0 --> n1",
+            "n2{\"n\"}",
+            "n1 -->|yes| n2",
+            "n3([\"return 1;\"])",
+            "n2 -->|yes| n3",
+            "n4([\"return 2;\"])",
+            "n2 -->|no| n4",
+            "n5>\"rest(s)\"]:::hidden",
+            "n1 -->|exit not drawn| n5",
+            "n6([\"return 0;\"])",
+            "n5 --> n6",
+        ]
+    );
+    let pick = drawn(&src, "pick");
+    assert_eq!(
+        pick.iter()
+            .filter(|l| l.contains("rest(s)") || l.contains("exit not drawn"))
+            .collect::<Vec<_>>(),
+        ["n7>\"rest(s)\"]:::hidden", "n1 -->|exit not drawn| n7"]
+    );
+}
+
+#[test]
+fn a_first_branch_that_cannot_fall_through_with_nothing_after_its_group_has_no_unseen_way() {
+    let src = format!("int last(float * MY_RESTRICT s) {{\n#ifdef USE_A\n    fast(s);\n    return 1;\n#else\n    slow(s);\n    return 2;\n#endif\n}}\n\n{SPLIT}");
+    assert_eq!(
+        drawn(&src, "last"),
+        [
+            "n0([\"last\"])",
+            "n1>\"fast(s)\"]:::hidden",
+            "n0 --> n1",
+            "n2([\"return 1;\"])",
+            "n1 --> n2",
+        ]
+    );
 }
 
 #[test]

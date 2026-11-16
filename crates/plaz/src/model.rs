@@ -231,7 +231,9 @@ pub enum Step {
         /// (a C `switch`); `continue` passes through to the loop.
         breakable: bool,
         /// The way past the arms runs through branches not drawn (a
-        /// directive group's others, in a first-branch chart).
+        /// directive group's others, in a first-branch chart): the one arm
+        /// is drawn in line, unless it cannot fall through and a step
+        /// follows, which that way then reaches.
         unseen: bool,
     },
     Loop {

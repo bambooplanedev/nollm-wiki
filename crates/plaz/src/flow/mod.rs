@@ -285,11 +285,10 @@ impl<'s> Walker<'s> {
     }
 
     /// Walks `kids` in order. A run of them in the first branch of a
-    /// directive group opening in `within`, when it has a step, is that
-    /// group's one arm if the group has no other branch: the way past it
-    /// skips the run. A group with other branches stays counted; its run
-    /// is drawn in line, or, when the run cannot fall through, as the arm
-    /// of a branch whose way past it is not drawn.
+    /// directive group opening in `within`, when it has a step, is the arm
+    /// of that group's branch: if the group has no other branch, the way
+    /// past it skips the run; else the group stays counted and the way
+    /// past runs through branches not drawn (`Step::Branch::unseen`).
     fn run(&self, kids: &[Node], within: &Range<usize>, flow: &mut Flow, out: &mut Vec<Step>) {
         let mut kids = kids.iter().copied().peekable();
         while let Some(c) = kids.next() {
@@ -304,9 +303,7 @@ impl<'s> Walker<'s> {
             let mut steps = Vec::new();
             self.run(&body, &g.body, flow, &mut steps);
             // A group holding no step (a `#define`) stays counted.
-            let exits = matches!(steps.last(), Some(Step::Exit { .. }));
-            if steps.is_empty() || !(g.only || exits) {
-                out.extend(steps);
+            if steps.is_empty() {
                 continue;
             }
             if g.only {

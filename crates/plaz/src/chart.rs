@@ -1,6 +1,6 @@
 //! The decision flowchart of one function and its coverage line.
 
-use crate::model::{Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
+use crate::model::{Arm, Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
 use std::collections::BTreeMap;
 
 /// `s` as the text of a double-quoted Mermaid label: every char that could
@@ -220,6 +220,12 @@ impl Chart<'_> {
                 Vec::new()
             }
             Step::Loop { .. } => self.looped(s, ends, next),
+            Step::Branch {
+                arms, unseen: true, ..
+            } if !(next && self.closed(arms)) => {
+                let ends = arms.iter().fold(ends, |e, a| self.steps(&a.body, e).1);
+                ends
+            }
             Step::Branch { .. } => self.branched(s, ends),
             Step::Nested { name, flow, .. } => {
                 self.beside(name, &flow.steps);
@@ -299,6 +305,23 @@ impl Chart<'_> {
             out.push((d, Some("exit not drawn")));
         }
         out
+    }
+
+    /// Can no arm of `arms` fall off its end? Drawn on a scratch chart
+    /// with no loop around: a `break` or `continue` leaves too.
+    fn closed(&self, arms: &[Arm]) -> bool {
+        let mut scratch = Chart {
+            path: self.path,
+            href: self.href,
+            lines: Vec::new(),
+            clicks: Vec::new(),
+            next: 1,
+            edges: 0,
+            loops: Vec::new(),
+            branches: Vec::new(),
+        };
+        arms.iter()
+            .all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty())
     }
 
     /// A branch: a diamond per arm, the open ends of every arm joined.
