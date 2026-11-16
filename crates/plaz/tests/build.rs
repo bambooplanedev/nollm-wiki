@@ -2829,6 +2829,15 @@ fn a_c_definition_in_the_callers_file_wins_over_an_included_declaration() {
 }
 
 #[test]
+fn a_method_declared_unlike_its_files_one_definition_may_be_another_overload() {
+    let src = "struct Pot {\n    void put(int v);\n    void put(double v);\n    void run();\n};\nvoid Pot::put(double v) {}\nvoid Pot::run() { put(1); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["put(1) → one of: src/a.cpp:6, or outside"]
+    );
+}
+
+#[test]
 fn a_cpp_callers_own_overload_and_an_included_one_are_one_candidate_set() {
     let h = "int step(double d);\n";
     let src = "#include \"step.h\"\nstatic int step(int a) { return a; }\nint run() { return step(1.5); }\n";
@@ -3234,7 +3243,8 @@ fn an_angle_include_with_a_directory_reaches_a_project_header() {
 #[test]
 fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
     let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
-    // C++: the definition of the same arity, not the overload.
+    // C++: the definition of the same arity, not the overload; it may
+    // be another overload, defined elsewhere.
     let cpp = "int tally(int v[]);\nint run(int *v) { return tally(v); }\nint tally(int *v) { return *v; }\nint tally() { return 0; }\n";
     assert_eq!(
         cpp_targets(&[("src/fwd.c", c)], "src/fwd.c", "run"),
@@ -3242,7 +3252,7 @@ fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition()
     );
     assert_eq!(
         cpp_targets(&[("src/fwd.cpp", cpp)], "src/fwd.cpp", "run"),
-        ["tally(v) → src/fwd.cpp:3"]
+        ["tally(v) → one of: src/fwd.cpp:3, or outside"]
     );
 }
 

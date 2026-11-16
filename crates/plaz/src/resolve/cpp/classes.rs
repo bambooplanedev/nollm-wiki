@@ -5,7 +5,7 @@
 mod field;
 mod place;
 
-use super::{fits, Cpp};
+use super::{fits, Cpp, Loose};
 use crate::source::untemplated;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
@@ -266,7 +266,7 @@ impl<'a> Cpp<'a> {
         class: &str,
         site: &CallSite,
         sight: Option<Sight>,
-    ) -> (BTreeSet<FnRef>, bool) {
+    ) -> (BTreeSet<FnRef>, Loose) {
         let only = self.seen_head(class, sight);
         let of = |c: FnRef| only.is_none_or(|h| c.0 == h || self.closure(c.0).contains(&h));
         let named = self.by_name.get(site.name.as_str()).into_iter().flatten();
@@ -278,7 +278,7 @@ impl<'a> Cpp<'a> {
         // Declarations fold by owner name: drop another class's definitions;
         // a declaration with none of its own class's stays.
         let mine = |c: &FnRef| self.classes.placed.get(c).is_none_or(|p| *p == class);
-        let (mut out, mut open) = (BTreeSet::new(), false);
+        let (mut out, mut open) = (BTreeSet::new(), Loose::default());
         for c in own {
             let (defs, loose) = self.folded(vec![c]);
             let defs: BTreeSet<FnRef> = defs.into_iter().filter(|d| mine(d) && of(*d)).collect();
@@ -287,7 +287,7 @@ impl<'a> Cpp<'a> {
             } else {
                 defs
             });
-            open |= loose;
+            open = open.or(loose);
         }
         (out, open)
     }
@@ -347,13 +347,14 @@ impl<'a> Cpp<'a> {
         let mut level = vec![(class, false)];
         let (mut missing, mut settled) = (Missing::Nowhere, true);
         while !level.is_empty() {
-            let (mut found, mut dependent, mut loose) = (BTreeSet::new(), true, false);
+            let (mut found, mut dependent) = (BTreeSet::new(), true);
+            let mut loose = Loose::default();
             for &(c, dep) in &level {
                 settled &= self.settled(c, Some(sight));
                 let (fns, open) = self.members(c, site, Some(sight));
                 dependent &= dep || fns.is_empty();
                 found.extend(fns);
-                loose |= open;
+                loose = loose.or(open);
             }
             if !found.is_empty() {
                 let subs = self.descendants(class).into_iter().filter(|_| dispatch);
@@ -363,14 +364,14 @@ impl<'a> Cpp<'a> {
                     let (fns, open) = self.members(c, site, None);
                     wide |= unsure && !fns.is_empty();
                     overrides.extend(fns);
-                    loose |= open;
+                    loose = loose.or(open);
                 }
                 let pure = overrides.is_empty() && found.iter().all(|&c| self.pure(c));
                 if !overrides.is_empty() {
                     found.retain(|&c| !self.pure(c));
                 }
                 found.extend(overrides);
-                let loose = loose && !self.defined_in(&found, sight.page);
+                let loose = loose.open(self.defined_in(&found, sight.page));
                 let open = pure || loose || wide || (!settled && found.len() == 1);
                 return Ok(Found {
                     fns: found,

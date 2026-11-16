@@ -71,13 +71,10 @@ impl Caller<'_, '_> {
                     (shown, open)
                 };
                 let (fns, loose) = cpp.folded(fns);
-                let loose = loose && !cpp.defined_in(&fns, self.page);
+                let open = open || loose.open(cpp.defined_in(&fns, self.page));
                 let fns = self.ids(fns);
                 if !fns.is_empty() {
-                    return Some(Evidence::Found {
-                        fns,
-                        open: open || loose,
-                    });
+                    return Some(Evidence::Found { fns, open });
                 }
             }
         }

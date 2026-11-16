@@ -36,6 +36,32 @@ pub(crate) fn namespace_owners<'a>(files: impl Iterator<Item = &'a File>) -> BTr
         .collect()
 }
 
+/// What may open a fold (`Cpp::folded`).
+#[derive(Clone, Copy, Default)]
+struct Loose {
+    /// A definition may be another program's: unless the caller's file
+    /// holds one of them (`Cpp::defined_in`).
+    program: bool,
+    /// A C++ declaration was taken as its file's one definition spelled
+    /// otherwise, which may be another overload.
+    spelled: bool,
+}
+
+impl Loose {
+    fn or(self, other: Loose) -> Loose {
+        Loose {
+            program: self.program || other.program,
+            spelled: self.spelled || other.spelled,
+        }
+    }
+
+    /// Is the fold open for a caller whose file holds a definition of it
+    /// (`here`)?
+    fn open(self, here: bool) -> bool {
+        (self.program && !here) || self.spelled
+    }
+}
+
 /// The scope a C/C++ function item `i` of `file` shares with its
 /// declarations, `owners` as `namespace_owners` gives: a class method's
 /// owner key (`K` of `void n::K::f()` and of `f` declared in `K`); else
@@ -255,15 +281,17 @@ impl<'a> Cpp<'a> {
 
     /// `fns`, each declaration taken as the definitions of its key: of its
     /// own file when it is local, else those no file keeps to itself; with
-    /// none, its file's one definition of that name (and arity, in C++); a
-    /// declaration with neither stays. A free function's declarations none
+    /// none, its file's one definition of that name (and arity, in C++,
+    /// where it may be another overload); a declaration with neither
+    /// stays. A free function's declarations none
     /// of whose definitions' files includes one (`extern int main(int,
     /// char**);` beside each program's `main`) may be any program's: each
     /// definition of that name and arity, and the set is open. So is it
     /// for a declaration in a header an unread Objective-C file shares a
     /// stem with (`pad.hpp`, `pad.mm`).
-    fn folded(&self, fns: Vec<FnRef>) -> (BTreeSet<FnRef>, bool) {
+    fn folded(&self, fns: Vec<FnRef>) -> (BTreeSet<FnRef>, Loose) {
         let mut out = BTreeSet::new();
+        let mut spelled = false;
         // Per free function's key: a declaration, and is one tied?
         let mut tied: BTreeMap<Key, (FnRef, bool)> = BTreeMap::new();
         let mut twin = false;
@@ -299,7 +327,10 @@ impl<'a> Cpp<'a> {
             let mut same =
                 named.filter(|&&d| self.is_c(c.0) || self.item(d).arity == self.item(c).arity);
             match (same.next(), same.next()) {
-                (Some(&d), None) => out.insert(d),
+                (Some(&d), None) => {
+                    spelled |= !self.is_c(c.0);
+                    out.insert(d)
+                }
                 _ => out.insert(c),
             };
         }
@@ -313,7 +344,8 @@ impl<'a> Cpp<'a> {
             let defs = named.flat_map(|(_, d)| d);
             out.extend(defs.filter(|&&d| self.item(d).arity == self.item(c).arity));
         }
-        (out, twin || !loose.is_empty())
+        let program = twin || !loose.is_empty();
+        (out, Loose { program, spelled })
     }
 }
 
