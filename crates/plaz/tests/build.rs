@@ -4813,6 +4813,25 @@ fn an_inline_conversion_operator_read_as_a_function_named_its_type_keeps_its_cla
 }
 
 #[test]
+fn a_call_of_a_function_template_with_an_explicit_specialization_is_never_certain() {
+    let h = "struct Wide {};\nnamespace pk {\ntemplate <typename T> int pack(T v) { return 0; }\ntemplate <> int pack<Wide>(Wide v);\n}\nnamespace tray {\ntemplate <typename T> int pack(T v) { return 2; }\n}\n";
+    let def = "#include \"pack.h\"\nnamespace pk {\ntemplate <> int pack<Wide>(Wide v) { return 1; }\n}\n";
+    let src = "#include \"pack.h\"\nint send() { return pk::pack(Wide{}) + tray::pack(2); }\n";
+    let files = [
+        ("src/pack.h", h),
+        ("src/pack.cpp", def),
+        ("src/send.cpp", src),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/send.cpp", "send"),
+        [
+            "pk::pack(Wide{}) → one of: src/pack.h:3, or outside",
+            "tray::pack(2) → src/pack.h:7"
+        ]
+    );
+}
+
+#[test]
 fn a_bare_call_a_using_declaration_of_an_outside_function_reaches_may_be_outside() {
     // A project `namespace std` block is still no project function's.
     let h = "#include <string>\nnamespace std {\ntemplate <> struct hash<int>;\n}\nnamespace util {\nstd::string to_text(int x);\ntemplate <typename T>\nstd::string to_text(const T& t)\n{\n    using std::to_text;\n    return to_text(t);\n}\n}\n";

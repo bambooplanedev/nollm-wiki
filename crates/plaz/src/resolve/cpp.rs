@@ -9,12 +9,11 @@ mod members;
 
 use super::{Caller, Evidence};
 use crate::flow::FlowScope;
-use crate::model::{Bodiless, File, MapCall};
+use crate::model::{Bodiless, File, FnId, MapCall};
 use crate::source::untemplated;
 use classes::{Classes, Missing, Sight};
 pub(crate) use fold::{fold_scope, namespace_owners};
 use fold::{Key, Loose};
-use members::member_path;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
@@ -38,6 +37,8 @@ pub(super) struct Cpp<'a> {
     /// `namespace_owners`.
     owners: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
+    /// `File::specialized`, of every file: each path's scope and name.
+    specialized: BTreeSet<(&'a str, &'a str)>,
     /// Type names, the names of the classes the heads define, and owners
     /// of out-of-line definitions that are no namespace or misread.
     types: BTreeSet<&'a str>,
@@ -74,6 +75,10 @@ impl<'a> Cpp<'a> {
             macros: cpp()
                 .flat_map(|(_, (_, f))| &f.macros)
                 .map(|m| m.0.as_str())
+                .collect(),
+            specialized: cpp()
+                .flat_map(|(_, (_, f))| &f.specialized)
+                .map(|s| s.rsplit_once("::").unwrap_or(("", s)))
                 .collect(),
             types: BTreeSet::new(),
             classes: Classes::default(),
@@ -201,6 +206,22 @@ impl<'a> Cpp<'a> {
         self.misread(c) && at.any(|i| sig[i..].trim_start().starts_with('('))
     }
 
+    /// Is `c` a function template an explicit specialization of the
+    /// project names: of its name, in its scope (`fold_scope`) or a path
+    /// ending in it?
+    fn specialized(&self, c: FnRef) -> bool {
+        let (it, scope) = (
+            self.item(c),
+            fold_scope(self.pages[c.0].1, c.1, &self.owners),
+        );
+        let at = |path: &str| path == scope || path.ends_with(&format!("::{scope}"));
+        let named = self
+            .specialized
+            .iter()
+            .any(|&(path, name)| name == it.name && at(path));
+        it.signature.starts_with("template") && named
+    }
+
     fn local(&self, c: FnRef) -> bool {
         self.pages[c.0].1.local.contains(&c.1)
     }
@@ -227,48 +248,29 @@ fn fits(it: &CodeItem, site: &CallSite) -> bool {
 impl Caller<'_, '_> {
     /// The target of a call in a C/C++ function.
     pub(super) fn cpp(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
-        match &call.site.via {
-            CallVia::Bare => match self.cpp_bare(chain, call) {
-                // A `using std::f;` of the file may bring in another `f`.
-                Evidence::Found { fns, .. } if self.foreign_using(&call.site.name) => {
-                    Evidence::Found { fns, open: true }
-                }
-                e @ (Evidence::Found { .. } | Evidence::Outside | Evidence::Hidden) => e,
-            },
+        let via = &call.site.via;
+        let found = match via {
+            CallVia::Bare => self.cpp_bare(chain, call),
             CallVia::Path(q) => self.cpp_path(chain, call, q),
             CallVia::SelfRecv => match self.member_of(chain) {
                 Some(class) => self.on_class(call, class),
                 None => self.any_method(call),
             },
-            // `x.f()`, `x->a.f()`: the innermost flow binding `x` gives its
-            // type; with none, a data member of that name. `this->a.f()`:
-            // the caller's class.
-            CallVia::Member(x) => {
-                let path = match x {
-                    Some(x) => Some((x.as_str(), call.text.strip_prefix(x.as_str()).unwrap_or(""))),
-                    None => member_path(&call.text, &call.site.name),
-                };
-                let Some((x, after)) = path else {
-                    return self.any_method(call);
-                };
-                match chain.iter().rev().find(|f| f.locals.contains(x)) {
-                    _ if x == "this" => match self.member_of(chain) {
-                        Some(class) => self.on_step(call, after, class),
-                        None => self.any_method(call),
-                    },
-                    Some(f) => match f.types.get(x) {
-                        Some(t) => self.on_typed(
-                            call,
-                            after,
-                            t,
-                            self.class.unwrap_or(self.ns),
-                            self.sight(),
-                        ),
-                        None => self.any_method(call),
-                    },
-                    None => self.on_field(chain, call, x, Some(after)),
-                }
+            CallVia::Member(x) => self.cpp_member(chain, call, x.as_deref()),
+        };
+        // A `using std::f;` of the file may bring in another `f`; a
+        // function template's explicit specialization, which has no item,
+        // may be the one called.
+        let foreign = *via == CallVia::Bare && self.foreign_using(&call.site.name);
+        let specialized = |f: &FnId| {
+            let page = self.index.page_of(&f.path);
+            page.is_some_and(|p| self.cpp.specialized((p, f.item)))
+        };
+        match found {
+            Evidence::Found { fns, .. } if foreign || fns.iter().any(specialized) => {
+                Evidence::Found { fns, open: true }
             }
+            e @ (Evidence::Found { .. } | Evidence::Outside | Evidence::Hidden) => e,
         }
     }
 

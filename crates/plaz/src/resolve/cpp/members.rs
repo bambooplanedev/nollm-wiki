@@ -46,7 +46,7 @@ fn member_step(after: &str) -> Option<(&str, &str)> {
 /// The first name `x` and the text after it, of a call of `f` written as
 /// a path of names (`x.f()`, `x->a.f()`, `this->a.f()`) whose own
 /// arguments end the text, or run past its clipped end.
-pub(super) fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
+fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
     let end = text.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
     let (x, after) = text.split_at(end);
     let mut rest = after;
@@ -76,6 +76,37 @@ pub(super) fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t st
 }
 
 impl Caller<'_, '_> {
+    /// `x.f()`, `x->a.f()` (`x` as the call site gives it, or none):
+    /// the innermost flow binding `x` gives its type; with none, a data
+    /// member of that name. `this->a.f()`: the caller's class.
+    pub(super) fn cpp_member(
+        &self,
+        chain: &[FlowScope],
+        call: &MapCall,
+        x: Option<&str>,
+    ) -> Evidence {
+        let path = match x {
+            Some(x) => Some((x, call.text.strip_prefix(x).unwrap_or(""))),
+            None => member_path(&call.text, &call.site.name),
+        };
+        let Some((x, after)) = path else {
+            return self.any_method(call);
+        };
+        match chain.iter().rev().find(|f| f.locals.contains(x)) {
+            _ if x == "this" => match self.member_of(chain) {
+                Some(class) => self.on_step(call, after, class),
+                None => self.any_method(call),
+            },
+            Some(f) => match f.types.get(x) {
+                Some(t) => {
+                    self.on_typed(call, after, t, self.class.unwrap_or(self.ns), self.sight())
+                }
+                None => self.any_method(call),
+            },
+            None => self.on_field(chain, call, x, Some(after)),
+        }
+    }
+
     /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
     /// it) of the caller's class, or `x(…)` with no `after`: as `on_member`.
     pub(super) fn on_field(
@@ -195,7 +226,7 @@ impl Caller<'_, '_> {
     /// a data member `a` before the called name, as on the member (`a`
     /// untyped or no data member: any project method `f`); else as
     /// `on_class`.
-    pub(super) fn on_step(&self, call: &MapCall, after: &str, class: &str) -> Evidence {
+    fn on_step(&self, call: &MapCall, after: &str, class: &str) -> Evidence {
         let Some((a, tail)) = member_step(after) else {
             return self.on_class(call, class);
         };

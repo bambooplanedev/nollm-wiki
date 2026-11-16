@@ -81,6 +81,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             namespace(file, n, s.text());
             class_head(file, n, s.text(), &anon);
             alias(file, n, s.text(), &anon);
+            specialization(file, n, s.text());
             if n.kind() == "using_declaration" {
                 using(file, n, s.text());
             }
@@ -282,6 +283,30 @@ fn using(file: &mut File, n: Node, src: &str) {
         Some(_) => file.inner_usings.insert(named.clone()),
     };
     file.usings.insert(named);
+}
+
+/// Records in `File::specialized` the function template the explicit
+/// specialization `n` (`template <> int pack<Wide>(Wide v)`, defined or
+/// declared) specializes.
+fn specialization(file: &mut File, n: Node, src: &str) {
+    let params = n.child_by_field_name("parameters");
+    let empty = params.is_some_and(|p| p.named_child_count() == 0);
+    if n.kind() != "template_declaration" || !empty {
+        return;
+    }
+    let mut d = n.named_children(&mut n.walk()).last();
+    d = d.filter(|d| matches!(d.kind(), "function_definition" | "declaration"));
+    // Past a pointer or reference return type to the function declarator.
+    while let Some(x) = d.and_then(|x| x.child_by_field_name("declarator")) {
+        if x.kind() == "function_declarator" {
+            let mut path = enclosing(n, src, None);
+            let named = x.child_by_field_name("declarator");
+            path.extend(named.map(|f| untemplated(&src[f.byte_range()])));
+            file.specialized.insert(path.join("::"));
+            return;
+        }
+        d = Some(x);
+    }
 }
 
 /// Records the type alias `n` declares, if it is one outside any body,

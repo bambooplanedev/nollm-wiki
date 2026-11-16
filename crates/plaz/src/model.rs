@@ -101,6 +101,12 @@ pub struct File {
     /// template parameter of the class, or one the file's trees type
     /// differently.
     pub fields: BTreeMap<String, BTreeMap<String, Option<String>>>,
+    /// The function templates a C/C++ file explicitly specializes, whose
+    /// specializations have no item: each by its path, the enclosing
+    /// named namespaces then the name as written, template arguments
+    /// dropped (`a::pk::pack` of `template <> int pk::pack<Wide>(Wide)` in
+    /// `namespace a`).
+    pub specialized: BTreeSet<String>,
 }
 
 /// What a C/C++ function item has in place of a body.
