@@ -45,14 +45,15 @@ pub(super) fn this_field<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str
 
 impl Caller<'_, '_> {
     /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
-    /// it) of the caller's class: as on a local of the member's type, the
-    /// type placed from the class declaring it, in the file of its head.
+    /// it) of the caller's class, or `x(…)` with no `after`: as on a local
+    /// of the member's type, the type placed from the class declaring it,
+    /// in the file of its head.
     pub(super) fn on_field(
         &self,
         chain: &[FlowScope],
         call: &MapCall,
         x: &str,
-        after: &str,
+        after: Option<&str>,
     ) -> Evidence {
         let field = self
             .member_of(chain)
@@ -74,9 +75,40 @@ impl Caller<'_, '_> {
                 } else {
                     head
                 };
-                self.on_typed(call, after, t, f.class, sight)
+                match after {
+                    Some(after) => self.on_typed(call, after, t, f.class, sight),
+                    None => self.called(call, t, f.class, sight),
+                }
             }
+            None if after.is_none() => Evidence::Hidden,
             None => self.any_method(call),
+        }
+    }
+
+    /// `x(…)` on `x` of the written type `t`, placed from the scope `from`
+    /// in the file of `sight`: the `operator()` of that project class (or
+    /// either class), its subclasses' too. A smart pointer, a function
+    /// pointer, `std::function`, an unplaced name, a class with no
+    /// `operator()`: not visible.
+    pub(super) fn called(&self, call: &MapCall, t: &str, from: &str, sight: Sight) -> Evidence {
+        let op = MapCall {
+            site: CallSite {
+                name: "operator()".to_string(),
+                ..call.site.clone()
+            },
+            ..call.clone()
+        };
+        let on = |class| match self.cpp.lookup(class, &op.site, self.sight(), true) {
+            Err(Missing::Nowhere) => Evidence::Hidden,
+            Ok(_) | Err(Missing::Outside | Missing::Unseen) => self.on_class(&op, class),
+        };
+        if pointee(t).0 {
+            return Evidence::Hidden;
+        }
+        match self.cpp.place_name(t, from, sight) {
+            Placed::Class(class) => on(class),
+            Placed::Either(one, other) => either(on(one), on(other)),
+            Placed::Unplaced | Placed::Nothing => Evidence::Hidden,
         }
     }
 

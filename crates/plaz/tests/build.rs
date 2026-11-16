@@ -4393,3 +4393,22 @@ fn a_namespace_alias_is_the_namespace_it_names() {
         ]
     );
 }
+
+#[test]
+fn a_member_or_local_of_a_project_class_called_bare_is_its_call_operator() {
+    let src = "#include <functional>\nstruct Less {\n    bool operator()(int a, int b) const { return a < b; }\n};\nstruct Plain {\n    int v;\n};\nstruct Sorter {\n    Less less_;\n    std::function<bool(int, int)> fn_;\n    bool (*ptr_)(int, int);\n    Plain plain_;\n    bool run(int a, int b) { return less_(a, b) && fn_(a, b) && ptr_(a, b) && plain_(a, b); }\n};\nbool pick(int a, int b, Plain p) {\n    Less cmp;\n    return cmp(a, b) && p(a, b);\n}\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        [
+            "less_(a, b) → src/a.cpp:3",
+            "fn_(a, b) → hidden",
+            "ptr_(a, b) → hidden",
+            "plain_(a, b) → hidden"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "pick"),
+        ["cmp(a, b) → src/a.cpp:3", "p(a, b) → hidden"]
+    );
+}

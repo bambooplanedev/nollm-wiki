@@ -283,11 +283,11 @@ impl Caller<'_, '_> {
                         ),
                         None => self.any_method(call),
                     },
-                    None => self.on_field(chain, call, x, after),
+                    None => self.on_field(chain, call, x, Some(after)),
                 }
             }
             CallVia::Member(None) => match this_field(&call.text, &call.site.name) {
-                Some((x, after)) => self.on_field(chain, call, x, after),
+                Some((x, after)) => self.on_field(chain, call, x, Some(after)),
                 None => self.any_method(call),
             },
         }
@@ -340,7 +340,14 @@ impl Caller<'_, '_> {
     fn cpp_bare(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
         let site = &call.site;
         let name = site.name.as_str();
-        if (chain.iter()).any(|f| f.locals.contains(name) || f.rebound.contains(name)) {
+        // A local called is its own call operator.
+        if let Some(f) = chain.iter().rev().find(|f| f.locals.contains(name)) {
+            return match f.types.get(name) {
+                Some(t) => self.called(call, t, self.class.unwrap_or(self.ns), self.sight()),
+                None => Evidence::Hidden,
+            };
+        }
+        if (chain.iter()).any(|f| f.rebound.contains(name)) {
             return Evidence::Hidden;
         }
         // `::f()` names no member.
@@ -350,7 +357,7 @@ impl Caller<'_, '_> {
             let local = self.member_of(chain).is_none();
             // A data member called is its own call operator.
             if !local && self.cpp.field(class, name, self.sight()).is_some() {
-                return Evidence::Hidden;
+                return self.on_field(chain, call, name, None);
             }
             // A member the class may inherit hides the free functions; one
             // of a class no head shows may be any method.
