@@ -1,11 +1,13 @@
 //! The resolve stage: every call's target in one of four forms, from what
 //! the code shows and nothing else.
 
+mod cpp;
 mod python;
 
 use crate::flow::FlowScope;
 use crate::model::{File, FnId, MapCall, Project, Target};
 use crate::uses::{defines, in_scope, in_trait, is_trait, own_crate, standard, InScope};
+use cpp::Cpp;
 use python::{Own, Python};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::imports::Imports;
@@ -67,6 +69,7 @@ pub fn resolve(mut project: Project) -> Resolved {
         // Per type name: how many type items carry it, and is one a trait.
         let mut types: BTreeMap<&str, (usize, bool)> = BTreeMap::new();
         let py = Python::new(&project.files);
+        let cpp = Cpp::new(&project.files);
         for f in project.files.values() {
             for it in f
                 .code
@@ -85,6 +88,12 @@ pub fn resolve(mut project: Project) -> Resolved {
             .map(|(page, (path, file))| {
                 let sees = sees(page, pages_of);
                 let in_scope = in_scope(path, file, &imports, &index, &py.roots, &project.crates);
+                let included = match file.family {
+                    Family::Cpp => cpp.closure(page),
+                    Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => {
+                        BTreeSet::new()
+                    }
+                };
                 let mut flows = file.flows.clone();
                 for (&item, flow) in &mut flows {
                     // An owner like `<W as Display>` has no key: no own methods.
@@ -97,6 +106,8 @@ pub fn resolve(mut project: Project) -> Resolved {
                         index: &index,
                         page,
                         py: &py,
+                        cpp: &cpp,
+                        included: &included,
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
@@ -123,6 +134,9 @@ struct Caller<'i, 'a> {
     index: &'i Index<'a, File>,
     page: usize,
     py: &'i Python<'a>,
+    cpp: &'i Cpp<'a>,
+    /// The pages a C/C++ caller's file includes, directly or not.
+    included: &'i BTreeSet<usize>,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,
@@ -217,6 +231,9 @@ impl Caller<'_, '_> {
         let rebound = |x: &str| chain.iter().any(|f| f.rebound.contains(x));
         let python = self.file.family == Family::Python;
         match &site.via {
+            CallVia::Bare | CallVia::Path(_) if self.file.family == Family::Cpp => {
+                self.cpp(chain, call)
+            }
             CallVia::Bare
                 if binder(&site.name).is_some()
                     || rebound(&site.name)
@@ -416,12 +433,7 @@ impl Caller<'_, '_> {
 
     fn bare(&self, call: &MapCall) -> Evidence {
         let (s, site) = (&self.scope, &call.site);
-        let (cpp, shell) = match self.file.family {
-            Family::Cpp => (true, false),
-            Family::Shell => (false, true),
-            Family::Rust | Family::Python | Family::Go | Family::Ecma => (false, false),
-        };
-        if shell && site.name.starts_with('$') {
+        if self.file.family == Family::Shell && site.name.starts_with('$') {
             return Evidence::Hidden;
         }
         let external = self.names.external.get(&site.name).copied();
@@ -437,27 +449,20 @@ impl Caller<'_, '_> {
         if let Some(std) = external {
             return self.external(std, s.fns_anywhere(site));
         }
-        let none = || Vec::new();
-        let own = || if cpp { s.own_methods(site) } else { none() };
-        let methods_seen = || if cpp { s.methods_seen(site) } else { none() };
         // A function of another file may be shadowed by an external glob's;
         // a Python name no import names may be a builtin.
         let builtin = self.file.family == Family::Python && !imported;
-        let found = self
-            .first(&[&own, &|| s.fns_here(site)], false)
-            .or_else(|| {
-                // The files a Python import names hold it, or no function.
-                if let Some(from) = self.py.sources(self.page, &site.name) {
-                    let all = s.fns_anywhere(site).into_iter();
-                    let there = || all.clone().filter(|c| from.contains(&c.0)).collect();
-                    return self.first(&[&there], !self.sure(&site.name));
-                }
-                let other: [&dyn Fn() -> Vec<FnRef>; 3] =
-                    [&|| s.fns_seen(site), &methods_seen, &|| {
-                        s.fns_anywhere(site)
-                    }];
-                self.first(&other, builtin || !self.sure(&site.name))
-            });
+        let found = self.first(&[&|| s.fns_here(site)], false).or_else(|| {
+            // The files a Python import names hold it, or no function.
+            if let Some(from) = self.py.sources(self.page, &site.name) {
+                let all = s.fns_anywhere(site).into_iter();
+                let there = || all.clone().filter(|c| from.contains(&c.0)).collect();
+                return self.first(&[&there], !self.sure(&site.name));
+            }
+            let other: [&dyn Fn() -> Vec<FnRef>; 2] =
+                [&|| s.fns_seen(site), &|| s.fns_anywhere(site)];
+            self.first(&other, builtin || !self.sure(&site.name))
+        });
         // A name imported from one own crate is that crate's.
         let krate = self
             .names

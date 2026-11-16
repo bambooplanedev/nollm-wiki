@@ -235,7 +235,8 @@ fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
 
 /// The line of the declaration `me`'s section: the definition the index
 /// pairs it with; else the charted functions of the same language, owner
-/// and name, only those of its own file when it has any, in source order.
+/// and name, only those of its own file when it has any, in source order;
+/// never one another file keeps to itself.
 fn defined_at(index: &Index<File>, p: &Project, names: &Names, me: &FnId) -> String {
     let file = &p.files[&me.path];
     let it = &file.code.items[me.item];
@@ -245,7 +246,13 @@ fn defined_at(index: &Index<File>, p: &Project, names: &Names, me: &FnId) -> Str
         args: None,
         line: it.start_line,
     };
-    let charted = |d: &FnId| d != me && p.files[&d.path].flows.contains_key(&d.item);
+    // A `static` or anonymous-namespace function of another file is not it.
+    let charted = |d: &FnId| {
+        let f = &p.files[&d.path];
+        d != me
+            && f.flows.contains_key(&d.item)
+            && (d.path == me.path || !f.local.contains(&d.item))
+    };
     let paired = (index.page_of(&me.path).into_iter())
         .flat_map(|page| index.pick(page, &site, |c| c == (page, me.item)))
         .map(|(pg, item)| FnId {
@@ -273,7 +280,9 @@ fn defined_at(index: &Index<File>, p: &Project, names: &Names, me: &FnId) -> Str
                     path: path.clone(),
                     item,
                 };
-                all.push((path.as_str(), f.code.items[item].start_line, id));
+                if charted(&id) {
+                    all.push((path.as_str(), f.code.items[item].start_line, id));
+                }
             }
         }
         all.sort();

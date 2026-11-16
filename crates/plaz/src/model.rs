@@ -43,6 +43,16 @@ pub struct File {
     /// body of it holds a `return`, `goto`, `break`, `continue` or `throw`
     /// token; empty for the other languages.
     pub macros: Vec<(String, bool)>,
+    /// The C/C++ function items, by index into `code.items`, that are
+    /// `static` free functions or inside an anonymous namespace: seen only
+    /// where the file is compiled in.
+    pub local: BTreeSet<usize>,
+    /// Per C/C++ function item: its parameter types as written, names,
+    /// default values, whitespace and `struct` dropped (`int,constchar*`).
+    pub params: BTreeMap<usize, String>,
+    /// Every segment of a C/C++ file's named namespaces and every namespace
+    /// alias it defines.
+    pub namespaces: BTreeSet<String>,
 }
 
 /// What a C/C++ function item has in place of a body.

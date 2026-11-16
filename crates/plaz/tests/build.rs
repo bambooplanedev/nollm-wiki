@@ -2768,6 +2768,316 @@ fn a_call_of_a_jumping_macro_from_another_file_is_on_the_coverage_line() {
         .collect();
     assert_eq!(
         coverage,
-        ["Coverage: 2 calls: 0 resolved, 0 one of, 2 outside, 0 hidden. Not drawn: 1 macro jump."]
+        ["Coverage: 2 calls: 0 resolved, 0 one of, 1 outside, 1 hidden. Not drawn: 1 macro jump."]
+    );
+}
+
+/// Each call of the charted function `name` in `path`, in source order,
+/// with its target: `path:line` of the target item, `one of: …`, `outside`
+/// or `hidden`.
+fn cpp_targets(files: &[(&str, &str)], path: &str, name: &str) -> Vec<String> {
+    use plaz::model::Target;
+    let sources = files.iter().map(|(p, t)| (p.to_string(), t.to_string()));
+    let resolved = plaz::resolve::resolve(plaz::source::project(sources));
+    let p = resolved.project();
+    let at = |id: &plaz::model::FnId| {
+        let line = p.files[&id.path].code.items[id.item].start_line;
+        format!("{}:{line}", id.path)
+    };
+    let f = &p.files[path];
+    let (_, flow) = (f.flows.iter())
+        .find(|(&i, _)| f.code.items[i].name == name)
+        .unwrap_or_else(|| panic!("no charted {name} in {path}"));
+    let mut out = Vec::new();
+    flow.each_call(&mut |_, c| {
+        let target = match &c.target {
+            Target::Resolved(id) => at(id),
+            Target::OneOf {
+                candidates,
+                outside,
+            } => {
+                let all: Vec<String> = candidates.iter().map(at).collect();
+                let or = if *outside { ", or outside" } else { "" };
+                format!("one of: {}{or}", all.join(", "))
+            }
+            Target::Outside => "outside".to_string(),
+            Target::Hidden => "hidden".to_string(),
+        };
+        out.push(format!("{} → {target}", c.text));
+    });
+    out
+}
+
+#[test]
+fn a_cpp_call_of_a_bound_name_is_hidden_beside_a_same_named_function() {
+    let src = "int pick(int v) { return v; }\nint run(int (*pick)(int)) { return pick(2); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.c", src)], "src/a.c", "run"),
+        ["pick(2) → hidden"]
+    );
+}
+
+#[test]
+fn a_bare_call_in_a_method_naming_a_project_method_is_hidden_until_class_rules() {
+    let h = "struct Oven {\n    void heat();\n    void tick() { heat(); warm(); }\n};\n";
+    let warm = "void warm() {}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/oven.h", h), ("src/warm.cpp", warm)],
+            "src/oven.h",
+            "tick"
+        ),
+        [
+            "heat() → hidden",
+            "warm() → one of: src/warm.cpp:1, or outside"
+        ]
+    );
+}
+
+#[test]
+fn a_free_function_in_the_callers_file_wins_over_an_included_one() {
+    let h = "int step(double d);\n";
+    let src = "#include \"step.h\"\nint step(int a) { return a; }\nint run() { return step(1); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/step.h", h), ("src/a.c", src)], "src/a.c", "run"),
+        ["step(1) → src/a.c:2"]
+    );
+}
+
+#[test]
+fn a_forward_declaration_folds_onto_its_definition_in_the_same_file() {
+    // REPORT T12, first bullet.
+    let src = "static int twice(int);\nint run(int a) { return twice(a); }\nstatic int twice(int a) { return a * 2; }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.c", src)], "src/a.c", "run"),
+        ["twice(a) → src/a.c:3"]
+    );
+}
+
+#[test]
+fn a_header_declaration_folds_onto_its_definition_with_names_and_defaults_dropped() {
+    let h = "int scale(const struct grid* g, int value, int by = 2);\n";
+    let def =
+        "#include \"scale.h\"\nint scale(const grid *g, const int v, int k) { return v * k; }\n";
+    let main = "#include \"scale.h\"\nint run() { return scale(nullptr, 3); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[
+                ("src/scale.h", h),
+                ("src/scale.cpp", def),
+                ("src/main.cpp", main)
+            ],
+            "src/main.cpp",
+            "run"
+        ),
+        ["scale(nullptr, 3) → src/scale.cpp:2"]
+    );
+}
+
+#[test]
+fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
+    let h = "void put(int n);\n";
+    let def = "void put(double d) {}\n";
+    let main = "#include \"put.h\"\nvoid run() { put(1); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[
+                ("src/put.h", h),
+                ("src/put.cpp", def),
+                ("src/main.cpp", main)
+            ],
+            "src/main.cpp",
+            "run"
+        ),
+        ["put(1) → src/put.h:1"]
+    );
+}
+
+#[test]
+fn a_function_in_the_include_closure_is_certain_when_one_and_one_of_when_several() {
+    let top = "#include \"../lib/mid.h\"\n";
+    let mid = "#include \"deep.h\"\nint pair_of(int a);\n";
+    let deep = "int sink(int a);\nint pair_of(long a);\n";
+    // The definitions, in a file no include reaches.
+    let elsewhere = "int sink(int a) { return a; }\nint sink(long a) { return 1; }\n";
+    let src = "#include \"top.h\"\nint run() { return sink(1) + pair_of(2); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[
+                ("app/top.h", top),
+                ("lib/mid.h", mid),
+                ("lib/deep.h", deep),
+                ("other/sink.c", elsewhere),
+                // Same suffix as the include, not the file it names.
+                ("vendor/lib/mid.h", "int sink(short a);\n"),
+                ("app/main.c", src),
+            ],
+            "app/main.c",
+            "run"
+        ),
+        [
+            "sink(1) → other/sink.c:1",
+            "pair_of(2) → one of: lib/deep.h:2, lib/mid.h:2"
+        ]
+    );
+}
+
+#[test]
+fn a_static_inline_helper_in_a_header_is_certain_only_where_the_header_is_included() {
+    let h = "static inline int clampi(int v) { return v < 0 ? 0 : v; }\n";
+    let with = "#include \"util.h\"\nint run(int v) { return clampi(v); }\n";
+    let without = "int other(int v) { return clampi(v); }\n";
+    let files = [
+        ("src/util.h", h),
+        ("src/with.c", with),
+        ("src/without.c", without),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/with.c", "run"),
+        ["clampi(v) → src/util.h:1"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/without.c", "other"),
+        ["clampi(v) → outside"]
+    );
+}
+
+#[test]
+fn a_project_function_no_include_reaches_may_be_a_c_library_name() {
+    // REPORT T13.
+    let net = "#include <unistd.h>\nvoid hang_up(int fd) { close(fd); }\n";
+    let pool = "void close(int slot) {}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/net.cpp", net), ("src/pool.cpp", pool)],
+            "src/net.cpp",
+            "hang_up"
+        ),
+        ["close(fd) → one of: src/pool.cpp:1, or outside"]
+    );
+}
+
+#[test]
+fn a_static_function_of_another_file_is_no_candidate() {
+    // REPORT T12, second bullet.
+    let a = "static int twice(int a) { return a * 2; }\n";
+    let b = "int run() { return twice(1); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.c", a), ("src/b.c", b)], "src/b.c", "run"),
+        ["twice(1) → outside"]
+    );
+}
+
+#[test]
+fn a_function_in_an_anonymous_namespace_of_another_file_is_no_candidate() {
+    let a = "namespace {\nint twice(int a) { return a * 2; }\n}\nint keep() { return twice(2); }\n";
+    let b = "int run() { return twice(1); }\n";
+    let files = [("src/a.cpp", a), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "keep"),
+        ["twice(2) → src/a.cpp:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/b.cpp", "run"),
+        ["twice(1) → outside"]
+    );
+}
+
+#[test]
+fn a_variadic_function_is_a_candidate_for_any_argument_count() {
+    // REPORT T12, third bullet.
+    let src = "int say(const char* f, ...) { return 0; }\nint run() { return say(\"a\", 1, 2); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.c", src)], "src/a.c", "run"),
+        ["say(\"a\", 1, 2) → src/a.c:1"]
+    );
+}
+
+#[test]
+fn a_bare_call_of_a_project_macro_or_type_is_hidden_anything_else_outside() {
+    let h = "#define CHECKED(x) (x)\nstruct Point { int x; };\n";
+    let src = "#include \"defs.h\"\nint run() { CHECKED(1); Point(2); return puts(\"x\"); }\n";
+    assert_eq!(
+        cpp_targets(&[("inc/defs.h", h), ("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "CHECKED(1) → hidden",
+            "Point(2) → hidden",
+            "puts(\"x\") → outside"
+        ]
+    );
+}
+
+#[test]
+fn a_function_a_project_macro_generates_is_outside() {
+    // A known limitation pinned on purpose: no item stands for `get_depth`.
+    let src = "#define DEFINE_GETTER(x) int get_##x() { return 0; }\nDEFINE_GETTER(depth)\nint run() { return get_depth(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["get_depth() → outside"]
+    );
+}
+
+#[test]
+fn a_std_call_is_outside_and_a_root_the_project_does_not_have_is_outside() {
+    let src = "int run() { std::abs(1); return fmtlib::print(2); }\n";
+    // A same-named project function changes neither, nor a project
+    // specialization in `namespace std`.
+    let other = "int print(int a) { return a; }\nint abs(int a) { return a; }\nnamespace std {\ntemplate <> struct hash<int>;\n}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/a.cpp", src), ("src/print.cpp", other)],
+            "src/a.cpp",
+            "run"
+        ),
+        ["std::abs(1) → outside", "fmtlib::print(2) → outside"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_a_project_type_is_its_member_not_dispatched() {
+    let h = "struct Base {\n    virtual void fill(int n);\n};\nstruct Child : Base {\n    void fill(int n) override { Base::fill(n); }\n};\n";
+    let cpp = "#include \"base.h\"\nvoid Base::fill(int k) {}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/base.h", h), ("src/base.cpp", cpp)],
+            "src/base.h",
+            "fill"
+        ),
+        ["Base::fill(n) → src/base.cpp:2"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_a_project_namespace_reaches_its_free_function() {
+    let h = "namespace core {\nint run(int n);\n}\n";
+    let def = "#include \"core.h\"\nint core::run(int count) { return count; }\n";
+    let main = "#include \"core.h\"\nint start() { return core::run(1); }\n";
+    assert_eq!(
+        cpp_targets(
+            &[
+                ("src/core.h", h),
+                ("src/core.cpp", def),
+                ("src/main.cpp", main)
+            ],
+            "src/main.cpp",
+            "start"
+        ),
+        ["core::run(1) → src/core.cpp:2"]
+    );
+}
+
+#[test]
+fn a_prototype_offers_no_static_definition_of_another_file() {
+    let proto = "int measure(int v);\nint run(int v) { return measure(v); }\n";
+    let shared = "int measure(int v) { return v; }\n";
+    let hidden = "static int measure(int v) { return -v; }\n";
+    let (_d, vault) = common::built(&[
+        ("src/proto.c", proto),
+        ("src/shared.c", shared),
+        ("src/hidden.c", hidden),
+    ]);
+    assert_eq!(
+        common::fn_block(&common::map_page(&vault, "map/src/proto_c"), "measure"),
+        "## measure\n`int measure(int v)` · `src/proto.c:1-1`\n\nDefined at [[map/src/shared_c#measure|measure]]\n\n"
     );
 }

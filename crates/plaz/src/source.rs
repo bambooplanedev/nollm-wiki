@@ -6,9 +6,10 @@ use crate::Error;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use wiki_code::index::Family;
-use wiki_code::model::CallVia;
+use wiki_code::model::{CallVia, CodeItemKind};
+use wiki_code::tree_sitter::Node;
 use wiki_code::walk::walk;
-use wiki_code::{analyze, handles, pair_declarations};
+use wiki_code::{analyze, handles, pair_declarations, Analyzed};
 
 /// `(relative path, text)` pairs in, `Project` out. A code file the parser
 /// fails on is not in `files`; it is listed in `unreadable`. Other non-code
@@ -57,8 +58,14 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             } else {
                 Vec::new()
             },
+            local: BTreeSet::new(),
+            params: BTreeMap::new(),
+            namespaces: BTreeSet::new(),
         };
         flow::attach(&mut file, &a);
+        if family == Family::Cpp {
+            cpp_facts(&mut file, &a);
+        }
         files.insert(path, file);
     }
     pair_declarations(&mut files);
@@ -89,6 +96,109 @@ fn hidden_jumps(files: &mut BTreeMap<String, File>) {
             }
         }
     }
+}
+
+/// What a C/C++ file's trees show that its items do not: which functions
+/// are file-local, each function's parameter types, its namespace names.
+fn cpp_facts(file: &mut File, a: &Analyzed) {
+    let items = file.code.items.iter().zip(&a.defs).enumerate();
+    for (i, (it, def)) in items.filter(|(_, (it, _))| !it.nested) {
+        let fns = matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method);
+        let Some((def, src)) = def.filter(|_| fns).map(|d| (d, &a.sources[d.source])) else {
+            continue;
+        };
+        let Some(node) = src.node(&def) else {
+            continue;
+        };
+        let text = |n: Node| &src.text()[n.byte_range()];
+        let decl = match node.kind() {
+            "template_declaration" => node.named_children(&mut node.walk()).last(),
+            _ => Some(node),
+        };
+        let kids = decl
+            .into_iter()
+            .flat_map(|d| d.children(&mut d.walk()).collect::<Vec<_>>());
+        let is_static = kids
+            .filter(|c| c.kind() == "storage_class_specifier")
+            .any(|c| text(c) == "static");
+        let anonymous = std::iter::successors(node.parent(), Node::parent)
+            .any(|n| n.kind() == "namespace_definition" && n.child_by_field_name("name").is_none());
+        if it.kind == CodeItemKind::Fn && (is_static || anonymous) {
+            file.local.insert(i);
+        }
+        if let Some(p) = params(node, &it.name, src.text()) {
+            file.params.insert(i, p);
+        }
+    }
+    for s in &a.sources {
+        let mut stack = vec![s.tree().root_node()];
+        while let Some(n) = stack.pop() {
+            if let Some(name) = matches!(
+                n.kind(),
+                "namespace_definition" | "namespace_alias_definition"
+            )
+            .then(|| n.child_by_field_name("name"))
+            .flatten()
+            {
+                let segs = s.text()[name.byte_range()].split("::");
+                let segs = segs.map(|g| g.trim().trim_start_matches("inline").trim());
+                file.namespaces
+                    .extend(segs.filter(|g| !g.is_empty()).map(String::from));
+            }
+            stack.extend(n.named_children(&mut n.walk()));
+        }
+    }
+}
+
+/// The parameter types of the function declarator under `node` that
+/// declares `name`, outside any body: each parameter's text with its name,
+/// default value, whitespace, `struct`-like keywords and a by-value
+/// parameter's `const` dropped, joined by `,`; `(void)` is `()`.
+fn params(node: Node, name: &str, src: &str) -> Option<String> {
+    let text = |n: Node| &src[n.byte_range()];
+    let mut stack = vec![node];
+    let f = loop {
+        let n = stack.pop()?;
+        let declares = n
+            .child_by_field_name("declarator")
+            .is_some_and(|d| text(d).ends_with(name));
+        if n.kind() == "function_declarator" && declares {
+            break n;
+        }
+        if n.kind() != "compound_statement" {
+            stack.extend(n.named_children(&mut n.walk()));
+        }
+    };
+    let list = f.child_by_field_name("parameters")?;
+    let mut out = Vec::new();
+    for p in list.children(&mut list.walk()) {
+        if matches!(p.kind(), "(" | ")" | "," | "comment") {
+            continue;
+        }
+        let end = p
+            .child_by_field_name("default_value")
+            .map_or(p.end_byte(), |d| d.start_byte());
+        // The parameter's own name: the innermost declarator.
+        let mut d = p.child_by_field_name("declarator");
+        while let Some(n) = d.filter(|n| n.kind() != "identifier") {
+            d = n
+                .child_by_field_name("declarator")
+                .or_else(|| n.named_child(0));
+        }
+        let cut = d.map_or(end..end, |n| n.start_byte().min(end)..n.end_byte().min(end));
+        let kept = [&src[p.start_byte()..cut.start], &src[cut.end..end]].concat();
+        // `struct T*` and `T*` are one type in C++; so are `const T` and
+        // `T` passed by value.
+        let by_value = !kept.contains(['*', '&', '[', '(', '<']);
+        let words = kept.split_whitespace();
+        let kept: String = words
+            .filter(|w| !matches!(*w, "struct" | "class" | "union" | "enum"))
+            .filter(|w| !(by_value && matches!(*w, "const" | "volatile")))
+            .collect();
+        out.push(kept.trim_end_matches('=').to_string());
+    }
+    let all = out.join(",");
+    Some(if all == "void" { String::new() } else { all })
 }
 
 fn manifest(path: &str) -> bool {
