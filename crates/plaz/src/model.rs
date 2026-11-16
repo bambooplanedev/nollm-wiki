@@ -24,9 +24,9 @@ pub struct File {
     pub family: Family,
     /// Keyed by index into `code.items`.
     pub flows: BTreeMap<usize, Flow>,
-    /// The function items whose node is a body-less declaration (C/C++),
-    /// by index into `code.items`: a section each, with no flow.
-    pub declarations: BTreeSet<usize>,
+    /// The C/C++ function items with no body to chart, by index into
+    /// `code.items`: a section each, with no flow.
+    pub declarations: BTreeMap<usize, Bodiless>,
     /// True when any of the file's trees has an error node.
     pub syntax_errors: bool,
     /// The file's line count, at least 1.
@@ -39,6 +39,17 @@ pub struct File {
     /// A call or a decision at module level (Python), a declaration
     /// outside any function initialized by a call (C/C++): no flow shows it.
     pub module_code: bool,
+}
+
+/// What a C/C++ function item has in place of a body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Bodiless {
+    /// A declaration: `void f(int);`, a pure virtual.
+    Declared,
+    /// `= default`.
+    Defaulted,
+    /// `= delete`.
+    Deleted,
 }
 
 /// One name a Python import statement imports.
@@ -106,6 +117,11 @@ pub enum NotDrawn {
     Preprocessor,
     /// A call with no call site: `new T(…)`, a call through an expression.
     Untraced,
+    /// A `case` label inside a statement in a switch (Duff's device): no
+    /// edge enters it.
+    NestedCase,
+    /// A statement in a switch before its first label: no arm holds it.
+    BeforeCase,
 }
 
 impl NotDrawn {
@@ -120,6 +136,8 @@ impl NotDrawn {
             NotDrawn::Goto => "goto",
             NotDrawn::Preprocessor => "#if",
             NotDrawn::Untraced => "call not traced",
+            NotDrawn::NestedCase => "nested case",
+            NotDrawn::BeforeCase => "code before the first case",
         }
     }
 }

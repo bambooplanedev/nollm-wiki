@@ -2,7 +2,7 @@
 //! outside its functions.
 
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
-use crate::model::{ExitKind, NotDrawn};
+use crate::model::{Bodiless, ExitKind, NotDrawn};
 use std::collections::BTreeSet;
 use std::ops::Range;
 use wiki_code::model::{CallSite, CallVia};
@@ -60,6 +60,8 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "#if" | "#ifdef" | "#ifndef" if n.parent().is_some_and(holds_case) => {
             FlowNode::NotDrawn(NotDrawn::Preprocessor)
         }
+        // Every label a switch draws as an arm is an arm's `at`, never walked.
+        "case_statement" => FlowNode::NotDrawn(NotDrawn::NestedCase),
         "lambda_expression" if field("body").is_some() => FlowNode::Nested {
             name: n
                 .parent()
@@ -241,7 +243,8 @@ fn switch<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
     // Per arm: its labels, its body, and whether the body has a statement
     // yet; a label before any statement stacks onto the arm.
     let mut runs: Vec<(Vec<Node>, Vec<Node>, bool)> = Vec::new();
-    // Group tokens before the first label; statements there never run.
+    // Group tokens before the first label; statements there run only by a
+    // `goto`, counted by `before_case`.
     let mut early = Vec::new();
     for c in entries {
         let label = c.kind() == "case_statement";
@@ -308,6 +311,48 @@ fn flatten<'a>(nodes: impl Iterator<Item = Node<'a>>, src: &str, out: &mut Vec<N
             _ => out.push(c),
         }
     }
+}
+
+/// The statements of each switch under `n` that come before its first
+/// label: only a `goto` reaches them, and no arm draws them.
+pub(super) fn before_case(n: Node, src: &str) -> usize {
+    let mut count = 0;
+    let mut stack = vec![n];
+    while let Some(c) = stack.pop() {
+        if let Some(b) = c
+            .child_by_field_name("body")
+            .filter(|_| c.kind() == "switch_statement")
+        {
+            let mut entries = Vec::new();
+            flatten(b.named_children(&mut b.walk()), src, &mut entries);
+            count += (entries.iter())
+                .take_while(|e| e.kind() != "case_statement")
+                .filter(|e| e.is_named())
+                .count();
+        }
+        stack.extend(c.named_children(&mut c.walk()));
+    }
+    count
+}
+
+/// What a function item's node has in place of a body to chart; `None`
+/// for a definition with a block (or a function-try-block) body.
+pub(super) fn bodiless(node: Node) -> Option<Bodiless> {
+    if node.kind() != "function_definition" {
+        return Some(Bodiless::Declared);
+    }
+    let body = node.child_by_field_name("body").map(|b| b.kind());
+    if matches!(body, Some("compound_statement" | "try_statement")) {
+        return None;
+    }
+    let clause = |k: &str| node.named_children(&mut node.walk()).any(|c| c.kind() == k);
+    Some(if clause("default_method_clause") {
+        Bodiless::Defaulted
+    } else if clause("delete_method_clause") {
+        Bodiless::Deleted
+    } else {
+        Bodiless::Declared
+    })
 }
 
 /// The body as the arm `try`, each `catch (…)` as an arm.

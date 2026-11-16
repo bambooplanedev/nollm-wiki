@@ -154,9 +154,12 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
         let Some(mut node) = source.node(def) else {
             continue;
         };
-        if file.family == Family::Cpp && node.kind() != "function_definition" {
+        if let Some(b) = (file.family == Family::Cpp)
+            .then(|| cpp::bodiless(node))
+            .flatten()
+        {
             if !it.test {
-                file.declarations.insert(i);
+                file.declarations.insert(i, b);
             }
             continue;
         }
@@ -181,8 +184,17 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
             comments: comments(source, node),
         };
         let mut flow = w.flow(node);
-        if hidden > 0 {
-            *flow.not_drawn.entry(NotDrawn::Preprocessor).or_default() += hidden;
+        let early = match file.family {
+            Family::Cpp => cpp::before_case(node, source.text()),
+            Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => 0,
+        };
+        for (k, n) in [
+            (NotDrawn::Preprocessor, hidden),
+            (NotDrawn::BeforeCase, early),
+        ] {
+            if n > 0 {
+                *flow.not_drawn.entry(k).or_default() += n;
+            }
         }
         file.flows.insert(i, flow);
     }

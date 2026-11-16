@@ -3,7 +3,7 @@
 
 use crate::chart::{chart, coverage, relative};
 use crate::flow::hooks;
-use crate::model::{File, Flow, FnId, Project, Target};
+use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
 use crate::resolve::Resolved;
 use crate::write::Links;
@@ -74,7 +74,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
             let mut items: Vec<usize> = file
                 .flows
                 .keys()
-                .chain(&file.declarations)
+                .chain(file.declarations.keys())
                 .copied()
                 .collect();
             items.sort_unstable();
@@ -91,7 +91,11 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     links.code(path, it.start_line, it.end_line)
                 ));
                 let Some(flow) = file.flows.get(&item) else {
-                    out.push_str(&defined_at(&index, p, names, &me));
+                    out.push_str(&match file.declarations.get(&item) {
+                        Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
+                        Some(Bodiless::Deleted) => "Deleted.\n".to_string(),
+                        Some(Bodiless::Declared) | None => defined_at(&index, p, names, &me),
+                    });
                     continue;
                 };
                 out.push_str(&called_from(p, names, &me));

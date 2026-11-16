@@ -2739,3 +2739,19 @@ fn a_function_both_trees_list_is_one_call_target_with_a_heading() {
         ["`span(1)` L8 → [[map/a_cpp#span|span]]"]
     );
 }
+
+#[test]
+fn a_defaulted_or_deleted_function_says_so_and_has_no_chart() {
+    let h = "class Pot {\npublic:\n    Pot() = default;\n    Pot(const Pot&) = delete;\n    int size() const { return 1; }\n};\n";
+    let (_d, vault) = common::built(&[("src/pot.h", h)]);
+    let page = common::map_page(&vault, "map/src/pot_h");
+    assert_eq!(headings(&page), ["pot_pot", "pot_pot_2", "pot_size"]);
+    assert_eq!(
+        common::fn_block(&page, "pot_pot"),
+        "## pot_pot\n`Pot() = default` · `src/pot.h:3-3`\n\nDefaulted.\n\n"
+    );
+    assert_eq!(
+        common::fn_block(&page, "pot_pot_2"),
+        "## pot_pot_2\n`Pot(const Pot&) = delete` · `src/pot.h:4-4`\n\nDeleted.\n\n"
+    );
+}

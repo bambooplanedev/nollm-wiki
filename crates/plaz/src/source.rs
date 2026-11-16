@@ -50,7 +50,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             lines: text.lines().count().max(1),
             code: a.file.clone(),
             flows: BTreeMap::new(),
-            declarations: BTreeSet::new(),
+            declarations: BTreeMap::new(),
         };
         flow::attach(&mut file, &a);
         files.insert(path, file);

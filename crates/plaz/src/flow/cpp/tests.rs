@@ -1,6 +1,6 @@
 //! Tests for `flow::cpp`.
 use crate::flow::testutil::{file, flow_lines, not_drawn};
-use crate::model::Step;
+use crate::model::{Bodiless, Step};
 
 /// The node and edge lines of the chart of `name` in the C++ file `src`.
 fn drawn(src: &str, name: &str) -> Vec<String> {
@@ -357,7 +357,63 @@ fn a_body_less_declaration_is_no_flow() {
     };
     assert_eq!(names(f.flows.keys().copied().collect()), ["heat"]);
     assert_eq!(
-        names(f.declarations.iter().copied().collect()),
+        names(f.declarations.keys().copied().collect()),
         ["Kiln", "fire", "vent"]
+    );
+    assert!(f.declarations.values().all(|b| *b == Bodiless::Declared));
+}
+
+#[test]
+fn a_defaulted_or_deleted_function_is_no_flow() {
+    let src = "class Pot {\npublic:\n    Pot() = default;\n    Pot(const Pot&) = delete;\n    int size() const { return 1; }\n};\n";
+    let f = file("a.h", src);
+    let named = |i: &usize| f.code.items[*i].signature.clone();
+    assert_eq!(
+        f.flows.keys().map(named).collect::<Vec<_>>(),
+        ["int size() const"]
+    );
+    let bodiless: Vec<_> = f.declarations.iter().map(|(i, b)| (named(i), *b)).collect();
+    assert_eq!(
+        bodiless,
+        [
+            ("Pot() = default".to_string(), Bodiless::Defaulted),
+            ("Pot(const Pot&) = delete".to_string(), Bodiless::Deleted),
+        ]
+    );
+}
+
+#[test]
+fn a_case_inside_a_statement_in_a_switch_is_counted_and_its_code_drawn_in_place() {
+    let src = "void pump(int n) {\n    switch (n % 2) {\n    case 0:\n        do {\n            lift();\n    case 1:\n            drop();\n        } while (--n > 0);\n    }\n}\n";
+    assert_eq!(
+        flow_lines("a.cpp", src, "pump"),
+        [
+            "branch switch (n % 2) @2 breakable",
+            "  arm case 0: @3",
+            "    loop while (--n > 0) @4 after",
+            "      call lift() @5",
+            "      call drop() @7",
+        ]
+    );
+    assert_eq!(
+        not_drawn("a.cpp", src, "pump"),
+        [("nested case".to_string(), 1)]
+    );
+}
+
+#[test]
+fn code_before_the_first_case_is_counted_not_drawn() {
+    let src = "void pick(int x) {\n    switch (x) {\n        prep();\n        int k = 2;\n    case 2:\n        two(k);\n    }\n}\n";
+    assert_eq!(
+        flow_lines("a.cpp", src, "pick"),
+        [
+            "branch switch (x) @2 breakable",
+            "  arm case 2: @5",
+            "    call two(k) @6",
+        ]
+    );
+    assert_eq!(
+        not_drawn("a.cpp", src, "pick"),
+        [("code before the first case".to_string(), 2)]
     );
 }
