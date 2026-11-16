@@ -2,6 +2,8 @@
 //! (`File::classes`): what its bases are, which classes derive from it,
 //! and what name lookup finds from it.
 
+mod field;
+
 use super::{fits, Cpp};
 use crate::source::untemplated;
 use std::collections::{BTreeMap, BTreeSet};
@@ -43,15 +45,6 @@ pub(super) struct Found {
     /// Found only through dependent bases, which a bare call in the
     /// template does not search.
     pub dependent: bool,
-}
-
-/// A data member name lookup finds.
-pub(super) struct Field<'a> {
-    /// Its written type (`File::fields`).
-    pub ty: Option<&'a str>,
-    /// The class declaring it, and the page holding that class's head.
-    pub class: &'a str,
-    pub page: usize,
 }
 
 /// The pages a caller's file sees: its own and its include closure.
@@ -555,46 +548,6 @@ impl<'a> Cpp<'a> {
             level = next;
         }
         Err(missing)
-    }
-
-    /// The data member `name` that lookup from `class` finds in it or its
-    /// nearest project bases: none when no class on the way declares it,
-    /// or when a class no head settles, a base no head places, a dependent
-    /// base or two classes of one level may hold it instead.
-    pub(super) fn field(&self, class: &'a str, name: &str, sight: Sight) -> Option<Field<'a>> {
-        let mut seen = BTreeSet::from([class]);
-        let mut level = vec![class];
-        while !level.is_empty() {
-            let mut found = Vec::new();
-            for &c in &level {
-                let heads = self.classes.heads.get(c)?;
-                let page = match self.seen_head(c, Some(sight)) {
-                    Some(p) => p,
-                    None if heads.len() == 1 => *heads.keys().next()?,
-                    None => return None,
-                };
-                let ty = self.pages[page].1.fields.get(c).and_then(|f| f.get(name));
-                found.extend(ty.map(|ty| Field {
-                    ty: ty.as_deref(),
-                    class: c,
-                    page,
-                }));
-            }
-            if !found.is_empty() {
-                return found.pop().filter(|_| found.is_empty());
-            }
-            let mut next = Vec::new();
-            let bases = level.iter().filter_map(|c| self.bases_of(c, sight));
-            for b in bases.flatten() {
-                match b {
-                    Base::Class(p, false) if seen.insert(p) => next.push(p),
-                    Base::Class(_, false) | Base::Outside => {}
-                    Base::Class(_, true) | Base::Unseen => return None,
-                }
-            }
-            level = next;
-        }
-        None
     }
 
     /// Is `c` a pure virtual declaration (`virtual int f() = 0`)?
