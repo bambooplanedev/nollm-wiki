@@ -81,6 +81,13 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             {
                 let segs = segments(&s.text()[name.byte_range()]);
                 file.namespaces.extend(segs.map(|g| g.0.to_string()));
+                let named = n.named_children(&mut n.walk()).last();
+                if let Some(t) = named.filter(|_| n.kind() == "namespace_alias_definition") {
+                    let t: String = s.text()[t.byte_range()].split_whitespace().collect();
+                    let t = t.trim_start_matches("::").to_string();
+                    file.namespace_aliases
+                        .insert(s.text()[name.byte_range()].to_string(), t);
+                }
             }
             class_head(file, n, s.text(), &anon);
             alias(file, n, s.text(), &anon);

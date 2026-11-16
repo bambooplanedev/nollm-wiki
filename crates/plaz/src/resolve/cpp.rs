@@ -314,6 +314,11 @@ impl Caller<'_, '_> {
         let (cpp, site) = (self.cpp, &call.site);
         // `Box<int>` of `Box<int>::f()` is the type `Box`.
         let root = call.root.as_deref().map_or(q, owner_key);
+        // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
+        // `filesystem`) starts at `std`.
+        let mut pages = std::iter::once(&self.page).chain(self.included);
+        let alias = pages.find_map(|&p| cpp.pages[p].1.namespace_aliases.get(root));
+        let root = alias.map_or(root, |a| a.split("::").next().unwrap_or(""));
         let project =
             cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
         if (chain.iter()).any(|f| f.rebound.contains(root)) {

@@ -4378,3 +4378,18 @@ fn a_declaration_no_definitions_file_includes_is_any_programs_definition() {
         ["count(1) → src/count.cpp:2"]
     );
 }
+
+#[test]
+fn a_namespace_alias_is_the_namespace_it_names() {
+    let h = "namespace kit {\nnamespace ui {\nvoid draw(int n);\n}\n}\n";
+    let def = "#include \"ui.h\"\nnamespace kit {\nnamespace ui {\nvoid draw(int n) {}\n}\n}\n";
+    let src = "#include \"ui.h\"\nnamespace fs = std::filesystem;\nnamespace kui = ::kit::ui;\nvoid run() {\n    fs::create_directories(\"x\");\n    kui::draw(1);\n}\n";
+    let files = [("src/ui.h", h), ("src/ui.cpp", def), ("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        [
+            "fs::create_directories(\"x\") → outside",
+            "kui::draw(1) → src/ui.cpp:4"
+        ]
+    );
+}

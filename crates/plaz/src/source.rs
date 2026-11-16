@@ -70,6 +70,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             local: BTreeSet::new(),
             params: BTreeMap::new(),
             namespaces: BTreeSet::new(),
+            namespace_aliases: BTreeMap::new(),
             scopes: BTreeMap::new(),
             usings: BTreeSet::new(),
             file_usings: BTreeSet::new(),
