@@ -240,6 +240,23 @@ fn a_brace_split_function_is_charted_from_the_first_branch_with_its_groups_count
 }
 
 #[test]
+fn a_whole_block_under_a_group_in_a_first_branch_chart_is_a_branch_its_group_may_skip() {
+    // A group holding no step stays counted.
+    let src = format!("void pick(float * MY_RESTRICT s) {{\n#if defined(USE_FAST)\n    {{\n        fast(s);\n        return;\n    }}\n#endif\n#ifdef WIDE\n#define STEP 2\n#endif\n    slow(s);\n}}\n\n{SPLIT}");
+    assert_eq!(
+        flow_lines("a.cpp", &src, "pick"),
+        [
+            "branch @2",
+            "  arm #if defined(USE_FAST) @2",
+            "    call fast(s) @4",
+            "    exit return; @5",
+            "call slow(s) @11"
+        ]
+    );
+    assert_eq!(not_drawn("a.cpp", &src, "pick"), [("#if".to_string(), 1)]);
+}
+
+#[test]
 fn a_function_both_trees_list_gets_one_flow() {
     let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\n";
     let f = file("a.cpp", src);

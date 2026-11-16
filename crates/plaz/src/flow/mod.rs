@@ -9,6 +9,7 @@ pub(crate) use cpp::{fields as cpp_fields, macros as cpp_macros, module_code as 
 pub(crate) use python::{module_code, module_imports};
 
 use crate::model::{Arm, Comment, ExitKind, File, Flow, MapCall, NotDrawn, Step, Target};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use wiki_code::index::Family;
@@ -170,7 +171,7 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
             file.test_fns += 1;
             continue;
         }
-        let mut hidden = 0;
+        let mut groups = Vec::new();
         if def.source < main {
             let whole = &analyzed.sources[main];
             match whole
@@ -178,15 +179,18 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
                 .filter(|m| m.kind() == "function_definition" && !m.has_error())
             {
                 Some(m) => (source, node) = (whole, m),
-                None => hidden = cpp::directive_groups(source.text(), def.start_byte..def.end_byte),
+                None => groups = cpp::directive_groups(source.text(), def.start_byte..def.end_byte),
             }
         }
         let w = Walker {
             source,
             hooks,
             comments: comments(source, node),
+            groups,
+            drawn: RefCell::new(BTreeSet::new()),
         };
         let mut flow = w.flow(node);
+        let hidden = w.groups.len() - w.drawn.borrow().len();
         let early = match file.family {
             Family::Cpp => cpp::before_case(node, source.text()),
             Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => 0,
@@ -239,6 +243,10 @@ struct Walker<'s> {
     source: &'s Source,
     hooks: &'static Hooks,
     comments: Vec<Note>,
+    /// Charting from a C/C++ first-branch tree: the directive groups in
+    /// the function's range, and the indices of those drawn as branches.
+    groups: Vec<cpp::Group>,
+    drawn: RefCell<BTreeSet<usize>>,
 }
 
 fn text<'t>(n: Node, src: &'t str) -> &'t str {
@@ -272,8 +280,46 @@ impl<'s> Walker<'s> {
     }
 
     fn children(&self, n: Node, flow: &mut Flow, out: &mut Vec<Step>) {
-        for c in n.children(&mut n.walk()) {
-            self.walk(c, flow, out);
+        let kids: Vec<Node> = n.children(&mut n.walk()).collect();
+        self.run(&kids, &n.byte_range(), flow, out);
+    }
+
+    /// Walks `kids` in order. A run of them in the first branch of a
+    /// directive group opening in `within` is that group's one arm when it
+    /// has a step: the group's other branches skip it.
+    fn run(&self, kids: &[Node], within: &Range<usize>, flow: &mut Flow, out: &mut Vec<Step>) {
+        let mut kids = kids.iter().copied().peekable();
+        while let Some(c) = kids.next() {
+            let Some((i, g)) = cpp::holding(&self.groups, c, within) else {
+                self.walk(c, flow, out);
+                continue;
+            };
+            let mut body = vec![c];
+            body.extend(std::iter::from_fn(|| {
+                kids.next_if(|k| k.end_byte() <= g.body.end)
+            }));
+            let mut steps = Vec::new();
+            self.run(&body, &g.body, flow, &mut steps);
+            // A group holding no step (a `#define`) stays counted.
+            if steps.is_empty() {
+                continue;
+            }
+            self.drawn.borrow_mut().insert(i);
+            out.push(Step::Branch {
+                head: None,
+                line: g.line,
+                arms: vec![Arm {
+                    cond: Some(g.cond.clone()),
+                    line: g.line,
+                    comment: None,
+                    pre: Vec::new(),
+                    body: steps,
+                    falls: false,
+                    after: Vec::new(),
+                }],
+                exhaustive: false,
+                breakable: false,
+            });
         }
     }
 
