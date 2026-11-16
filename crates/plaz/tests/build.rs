@@ -2943,16 +2943,16 @@ fn a_function_in_the_include_closure_is_certain_when_one_and_one_of_when_several
                 ("app/top.h", top),
                 ("lib/mid.h", mid),
                 ("lib/deep.h", deep),
-                ("other/sink.c", elsewhere),
+                ("other/sink.cpp", elsewhere),
                 // Same suffix as the include, not the file it names.
                 ("vendor/lib/mid.h", "int sink(short a);\n"),
-                ("app/main.c", src),
+                ("app/main.cpp", src),
             ],
-            "app/main.c",
+            "app/main.cpp",
             "run"
         ),
         [
-            "sink(1) → other/sink.c:2",
+            "sink(1) → other/sink.cpp:2",
             "pair_of(2) → one of: lib/deep.h:2, lib/mid.h:2"
         ]
     );
@@ -4834,27 +4834,27 @@ fn a_call_of_a_function_template_with_an_explicit_specialization_is_never_certai
 #[test]
 fn a_bare_call_a_using_declaration_of_an_outside_function_reaches_may_be_outside() {
     // A project `namespace std` block is still no project function's.
-    let h = "#include <string>\nnamespace std {\ntemplate <> struct hash<int>;\n}\nnamespace util {\nstd::string to_text(int x);\ntemplate <typename T>\nstd::string to_text(const T& t)\n{\n    using std::to_text;\n    return to_text(t);\n}\n}\n";
-    let def =
-        "#include \"conv.h\"\nnamespace util {\nstd::string to_text(int x) { return {}; }\n}\n";
-    let at_file = "#include \"conv.h\"\nnamespace ol = other_lib;\nusing ol::to_text;\nusing namespace util;\nstd::string show(int x) { return to_text(x); }\n";
-    let own = "#include \"conv.h\"\nusing util::to_text;\nstd::string mine(int x) { return to_text(x); }\n";
+    let h = "#include <utility>\nnamespace std {\ntemplate <> struct hash<int>;\n}\nnamespace geo {\nstruct Pt { int x; };\nvoid swap(Pt& a, Pt& b);\ntemplate <typename T>\nvoid swap(T* a, T* b) {}\ntemplate <typename T>\nvoid reorder(T& a, T& b)\n{\n    using std::swap;\n    swap(a, b);\n}\n}\n";
+    let def = "#include \"geo.h\"\nnamespace geo {\nvoid swap(Pt& a, Pt& b) {}\n}\n";
+    let at_file = "#include <other_lib.h>\n#include \"geo.h\"\nnamespace ol = other_lib;\nusing ol::swap;\nusing namespace geo;\nvoid show(Pt& a, Pt& b) { swap(a, b); }\n";
+    let own =
+        "#include \"geo.h\"\nusing geo::swap;\nvoid mine(geo::Pt& a, geo::Pt& b) { swap(a, b); }\n";
     let files = [
-        ("src/conv.h", h),
-        ("src/conv.cpp", def),
+        ("src/geo.h", h),
+        ("src/geo.cpp", def),
         ("src/show.cpp", at_file),
         ("src/mine.cpp", own),
     ];
     assert_eq!(
-        cpp_targets(&files, "src/conv.h", "to_text"),
-        ["to_text(t) → one of: src/conv.cpp:3, src/conv.h:7, or outside"]
+        cpp_targets(&files, "src/geo.h", "reorder"),
+        ["swap(a, b) → one of: src/geo.cpp:3, src/geo.h:8, or outside"]
     );
     assert_eq!(
         cpp_targets(&files, "src/show.cpp", "show"),
-        ["to_text(x) → one of: src/conv.cpp:3, src/conv.h:7, or outside"]
+        ["swap(a, b) → one of: src/geo.cpp:3, src/geo.h:8, or outside"]
     );
     assert_eq!(
         cpp_targets(&files, "src/mine.cpp", "mine"),
-        ["to_text(x) → one of: src/conv.cpp:3, src/conv.h:7"]
+        ["swap(a, b) → one of: src/geo.cpp:3, src/geo.h:8"]
     );
 }

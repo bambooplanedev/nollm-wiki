@@ -753,13 +753,13 @@ fn a_macro_that_jumps_in_one_file_counts_wherever_it_is_defined_without() {
 
 #[test]
 fn a_statement_macro_without_a_semicolon_counts_the_call_it_swallows() {
-    let src = "void sort_rows(const struct params * p, struct tensor * dst) {\n    TENSOR_LOCALS\n    CHECK(nb0 == size(p));\n    MUTEX_GUARD lock(dst);\n    rows(dst);\n}\n";
+    let src = "void tint(const struct palette * pal, struct layer * out) {\n    LAYER_PROLOGUE\n    ENSURE(depth == hue(pal));\n    SCOPED_HOLD hold(out);\n    blit(out);\n}\n";
     assert_eq!(
-        flow_lines("a.cpp", src, "sort_rows"),
-        ["call size(p) @3", "call rows(dst) @5"]
+        flow_lines("a.cpp", src, "tint"),
+        ["call hue(pal) @3", "call blit(out) @5"]
     );
     assert_eq!(
-        not_drawn("a.cpp", src, "sort_rows"),
+        not_drawn("a.cpp", src, "tint"),
         [("call not traced".to_string(), 1)]
     );
 }
