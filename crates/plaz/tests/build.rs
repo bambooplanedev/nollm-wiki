@@ -4145,3 +4145,23 @@ fn a_method_returning_a_pointer_or_reference_is_no_data_member() {
         ]
     );
 }
+
+#[test]
+fn a_smart_pointer_of_a_template_parameter_is_no_project_class() {
+    let src = "struct Engine {\n    void start() {}\n};\ntemplate <class Engine>\nvoid boot(std::unique_ptr<Engine> e) { e->start(); }\ntemplate <class Engine>\nstruct Pad {\n    void run(std::shared_ptr<Engine> e) { e->start(); }\n};\n";
+    let open = ["e->start() → one of: src/a.cpp:2, or outside"];
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "boot"),
+        open
+    );
+    assert_eq!(cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"), open);
+}
+
+#[test]
+fn a_project_class_with_a_template_parameter_argument_keeps_its_type() {
+    let src = "template <class T>\nstruct Box {\n    int size() { return 0; }\n};\nstruct Tray {\n    int size() { return 1; }\n};\ntemplate <class T>\nint count(Box<T>& b) { return b.size(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "count"),
+        ["b.size() → src/a.cpp:3"]
+    );
+}
