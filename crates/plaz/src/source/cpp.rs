@@ -104,19 +104,38 @@ fn namespace(file: &mut File, n: Node, src: &str) {
     }
 }
 
-/// The class heads the grammar misread in a file (`class API Win :
-/// public Base {` or `class Win API {`): the bytes of the two words
-/// between `class` (`struct`, `union`) and the base clause or body.
+/// The class heads and function names the grammar misread in a file
+/// (`class API Win : public Base {`, `class Win API {`, `API ret_t
+/// f(…)`): the bytes of the two words of each, one of them a macro.
 pub(super) fn misread_heads(a: &Analyzed) -> Vec<[Range<usize>; 2]> {
-    let mut out = Vec::new();
+    let mut out = BTreeSet::new();
     for s in &a.sources {
         let mut stack = vec![s.tree().root_node()];
         while let Some(n) = stack.pop() {
             stack.extend(n.named_children(&mut n.walk()));
-            out.extend(misread_head(n, s.text()).filter(|h| !out.contains(h)));
+            let words = misread_head(n, s.text()).or_else(|| misread_name(n, s.text()));
+            out.extend(words.map(|[a, b]| (a.start, a.end, b.start, b.end)));
         }
     }
-    out
+    out.into_iter().map(|w| [w.0..w.1, w.2..w.3]).collect()
+}
+
+/// The words before a function's name when the grammar misread a macro
+/// before its return type (`API ret_t f(…)` read as `ret_t::f` of the
+/// type `API`): the declaration's type and the scope that has no `::`.
+fn misread_name(n: Node, src: &str) -> Option<[Range<usize>; 2]> {
+    let named = n
+        .child_by_field_name("declarator")
+        .filter(|_| n.kind() == "function_declarator");
+    let named = named.filter(|d| d.kind() == "qualified_identifier")?;
+    let (scope, name) = (
+        named.child_by_field_name("scope")?,
+        named.child_by_field_name("name")?,
+    );
+    let spaced = src[scope.end_byte()..name.start_byte()].trim().is_empty();
+    let ty = n.parent()?.child_by_field_name("type");
+    let ty = ty.filter(|t| spaced && t.kind() == "type_identifier")?;
+    Some([ty.byte_range(), scope.byte_range()])
 }
 
 /// `n`'s two words when `n` is the `class A` of a head the grammar

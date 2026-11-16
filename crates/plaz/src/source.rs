@@ -21,8 +21,9 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     let mut unreadable = Vec::new();
     let mut crates = BTreeSet::new();
     let mut objc_paths = Vec::new();
-    // C/C++ files with a class head the grammar misread, read again once
-    // every file's macros are known: path, text, heads, file as read.
+    // C/C++ files with a class head or function name the grammar misread,
+    // read again once every file's macros are known: path, text, the
+    // misread words, file as read.
     let mut misread = Vec::new();
     for (path, text) in sources {
         if manifest(&path) {

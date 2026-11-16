@@ -99,7 +99,7 @@ impl<'a> Cpp<'a> {
                     out.types.insert(&it.name);
                 }
                 let owner = it.owner.as_deref().map(owner_key);
-                let misread = it.kind == CodeItemKind::Method && !file.classes.contains_key(&i);
+                let misread = out.misread((page, i));
                 out.types
                     .extend(owner.filter(|o| !misread && !out.namespaces.contains(o)));
                 if !matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) || it.nested {
@@ -181,6 +181,12 @@ impl<'a> Cpp<'a> {
     fn is_c(&self, page: usize) -> bool {
         // `.C` is C++.
         std::path::Path::new(self.pages[page].0).extension() == Some("c".as_ref())
+    }
+
+    /// Is `c` a method no class holds: a name the grammar misread?
+    fn misread(&self, c: FnRef) -> bool {
+        let file = self.pages[c.0].1;
+        file.code.items[c.1].kind == CodeItemKind::Method && !file.classes.contains_key(&c.1)
     }
 
     fn local(&self, c: FnRef) -> bool {
@@ -426,9 +432,10 @@ impl Caller<'_, '_> {
         self.made(name, Evidence::Outside)
     }
 
-    /// `or`, a bare call of `name`, unless it reads outside the project
-    /// and `name` is a project macro or names a project type, which the
-    /// call constructs: then not visible. Not when no class of that name
+    /// `or`, a bare call of `name`, unless it reads outside the project:
+    /// then any project function of that name misread as a method, or
+    /// something outside; with none, not visible when `name` is a project
+    /// macro or names a project type, which the call constructs. Not when no class of that name
     /// is in reach and every project alias of it in reach names a type
     /// shown to be from outside: of `std`, or qualified by no project
     /// namespace or type.
@@ -442,6 +449,16 @@ impl Caller<'_, '_> {
             return or;
         }
         let cpp = self.cpp;
+        // A function whose name a macro before its return type misread as
+        // a method's: any of those, or something outside.
+        let named = cpp.by_name.get(name).into_iter().flatten();
+        let misread: Vec<FnRef> = named.copied().filter(|&c| cpp.misread(c)).collect();
+        if !misread.is_empty() {
+            return Evidence::Found {
+                fns: self.ids(misread),
+                open: true,
+            };
+        }
         let aliased = cpp.alias_targets(name, self.sight());
         let outside = |t: &str| match t.split_once("::") {
             Some(("std", _)) => true,

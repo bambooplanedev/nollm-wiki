@@ -4545,3 +4545,34 @@ fn a_bare_call_of_an_alias_reads_outside_only_on_evidence_its_type_is_from_outsi
         ["Buf(3) → hidden"]
     );
 }
+
+#[test]
+fn a_function_with_a_macro_before_its_return_type_is_a_function() {
+    // A long return type name (`tap_outcome_kind`) is what makes the
+    // grammar read `TAP_API tap_outcome_kind tap_open` as `tap_outcome_kind::tap_open`.
+    let h = "#define TAP_API extern\ntypedef int tap_outcome_kind;\ntypedef struct tap_dev tap_dev;\nTAP_API tap_outcome_kind tap_open(const tap_dev* d);\n";
+    let src = "#include \"tap.h\"\nTAP_API tap_outcome_kind tap_open(const tap_dev* d)\n{\n    return d == 0;\n}";
+    let call =
+        "#include <tap.h>\nint use(const tap_dev* d) { return tap_open(d) + tap_shut(d); }\n";
+    // Neither word tells which is the macro: no stronger than open.
+    let other = "tap_layout tap_outcome_kind tap_shut(const tap_dev* d)\n{\n    return 0;\n}\n";
+    let near = "#include \"../lib/tap.h\"\nint near(const tap_dev* d) { return tap_open(d); }\n";
+    let files = [
+        ("lib/tap.h", h),
+        ("lib/tap.c", src),
+        ("app/use.c", call),
+        ("lib/shut.c", other),
+        ("app/near.c", near),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "app/near.c", "near"),
+        ["tap_open(d) → lib/tap.c:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "app/use.c", "use"),
+        [
+            "tap_open(d) → one of: lib/tap.c:2, or outside",
+            "tap_shut(d) → one of: lib/shut.c:1, or outside"
+        ]
+    );
+}
