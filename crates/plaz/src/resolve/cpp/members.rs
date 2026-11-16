@@ -125,7 +125,8 @@ impl Caller<'_, '_> {
     /// A call on the data member `field` (`after` the text after it), or
     /// of it with no `after`: as on a local of the member's type, the type
     /// placed from the class declaring it, in the file of its head. With
-    /// no type, a member called is not visible.
+    /// no member or no type: called itself, not visible; called on, any
+    /// project method of the call's name.
     fn on_member(&self, call: &MapCall, field: Option<Field>, after: Option<&str>) -> Evidence {
         match field.and_then(|f| Some((f.ty?, f))) {
             Some((t, f)) => {
