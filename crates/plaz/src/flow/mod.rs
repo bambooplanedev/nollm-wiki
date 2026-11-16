@@ -354,12 +354,20 @@ impl<'s> Walker<'s> {
         after
     }
 
-    /// The steps of `nodes`, each walked in order.
-    fn sub<'t>(&self, nodes: impl IntoIterator<Item = Node<'t>>, flow: &mut Flow) -> Vec<Step> {
+    /// The steps of `nodes`, walked in order as `run` walks a sequence:
+    /// the groups that open among them (after `from`, else after the
+    /// first) recognised.
+    fn sub<'t>(
+        &self,
+        from: Option<usize>,
+        nodes: impl IntoIterator<Item = Node<'t>>,
+        flow: &mut Flow,
+    ) -> Vec<Step> {
+        let nodes: Vec<Node> = nodes.into_iter().collect();
+        let start = from.or_else(|| nodes.first().map(Node::start_byte));
+        let within = start.unwrap_or(0)..nodes.last().map_or(0, Node::end_byte);
         let mut out = Vec::new();
-        for c in nodes {
-            self.walk(c, flow, &mut out);
-        }
+        self.run(&nodes, &within, flow, &mut out);
         out
     }
 
@@ -414,10 +422,10 @@ impl<'s> Walker<'s> {
                     .chain(orelse)
                     .collect();
                 let rest = self.around(n, &except, flow, out);
-                let pre = self.sub(each, flow);
-                let steps = self.sub([body], flow);
-                let post = self.sub(post, flow);
-                let after = self.sub(orelse, flow);
+                let pre = self.sub(None, each, flow);
+                let steps = self.sub(None, [body], flow);
+                let post = self.sub(None, post, flow);
+                let after = self.sub(None, orelse, flow);
                 out.push(Step::Loop {
                     header,
                     line: line(n),
@@ -431,7 +439,7 @@ impl<'s> Walker<'s> {
                     test_after,
                     post,
                 });
-                out.extend(self.sub(rest, flow));
+                out.extend(self.sub(None, rest, flow));
             }
             FlowNode::Branch {
                 head,
@@ -455,9 +463,10 @@ impl<'s> Walker<'s> {
                             .last()
                             .or(a.cond_node.as_ref())
                             .map_or(after, Node::end_byte);
-                        let pre = self.sub(a.cond_node, flow);
-                        let body = self.sub(a.body, flow);
-                        let late = self.sub(a.after, flow);
+                        let pre = self.sub(None, a.cond_node, flow);
+                        // A `case` arm's group may open right after its label.
+                        let body = self.sub(Some(a.at.start_byte()), a.body, flow);
+                        let late = self.sub(None, a.after, flow);
                         Arm {
                             cond: a.cond,
                             line: line(a.at),
@@ -477,7 +486,7 @@ impl<'s> Walker<'s> {
                     breakable,
                     unseen: false,
                 });
-                out.extend(self.sub(rest, flow));
+                out.extend(self.sub(None, rest, flow));
             }
         }
     }

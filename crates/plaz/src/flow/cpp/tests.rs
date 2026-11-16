@@ -342,6 +342,41 @@ fn a_first_branch_ending_in_return_beside_unseen_branches_leaves_by_an_unseen_wa
 }
 
 #[test]
+fn a_first_branch_group_in_an_unbraced_case_arm_leaves_by_an_unseen_way() {
+    let src = format!("int sel(float * MY_RESTRICT s, int n) {{\n    switch (n) {{\n    case 1:\n#ifdef USE_A\n        if (n) return 1; else return 2;\n#else\n        lean(s);\n#endif\n        mid(s);\n        break;\n    default:\n        rest(s);\n    }}\n    return 0;\n}}\n\n{SPLIT}");
+    let lines = drawn(&src, "sel");
+    let mid = lines.iter().find(|l| l.contains("mid(s)")).unwrap();
+    let id = mid.split(['>', '[']).next().unwrap();
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.ends_with(&format!(" {id}")))
+            .collect::<Vec<_>>(),
+        ["n3 -->|exit not drawn| n7"]
+    );
+    assert_eq!(not_drawn("a.cpp", &src, "sel"), [("#if".to_string(), 1)]);
+}
+
+#[test]
+fn a_first_branch_group_opening_before_a_case_label_stays_counted() {
+    let src = format!("void pick(float * MY_RESTRICT s, int op) {{\n    switch (op) {{\n    case 1:\n        one(s);\n        break;\n#if EXTRA\n    case 2:\n        two(s);\n#else\n    case 3:\n        three(s);\n#endif\n        both(s);\n        break;\n    }}\n}}\n\n{SPLIT}");
+    assert_eq!(
+        flow_lines("a.cpp", &src, "pick"),
+        [
+            "branch switch (op) @2 breakable",
+            "  arm case 1: @3 falls",
+            "    call one(s) @4",
+            "    exit break; @5",
+            "  arm case 2: @7",
+            "    call two(s) @8",
+            "    call both(s) @13",
+            "    exit break; @14"
+        ]
+    );
+    assert_eq!(not_drawn("a.cpp", &src, "pick"), [("#if".to_string(), 1)]);
+}
+
+#[test]
 fn a_function_both_trees_list_gets_one_flow() {
     let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\n";
     let f = file("a.cpp", src);
