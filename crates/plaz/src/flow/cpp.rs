@@ -104,6 +104,10 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             _ => FlowNode::NotDrawn(NotDrawn::Untraced),
         },
         "new_expression" => FlowNode::NotDrawn(NotDrawn::Untraced),
+        "expression_statement" if n.named_child_count() == 1 => match n.named_child(0) {
+            Some(w) if w.kind() == "identifier" => FlowNode::Word(text(w, src).to_string()),
+            _ => FlowNode::Plain,
+        },
         "declaration" if swallowed(n, src) => FlowNode::NotDrawn(NotDrawn::Untraced),
         _ => FlowNode::Plain,
     }

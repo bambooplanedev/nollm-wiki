@@ -125,8 +125,9 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
     file
 }
 
-/// Counts in each C/C++ flow every bare call, nested flows' included, of
-/// a name some file of the project defines as a macro with a jump.
+/// Counts in each C/C++ flow every bare call and every name written as a
+/// statement, nested flows' included, of a name some file of the project
+/// defines as a macro with a jump.
 fn hidden_jumps(files: &mut BTreeMap<String, File>) {
     let jumps: BTreeSet<String> = (files.values().flat_map(|f| &f.macros))
         .filter(|m| m.1)
@@ -138,6 +139,7 @@ fn hidden_jumps(files: &mut BTreeMap<String, File>) {
             flow.each_call(&mut |_, c| {
                 n += usize::from(c.site.via == CallVia::Bare && jumps.contains(&c.site.name));
             });
+            n += flow.words.iter().filter(|w| jumps.contains(*w)).count();
             if n > 0 {
                 *flow.not_drawn.entry(NotDrawn::HiddenJump).or_default() += n;
             }

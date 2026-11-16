@@ -231,6 +231,9 @@ pub struct Flow {
     /// that function: its members are the local class's.
     pub local_class: bool,
     pub syntax_errors: bool,
+    /// The names written as whole statements (`GIVE_UP;`), nested flows'
+    /// included: one a project macro with a jump is counted as one.
+    pub words: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

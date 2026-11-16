@@ -728,6 +728,15 @@ fn a_call_of_a_project_macro_that_jumps_is_counted_and_stays_a_call() {
 }
 
 #[test]
+fn an_object_like_jump_macro_written_as_a_statement_is_counted() {
+    let m = "#define GIVE_UP return -1\n#define QUIET_FLAG 0\n";
+    let src = "int load(int n) {\n    if (n < 0) GIVE_UP;\n    QUIET_FLAG;\n    auto f = [&]() { GIVE_UP; };\n    return fill(n);\n}\n";
+    let (nd, calls) = counted(&[("m.h", m), ("a.cpp", src)], "a.cpp", "load");
+    assert_eq!(nd, [(NotDrawn::HiddenJump, 2)].into());
+    assert_eq!(calls, ["fill(n)"]);
+}
+
+#[test]
 fn a_call_of_a_macro_without_a_jump_token_is_not_counted() {
     let m = "#define NOTE(x) keep(x, returned, on_break)\n#define BAIL(c) if (c) goto out\n";
     let src = "void f(int a) {\n    NOTE(a);\n    BAIL(a);\nout:\n    done();\n}\n";

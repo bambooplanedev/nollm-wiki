@@ -54,6 +54,9 @@ pub(crate) enum FlowNode<'a> {
     },
     /// Counted, then walked as `Plain`.
     NotDrawn(NotDrawn),
+    /// A name written as a whole statement (a C macro): kept in
+    /// `Flow::words`, then walked as `Plain`.
+    Word(String),
 }
 
 pub(crate) struct ArmNode<'a> {
@@ -382,6 +385,11 @@ impl<'s> Walker<'s> {
                 self.children(n, flow, out);
                 self.calls(n, out);
             }
+            FlowNode::Word(w) => {
+                flow.words.push(w);
+                self.children(n, flow, out);
+                self.calls(n, out);
+            }
             FlowNode::Exit(kind) => {
                 self.children(n, flow, out);
                 self.calls(n, out);
@@ -399,11 +407,15 @@ impl<'s> Walker<'s> {
                     body,
                 });
             }
-            FlowNode::Nested { name, body } => out.push(Step::Nested {
-                name: name.unwrap_or_else(|| format!("closure L{}", line(n))),
-                line: line(n),
-                flow: self.flow(body),
-            }),
+            FlowNode::Nested { name, body } => {
+                let mut nested = self.flow(body);
+                flow.words.append(&mut nested.words);
+                out.push(Step::Nested {
+                    name: name.unwrap_or_else(|| format!("closure L{}", line(n))),
+                    line: line(n),
+                    flow: nested,
+                });
+            }
             FlowNode::Loop {
                 header,
                 body,
