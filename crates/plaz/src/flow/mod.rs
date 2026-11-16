@@ -127,7 +127,8 @@ pub(crate) fn hooks(family: Family) -> Option<&'static Hooks> {
 /// function of the copy is walked in the main tree when its range there
 /// is a whole function definition; otherwise in the copy, with the
 /// directive groups in its range counted. A main-tree item overlapping a
-/// copy function is that function read from another branch: skipped.
+/// copy function is that function read from another branch: marked
+/// `nested`, so it has no section, no anchor and is no call target.
 pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
     let Some(hooks) = hooks(file.family) else {
         return;
@@ -146,7 +147,11 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
                 c.source < main && c.start_byte < def.end_byte && def.start_byte < c.end_byte
             });
         let mut source = &analyzed.sources[def.source];
-        let Some(mut node) = source.node(def).filter(|_| !twice) else {
+        if twice {
+            file.code.items[i].nested = true;
+            continue;
+        }
+        let Some(mut node) = source.node(def) else {
             continue;
         };
         if file.family == Family::Cpp && node.kind() != "function_definition" {

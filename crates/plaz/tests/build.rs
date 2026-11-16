@@ -2691,3 +2691,51 @@ fn a_constructor_says_constructions_are_not_traced_and_file_level_calls_are_note
     assert!(cpp.contains(module), "{cpp}");
     assert!(!common::map_page(&vault, "map/src/kiln_h").contains(module));
 }
+
+#[test]
+fn a_prototype_links_its_definition_in_the_same_file() {
+    let calc = "static int clamp(int v);\nint run(int v) { return clamp(v); }\nstatic int clamp(int v) { return v > 9 ? 9 : v; }\n";
+    // A same-named function elsewhere is not the prototype's definition.
+    let other = "static int clamp(int v) { return v; }\n";
+    let (_d, vault) = common::built(&[("src/calc.c", calc), ("src/other.c", other)]);
+    let page = common::map_page(&vault, "map/src/calc_c");
+    assert_eq!(headings(&page), ["clamp", "run", "clamp_2"]);
+    assert_eq!(
+        common::fn_block(&page, "clamp"),
+        "## clamp\n`static int clamp(int v)` · `src/calc.c:1-1`\n\nDefined at [[map/src/calc_c#clamp_2|clamp]]\n\n"
+    );
+}
+
+#[test]
+fn same_arity_overloads_the_index_cannot_pair_are_one_of_their_definitions() {
+    let h = "class Pan {\npublic:\n    void heat(int t);\n    void heat(double t);\n};\n";
+    let cpp = "#include \"pan.h\"\nvoid Pan::heat(int t) { warm(t); }\nvoid Pan::heat(double t) { warm(t); }\n";
+    let (_d, vault) = common::built(&[("src/pan.h", h), ("src/pan.cpp", cpp)]);
+    let header = common::map_page(&vault, "map/src/pan_h");
+    let one_of = "Defined at one of: [[map/src/pan_cpp#pan_heat|Pan::heat]], [[map/src/pan_cpp#pan_heat_2|Pan::heat]]";
+    for (anchor, sig, line) in [
+        ("pan_heat", "void heat(int t)", 3),
+        ("pan_heat_2", "void heat(double t)", 4),
+    ] {
+        assert_eq!(
+            common::fn_block(&header, anchor).trim_end(),
+            format!("## {anchor}\n`{sig}` · `src/pan.h:{line}-{line}`\n\n{one_of}")
+        );
+    }
+    assert_eq!(
+        headings(&common::map_page(&vault, "map/src/pan_cpp")),
+        ["pan_heat", "pan_heat_2"]
+    );
+}
+
+#[test]
+fn a_function_both_trees_list_is_one_call_target_with_a_heading() {
+    let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\nint use_it() { return span(1); }\n";
+    let (_d, vault) = common::built(&[("a.cpp", src)]);
+    let page = common::map_page(&vault, "map/a_cpp");
+    assert_eq!(headings(&page), ["span", "use_it"]);
+    assert_eq!(
+        common::fn_section(&page, "use_it", "Calls"),
+        ["`span(1)` L8 → [[map/a_cpp#span|span]]"]
+    );
+}
