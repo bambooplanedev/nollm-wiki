@@ -3119,3 +3119,20 @@ fn a_call_qualified_by_a_template_parameter_is_any_project_method_of_that_name()
         ]
     );
 }
+
+#[test]
+fn a_call_qualified_by_a_block_scope_alias_is_any_project_method_of_that_name() {
+    let h = "template <typename T>\nstruct Box {\n    static T fill(T v);\n};\n";
+    let src = "#include \"box.h\"\nint run() {\n    using X = Box<int>;\n    return X::fill(1) + Box<int>::fill(2);\n}\n";
+    assert_eq!(
+        cpp_targets(
+            &[("src/box.h", h), ("src/run.cpp", src)],
+            "src/run.cpp",
+            "run"
+        ),
+        [
+            "X::fill(1) → one of: src/box.h:3, or outside",
+            "Box<int>::fill(2) → src/box.h:3"
+        ]
+    );
+}

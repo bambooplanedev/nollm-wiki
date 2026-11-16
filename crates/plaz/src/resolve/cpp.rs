@@ -201,7 +201,8 @@ impl Caller<'_, '_> {
             return self.cpp_bare(chain, site);
         };
         let q = q.as_str();
-        let root = call.root.as_deref().unwrap_or(q);
+        // `Box<int>` of `Box<int>::f()` is the type `Box`.
+        let root = call.root.as_deref().map_or(q, owner_key);
         let project =
             cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
         if (chain.iter()).any(|f| f.rebound.contains(root)) {
