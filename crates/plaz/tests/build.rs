@@ -3483,3 +3483,53 @@ fn a_call_qualified_by_the_global_scope_is_no_member_call() {
         ["::flush(1) → src/a.cpp:1"]
     );
 }
+
+#[test]
+fn a_call_qualified_by_a_class_name_two_classes_share_is_the_one_in_view() {
+    let src = "namespace x {\nstruct Cfg {\n    static int load() { return 1; }\n};\nint run() { return Cfg::load(); }\n}\nnamespace y {\nstruct Cfg {\n    static int load() { return 2; }\n};\n}\nint other() { return Cfg::load(); }\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["Cfg::load() → src/a.cpp:3"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "other"),
+        ["Cfg::load() → one of: src/a.cpp:3, src/a.cpp:9"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_a_shared_class_name_only_one_class_answers_is_open() {
+    let src = "namespace x {\nstruct Cfg {\n    static int load() { return 1; }\n};\n}\nnamespace y {\nstruct Cfg {};\n}\nint other() { return Cfg::load(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "other"),
+        ["Cfg::load() → one of: src/a.cpp:3, or outside"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_an_owner_no_head_shows_is_its_member_or_outside() {
+    let src = "int Gen::make() { return 1; }\nint run() { return Gen::make(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/gen.cpp", src)], "src/gen.cpp", "run"),
+        ["Gen::make() → one of: src/gen.cpp:1, or outside"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_a_namespace_a_class_elsewhere_is_named_like_reaches_its_function() {
+    let src = "namespace ui {\nnamespace dial {\nvoid start() {}\n}\n}\nstruct dial {};\nvoid run() { ui::dial::start(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["ui::dial::start() → src/a.cpp:3"]
+    );
+}
+
+#[test]
+fn a_call_qualified_by_a_project_alias_is_any_project_method_of_that_name() {
+    let src = "struct Doc {\n    static int parse() { return 0; }\n};\nusing Text = Doc;\nint run() { return Text::parse(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["Text::parse() → one of: src/a.cpp:2, or outside"]
+    );
+}

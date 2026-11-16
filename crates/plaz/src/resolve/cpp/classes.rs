@@ -103,11 +103,19 @@ impl<'a> Cpp<'a> {
             }
             scope = scope.rsplit_once("::").map_or("", |s| s.0);
         }
-        let mut ends = heads.iter().filter(|p| p.ends_with(&format!("::{t}")));
-        match (ends.next(), ends.next()) {
-            (Some(&p), None) => Some(p),
+        match self.namesakes(t)[..] {
+            [p] => Some(p),
             _ => None,
         }
+    }
+
+    /// The classes whose path is the type written `t` or ends in it.
+    pub(super) fn namesakes(&self, t: &str) -> Vec<&'a str> {
+        let t = untemplated(t);
+        let t = t.trim_start_matches("::");
+        let heads = self.classes.by_key.get(owner_key(t)).into_iter().flatten();
+        let named = heads.filter(|p| **p == t || p.ends_with(&format!("::{t}")));
+        named.copied().collect()
     }
 
     /// Is the type written `t` a project type's name, under no qualifier

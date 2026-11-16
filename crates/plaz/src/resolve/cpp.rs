@@ -7,6 +7,7 @@ mod classes;
 use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
+use crate::source::untemplated;
 use classes::{Classes, Missing};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
@@ -310,7 +311,36 @@ impl Caller<'_, '_> {
         } else if root == "std" || !project {
             Evidence::Outside
         } else if cpp.types.contains(q) {
-            // `Base::f()` names that one function: no dispatch.
+            self.on_qualifier(call, q)
+        } else if cpp.namespaces.contains(q) {
+            self.free(site, Some(q)).unwrap_or(Evidence::Hidden)
+        } else {
+            Evidence::Hidden
+        }
+    }
+
+    /// `Q::f()` with `Q` a project type names that one function, no
+    /// dispatch: the member of the class `Q` names from the caller's
+    /// scope; with several classes it may name, one of theirs, never
+    /// certain; with no class head, the functions of a namespace `Q`, else
+    /// the methods of an owner `Q`, or with none (an alias) any project
+    /// method `f`, or something outside.
+    fn on_qualifier(&self, call: &MapCall, q: &str) -> Evidence {
+        let (cpp, site) = (self.cpp, &call.site);
+        let callee = call.text.split('(').next().unwrap_or("");
+        let callee = untemplated(callee);
+        let written = callee.rsplit_once("::").map_or(q, |w| w.0);
+        if let Some(class) = cpp.resolve(written, self.class.unwrap_or(self.ns)) {
+            return Evidence::Found {
+                fns: self.ids(cpp.members(class, site)),
+                open: false,
+            };
+        }
+        let namesakes = cpp.namesakes(written);
+        if namesakes.is_empty() && cpp.namespaces.contains(q) {
+            return self.free(site, Some(q)).unwrap_or(Evidence::Hidden);
+        }
+        if namesakes.is_empty() {
             let named = cpp.by_name.get(site.name.as_str()).into_iter().flatten();
             let members = named.copied().filter(|&c| {
                 let it = cpp.item(c);
@@ -318,14 +348,18 @@ impl Caller<'_, '_> {
                     && it.owner.as_deref().map(owner_key) == Some(q)
                     && fits(it, site)
             });
-            Evidence::Found {
-                fns: self.ids(cpp.folded(members.collect())),
-                open: false,
+            // An alias may name any class.
+            let fns = self.ids(cpp.folded(members.collect()));
+            if fns.is_empty() {
+                return self.any_method(call);
             }
-        } else if cpp.namespaces.contains(q) {
-            self.free(site, Some(q)).unwrap_or(Evidence::Hidden)
-        } else {
-            Evidence::Hidden
+            return Evidence::Found { fns, open: true };
+        }
+        let fns = self.ids(namesakes.into_iter().flat_map(|c| cpp.members(c, site)));
+        // One member of several classes it may name: maybe another's.
+        Evidence::Found {
+            open: fns.len() == 1,
+            fns,
         }
     }
 
