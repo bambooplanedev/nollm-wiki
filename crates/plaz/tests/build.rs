@@ -4209,3 +4209,57 @@ fn a_smart_pointer_to_a_const_project_class_is_its_pointee() {
         ]
     );
 }
+
+#[test]
+fn a_function_like_macro_block_in_a_method_keeps_the_methods_fields() {
+    let src = "struct Book {\n    void apply() {}\n};\nstruct Shelf {\n    Book book_;\n    std::vector<int> items_;\n    void run() {\n        EACH_ITEM(int i, items_) { book_.apply(); }\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["book_.apply() → src/a.cpp:2"]
+    );
+}
+
+#[test]
+fn a_call_in_a_local_class_method_is_never_certainly_the_enclosing_classs_method() {
+    let src = "void tidy() {}\nstruct Shelf {\n    void flush() {}\n    void tidy() {}\n    void run() {\n        struct Guard {\n            void flush() {}\n            ~Guard() { flush(); this->flush(); ::tidy(); tidy(); }\n        };\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "flush() → one of: src/a.cpp:3, or outside",
+            "this->flush() → one of: src/a.cpp:3, or outside",
+            "::tidy() → src/a.cpp:1",
+            "tidy() → one of: src/a.cpp:1, src/a.cpp:4, or outside"
+        ]
+    );
+}
+
+#[test]
+fn an_arrow_operator_declared_with_spaces_is_found() {
+    let src = "struct Book {\n    void reset() {}\n};\nstruct Spaced {\n    Book* operator -> ();\n    void reset() {}\n};\nvoid run(Spaced s) { s->reset(); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["s->reset() → one of: src/a.cpp:2, src/a.cpp:6, or outside"]
+    );
+}
+
+#[test]
+fn an_items_own_flow_marked_as_a_local_class_method_still_reaches_its_class() {
+    // Regression pin: in a file whose braces split across `#if`/`#else`, a
+    // method charted from the tree that misreads the split sits in a body,
+    // so its own flow carries `local_class`; the item is still its class's.
+    let src = "struct Turn {\n    void flush() {}\n    void push() { flush(); }\n};\n";
+    let mut p = plaz::source::project([("src/a.h".to_string(), src.to_string())]);
+    let f = p.files.get_mut("src/a.h").unwrap();
+    let at = |name: &str| (f.code.items.iter()).position(|it| it.name == name);
+    let (push, flush) = (at("push").unwrap(), at("flush").unwrap());
+    f.flows.get_mut(&push).unwrap().local_class = true;
+    let resolved = plaz::resolve::resolve(p);
+    let mut out = Vec::new();
+    resolved.project().files["src/a.h"].flows[&push]
+        .each_call(&mut |_, c| out.push(c.target.clone()));
+    let flush = plaz::model::FnId {
+        path: "src/a.h".to_string(),
+        item: flush,
+    };
+    assert_eq!(out, [plaz::model::Target::Resolved(flush)]);
+}

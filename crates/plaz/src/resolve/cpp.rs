@@ -25,8 +25,9 @@ pub(super) struct Cpp<'a> {
     pages: Vec<(&'a str, &'a File)>,
     /// Per page: the pages its quoted includes name.
     includes: Vec<Vec<usize>>,
-    /// The functions by name, a function both trees list once.
-    by_name: BTreeMap<&'a str, Vec<FnRef>>,
+    /// The functions by name, a function both trees list once; an
+    /// operator's name without spaces (`operator->` of `operator -> ()`).
+    by_name: BTreeMap<String, Vec<FnRef>>,
     /// The definitions no file keeps to itself, by key.
     shared: BTreeMap<Key<'a>, Vec<FnRef>>,
     /// Every definition, by page and key.
@@ -98,7 +99,14 @@ impl<'a> Cpp<'a> {
                     continue;
                 }
                 let c = (page, i);
-                out.by_name.entry(&it.name).or_default().push(c);
+                // `operator -> ()` is `operator->`; `operator new` keeps its space.
+                let op = it.name.strip_prefix("operator");
+                let op = op.filter(|o| o.contains(|c: char| c.is_ascii_punctuation()));
+                let name = op.map_or_else(
+                    || it.name.clone(),
+                    |o| format!("operator{}", o.replace(' ', "")),
+                );
+                out.by_name.entry(name).or_default().push(c);
                 match out.key(c) {
                     Some(key) if !it.test && !out.declared(c) => {
                         if !file.local.contains(&i) {
@@ -271,7 +279,7 @@ impl Caller<'_, '_> {
         match &call.site.via {
             CallVia::Bare => self.cpp_bare(chain, call),
             CallVia::Path(q) => self.cpp_path(chain, call, q),
-            CallVia::SelfRecv => match self.class {
+            CallVia::SelfRecv => match self.member_of(chain) {
                 Some(class) => self.on_class(call, class),
                 None => self.any_method(call),
             },
@@ -320,10 +328,12 @@ impl Caller<'_, '_> {
         }
     }
 
-    /// The class whose data members a name in the innermost flow of
-    /// `chain` may be: the caller's, unless a local class's method holds it.
+    /// The class whose members a name in the innermost flow of `chain`
+    /// may be: the caller's, unless a local class's method nested in the
+    /// caller holds it (the caller's own flow is an item, never one).
     fn member_of(&self, chain: &[FlowScope]) -> Option<&str> {
-        self.class.filter(|_| !chain.iter().any(|f| f.local_class))
+        self.class
+            .filter(|_| !chain.iter().skip(1).any(|f| f.local_class))
     }
 
     /// What the caller's file sees.
@@ -471,11 +481,11 @@ impl Caller<'_, '_> {
         }
         // `::f()` names no member.
         if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
+            // In a local class's method the enclosing class's members are
+            // in reach, but the local class's own may hide them.
+            let local = self.member_of(chain).is_none();
             // A data member called is its own call operator.
-            let field = self
-                .member_of(chain)
-                .and_then(|c| self.cpp.field(c, name, self.sight()));
-            if field.is_some() {
+            if !local && self.cpp.field(class, name, self.sight()).is_some() {
                 return Evidence::Hidden;
             }
             // A member the class may inherit hides the free functions.
@@ -486,12 +496,15 @@ impl Caller<'_, '_> {
             match self.cpp.lookup(class, site, self.sight(), true) {
                 // A bare call in a template does not search a dependent
                 // base: the free functions may be meant.
-                Ok(found) if found.dependent => {
+                Ok(found) if found.dependent || local => {
                     let mut fns = self.ids(found.fns);
                     return match self.free(site, None) {
                         Some(Evidence::Found { fns: free, open }) => {
                             fns.extend(free);
-                            Evidence::Found { fns, open }
+                            Evidence::Found {
+                                fns,
+                                open: open || local,
+                            }
                         }
                         Some(_) | None => Evidence::Found { fns, open: true },
                     };
@@ -502,9 +515,9 @@ impl Caller<'_, '_> {
                         open: found.open,
                     }
                 }
-                Err(Missing::Outside) => return or_free(Evidence::Outside),
-                Err(Missing::Unseen) => return or_free(self.any_method(call)),
-                Err(Missing::Nowhere) => {}
+                Err(Missing::Outside) if !local => return or_free(Evidence::Outside),
+                Err(Missing::Unseen) if !local => return or_free(self.any_method(call)),
+                Err(Missing::Outside | Missing::Unseen | Missing::Nowhere) => {}
             }
         }
         if let Some(found) = self.free(site, None) {

@@ -71,12 +71,15 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         .filter(|(n, _)| !n.is_empty())
         .map(|(n, t)| (n, t.filter(keep)));
     let joined = Bindings::join(binds);
-    // Only a local class's method is a function definition in a body.
-    let in_body = std::iter::successors(root.parent(), Node::parent)
-        .any(|n| n.kind() == "compound_statement");
+    // A method in a class body inside a function body (a macro block such
+    // as `EACH(x) { … }` is a function definition in no class body).
+    let mut around = std::iter::successors(root.parent(), Node::parent);
+    let in_class = root
+        .parent()
+        .is_some_and(|p| p.kind() == "field_declaration_list");
     Bindings {
         rebound,
-        local_class: root.kind() == "function_definition" && in_body,
+        local_class: in_class && around.any(|n| n.kind() == "compound_statement"),
         ..joined
     }
 }
