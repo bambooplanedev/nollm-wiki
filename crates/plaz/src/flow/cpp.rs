@@ -37,7 +37,9 @@ const ENDS: [&str; 7] = [
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
     let field = |f: &str| n.child_by_field_name(f);
-    let parent = n.parent().map_or("", |p| p.kind());
+    // Asked only of a `try` or `goto` token: finding a parent walks down
+    // from the root.
+    let parent = || n.parent().map_or("", |p| p.kind());
     match n.kind() {
         "if_statement" => branch(if_arms(n, src), false),
         "preproc_if" | "preproc_ifdef" => {
@@ -48,11 +50,11 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "switch_statement" => switch(n, src),
         "while_statement" | "for_statement" | "for_range_loop" | "do_statement" => looping(n, src),
         "try_statement" => branch(try_arms(n, src), true),
-        "try" if parent == "try_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
+        "try" if parent() == "try_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
         "return_statement" | "throw_statement" | "co_return_statement" | "goto_statement" => {
             FlowNode::Exit(ExitKind::Return)
         }
-        "goto" if parent == "goto_statement" => FlowNode::NotDrawn(NotDrawn::Goto),
+        "goto" if parent() == "goto_statement" => FlowNode::NotDrawn(NotDrawn::Goto),
         "break_statement" => FlowNode::Exit(ExitKind::Break(None)),
         "continue_statement" => FlowNode::Exit(ExitKind::Continue(None)),
         // The opening token of a group whose labels `switch` draws as arms:
