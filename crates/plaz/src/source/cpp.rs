@@ -73,23 +73,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
     for s in &a.sources {
         let mut stack = vec![s.tree().root_node()];
         while let Some(n) = stack.pop() {
-            if let Some(name) = matches!(
-                n.kind(),
-                "namespace_definition" | "namespace_alias_definition"
-            )
-            .then(|| n.child_by_field_name("name"))
-            .flatten()
-            {
-                let segs = segments(&s.text()[name.byte_range()]);
-                file.namespaces.extend(segs.map(|g| g.0.to_string()));
-                let named = n.named_children(&mut n.walk()).last();
-                if let Some(t) = named.filter(|_| n.kind() == "namespace_alias_definition") {
-                    let t: String = s.text()[t.byte_range()].split_whitespace().collect();
-                    let t = t.trim_start_matches("::").to_string();
-                    file.namespace_aliases
-                        .insert(s.text()[name.byte_range()].to_string(), t);
-                }
-            }
+            namespace(file, n, s.text());
             class_head(file, n, s.text(), &anon);
             alias(file, n, s.text(), &anon);
             if n.kind() == "using_declaration" {
@@ -97,6 +81,26 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             }
             stack.extend(n.named_children(&mut n.walk()));
         }
+    }
+}
+
+/// Records the names of the namespace or namespace alias `n` defines in
+/// `File::namespaces`, and an alias's namespace in
+/// `File::namespace_aliases`.
+fn namespace(file: &mut File, n: Node, src: &str) {
+    let alias = n.kind() == "namespace_alias_definition";
+    let name = n.child_by_field_name("name");
+    let Some(name) = name.filter(|_| alias || n.kind() == "namespace_definition") else {
+        return;
+    };
+    file.namespaces
+        .extend(segments(&src[name.byte_range()]).map(|g| g.0.to_string()));
+    let named = n.named_children(&mut n.walk()).last();
+    if let Some(t) = named.filter(|_| alias) {
+        let t: String = src[t.byte_range()].split_whitespace().collect();
+        let t = t.trim_start_matches("::").to_string();
+        file.namespace_aliases
+            .insert(src[name.byte_range()].to_string(), t);
     }
 }
 

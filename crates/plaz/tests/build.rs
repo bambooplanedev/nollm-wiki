@@ -4472,3 +4472,12 @@ fn a_declaration_whose_header_has_an_unread_objective_c_twin_is_open() {
         ]
     );
 }
+
+#[test]
+fn a_parameter_of_a_callable_project_class_called_bare_is_its_call_operator() {
+    let src = "struct Less {\n    bool operator()(int a, int b) const { return a < b; }\n};\nbool pick(Less& cmp, int a, int b) { return cmp(a, b); }\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "pick"),
+        ["cmp(a, b) → src/a.cpp:2"]
+    );
+}
