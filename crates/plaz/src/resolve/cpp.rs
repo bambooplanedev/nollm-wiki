@@ -138,17 +138,7 @@ impl<'a> Cpp<'a> {
                 }
             }
         }
-        out.closures = (0..pages.len())
-            .map(|page| {
-                let (mut seen, mut todo) = (BTreeSet::new(), includes[page].clone());
-                while let Some(p) = todo.pop() {
-                    if seen.insert(p) {
-                        todo.extend(&includes[p]);
-                    }
-                }
-                seen
-            })
-            .collect();
+        out.closures = closures(&includes);
         out.read_classes();
         out
     }
@@ -242,6 +232,21 @@ impl<'a> Cpp<'a> {
     fn declared(&self, c: FnRef) -> bool {
         self.pages[c.0].1.declarations.get(&c.1) == Some(&Bodiless::Declared)
     }
+}
+
+/// Per page: the pages it includes, directly or through another, of
+/// `includes`, the pages each page's includes name.
+fn closures(includes: &[Vec<usize>]) -> Vec<BTreeSet<usize>> {
+    let closure = |page: usize| {
+        let (mut seen, mut todo) = (BTreeSet::new(), includes[page].clone());
+        while let Some(p) = todo.pop() {
+            if seen.insert(p) {
+                todo.extend(&includes[p]);
+            }
+        }
+        seen
+    };
+    (0..includes.len()).map(closure).collect()
 }
 
 /// Can `it` take `site`'s argument count?
