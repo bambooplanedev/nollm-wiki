@@ -187,6 +187,12 @@ impl<'a> Cpp<'a> {
         self.pages[c.0].1.local.contains(&c.1)
     }
 
+    /// Does a definition among `fns` stand in the file of `page`? A call
+    /// there reaches its own unit's definition, whatever `folded` opened.
+    fn defined_in(&self, fns: &BTreeSet<FnRef>, page: usize) -> bool {
+        fns.iter().any(|&c| c.0 == page && !self.declared(c))
+    }
+
     fn declared(&self, c: FnRef) -> bool {
         self.pages[c.0].1.declarations.get(&c.1) == Some(&Bodiless::Declared)
     }
@@ -479,6 +485,7 @@ impl Caller<'_, '_> {
                     (shown, open)
                 };
                 let (fns, loose) = cpp.folded(fns);
+                let loose = loose && !cpp.defined_in(&fns, self.page);
                 let fns = self.ids(fns);
                 if !fns.is_empty() {
                     return Some(Evidence::Found {

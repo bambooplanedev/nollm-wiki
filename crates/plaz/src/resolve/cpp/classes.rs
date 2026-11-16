@@ -530,6 +530,7 @@ impl<'a> Cpp<'a> {
                     found.retain(|&c| !self.pure(c));
                 }
                 found.extend(overrides);
+                let loose = loose && !self.defined_in(&found, sight.page);
                 let open = pure || loose || (!settled && found.len() == 1);
                 return Ok(Found {
                     fns: found,

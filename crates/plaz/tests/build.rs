@@ -4447,8 +4447,9 @@ fn a_class_head_whose_macro_word_cannot_be_told_is_left_unread() {
 
 #[test]
 fn a_declaration_whose_header_has_an_unread_objective_c_twin_is_open() {
-    let h = "bool touched(int f);\nstruct Pad {\n    bool held(int f);\n};\n";
-    let def = "#include \"../pad.hpp\"\nbool touched(int f) { return f > 0; }\nbool Pad::held(int f) { return f < 0; }\n";
+    let h =
+        "bool touched(int f);\nstruct Pad {\n    bool held(int f);\n    bool both(int f);\n};\n";
+    let def = "#include \"../pad.hpp\"\nbool touched(int f) { return f > 0; }\nbool Pad::held(int f) { return f < 0; }\nbool Pad::both(int f) { return touched(f) && held(f); }\n";
     let call = "#include \"pad.hpp\"\nbool any(Pad p) { return touched(1) || p.held(2); }\n";
     let twin = "bool touched(int f) { return false; }\n";
     let files = [
@@ -4469,6 +4470,14 @@ fn a_declaration_whose_header_has_an_unread_objective_c_twin_is_open() {
         [
             "touched(1) → one of: src/linux/pad.cpp:2, or outside",
             "p.held(2) → one of: src/linux/pad.cpp:3, or outside"
+        ]
+    );
+    // A call in the defining file reaches its own unit's definition.
+    assert_eq!(
+        cpp_targets(&files, "src/linux/pad.cpp", "both"),
+        [
+            "touched(f) → src/linux/pad.cpp:2",
+            "held(f) → src/linux/pad.cpp:3"
         ]
     );
 }
