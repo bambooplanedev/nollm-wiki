@@ -43,12 +43,12 @@ pub(super) struct Cpp<'a> {
     /// of out-of-line definitions that are no namespace or misread.
     types: BTreeSet<&'a str>,
     classes: Classes<'a>,
-    /// The stems of the project's Objective-C and Objective-C++ files.
+    /// The stems of the project's unread files (`Project::twins`).
     unread: BTreeSet<&'a str>,
 }
 
 impl<'a> Cpp<'a> {
-    pub fn new(files: &'a BTreeMap<String, File>, objc: &'a [String]) -> Cpp<'a> {
+    pub fn new(files: &'a BTreeMap<String, File>, twins: &'a [String]) -> Cpp<'a> {
         let pages: Vec<(&str, &File)> = files.iter().map(|(p, f)| (p.as_str(), f)).collect();
         let cpp = || {
             let all = pages.iter().enumerate();
@@ -82,7 +82,7 @@ impl<'a> Cpp<'a> {
                 .collect(),
             types: BTreeSet::new(),
             classes: Classes::default(),
-            unread: (objc.iter())
+            unread: (twins.iter())
                 .filter_map(|p| p.rsplit('/').next()?.rsplit_once('.'))
                 .map(|s| s.0)
                 .collect(),

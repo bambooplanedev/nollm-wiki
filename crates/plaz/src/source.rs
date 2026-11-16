@@ -20,7 +20,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     let mut files = BTreeMap::new();
     let mut unreadable = Vec::new();
     let mut crates = BTreeSet::new();
-    let mut objc_paths = Vec::new();
+    let mut twins = Vec::new();
     // C/C++ files with a class head or function name the grammar misread,
     // read again once every file's macros are known: path, text, the
     // misread words, file as read.
@@ -31,8 +31,8 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             crates.extend(crate_names(&text).into_iter().map(|n| (n, dir.to_string())));
             continue;
         }
-        if objc(&path) {
-            objc_paths.push(path);
+        if twin(&path) {
+            twins.push(path);
             continue;
         }
         let Some(a) = analyze(&path, &text) else {
@@ -64,12 +64,12 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();
-    objc_paths.sort();
+    twins.sort();
     Project {
         files,
         unreadable,
         crates,
-        objc: objc_paths,
+        twins,
     }
 }
 
@@ -187,14 +187,16 @@ pub(crate) fn pointee(t: &str) -> (bool, &str) {
     }
 }
 
-/// An Objective-C or Objective-C++ file.
-fn objc(path: &str) -> bool {
+/// An Objective-C, Objective-C++ or CUDA source file: no grammar reads
+/// it. A CUDA header (`.cuh`) is left out: it defines what another
+/// header of its stem declares no more than any header does.
+fn twin(path: &str) -> bool {
     let name = path.rsplit('/').next().unwrap_or(path);
     let ext = name
         .rsplit_once('.')
         .filter(|n| !n.0.is_empty())
-        .map(|n| n.1);
-    ext.is_some_and(|e| e.eq_ignore_ascii_case("m") || e.eq_ignore_ascii_case("mm"))
+        .map(|n| n.1.to_ascii_lowercase());
+    ext.is_some_and(|e| matches!(e.as_str(), "m" | "mm" | "cu"))
 }
 
 fn manifest(path: &str) -> bool {
@@ -226,7 +228,7 @@ pub fn load(root: &Path) -> Result<Project, Error> {
     if !root.is_dir() {
         return Err(Error::NotADirectory(root.to_path_buf()));
     }
-    let walked = walk(root, true, &|p| handles(p) || manifest(p) || objc(p));
+    let walked = walk(root, true, &|p| handles(p) || manifest(p) || twin(p));
     let mut p = project(
         walked
             .files

@@ -4687,6 +4687,23 @@ fn a_declaration_whose_header_has_an_unread_objective_c_twin_is_open() {
 }
 
 #[test]
+fn a_declaration_whose_header_has_an_unread_cuda_twin_is_open() {
+    let h = "void launch(int n);\n";
+    let def = "#include \"../kern.h\"\nvoid launch(int n) {}\n";
+    let call = "#include \"kern.h\"\nvoid go() { launch(4); }\n";
+    let files = [
+        ("src/kern.h", h),
+        ("src/cpu/kern.cpp", def),
+        ("src/use.cpp", call),
+        ("src/gpu/kern.cu", "void launch(int n) {}\n"),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/use.cpp", "go"),
+        ["launch(4) → one of: src/cpu/kern.cpp:2, or outside"]
+    );
+}
+
+#[test]
 fn a_parameter_of_a_callable_project_class_called_bare_is_its_call_operator() {
     let src = "struct Less {\n    bool operator()(int a, int b) const { return a < b; }\n};\nbool pick(Less& cmp, int a, int b) { return cmp(a, b); }\n";
     assert_eq!(

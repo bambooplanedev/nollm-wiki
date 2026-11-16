@@ -82,7 +82,7 @@ impl<'a> Cpp<'a> {
     /// of whose definitions' files includes one (`extern int main(int,
     /// char**);` beside each program's `main`) may be any program's: each
     /// definition of that name and arity, and the set is open. So is it
-    /// for a declaration in a header an unread Objective-C file shares a
+    /// for a declaration in a header an unread file (`Project::twins`) shares a
     /// stem with (`pad.hpp`, `pad.mm`).
     pub(super) fn folded(&self, fns: Vec<FnRef>) -> (BTreeSet<FnRef>, Loose) {
         let mut out = BTreeSet::new();
@@ -95,7 +95,7 @@ impl<'a> Cpp<'a> {
                 out.insert(c);
                 continue;
             };
-            // An unread Objective-C file of the header's stem may define it.
+            // An unread file of the header's stem may define it.
             let path = self.pages[c.0].0;
             let stem = path.rsplit('/').next().and_then(|f| f.rsplit_once('.'));
             twin |= source_rank(path) < 2 && stem.is_some_and(|s| self.unread.contains(s.0));

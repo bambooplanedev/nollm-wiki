@@ -16,10 +16,10 @@ pub struct Project {
     /// and `[lib]` names of the tree's `Cargo.toml` files, `-` read as `_`,
     /// and the manifest's directory (`""` at the top of the tree).
     pub crates: BTreeSet<(String, String)>,
-    /// Relative paths of the Objective-C and Objective-C++ files (`.m`,
-    /// `.mm`): no grammar reads them, but they may define what a C/C++
-    /// header of the same stem declares.
-    pub objc: Vec<String>,
+    /// Relative paths of the Objective-C, Objective-C++ and CUDA source
+    /// files (`.m`, `.mm`, `.cu`): no grammar reads them, but they may
+    /// define what a C/C++ header of the same stem declares.
+    pub twins: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
