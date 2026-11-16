@@ -3533,3 +3533,144 @@ fn a_call_qualified_by_a_project_alias_is_any_project_method_of_that_name() {
         ["Text::parse() → one of: src/a.cpp:2, or outside"]
     );
 }
+
+#[test]
+fn classes_in_two_files_anonymous_namespaces_are_two_classes() {
+    let a =
+        "namespace {\nstruct Printer {\n    void line() {}\n    void run() { line(); }\n};\n}\n";
+    let b = "namespace {\nstruct Printer : public lib::Out {\n    void go() { line(); }\n};\n}\n";
+    let files = [("src/a.cpp", a), ("src/b.cpp", b)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["line() → src/a.cpp:3"]
+    );
+    assert_eq!(cpp_targets(&files, "src/b.cpp", "go"), ["line() → outside"]);
+}
+
+#[test]
+fn a_class_name_two_programs_define_is_the_one_the_callers_file_sees() {
+    let h = "struct Config {\n    void load();\n    void run();\n};\n";
+    let src = "#include \"config.h\"\nvoid Config::load() {}\nvoid Config::run() { load(); }\n";
+    let tool = "struct Config : lib::Out {\n    void go() { load(); }\n};\n";
+    let files = [
+        ("app/config.h", h),
+        ("app/config.cpp", src),
+        ("tool/tool.cpp", tool),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "app/config.cpp", "run"),
+        ["load() → app/config.cpp:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "tool/tool.cpp", "go"),
+        ["load() → outside"]
+    );
+}
+
+#[test]
+fn an_out_of_line_method_written_short_after_a_using_is_its_namespaces_class() {
+    let a = "namespace a {\nstruct Node {\n    void tick() {}\n    void step();\n};\n}\n";
+    let b = "namespace b {\nstruct Node {\n    void tick();\n};\n}\n";
+    let a_src = "#include \"a.h\"\nusing namespace a;\nvoid Node::step() { tick(); }\n";
+    let b_src = "#include \"b.h\"\nusing namespace b;\nvoid Node::tick() {}\n";
+    let files = [
+        ("src/a.h", a),
+        ("src/b.h", b),
+        ("src/a.cpp", a_src),
+        ("src/b.cpp", b_src),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "step"),
+        ["tick() → src/a.h:3"]
+    );
+}
+
+#[test]
+fn a_type_name_in_a_class_is_first_a_class_nested_in_its_bases() {
+    let src = "struct Cfg {\n    static int load() { return 1; }\n};\nnamespace n {\nstruct Base {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\nstruct App : Base {\n    int run() { return Cfg::load(); }\n    struct Part {\n        int read() { return Cfg::load(); }\n    };\n};\n}\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["Cfg::load() → src/a.cpp:7"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "read"),
+        ["Cfg::load() → src/a.cpp:7"]
+    );
+}
+
+#[test]
+fn a_type_name_in_a_class_with_an_outside_base_is_not_placed_certainly() {
+    let src = "struct Cfg {\n    static int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run() { return Cfg::load(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["Cfg::load() → one of: src/a.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_bare_call_reaching_only_a_dependent_base_may_be_the_free_function() {
+    let src = "void flush() {}\ntemplate <class T>\nstruct Base {\n    void flush() {}\n};\ntemplate <class T>\nstruct Sink : Base<T> {\n    void run() { flush(); }\n};\nstruct Pipe : Base<int> {\n    void pump() { flush(); }\n};\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "run"),
+        ["flush() → one of: src/a.cpp:1, src/a.cpp:4"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "pump"),
+        ["flush() → src/a.cpp:4"]
+    );
+}
+
+#[test]
+fn a_base_is_named_from_outside_its_class() {
+    let src = "struct Outer {\n    struct Part {\n        void fit() {}\n    };\n    struct Whole : Part {\n        struct Part {};\n        void make() { fit(); }\n    };\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "make"),
+        ["fit() → src/a.cpp:3"]
+    );
+}
+
+#[test]
+fn an_out_of_line_method_of_a_class_no_head_settles_has_no_certain_member() {
+    let a = "namespace a {\nstruct Node {\n    void tick() {}\n    void step();\n};\n}\n";
+    let b = "namespace b {\nstruct Node {\n    void tick();\n};\n}\n";
+    let a_src = "#include \"a.h\"\nvoid Node::step() { tick(); }\n";
+    let b_src = "#include \"b.h\"\nvoid Node::tick() {}\n";
+    let files = [
+        ("src/a.h", a),
+        ("src/b.h", b),
+        ("src/a.cpp", a_src),
+        ("src/b.cpp", b_src),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "step"),
+        ["tick() → one of: src/a.h:3, src/b.cpp:2, or outside"]
+    );
+}
+
+#[test]
+fn a_class_two_programs_split_into_header_and_source_is_the_callers_programs() {
+    let h = "struct Config {\n    void load();\n    void run();\n};\n";
+    let src = "#include \"config.h\"\nvoid Config::load() {}\nvoid Config::run() { load(); }\n";
+    let other = "#include \"config.h\"\nvoid Config::load() {}\n";
+    let files = [
+        ("app/config.h", h),
+        ("app/config.cpp", src),
+        ("tool/config.h", "struct Config {\n    void load();\n};\n"),
+        ("tool/config.cpp", other),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "app/config.cpp", "run"),
+        ["load() → app/config.cpp:2"]
+    );
+}
+
+#[test]
+fn a_class_names_itself_inside_its_body_under_an_outside_base() {
+    let src = "struct Reader : lib::Base {\n    static int peek() { return 0; }\n    int next() { return Reader::peek(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "next"),
+        ["Reader::peek() → src/a.cpp:2"]
+    );
+}

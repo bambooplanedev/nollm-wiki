@@ -63,14 +63,17 @@ pub struct File {
     pub usings: BTreeSet<String>,
     /// Per C/C++ method item, by index into `code.items`: its class as a
     /// path (`n::Outer::Inner`), template arguments and whitespace dropped
-    /// (`untemplated`): the enclosing namespaces and classes of a method in
-    /// a class body, `File::scopes` of one defined outside. None when the
-    /// declarator does not name the owner (a macro before the return type
-    /// made the return type the owner).
+    /// (`untemplated`), an anonymous namespace a segment of its own per
+    /// file: the enclosing namespaces and classes of a method in a class
+    /// body, those and the declarator's qualifier for one defined outside.
+    /// None when the declarator does not name the owner (a macro before
+    /// the return type made the return type the owner).
     pub classes: BTreeMap<usize, String>,
     /// Per C/C++ class, struct or union the file defines, by path as in
-    /// `classes`: the bases its heads name, as written, `untemplated`.
-    pub bases: BTreeMap<String, BTreeSet<String>>,
+    /// `classes`: the bases its heads name, as written, `untemplated`, each
+    /// with whether its template arguments name a template parameter of
+    /// the class or of a class around it (a dependent base).
+    pub bases: BTreeMap<String, BTreeSet<(String, bool)>>,
 }
 
 /// What a C/C++ function item has in place of a body.

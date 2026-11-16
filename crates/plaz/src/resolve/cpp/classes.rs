@@ -3,7 +3,6 @@
 //! and what name lookup finds from it.
 
 use super::{fits, Cpp};
-use crate::model::File;
 use crate::source::untemplated;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
@@ -12,8 +11,9 @@ use wiki_code::model::{CallSite, CodeItemKind};
 /// What a base a class head names is.
 #[derive(Clone, Copy)]
 enum Base<'a> {
-    /// The project class of this path.
-    Class(&'a str),
+    /// The project class of this path; whether the base's template
+    /// arguments name a template parameter (a dependent base).
+    Class(&'a str, bool),
     /// No project type.
     Outside,
     /// A project type no head places: an alias, or a name several
@@ -32,10 +32,38 @@ pub(super) enum Missing {
     Unseen,
 }
 
+/// The methods a lookup finds.
+pub(super) struct Found {
+    pub fns: BTreeSet<FnRef>,
+    /// They may also be something outside: only pure virtual declarations
+    /// were found, or one method of a class the caller's file does not
+    /// settle.
+    pub open: bool,
+    /// Found only through dependent bases, which a bare call in the
+    /// template does not search.
+    pub dependent: bool,
+}
+
+/// The pages a caller's file sees: its own and its include closure.
+#[derive(Clone, Copy)]
+pub(super) struct Sight<'s> {
+    pub page: usize,
+    pub included: &'s BTreeSet<usize>,
+}
+
+impl Sight<'_> {
+    fn sees(&self, page: usize) -> bool {
+        page == self.page || self.included.contains(&page)
+    }
+}
+
 #[derive(Default)]
 pub(super) struct Classes<'a> {
-    /// Per class whose head a file shows: its bases.
-    bases: BTreeMap<&'a str, Vec<Base<'a>>>,
+    /// Per class whose head a file shows: per page holding a head, the
+    /// bases that head names.
+    heads: BTreeMap<&'a str, BTreeMap<usize, Vec<Base<'a>>>>,
+    /// Per method of a class some head places: that class.
+    placed: BTreeMap<FnRef, &'a str>,
     /// Per class: the project classes naming it as a base.
     derived: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per base name as written, by `owner_key`: the classes naming it.
@@ -48,40 +76,79 @@ impl<'a> Cpp<'a> {
     /// Fills `classes` from every C/C++ file's heads, once the project's
     /// types and namespaces are known.
     pub(super) fn read_classes(&mut self) {
-        let files = self.pages.iter().map(|p| p.1);
-        let files: Vec<&'a File> = files.filter(|f| f.family == Family::Cpp).collect();
-        let heads = || files.iter().flat_map(|f| &f.bases);
-        for (class, _) in heads() {
+        let pages = self.pages.iter().enumerate().map(|(p, f)| (p, f.1));
+        let pages: Vec<_> = pages.filter(|f| f.1.family == Family::Cpp).collect();
+        let heads = || {
+            let all = pages
+                .iter()
+                .flat_map(|&(p, f)| f.bases.iter().map(move |h| (p, h)));
+            all.map(|(p, (c, bases))| (p, c.as_str(), bases))
+        };
+        for (page, class, _) in heads() {
             self.types.insert(owner_key(class));
             let paths = self.classes.by_key.entry(owner_key(class)).or_default();
             paths.insert(class);
-            self.classes.bases.entry(class).or_default();
+            let at = self.classes.heads.entry(class).or_default();
+            at.insert(page, Vec::new());
         }
-        let named = heads().flat_map(|(c, bases)| bases.iter().map(move |b| (c.as_str(), b)));
-        let read: Vec<(&str, &str, Base)> = named
-            .map(|(class, b)| (class, b.as_str(), self.base(b, class)))
+        // A base is named from the scope around its class.
+        let parent = |c: &'a str| c.rsplit_once("::").map_or("", |p| p.0);
+        let read: Vec<(usize, &str, &str, Base)> = heads()
+            .flat_map(|(page, c, bases)| bases.iter().map(move |b| (page, c, b)))
+            .map(|(page, c, (b, dep))| (page, c, b.as_str(), self.base(b, parent(c), *dep)))
             .collect();
-        for (class, written, base) in read {
-            if let Base::Class(p) = base {
+        for (page, class, written, base) in read {
+            if let Base::Class(p, _) = base {
                 self.classes.derived.entry(p).or_default().insert(class);
             }
             let naming = self.classes.naming.entry(owner_key(written));
             naming.or_default().insert(class);
-            self.classes.bases.entry(class).or_default().push(base);
+            let at = self.classes.heads.entry(class).or_default();
+            at.entry(page).or_default().push(base);
         }
+        let methods = pages
+            .iter()
+            .flat_map(|&(p, f)| f.classes.keys().map(move |&i| (p, i)));
+        let placed: Vec<(FnRef, &'a str)> = methods
+            .filter_map(|(p, i)| Some(((p, i), self.place(p, i)?)))
+            .collect();
+        self.classes.placed.extend(placed);
     }
 
-    fn base(&self, written: &str, from: &str) -> Base<'a> {
+    fn base(&self, written: &str, from: &str, dependent: bool) -> Base<'a> {
         match self.resolve(written, from) {
-            Some(p) => Base::Class(p),
+            Some(p) => Base::Class(p, dependent),
             None if self.is_type(written) => Base::Unseen,
             None => Base::Outside,
         }
     }
 
+    /// The class a head places for the method item `i` of `page`: its
+    /// path, else the one class a `using` of the file completes it to,
+    /// else (unless it names a namespace) the one class whose path ends
+    /// in it.
+    fn place(&self, page: usize, i: usize) -> Option<&'a str> {
+        let file = self.pages[page].1;
+        let written = file.classes.get(&i)?.as_str();
+        let head = |p: &str| self.classes.heads.get_key_value(p).map(|h| *h.0);
+        if let Some(class) = head(written) {
+            return Some(class);
+        }
+        let using = file.usings.iter();
+        let using: BTreeSet<&str> = using
+            .filter_map(|u| head(&format!("{u}::{written}")))
+            .collect();
+        match using.into_iter().collect::<Vec<_>>()[..] {
+            [class] => Some(class),
+            [] if !self.namespaces.contains(owner_key(written)) => self.resolve(written, ""),
+            _ => None,
+        }
+    }
+
     /// The project class the type written `t` names from the scope `from`
-    /// (a path): `from::t`, else that of each enclosing scope, else the
-    /// one class whose path ends in `t`.
+    /// (a path): at each scope from `from` outward, a class nested in it,
+    /// else in its nearest project bases (none when a base on the way is
+    /// no project class); else the one class whose path ends in `t`.
     pub(super) fn resolve(&self, t: &str, from: &str) -> Option<&'a str> {
         let t = untemplated(t);
         let t = t.trim_start_matches("::");
@@ -89,14 +156,23 @@ impl<'a> Cpp<'a> {
             return None;
         }
         let heads = self.classes.by_key.get(owner_key(t))?;
+        let want = |s: &str| match s {
+            "" => t.to_string(),
+            s => format!("{s}::{t}"),
+        };
         let mut scope = from;
         loop {
-            let want = match scope {
-                "" => t.to_string(),
-                s => format!("{s}::{t}"),
-            };
-            if let Some(&p) = heads.get(want.as_str()) {
+            if let Some(&p) = heads.get(want(scope).as_str()) {
                 return Some(p);
+            }
+            // A class's own name in its body is the class.
+            if let Some(&p) = heads.get(scope).filter(|_| owner_key(scope) == t) {
+                return Some(p);
+            }
+            match self.in_bases(scope, &want) {
+                Ok(None) => {}
+                Ok(Some(p)) => return Some(p),
+                Err(()) => return None,
             }
             if scope.is_empty() {
                 break;
@@ -107,6 +183,36 @@ impl<'a> Cpp<'a> {
             [p] => Some(p),
             _ => None,
         }
+    }
+
+    /// The class `want(base)` is for the nearest project bases of the
+    /// class `scope` that have one, `Ok(None)` when no base has one; `Err`
+    /// when a base on the way is no project class or one level has
+    /// several.
+    fn in_bases(&self, scope: &str, want: &dyn Fn(&str) -> String) -> Result<Option<&'a str>, ()> {
+        let mut level = vec![scope];
+        let mut seen = BTreeSet::from([scope]);
+        while !level.is_empty() {
+            let mut next = Vec::new();
+            let bases = level.iter().filter_map(|c| self.classes.heads.get(c));
+            for &b in bases.flat_map(|h| h.values()).flatten() {
+                match b {
+                    Base::Class(p, _) if seen.insert(p) => next.push(p),
+                    Base::Class(..) => {}
+                    Base::Outside | Base::Unseen => return Err(()),
+                }
+            }
+            let found: BTreeSet<&'a str> = (next.iter())
+                .filter_map(|b| self.classes.heads.get_key_value(want(b).as_str()))
+                .map(|h| *h.0)
+                .collect();
+            match found.len() {
+                0 => level = next,
+                1 => return Ok(found.into_iter().next()),
+                _ => return Err(()),
+            }
+        }
+        Ok(None)
     }
 
     /// The classes whose path is the type written `t` or ends in it.
@@ -129,28 +235,65 @@ impl<'a> Cpp<'a> {
         root != "std" && rooted && self.types.contains(owner_key(t))
     }
 
-    /// The class of the method item `i` of `page` (`File::classes`):
-    /// none for a namespace's function; a path written short is the one
-    /// class whose path ends in it.
+    /// The class of the method item `i` of `page`: the one a head places;
+    /// none for a namespace's function; else the path as written, which no
+    /// head and no placed method has: a class lookup reads as unseen.
     pub fn class_of(&self, page: usize, i: usize) -> Option<&'a str> {
-        let written = self.pages[page].1.classes.get(&i)?.as_str();
-        if let Some((&class, _)) = self.classes.bases.get_key_value(written) {
+        if let Some(&class) = self.classes.placed.get(&(page, i)) {
             return Some(class);
         }
-        let namespace = self.namespaces.contains(owner_key(written));
-        (!namespace).then(|| self.resolve(written, "").unwrap_or(written))
+        let written = self.pages[page].1.classes.get(&i)?.as_str();
+        (!self.namespaces.contains(owner_key(written))).then_some(written)
+    }
+
+    /// The one page holding a head of `class` that `sight` sees, when its
+    /// heads are in several files.
+    fn seen_head(&self, class: &str, sight: Option<Sight>) -> Option<usize> {
+        let heads = self.classes.heads.get(class)?;
+        let mut seen = heads.keys().filter(|&&p| sight.is_some_and(|s| s.sees(p)));
+        match (heads.len(), seen.next(), seen.next()) {
+            (2.., Some(&p), None) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Are the heads of `class` in one file, or does `sight` see one?
+    pub(super) fn settled(&self, class: &str, sight: Option<Sight>) -> bool {
+        let heads = self.classes.heads.get(class).map_or(0, BTreeMap::len);
+        heads < 2 || self.seen_head(class, sight).is_some()
     }
 
     /// The methods `site` names that `class` defines, by argument count,
-    /// folded.
-    pub(super) fn members(&self, class: &str, site: &CallSite) -> BTreeSet<FnRef> {
+    /// folded: with heads in several files and one `sight` sees, those of
+    /// that head (in its file or in one including it).
+    pub(super) fn members(
+        &self,
+        class: &str,
+        site: &CallSite,
+        sight: Option<Sight>,
+    ) -> BTreeSet<FnRef> {
+        let only = self.seen_head(class, sight);
+        let of = |c: FnRef| only.is_none_or(|h| c.0 == h || self.closure(c.0).contains(&h));
         let named = self.by_name.get(site.name.as_str()).into_iter().flatten();
         let own = named.copied().filter(|&c| {
             let it = self.item(c);
-            let of = self.pages[c.0].1.classes.get(&c.1);
-            it.kind == CodeItemKind::Method && of.is_some_and(|o| o == class) && fits(it, site)
+            let placed = self.classes.placed.get(&c);
+            it.kind == CodeItemKind::Method && placed == Some(&class) && fits(it, site) && of(c)
         });
-        self.folded(own.collect())
+        // Declarations fold by owner name: drop another head's definitions.
+        let folded = self.folded(own.collect()).into_iter();
+        folded.filter(|&c| of(c)).collect()
+    }
+
+    /// The bases of `class`: with heads in several files and one `sight`
+    /// sees, that head's; else all.
+    fn bases_of(&self, class: &str, sight: Sight) -> Option<Vec<Base<'a>>> {
+        let heads = self.classes.heads.get(class)?;
+        let all = match self.seen_head(class, Some(sight)) {
+            Some(p) => heads.get(&p).into_iter().flatten().copied().collect(),
+            None => heads.values().flatten().copied().collect(),
+        };
+        Some(all)
     }
 
     /// The project classes deriving from `class`, directly or not.
@@ -172,44 +315,57 @@ impl<'a> Cpp<'a> {
     pub(super) fn deriving(&self, t: &str, site: &CallSite) -> BTreeSet<FnRef> {
         let named = self.classes.naming.get(owner_key(t)).into_iter().flatten();
         let all = named.flat_map(|&c| self.descendants(c).into_iter().chain([c]));
-        all.flat_map(|c| self.members(c, site)).collect()
+        all.flat_map(|c| self.members(c, site, None)).collect()
     }
 
-    /// What a call of `site`'s name on an object of `class` may reach: the
-    /// methods name lookup finds in the class or its nearest project bases,
-    /// with each project subclass's own; a pure virtual declaration only
-    /// while no subclass defines the name; and whether it may also be
-    /// outside (only pure virtual declarations found).
+    /// What a call of `site`'s name on an object of `class`, in the file
+    /// `sight` sees from, may reach: the methods name lookup finds in the
+    /// class or its nearest project bases, with each project subclass's
+    /// own; a pure virtual declaration only while no subclass defines the
+    /// name.
     pub(super) fn lookup(
         &self,
         class: &'a str,
         site: &CallSite,
-    ) -> Result<(BTreeSet<FnRef>, bool), Missing> {
+        sight: Sight,
+    ) -> Result<Found, Missing> {
         let mut seen = BTreeSet::from([class]);
-        let (mut level, mut missing) = (vec![class], Missing::Nowhere);
+        let mut level = vec![(class, false)];
+        let (mut missing, mut settled) = (Missing::Nowhere, true);
         while !level.is_empty() {
-            let mut found: BTreeSet<FnRef> =
-                level.iter().flat_map(|c| self.members(c, site)).collect();
+            let (mut found, mut dependent) = (BTreeSet::new(), true);
+            for &(c, dep) in &level {
+                settled &= self.settled(c, Some(sight));
+                let fns = self.members(c, site, Some(sight));
+                dependent &= dep || fns.is_empty();
+                found.extend(fns);
+            }
             if !found.is_empty() {
                 let subs = self.descendants(class).into_iter();
-                let overrides: BTreeSet<FnRef> = subs.flat_map(|c| self.members(c, site)).collect();
-                let open = overrides.is_empty() && found.iter().all(|&c| self.pure(c));
+                let overrides: BTreeSet<FnRef> =
+                    subs.flat_map(|c| self.members(c, site, None)).collect();
+                let pure = overrides.is_empty() && found.iter().all(|&c| self.pure(c));
                 if !overrides.is_empty() {
                     found.retain(|&c| !self.pure(c));
                 }
                 found.extend(overrides);
-                return Ok((found, open));
+                let open = pure || (!settled && found.len() == 1);
+                return Ok(Found {
+                    fns: found,
+                    open,
+                    dependent,
+                });
             }
             let mut next = Vec::new();
-            for c in level {
-                let Some(bases) = self.classes.bases.get(c) else {
+            for (c, dep) in level {
+                let Some(bases) = self.bases_of(c, sight) else {
                     missing = Missing::Unseen;
                     continue;
                 };
-                for &b in bases {
+                for b in bases {
                     match b {
-                        Base::Class(p) if seen.insert(p) => next.push(p),
-                        Base::Class(_) => {}
+                        Base::Class(p, d) if seen.insert(p) => next.push((p, dep || d)),
+                        Base::Class(..) => {}
                         Base::Outside => missing = missing.max(Missing::Outside),
                         Base::Unseen => missing = Missing::Unseen,
                     }

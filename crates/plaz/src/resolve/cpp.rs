@@ -8,7 +8,7 @@ use super::{Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, MapCall};
 use crate::source::untemplated;
-use classes::{Classes, Missing};
+use classes::{Classes, Missing, Sight};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
@@ -254,14 +254,22 @@ impl Caller<'_, '_> {
         }
     }
 
+    /// What the caller's file sees.
+    fn sight(&self) -> Sight<'_> {
+        Sight {
+            page: self.page,
+            included: self.included,
+        }
+    }
+
     /// A call of `f` on an object of the project class `class`: what
     /// lookup finds, else outside under a base from outside the project,
     /// else any project method `f`.
     fn on_class(&self, call: &MapCall, class: &str) -> Evidence {
-        match self.cpp.lookup(class, &call.site) {
-            Ok((fns, open)) => Evidence::Found {
-                fns: self.ids(fns),
-                open,
+        match self.cpp.lookup(class, &call.site, self.sight()) {
+            Ok(found) => Evidence::Found {
+                fns: self.ids(found.fns),
+                open: found.open,
             },
             Err(Missing::Outside) => Evidence::Outside,
             Err(Missing::Nowhere | Missing::Unseen) => self.any_method(call),
@@ -331,9 +339,11 @@ impl Caller<'_, '_> {
         let callee = untemplated(callee);
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
         if let Some(class) = cpp.resolve(written, self.class.unwrap_or(self.ns)) {
+            let fns = self.ids(cpp.members(class, site, Some(self.sight())));
+            let settled = cpp.settled(class, Some(self.sight()));
             return Evidence::Found {
-                fns: self.ids(cpp.members(class, site)),
-                open: false,
+                open: !settled && fns.len() == 1,
+                fns,
             };
         }
         let namesakes = cpp.namesakes(written);
@@ -355,7 +365,11 @@ impl Caller<'_, '_> {
             }
             return Evidence::Found { fns, open: true };
         }
-        let fns = self.ids(namesakes.into_iter().flat_map(|c| cpp.members(c, site)));
+        let fns = self.ids(
+            namesakes
+                .into_iter()
+                .flat_map(|c| cpp.members(c, site, None)),
+        );
         // One member of several classes it may name: maybe another's.
         Evidence::Found {
             open: fns.len() == 1,
@@ -378,11 +392,23 @@ impl Caller<'_, '_> {
                 Some(Evidence::Found { fns, .. }) => Evidence::Found { fns, open: true },
                 Some(_) | None => or,
             };
-            match self.cpp.lookup(class, site) {
-                Ok((fns, open)) => {
+            match self.cpp.lookup(class, site, self.sight()) {
+                // A bare call in a template does not search a dependent
+                // base: the free functions may be meant.
+                Ok(found) if found.dependent => {
+                    let mut fns = self.ids(found.fns);
+                    return match self.free(site, None) {
+                        Some(Evidence::Found { fns: free, open }) => {
+                            fns.extend(free);
+                            Evidence::Found { fns, open }
+                        }
+                        Some(_) | None => Evidence::Found { fns, open: true },
+                    };
+                }
+                Ok(found) => {
                     return Evidence::Found {
-                        fns: self.ids(fns),
-                        open,
+                        fns: self.ids(found.fns),
+                        open: found.open,
                     }
                 }
                 Err(Missing::Outside) => return or_free(Evidence::Outside),

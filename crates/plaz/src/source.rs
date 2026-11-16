@@ -68,7 +68,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         };
         flow::attach(&mut file, &a);
         if family == Family::Cpp {
-            cpp_facts(&mut file, &a);
+            cpp_facts(&mut file, &a, &path);
         }
         files.insert(path, file);
     }
@@ -106,7 +106,8 @@ fn hidden_jumps(files: &mut BTreeMap<String, File>) {
 /// are file-local, each function's parameter types and namespace, each
 /// method's class, the file's classes and their bases, namespace names
 /// and `using`s.
-fn cpp_facts(file: &mut File, a: &Analyzed) {
+fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
+    let anon = format!("(anonymous@{path})");
     let items = file.code.items.iter().zip(&a.defs).enumerate();
     for (i, (it, def)) in items.filter(|(_, (it, _))| !it.nested) {
         let fns = matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method);
@@ -137,17 +138,13 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             file.params.insert(i, p);
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
-        let mut path = enclosing(node, src.text(), false);
+        let mut path = enclosing(node, src.text(), None);
         let declared = f.and_then(|f| f.child_by_field_name("declarator"));
         let qualifier = declared
             .and_then(|d| text(d).rsplit_once("::"))
             .map(|q| q.0);
-        path.extend(
-            qualifier
-                .into_iter()
-                .flat_map(|q| q.split("::"))
-                .map(|s| s.trim().to_string()),
-        );
+        let segs = || qualifier.into_iter().flat_map(|q| q.split("::"));
+        path.extend(segs().map(|s| s.trim().to_string()));
         path.retain(|s| !s.is_empty());
         if !path.is_empty() {
             file.scopes.insert(i, path.join("::"));
@@ -156,11 +153,12 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
             .any(|n| n.kind() == "field_declaration_list");
         let names_owner =
             |o: &String| declared.is_some_and(|d| text(d).contains(&format!("{o}::")));
-        let class = if in_class {
-            Some(enclosing(node, src.text(), true).join("::"))
-        } else {
-            (it.owner.as_ref().is_some_and(names_owner)).then(|| path.join("::"))
-        };
+        let mut class = enclosing(node, src.text(), Some(&anon));
+        if !in_class {
+            class.extend(segs().map(|s| s.trim().to_string()));
+        }
+        let class =
+            (in_class || it.owner.as_ref().is_some_and(names_owner)).then(|| class.join("::"));
         if let Some(c) = class.filter(|_| it.kind == CodeItemKind::Method) {
             file.classes.insert(i, untemplated(&c));
         }
@@ -178,31 +176,7 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
                 let segs = segments(&s.text()[name.byte_range()]);
                 file.namespaces.extend(segs.map(|g| g.0.to_string()));
             }
-            let name = (n.child_by_field_name("body").is_some())
-                .then(|| n.child_by_field_name("name"))
-                .flatten();
-            let class = matches!(
-                n.kind(),
-                "class_specifier" | "struct_specifier" | "union_specifier"
-            );
-            if let Some(name) = name.filter(|_| class) {
-                let text = |n: Node| &s.text()[n.byte_range()];
-                let clause = n
-                    .children(&mut n.walk())
-                    .find(|c| c.kind() == "base_class_clause");
-                let named = clause.map(|c| c.named_children(&mut c.walk()).collect::<Vec<_>>());
-                let bases = named
-                    .into_iter()
-                    .flatten()
-                    .filter(|b| b.kind() != "access_specifier");
-                let mut path = enclosing(n, s.text(), true);
-                path.push(text(name).to_string());
-                let class = untemplated(&path.join("::"));
-                file.bases
-                    .entry(class)
-                    .or_default()
-                    .extend(bases.map(|b| untemplated(text(b))));
-            }
+            class_head(file, n, s.text(), &anon);
             if n.kind() == "using_declaration" {
                 let named = n.named_children(&mut n.walk()).last();
                 let named = named.map(|u| s.text()[u.byte_range()].split_whitespace().collect());
@@ -213,16 +187,76 @@ fn cpp_facts(file: &mut File, a: &Analyzed) {
     }
 }
 
+/// Records the class head `n` (a class, struct or union with a body) in
+/// `File::bases`; `anonymous` names the file's anonymous namespaces.
+fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
+    let class = matches!(
+        n.kind(),
+        "class_specifier" | "struct_specifier" | "union_specifier"
+    );
+    let name = (n.child_by_field_name("body").is_some())
+        .then(|| n.child_by_field_name("name"))
+        .flatten();
+    let Some(name) = name.filter(|_| class) else {
+        return;
+    };
+    let text = |n: Node| &src[n.byte_range()];
+    let params = template_params(n, src);
+    let clause = n
+        .children(&mut n.walk())
+        .find(|c| c.kind() == "base_class_clause");
+    let named = clause.map(|c| c.named_children(&mut c.walk()).collect::<Vec<_>>());
+    let bases = named
+        .into_iter()
+        .flatten()
+        .filter(|b| b.kind() != "access_specifier");
+    let dependent = |b: &str| {
+        let args = b.split_once('<').map_or("", |a| a.1);
+        args.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .any(|w| params.contains(w))
+    };
+    let mut path = enclosing(n, src, Some(anonymous));
+    path.push(text(name).to_string());
+    let class = untemplated(&path.join("::"));
+    let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
+    file.bases.entry(class).or_default().extend(bases);
+}
+
+/// The names of the template parameters of the templates around `n`.
+fn template_params<'s>(n: Node, src: &'s str) -> BTreeSet<&'s str> {
+    let mut out = BTreeSet::new();
+    for t in std::iter::successors(n.parent(), Node::parent) {
+        let Some(list) = t
+            .child_by_field_name("parameters")
+            .filter(|_| t.kind() == "template_declaration")
+        else {
+            continue;
+        };
+        for p in list.named_children(&mut list.walk()) {
+            let name = p.child_by_field_name("name").or_else(|| {
+                let named = p.named_children(&mut p.walk()).last();
+                named.filter(|l| matches!(l.kind(), "type_identifier" | "identifier"))
+            });
+            out.extend(name.map(|i| &src[i.byte_range()]));
+        }
+    }
+    out
+}
+
 /// The names of the named namespaces (inline ones left out) around
-/// `node`, outermost first, and with `classes` those of its classes,
-/// structs and unions.
-fn enclosing(node: Node, src: &str, classes: bool) -> Vec<String> {
+/// `node`, outermost first; with `anonymous`, an anonymous namespace as
+/// that segment, and the names of the classes, structs and unions too.
+fn enclosing(node: Node, src: &str, anonymous: Option<&str>) -> Vec<String> {
     let mut path = Vec::new();
     for n in std::iter::successors(node.parent(), Node::parent) {
         let Some(name) = n.child_by_field_name("name") else {
+            if let Some(a) = anonymous.filter(|_| n.kind() == "namespace_definition") {
+                path.insert(0, a.to_string());
+            }
             continue;
         };
         let name = &src[name.byte_range()];
+        let classes = anonymous.is_some();
         match n.kind() {
             "namespace_definition" if !src[n.byte_range()].starts_with("inline") => {
                 let segs = segments(name).filter(|s| !s.1);
