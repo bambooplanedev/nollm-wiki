@@ -356,7 +356,7 @@ fn renew(
     for old in &gone {
         match renamed(old) {
             Some(new) => println!(
-                "removed {old}: renamed {new} in {latest}; run \"kulman setup --scope repo\" \
+                "removed {old}: renamed {new}; run \"kulman setup --scope repo\" \
                  (or local) again in each project set up with {old}"
             ),
             None => println!("removed {old}: not in release {latest}"),

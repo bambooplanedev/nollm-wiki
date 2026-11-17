@@ -364,7 +364,7 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
             "installed calque 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
-            "removed kalka: renamed calque in 0.8.0; run \"kulman setup --scope repo\" (or local) \
+            "removed kalka: renamed calque; run \"kulman setup --scope repo\" (or local) \
              again in each project set up with kalka",
             "restart running agent sessions; they keep the old binaries until then"
         ]
