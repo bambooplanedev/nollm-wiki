@@ -241,7 +241,8 @@ pub(crate) struct SearchParams {
     /// you were handed. Returns each path on its own line, then `  start-end  label` for
     /// matching headings and bold step labels (`-` and spaces match alike); an empty query lists the first 200 (pass `limit` for more).
     /// Pass the plan, spec and ledger together: an ID is often a label in only one of
-    /// them. Only labels are searched, not body text; use grep for text.
+    /// them. When no label matches, table rows holding the query (`| W21 | D12 |`) answer.
+    /// Other body text is not searched; use grep for it.
     pub docs: Option<Vec<String>>,
 }
 

@@ -82,6 +82,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         (a.memory, "--memory"),
         (a.no_memory, "--no-memory"),
         (a.agent.is_some(), "--agent"),
+        (a.hook, "--hook"),
         (a.no_hook, "--no-hook"),
     ] {
         if given && !calque {
@@ -148,6 +149,9 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         }
         if let Some(scope) = &scope {
             args.extend(["--scope", scope]);
+        }
+        if is_calque && a.hook {
+            args.push("--hook");
         }
         if is_calque && a.no_hook {
             args.push("--no-hook");

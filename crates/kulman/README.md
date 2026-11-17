@@ -98,7 +98,13 @@ in place it says `up to date` and does nothing. Each module it moves is named wi
 versions (`updated <name> <old> -> <new>`), a module the new release requires that was not
 installed is named `installed <name> <version>`, and the last line, when the version changed, is
 `restart running agent sessions; they keep the old binaries until then`. At the same version, files
-put back are named `repaired <name> <version>`, with no restart line.
+put back are named `repaired <name> <version>`, with no restart line. An installed module the new
+release no longer holds is removed, with its binary and link, once the rest is in place: when a
+module of the release lists it in `replaces` (a rename), that module is installed instead and the
+line is `removed <old>: renamed <new>; run "kulman setup --scope repo" (or local) again
+in each project set up with <old>`; otherwise `removed <name>: not in release <version>`. At a
+terminal any removal is asked first, at the installed version too, and the question ends
+`; removes <names>?`.
 
     kulman remove [--modules <MODULES>] [--yes]
 
@@ -116,12 +122,12 @@ need `kulman setup --scope repo --remove` (or `--scope local`) first: before the
 terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
-                 [--scope repo|local] [--no-hook] [--remove] [--yes]
+                 [--scope repo|local] [--hook | --no-hook] [--remove] [--yes]
 
 Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current
 directory, in the release's order: every chosen module runs, whatever the earlier ones returned.
 Without `--modules` every installed module is set up. `--scope` goes to every module; `--agent`,
-`--no-hook` and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
+`--hook`/`--no-hook` (calque's prompt hook, off by default) and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
 chosen. Agent memory is on unless `--no-memory` is given (or the release turns it off). `--remove`
 undoes each module's setup. Before the first module runs, every chosen module's binary must be in
 `bin/` and executable; with no module installed there is nothing to set up (exit 1). The modules
@@ -203,22 +209,23 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.8.1",
+  "version": "0.8.2",
   "modules": [
     {
       "name": "calque",
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
+      "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }

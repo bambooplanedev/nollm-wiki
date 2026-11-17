@@ -1374,6 +1374,31 @@ fn a_header_declaration_stands_for_its_definition() {
 }
 
 #[test]
+fn a_header_function_with_a_body_or_no_definition_stands_for_itself() {
+    let (_dir, w) = code_fixture(&[
+        (
+            "src/q.h",
+            "struct Q {\n  Q() = default;\n  Q(int n);\n  int take(int hint);\n  int take(int a, int b) = delete;\n  int size() const { return 1; }\n};\n",
+        ),
+        (
+            "src/q.cpp",
+            "#include \"q.h\"\nQ::Q(int n) {}\nint Q::take(int hint) { return hint; }\nint Q::size(int pad) const { return pad; }\n",
+        ),
+        (
+            "src/use.cpp",
+            "#include \"q.h\"\nint make() { Q q = Q(); return q.size(); }\n",
+        ),
+    ]);
+    // `Q()` is the defaulted constructor, and `Q(int)`'s definition, as C++
+    // sets no minimum; `size()` is the header's inline body, not the
+    // same-named `Q::size(int)` defined beside it.
+    assert_eq!(
+        callees(&w, "use", "make"),
+        ["src/q.cpp:2-2", "src/q.h:2-2", "src/q.h:6-6"]
+    );
+}
+
+#[test]
 fn an_index_with_no_updated_key_loads_and_its_hits_have_no_date() {
     let dir = build();
     let path = dir.path().join("out").join("index.json");
@@ -2527,6 +2552,40 @@ fn a_name_in_the_wrong_case_is_not_found_but_its_page_is_listed() {
     let hits = hit_paths(&w.search("orderBook", None, 10));
     assert!(hits.contains(&"src/book.py".to_string()), "{hits:?}");
     assert!(hits.contains(&"src/util.py".to_string()), "{hits:?}");
+}
+
+#[test]
+fn a_shell_script_without_an_extension_is_indexed_by_its_shebang() {
+    let (_d, w) = code_fixture(&[
+        (
+            "scripts/hooks/pre-commit",
+            "#!/bin/sh\nrun_checks() {\n  cargo test\n}\nrun_checks\n",
+        ),
+        (
+            "scripts/deploy",
+            "#!/usr/bin/env bash\nship_release() {\n  true\n}\n",
+        ),
+        // Only a shell shebang counts: no shebang, or another interpreter.
+        ("LICENSE", "lint_unread_marker\n"),
+        (
+            "bin/tool",
+            "#!/usr/bin/env python3\ndef lint_unread_marker():\n    pass\n",
+        ),
+    ]);
+    assert_eq!(
+        symbol_lines(&w.search("run_checks", None, 10)),
+        [(
+            "scripts/hooks/pre-commit".to_string(),
+            2,
+            4,
+            "run_checks".to_string()
+        )]
+    );
+    assert_eq!(
+        hit_paths(&w.search("ship_release", None, 10)),
+        ["scripts/deploy"]
+    );
+    assert!(w.search("lint_unread_marker", None, 10).is_empty());
 }
 
 const NESTED_PY: &str = "\

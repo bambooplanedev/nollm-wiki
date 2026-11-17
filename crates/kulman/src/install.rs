@@ -249,9 +249,27 @@ pub(super) fn update(ask: bool) -> Result<()> {
     result
 }
 
+/// The question before an update to `latest`, naming each module it removes.
+fn update_question(count: usize, latest: &str, gone: &[String]) -> String {
+    let removes = if gone.is_empty() {
+        String::new()
+    } else {
+        format!("; removes {}", gone.join(", "))
+    };
+    format!("Update {count} module(s) to {latest}{removes}?")
+}
+
+/// The installed `manifest.json` reads and lists every module of `state`: one it lacks is a
+/// removal a committed update has not finished.
+fn installed_has(home: &Home, state: &State) -> bool {
+    let manifest = std::fs::read(home.path.join("manifest.json")).ok();
+    let manifest = manifest.and_then(|b| Manifest::parse(&b).ok());
+    manifest.is_some_and(|m| state.modules.iter().all(|n| m.module(n).is_some()))
+}
+
 /// Under the lock: unless already current or newer, stages kulman and every installed module
 /// at the latest version, and only when all are ready commits them (kulman last). With `ask`,
-/// a move to a newer release is asked first.
+/// a move to a newer release, or any removal, is asked first.
 fn renew(
     home: &Home,
     base: &str,
@@ -276,35 +294,50 @@ fn renew(
             return Ok(());
         }
         std::cmp::Ordering::Equal
-            if listed.clone().all(|n| bin.join(n).is_file())
-                && home.path.join("manifest.json").is_file() =>
+            if listed.clone().all(|n| bin.join(n).is_file()) && installed_has(home, &state) =>
         {
             println!("up to date");
             return Ok(());
         }
         _ => {}
     }
-    // The installed modules, plus what they require in the latest release.
-    for name in &state.modules {
+    // The installed modules, plus what they require in the latest release. One the release no
+    // longer holds goes, the module that `replaces` it (if any) taking its place.
+    let renamed = |old: &String| {
+        (manifest.modules.iter())
+            .find(|m| m.replaces.contains(old))
+            .map(|m| m.name.clone())
+    };
+    let (kept, gone): (Vec<String>, Vec<String>) =
+        (state.modules.iter().cloned()).partition(|name| manifest.module(name).is_some());
+    let wanted: Vec<String> = kept
+        .into_iter()
+        .chain(gone.iter().filter_map(renamed))
+        .collect();
+    for name in &wanted {
         manifest.archive(name, target)?;
     }
-    let modules = choose(manifest, Some(state.modules.clone()))?;
-    if ask && release::version_key(latest) > release::version_key(have) {
-        let question = format!("Update {} module(s) to {latest}?", modules.len());
-        if !ask_yes(&question, true)? {
-            println!("nothing changed");
-            return Ok(());
-        }
+    let modules = choose(manifest, Some(wanted))?;
+    // A move to a newer release, or any removal, is asked first.
+    let asked =
+        ask && (release::version_key(latest) > release::version_key(have) || !gone.is_empty());
+    if asked && !ask_yes(&update_question(modules.len(), latest, &gone), true)? {
+        println!("nothing changed");
+        return Ok(());
     }
     let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
     let old_modules = state.modules.clone();
-    let state = State {
+    // Committed still listing the modules that go, so a run cut off before their removal
+    // finishes it; the removal then writes the state without them.
+    let mut listed = modules.clone();
+    listed.extend(gone.iter().cloned());
+    let state = |modules: BTreeSet<String>| State {
         version: latest.clone(),
         modules: modules.into_iter().collect(),
     };
-    store::commit(home, &staged, raw, &state)?;
+    store::commit(home, &staged, raw, &state(listed))?;
     for s in &staged {
         // A module the release newly requires was not there before; at the same version, files
         // are only put back.
@@ -316,8 +349,39 @@ fn renew(
             println!("updated {} {have} -> {latest}", s.name);
         }
     }
+    // Only once what replaces them is in place.
+    if !gone.is_empty() {
+        store::remove_modules(home, &gone, &state(modules))?;
+    }
+    for old in &gone {
+        match renamed(old) {
+            Some(new) => println!(
+                "removed {old}: renamed {new}; run \"kulman setup --scope repo\" \
+                 (or local) again in each project set up with {old}"
+            ),
+            None => println!("removed {old}: not in release {latest}"),
+        }
+    }
     if have != latest {
         println!("restart running agent sessions; they keep the old binaries until then");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_question;
+
+    #[test]
+    fn the_update_question_names_what_it_removes() {
+        assert_eq!(
+            update_question(2, "0.8.0", &[]),
+            "Update 2 module(s) to 0.8.0?"
+        );
+        let gone = ["kalka".to_string(), "old".to_string()];
+        assert_eq!(
+            update_question(1, "0.8.0", &gone),
+            "Update 1 module(s) to 0.8.0; removes kalka, old?"
+        );
+    }
 }

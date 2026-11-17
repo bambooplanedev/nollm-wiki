@@ -95,6 +95,32 @@ fn harness_prompts_open_with_a_tag() {
 }
 
 #[test]
+fn harness_prompts_include_claude_codes_fixed_notes() {
+    for text in [
+        "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] done",
+        "(Re-invocation of /superpowers:brainstorming — the skill instructions were previously loaded)",
+        "[Image: original 2560x1440, displayed at 2000x1125. Multiply coordinates by 1.28 to map to original image.]",
+        "Your claude.ai usage limit has reset. Continue the task you were working on",
+        "[Usage limit reached; a short summary follows]",
+        "[Earlier usage-limit notes no longer apply. Continue working normally.]",
+        "Your response above was stopped by a safety classifier — this is not a tool or API error.",
+        "Skill /superpowers:writing-plans is already loaded above; instructions unchanged.",
+    ] {
+        assert!(is_harness_prompt(text), "{text}");
+    }
+    // A person's prompts that open the same way stay theirs.
+    for text in [
+        "[Image #1] why is this button red",
+        "Another session crashed in parse_order",
+        "Skill /review fails on the order book",
+        "Your usage of load_creds is wrong",
+        "(re-run the tests please)",
+    ] {
+        assert!(!is_harness_prompt(text), "{text}");
+    }
+}
+
+#[test]
 fn prompt_from_hook_json_needs_a_string_prompt() {
     assert_eq!(prompt_from_hook_json("{}"), None);
     assert_eq!(prompt_from_hook_json("not json"), None);

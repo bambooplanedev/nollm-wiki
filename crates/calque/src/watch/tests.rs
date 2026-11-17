@@ -57,6 +57,37 @@ fn new_handled_file_in_visited_dir_is_relevant() {
 }
 
 #[test]
+fn new_shell_script_without_an_extension_is_relevant() {
+    let (_d, r, w) = compiled();
+    std::fs::write(r.join("src/hook"), "#!/bin/sh\necho hi\n").unwrap();
+    std::fs::write(r.join("src/NOTES"), "plain words\n").unwrap();
+    assert!(w.relevant(&r.join("src/hook")));
+    assert!(!w.relevant(&r.join("src/NOTES")));
+}
+
+/// A FIFO or a symlink with no extension is no shell script: opening a FIFO
+/// blocks until a writer comes, and the walk never follows a symlink.
+#[cfg(unix)]
+#[test]
+fn a_fifo_or_symlink_without_an_extension_is_not_opened() {
+    let (d, r, w) = compiled();
+    let outside = d.path().join("outside");
+    std::fs::write(&outside, "#!/bin/sh\necho hi\n").unwrap();
+    std::os::unix::fs::symlink(&outside, r.join("src/link")).unwrap();
+    assert!(!w.relevant(&r.join("src/link")));
+    let fifo = r.join("src/pipe");
+    let made = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(w.relevant(&fifo)));
+    let answer = rx.recv_timeout(Duration::from_secs(3));
+    assert_eq!(answer, Ok(false), "relevant() blocked on a FIFO");
+}
+
+#[test]
 fn unhandled_file_is_not_relevant() {
     let (_d, r, w) = compiled();
     assert!(!w.relevant(&r.join("src/a.o")));

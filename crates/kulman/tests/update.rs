@@ -252,18 +252,135 @@ fn update_with_one_bad_archive_changes_nothing() {
     assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
     assert_eq!(stderr(&out).lines().last(), Some("nothing changed"));
     assert_eq!(snapshot(t.path()), before);
+}
 
-    // A module the latest release no longer holds.
-    release(&t.path().join("release"), "0.9.0", &[("calque", CALQUE_8)]);
-    let before = snapshot(t.path());
-    let out = kulman(&home, &base).arg("update").output().unwrap();
-    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(
-        stderr(&out).contains("kulman: plaz: not in the release"),
-        "{}",
-        stderr(&out)
+#[test]
+fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
+    let (_t, base, home, dir) = installed_linked(&[]);
+    release(
+        &home.with_file_name("release"),
+        "0.9.0",
+        &[("calque", CALQUE_8)],
     );
-    assert_eq!(snapshot(t.path()), before);
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "updated calque 0.7.0 -> 0.9.0",
+            "updated kulman 0.7.0 -> 0.9.0",
+            "removed plaz: not in release 0.9.0",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.9.0", "modules": ["calque"]})
+    );
+    assert!(!home.join("bin/plaz").exists());
+    assert!(fs::symlink_metadata(dir.join("plaz")).is_err());
+    no_tmp_left(&home);
+}
+
+#[test]
+fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
+    let (_t, base, home) = installed();
+    release(
+        &home.with_file_name("release"),
+        "0.9.0",
+        &[("calque", CALQUE_8)],
+    );
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    fs::create_dir(home.join("bin/plaz")).unwrap();
+    let out = kulman(&home, &base)
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    // Committed: what moved is said, and the state still lists what is not yet removed.
+    assert_eq!(
+        lines(&out),
+        [
+            "updated calque 0.7.0 -> 0.9.0",
+            "updated kulman 0.7.0 -> 0.9.0"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.9.0", "modules": ["calque", "plaz"]})
+    );
+    fs::remove_dir(home.join("bin/plaz")).unwrap();
+    fs::write(home.join("bin/plaz"), PLAZ).unwrap();
+    let out = kulman(&home, &base)
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "repaired calque 0.9.0",
+            "repaired kulman 0.9.0",
+            "removed plaz: not in release 0.9.0"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.9.0", "modules": ["calque"]})
+    );
+    assert!(!home.join("bin/plaz").exists());
+}
+
+#[test]
+fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
+    let t = tempfile::tempdir().unwrap();
+    let rel = t.path().join("release");
+    let base = release(&rel, "0.7.0", &[("kalka", CALQUE), ("plaz", PLAZ)]);
+    let home = t.path().join("home");
+    let dir = local_bin(&home);
+    fs::create_dir_all(&dir).unwrap();
+    kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .args(["install", "--modules", "kalka,plaz"])
+        .assert()
+        .success();
+    publish_0_8(t.path());
+    common::edit_manifest(&rel, "0.8.0", |m| {
+        m["modules"][0]["replaces"] = json!(["kalka"]);
+    });
+    let out = kulman(&home, &base)
+        .env("PATH", path_first(&dir))
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "installed calque 0.8.0",
+            "updated plaz 0.7.0 -> 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "removed kalka: renamed calque; run \"kulman setup --scope repo\" (or local) \
+             again in each project set up with kalka",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
+    );
+    assert_binary(&home, "calque", CALQUE_8);
+    assert!(!home.join("bin/kalka").exists());
+    assert!(fs::symlink_metadata(dir.join("kalka")).is_err());
+    assert_eq!(
+        fs::read_link(dir.join("calque")).unwrap(),
+        home.join("bin/calque")
+    );
+    no_tmp_left(&home);
 }
 
 #[test]

@@ -7,12 +7,11 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use wiki_code::model::CodeItemKind;
 use wiki_code::tree_sitter::Node;
-use wiki_code::Analyzed;
+use wiki_code::{declarator, Analyzed};
 
 /// What a C/C++ file's trees show that its items do not: which functions
-/// are file-local, each function's parameter types and namespace, each
-/// method's class, the file's classes and their bases, namespace names
-/// and `using`s.
+/// are file-local, each function's namespace, each method's class, the
+/// file's classes and their bases, namespace names and `using`s.
 pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
     let anon = format!("(anonymous@{path})");
     let items = file.code.items.iter().zip(&a.defs).enumerate();
@@ -46,12 +45,6 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             file.cpp.template_params.insert(i, names);
         }
         let f = declarator(node, &it.name, src.text());
-        // A conversion operator's declarator is no function's: it takes
-        // no parameters.
-        let cast = || it.name.starts_with("operator ").then(String::new);
-        if let Some(p) = f.and_then(|f| params(f, src.text())).or_else(cast) {
-            file.cpp.params.insert(i, p);
-        }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
         let declared = f.and_then(|f| f.child_by_field_name("declarator"));
         // A conversion operator's class is its qualifier, read first: the
@@ -569,83 +562,4 @@ fn segments(name: &str) -> impl Iterator<Item = (&str, bool)> {
         word.map_or((g, false), |r| (r.trim(), true))
     });
     segs.filter(|g| !g.0.is_empty())
-}
-
-/// The function declarator under `node` that declares `name`, outside any
-/// body.
-fn declarator<'t>(node: Node<'t>, name: &str, src: &str) -> Option<Node<'t>> {
-    let mut stack = vec![node];
-    loop {
-        let n = stack.pop()?;
-        let declares = n
-            .child_by_field_name("declarator")
-            .is_some_and(|d| src[d.byte_range()].ends_with(name));
-        if n.kind() == "function_declarator" && declares {
-            return Some(n);
-        }
-        if n.kind() != "compound_statement" {
-            stack.extend(n.named_children(&mut n.walk()));
-        }
-    }
-}
-
-/// The parameter types of the function declarator `f`: each parameter's
-/// text with its name, default value, whitespace, `struct`-like keywords
-/// and a by-value parameter's `const` (a pointer's own too) dropped,
-/// joined by `,`; `(void)` is
-/// `()`.
-fn params(f: Node, src: &str) -> Option<String> {
-    let list = f.child_by_field_name("parameters")?;
-    let mut out = Vec::new();
-    for p in list.children(&mut list.walk()) {
-        if matches!(p.kind(), "(" | ")" | "," | "comment") {
-            continue;
-        }
-        let end = p
-            .child_by_field_name("default_value")
-            .map_or(p.end_byte(), |d| d.start_byte());
-        // The parameter's own name: the innermost declarator.
-        let mut d = p.child_by_field_name("declarator");
-        while let Some(n) = d.filter(|n| n.kind() != "identifier") {
-            d = n
-                .child_by_field_name("declarator")
-                .or_else(|| n.named_child(0));
-        }
-        let cut = d.map_or(end..end, |n| n.start_byte().min(end)..n.end_byte().min(end));
-        let kept = [&src[p.start_byte()..cut.start], &src[cut.end..end]].concat();
-        // `struct T*` and `T*` are one type in C++; so are `const T` and
-        // `T` passed by value.
-        // Words are dropped wherever they stand (`vector<enum E>`).
-        let by_value = !kept.contains(['*', '&', '[', '(', '<']);
-        let dropped = |w: &str| {
-            matches!(w, "struct" | "class" | "union" | "enum")
-                || (by_value && matches!(w, "const" | "volatile"))
-        };
-        let (mut typed, mut word) = (String::new(), String::new());
-        for c in kept.chars().chain([' ']) {
-            if c.is_alphanumeric() || c == '_' {
-                word.push(c);
-                continue;
-            }
-            // Two words keep a space between them (`const core::K`).
-            if !dropped(&word) {
-                if !word.is_empty() && typed.ends_with(|c: char| c.is_alphanumeric() || c == '_') {
-                    typed.push(' ');
-                }
-                typed.push_str(&word);
-            }
-            word.clear();
-            if !c.is_whitespace() {
-                typed.push(c);
-            }
-        }
-        // `T* const` and `T*` are one type passed by value.
-        let typed = typed.trim_end_matches('=');
-        let typed = (typed.strip_suffix("const"))
-            .filter(|t| t.ends_with('*'))
-            .unwrap_or(typed);
-        out.push(typed.to_string());
-    }
-    let all = out.join(",");
-    Some(if all == "void" { String::new() } else { all })
 }

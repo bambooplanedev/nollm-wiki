@@ -70,8 +70,8 @@ written outside that folder. Then, in each project:
     kulman setup --scope repo
 
 This runs `calque setup` and `plaz setup` there. They write into the project's `.kulman/` folder
-(the wiki, and the map under `.kulman/map/`), add the agent configs and the prompt hook for the
-agents they find, create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`.
+(the wiki, and the map under `.kulman/map/`), add the agent configs for the
+agents they find (the prompt hook only with `--hook`), create `.agents/memory/` for agent notes, and add `.kulman/` to `.gitignore`.
 `--scope repo` writes committed files for the whole team. `--scope local` writes its files into this
 checkout only and lists the ones it created in `.git/info/exclude` instead; the exception is Claude
 Code's calque server, which goes through `claude mcp add-json … --scope local` into Claude Code's

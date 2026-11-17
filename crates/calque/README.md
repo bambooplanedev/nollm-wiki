@@ -62,11 +62,12 @@ crates/calque/src/lib.rs
   Codex or any MCP client.
   Several servers on one `.kulman` are fine: one compiles, the others serve what it wrote.
 - **One-command setup.** `calque setup` installs the server and what tells the agent to use it, for
-  Claude Code, pi, Cursor and Codex, and a hook that adds the matching code lines to each prompt.
+  Claude Code, pi, Cursor and Codex, and, with `--hook`, a hook that adds the matching code lines
+  to each prompt.
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
   Code's) become searchable pages, listed after the code hits, with dates, aliases and `supersedes:`.
 - **Languages.** Rust, Python, C and C++ (`.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`; the included fragments `.inl`, `.ipp` and `.tcc` get no page), Go, JavaScript (`.js`, `.mjs`, `.cjs`), TypeScript (with JSX/TSX), `.vue` and `.svelte`
-  scripts, shell (`.sh`, `.bash`: functions, plus top-level UPPERCASE variables found by exact name), Markdown and plain text.
+  scripts, shell (`.sh`, `.bash`, or no extension with a `sh`/`bash` shebang: functions, plus top-level UPPERCASE variables found by exact name), Markdown and plain text.
 - **Deterministic.** Byte-identical output across runs, machines and thread counts; incremental
   recompiles.
 - **Opens in Obsidian.** The pages link each other with Obsidian wikilinks, so the output folder is
@@ -115,7 +116,7 @@ Commands, exit codes and the layout of a release: [crates/kulman/README.md](../k
 In the project you want agents to navigate:
 
     cd your-project
-    calque setup --scope local      # compiles .kulman, installs the MCP server, the prompt hook and (for pi) a skill
+    calque setup --scope local      # compiles .kulman, installs the MCP server and (for pi) a skill
 
 Then start Claude Code or pi in that directory: the `calque` tools are there, and the server keeps
 `.kulman/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
@@ -176,7 +177,8 @@ When no label holds the words in a row, a query that names several labels one af
 part of two or more words or one led by an ID opens its label, a single plain word must be the whole
 label, and the first line names the words that open none. Otherwise labels opened by the query's
 leading ID (`11.4`, `T3a`) answer, else labels holding all its words except stop words in any order;
-a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
+and when no label answers at all, the table rows holding the query's words in a row (`| W21 | D12 |`
+for `W21` or `D12`), a match in the first cell first; a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
 
 | agent | `calque setup` writes | what tells it to use the wiki |
 |---|---|---|
@@ -190,7 +192,7 @@ a first line names the fallback. An empty answer says no label matched and sugge
 
 `calque setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    calque setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--no-hook] [--memory | --no-memory] [--remove] [--yes]
+    calque setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 It compiles `.` into `.kulman`, then installs the MCP server (`calque serve --source .`) and what tells
 each agent to use it. pi gets the `calque-navigation` skill (how to find code, and the memory
@@ -227,14 +229,26 @@ stderr and exits 0.
   `codex` CLI for it; see [Codex](#codex).
 - Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
   stdout are both terminals; `--yes` is the same as having no terminal.
-- The prompt hook adds the wiki's code lines for each prompt before the model runs. Claude Code gets
-  a `UserPromptSubmit` entry (`calque hint --claude-hook`) in `.claude/settings.json`
-  (`settings.local.json` with `--scope local`); pi gets `.pi/extensions/calque-hint/index.ts`. The
-  hook is silent when there is no wiki, it cannot be read or nothing matches, and never blocks a
-  prompt. `--no-hook` skips it; a hook installed earlier stays until `--remove`.
+- The prompt hook (`--hook`, off by default) adds the wiki's code lines for each prompt before the
+  model runs. Claude Code gets a `UserPromptSubmit` entry (`calque hint --claude-hook`) in
+  `.claude/settings.json` (`settings.local.json` with `--scope local`); pi gets
+  `.pi/extensions/calque-hint/index.ts`. The hook is silent when there is no wiki, it cannot be read
+  or nothing matches, and never blocks a prompt. It is off by default because it still fires on
+  about a third of chat prompts (see `docs/KNOWN_GAPS.md`). A run without `--hook` (`--no-hook` is
+  the same) removes a hook an earlier setup wrote, matched exactly as `--remove` matches it, and
+  prints `removed <file> …: the prompt hint is off by default now; run setup again with --hook to
+  keep it`; a file it cannot read is left and named (`left <file> as it is: …`) without failing the
+  run. Re-run setup with `--hook` to keep it: setup does not remember the choice. A run
+  limited to some agents (`--agent claude`) leaves the other agents' hook as it is.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's block only when it is
   exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`
   after it). Ignore lines, `.kulman/` and memory notes stay.
+- Every run, `--remove` included, also deletes what `kalka setup` (the module's name before 0.8.0)
+  wrote, exactly as it wrote it: the server entries in the project's files, hooks, the pi skill, the
+  navigation steps and the Codex block, each said as `removed <item> (calque's old name)`. Claude
+  Code's local kalka server is removed only by a `--scope local` run that sets up claude. Anything
+  else named kalka stays, as does a file git tracks on a `--scope local` run; a file setup cannot
+  read is left and named (`left <file> as it is: …`) without failing the run.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
@@ -427,7 +441,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` (with `--tools`) | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
@@ -727,10 +741,19 @@ another of the page's lines; a page with no such line gets `path  title`. A head
 non-header line shows the same qualified name. The line whose own text (its lines plus the comment block above) matches the most counted words, by identifier, name word or word stem, goes first when it matches at least 1.5 times as many as line 1. Only the text's 24 rarest
 words rank the pages (vendored code is not compiled, see `compile`); one-character words never
 count. Prints nothing and exits 0 when the wiki is missing, nothing matches, the text opens with a
-tag (a turn the harness wrote, such as `<task-notification>`) or it has fewer than two words of two
-or more characters (a reply such as `yes` or `ok`), so a hook can run it on every prompt. It prints
-no code lines when the best page scores below half of what the text's counted words could give one
-page (its words are spread over the project, as in a long brief or a list of instructions).
+tag (a turn the harness wrote, such as `<task-notification>`) or with one of Claude Code's own
+notes (`Another Claude session sent a message:`, `(Re-invocation of /`, `[Image: original `, the
+usage-limit and safety-classifier notes, `Skill /… is already loaded above`), or it has fewer than
+two words of two or more characters (a reply such as `yes` or `ok`), so a hook can run it on every
+prompt. It prints no code lines when the best page scores below half of what the text's counted
+words could give one page (its words are spread over the project, as in a long brief or a list of
+instructions), when fewer than two of the text's words occur in the project, or when the best page
+falls below that half once the text's function words (Ukrainian and English prepositions,
+conjunctions, particles, pronouns and English auxiliaries) are removed. A single project word
+written as code (with `_`, `::` or a lower-to-upper case change) counts as enough, so `where is
+hint_lines` fires; a single plain word (`where is the parser`) or a number (`глянь 46`) stays
+silent. These gates apply to the code lines only; the
+memory line below follows its own gate.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.kulman`.
 

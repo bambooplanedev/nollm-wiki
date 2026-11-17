@@ -42,8 +42,9 @@ decision charts; `.agents/memory`, the agent memory folder; this agent's files, 
 navigation block in `AGENTS.md` for Codex, `.pi/` and `.agents/skills/` for pi; and lines that
 keep `.kulman/` out of git. Two scopes: `repo` writes the files for the whole team to commit and
 puts the ignore line in `.gitignore`; `local` is for this checkout only, with the ignore lines in
-`.git/info/exclude` (for Claude Code the server goes in Claude's own local config and the hook in
-`.claude/settings.local.json`).
+`.git/info/exclude` (for Claude Code the server goes in Claude's own local config). The prompt hook
+(`.claude/settings.local.json` or `.claude/settings.json`, `.pi/extensions/calque-hint/`) is written
+only with `--hook`, and a run without it removes one an earlier setup wrote.
 
 After they answer, in the project root run:
 

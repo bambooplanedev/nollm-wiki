@@ -180,15 +180,15 @@ pub fn append_item(path: &Path, parents: &[&str], own: &[Value]) -> Result<Outco
     })
 }
 
-/// Like [`remove_entry`], for an array item: the first of the `own` items found.
+/// Like [`remove_entry`], for an array item: every one of the `own` items found.
 pub fn remove_item(root: &Path, path: &Path, parents: &[&str], own: &[Value]) -> Result<Outcome> {
     let out = item_edit(path, parents, false, |items| {
-        match items.iter().position(|v| own.contains(v)) {
-            Some(i) => {
-                items.remove(i);
-                Outcome::Done
-            }
-            None => Outcome::AlreadyThere,
+        let n = items.len();
+        items.retain(|v| !own.contains(v));
+        if items.len() < n {
+            Outcome::Done
+        } else {
+            Outcome::AlreadyThere
         }
     })?;
     if out == Outcome::Done && !path.exists() {

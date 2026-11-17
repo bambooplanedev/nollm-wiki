@@ -102,6 +102,12 @@ kulman link)`), а `kulman remove` видаляє лише власні поси
 було встановлено, — `installed <name> <version>`, а останній рядок, коли версія змінилася, —
 `restart running agent sessions; they keep the old binaries until then`. На тій самій версії
 повернуті на місце файли названо `repaired <name> <version>`, без рядка про перезапуск.
+Встановлений модуль, якого новий реліз уже не містить, видаляється разом із бінарником і посиланням,
+коли решта вже на місці: якщо модуль релізу називає його в `replaces` (перейменування), натомість
+встановлюється той модуль, а рядок — `removed <old>: renamed <new>; run "kulman setup
+--scope repo" (or local) again in each project set up with <old>`; інакше —
+`removed <name>: not in release <version>`. У терміналі про будь-яке видалення спершу питають, і на
+встановленій версії теж, а питання закінчується на `; removes <names>?`.
 
     kulman remove [--modules <MODULES>] [--yes]
 
@@ -120,12 +126,12 @@ kulman link)`), а `kulman remove` видаляє лише власні поси
 питанням, інакше — останнім рядком.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
-                 [--scope repo|local] [--no-hook] [--remove] [--yes]
+                 [--scope repo|local] [--hook | --no-hook] [--remove] [--yes]
 
 Запускає власний `setup` кожного вибраного модуля (`~/.kulman-home/bin/<module> setup …`) у поточній
 теці, у порядку релізу: кожен вибраний модуль запускається, хоч би що повернули попередні. Без
 `--modules` налаштовуються всі встановлені модулі. `--scope` іде кожному модулю; `--agent`,
-`--no-hook` і `--memory`/`--no-memory` належать calque, і коли calque не вибрано, це помилка
+`--hook`/`--no-hook` (хук запиту calque, за замовчуванням вимкнений) і `--memory`/`--no-memory` належать calque, і коли calque не вибрано, це помилка
 використання. Памʼять агента ввімкнена, хіба що передано `--no-memory` або її вимикає реліз.
 `--remove` скасовує setup кожного модуля. Перед запуском першого модуля бінарник кожного вибраного
 модуля має лежати в `bin/` і бути виконуваним; коли не встановлено жодного модуля, налаштовувати
@@ -209,22 +215,23 @@ errors: <modules>` і виходить з кодом першого модуля
 
 ```json
 {
-  "version": "0.8.1",
+  "version": "0.8.2",
   "modules": [
     {
       "name": "calque",
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
+      "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }

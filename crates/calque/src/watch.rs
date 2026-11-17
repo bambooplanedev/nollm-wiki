@@ -48,7 +48,8 @@ impl WatchSet {
 
     /// Would a change at `path` (absolute, canonical) alter what a compile
     /// produces? Known paths always; new ones only inside a visited directory,
-    /// and only if a handled file, an ignore file, or a visible directory.
+    /// and only if a handled file (or a shell script with no extension), an
+    /// ignore file, or a visible directory.
     pub fn relevant(&self, path: &Path) -> bool {
         if self
             .memory
@@ -71,7 +72,10 @@ impl WatchSet {
             return false;
         }
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        self.registry.handles(&normalize_path(&self.root, path))
+        let rel = normalize_path(&self.root, path);
+        let handles = |p: &str| self.registry.handles(p);
+        handles(&rel)
+            || crate::walk::shell_script(path, &rel, &handles)
             || name == ".gitignore"
             || name == ".ignore"
             || (path.is_dir()

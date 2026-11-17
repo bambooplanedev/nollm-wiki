@@ -52,6 +52,24 @@ fn called_from_splits_certain_and_may() {
 }
 
 #[test]
+fn a_shell_script_with_no_extension_gets_a_map_page() {
+    let src = "#!/bin/sh\nhelper() { :; }\nrun() {\n  helper\n}\n";
+    let readme = "helper() { :; }\n";
+    let (_d, vault) = common::built(&[("scripts/deploy", src), ("scripts/README", readme)]);
+    assert_eq!(
+        common::map_page(&vault, "map/scripts/deploy"),
+        "---\ntitle: \"deploy · scripts\"\ntags: [\"plaz\"]\nkind: map\nsource: \"scripts/deploy\"\n---\nCode: `scripts/deploy:1-5`\n\nNot covered yet: shell flowcharts.\n"
+    );
+    // A file with no extension and no shebang gets no page.
+    let mut pages: Vec<_> = std::fs::read_dir(vault.join("map/scripts"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    pages.sort();
+    assert_eq!(pages, ["deploy.md"]);
+}
+
+#[test]
 fn a_closure_calling_an_outer_parameter_is_hidden_even_when_a_project_function_shares_the_name() {
     let src = "pub fn cb() {}\npub fn f(cb: impl Fn()) {\n    let run = || {\n        cb();\n    };\n    run();\n}\n";
     let (_d, vault) = common::built(&[("src/a.rs", src)]);

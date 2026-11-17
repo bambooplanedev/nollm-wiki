@@ -80,7 +80,10 @@ struct SetupArgs {
     /// repo (committed, for the whole team) or local (this checkout only).
     #[arg(long, value_parser = ["repo", "local"])]
     scope: Option<String>,
-    /// calque: no hook.
+    /// calque: the prompt hook (off by default).
+    #[arg(long, conflicts_with = "no_hook")]
+    hook: bool,
+    /// calque: no prompt hook (the default).
     #[arg(long)]
     no_hook: bool,
     /// Undo each module's setup.

@@ -171,7 +171,7 @@ enum Command {
         #[arg(long)]
         claude_hook: bool,
     },
-    /// Install the MCP server and what tells each agent to use it (Claude Code, pi, Cursor, Codex) in this project, plus the prompt hook for Claude Code and pi.
+    /// Install the MCP server and what tells each agent to use it (Claude Code, pi, Cursor, Codex) in this project, plus, with `--hook`, the prompt hook for Claude Code and pi.
     Setup {
         /// Agents to set up (default: the ones found, asked at a terminal when none is; Cursor and Codex by their project folder).
         #[arg(long, value_delimiter = ',')]
@@ -179,7 +179,10 @@ enum Command {
         /// Where the files go (asked when omitted and stdin and stdout are terminals).
         #[arg(long)]
         scope: Option<Scope>,
-        /// Skip the prompt hook (installed by default for Claude Code and pi).
+        /// Add the prompt hook for Claude Code and pi (`calque hint` on each prompt).
+        #[arg(long, conflicts_with = "no_hook")]
+        hook: bool,
+        /// No prompt hook (the default): one an earlier setup wrote is removed.
         #[arg(long)]
         no_hook: bool,
         /// Undo what setup wrote (ignore lines and `.kulman/` stay).
@@ -544,7 +547,8 @@ fn main() -> Result<()> {
         Command::Setup {
             agent,
             scope,
-            no_hook,
+            hook,
+            no_hook: _,
             remove,
             memory: _,
             no_memory,
@@ -566,7 +570,7 @@ fn main() -> Result<()> {
             let opts = SetupOptions {
                 agents,
                 scope,
-                hook: !no_hook,
+                hook,
                 remove,
                 memory: !no_memory,
             };

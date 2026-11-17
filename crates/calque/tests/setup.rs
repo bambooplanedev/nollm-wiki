@@ -31,8 +31,10 @@ impl Fixture {
         fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    /// The calls to `claude`, without the look for kalka's old server every local run makes first.
     fn claude_log(&self) -> String {
-        fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default()
+        let log = fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default();
+        log.replace("mcp get kalka\n", "")
     }
     fn setup(&self, args: &[&str]) -> assert_cmd::assert::Assert {
         self.run(Path::new(env!("CARGO_BIN_EXE_calque")), args)
@@ -436,13 +438,14 @@ fn git(dir: &Path, args: &[&str]) {
 }
 
 #[test]
-fn setup_remove_undoes_the_default_hooks() {
+fn setup_remove_undoes_the_hooks() {
     let f = fixture(true, true);
     let r = f.root();
     fs::create_dir_all(r.join(".claude")).unwrap();
     fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
     let args = ["--agent", "claude,pi", "--scope", "repo"];
-    f.setup(&args).success();
+    f.setup(&[&args[..], &["--hook"]].concat()).success();
+    assert!(r.join(PI_EXT).exists());
     f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert_eq!(read(&r.join(".claude/settings.json")), ECHO_HOOK);
     assert!(!r.join(".pi/extensions").exists());
@@ -578,12 +581,12 @@ fn prompt_hooks(p: &Path) -> serde_json::Value {
 }
 
 #[test]
-fn setup_repo_adds_claude_hook_and_pi_extension_by_default() {
+fn setup_hook_adds_claude_hook_and_pi_extension() {
     let f = fixture(true, true);
     let r = f.root();
     fs::create_dir_all(r.join(".claude")).unwrap();
     fs::write(r.join(".claude/settings.json"), ECHO_HOOK).unwrap();
-    f.setup(&["--agent", "claude,pi", "--scope", "repo"])
+    f.setup(&["--agent", "claude,pi", "--scope", "repo", "--hook"])
         .success();
     let echo = serde_json::json!({"type": "command", "command": "echo hi"});
     assert_eq!(
@@ -599,7 +602,7 @@ fn setup_repo_adds_claude_hook_and_pi_extension_by_default() {
 fn setup_local_hook_uses_settings_local() {
     let f = fixture(true, true);
     let r = f.root();
-    f.setup(&["--agent", "claude,pi", "--scope", "local"])
+    f.setup(&["--agent", "claude,pi", "--scope", "local", "--hook"])
         .success();
     assert_eq!(
         prompt_hooks(&r.join(".claude/settings.local.json")),
@@ -616,17 +619,148 @@ fn setup_local_hook_uses_settings_local() {
 }
 
 #[test]
-fn setup_no_hook_installs_no_hook() {
+fn setup_installs_no_hook_without_the_hook_flag() {
+    for extra in [&[][..], &["--no-hook"][..]] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let args = [&["--agent", "claude,pi", "--scope", "repo"][..], extra].concat();
+        let a = f.setup(&args).success();
+        assert!(!r.join(".claude/settings.json").exists());
+        assert!(!r.join(".pi/extensions").exists());
+        // Nothing was there to remove: no word about a hook.
+        assert!(!out(&a).contains("hook"), "{}", out(&a));
+    }
+    let f = fixture(true, true);
+    f.setup(&[
+        "--agent",
+        "claude",
+        "--scope",
+        "repo",
+        "--hook",
+        "--no-hook",
+    ])
+    .code(2)
+    .stderr(predicates::str::contains("cannot be used with"));
+}
+
+/// The line a run without `--hook` prints for each hook an earlier setup wrote.
+const HINT_OFF: &str =
+    "the prompt hint is off by default now; run setup again with --hook to keep it";
+
+#[test]
+fn a_run_without_the_hook_flag_removes_the_hooks_an_earlier_setup_wrote() {
+    for scope in ["repo", "local"] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let file = if scope == "repo" {
+            ".claude/settings.json"
+        } else {
+            ".claude/settings.local.json"
+        };
+        fs::create_dir_all(r.join(".claude")).unwrap();
+        fs::write(r.join(file), ECHO_HOOK).unwrap();
+        let args = ["--agent", "claude,pi", "--scope", scope];
+        f.setup(&[&args[..], &["--hook"]].concat()).success();
+        let a = f.setup(&args).success();
+        assert_eq!(read(&r.join(file)), ECHO_HOOK, "{scope}");
+        assert!(!r.join(".pi/extensions").exists(), "{scope}");
+        let o = out(&a);
+        for what in [
+            format!("{file} prompt hook"),
+            format!("{PI_EXT} hook for pi"),
+        ] {
+            assert!(o.contains(&format!("removed {what}: {HINT_OFF}")), "{o}");
+        }
+        // Gone now: a further run says nothing about it.
+        assert!(!out(&f.setup(&args).success()).contains("hook"), "{scope}");
+    }
+}
+
+#[test]
+fn a_run_without_the_hook_flag_leaves_an_unreadable_settings_file_and_succeeds() {
+    // A file the run would not otherwise write does not fail it, as with kalka's leftovers.
+    for unreadable in [false, true] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let path = r.join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{\"x\": \"\xff\"}").unwrap();
+        if unreadable {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let a = f
+            .setup(&["--agent", "claude,pi", "--scope", "repo"])
+            .success();
+        let o = out(&a);
+        let start = "left .claude/settings.json as it is: cannot check it for calque prompt hook (";
+        assert!(o.lines().any(|l| l.starts_with(start)), "{o}");
+        // The rest of the run still happened.
+        assert!(r.join(".pi/mcp.json").exists(), "{o}");
+        assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"x\": \"\xff\"}");
+    }
+}
+
+#[test]
+fn removing_the_hook_takes_every_copy_of_it() {
+    for remove in [false, true] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let path = r.join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let two = serde_json::json!({"hooks": {"UserPromptSubmit": [hook_item(), hook_item()]}});
+        fs::write(&path, two.to_string()).unwrap();
+        let mut args = vec!["--agent", "claude", "--scope", "repo"];
+        if remove {
+            args.push("--remove");
+        }
+        f.setup(&args).success();
+        assert!(!path.exists(), "remove {remove}: {}", read(&path));
+    }
+}
+
+#[test]
+fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let r = f.root();
+    // A teammate's repo-scope setup committed the pi hook.
+    f.setup(&["--agent", "pi", "--scope", "repo", "--hook"])
+        .success();
+    git(&r, &["add", PI_EXT]);
+    let hook = read(&r.join(PI_EXT));
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert_eq!(read(&r.join(PI_EXT)), hook);
+    assert!(!out(&a).contains("hook"), "{}", out(&a));
+}
+
+#[test]
+fn a_run_without_the_hook_flag_removes_an_older_pi_hook_and_leaves_an_edited_one() {
     let f = fixture(true, true);
     let r = f.root();
-    f.setup(&["--agent", "claude,pi", "--scope", "repo", "--no-hook"])
-        .success();
-    assert!(!r.join(".claude/settings.json").exists());
+    let args = ["--agent", "pi", "--scope", "repo"];
+    let path = r.join(PI_EXT);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // As calque 0.8 wrote it, when the hook was on by default.
+    let old = include_str!("../src/setup/calque-hint.ts")
+        .replace("<out>", ".kulman")
+        .replace("<cmd>", "calque")
+        .replace(
+            "(installed by calque setup --hook)",
+            "(installed by calque setup unless --no-hook)",
+        );
+    assert!(old.contains("unless --no-hook"));
+    fs::write(&path, &old).unwrap();
+    let a = f.setup(&args).success();
     assert!(!r.join(".pi/extensions").exists());
-    // The old opt-in flag is gone.
-    f.setup(&["--agent", "claude", "--scope", "repo", "--hook"])
-        .code(2)
-        .stderr(predicates::str::contains("--hook"));
+    assert!(out(&a).contains(HINT_OFF), "{}", out(&a));
+    // Someone's own edit is not calque's to remove, and not worth a skip.
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, format!("{old}// mine\n")).unwrap();
+    let a = f.setup(&args).success();
+    assert!(path.exists());
+    assert!(!out(&a).contains("hook"), "{}", out(&a));
 }
 
 #[test]
@@ -1493,7 +1627,13 @@ fn foreign_wiki_project() -> (Fixture, [(PathBuf, String); 3]) {
     (f, old)
 }
 
-const ALL_AGENTS: [&str; 4] = ["--agent", "claude,pi,cursor,codex", "--scope", "repo"];
+const ALL_AGENTS: [&str; 5] = [
+    "--agent",
+    "claude,pi,cursor,codex",
+    "--scope",
+    "repo",
+    "--hook",
+];
 
 #[test]
 fn setup_leaves_other_tools_wiki_entries_alone() {
@@ -1837,7 +1977,7 @@ const LAUNCH_CODEX_BLOCK: &str = r#"[mcp_servers.calque]
 command = "sh"
 args = ["-c", "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque\" serve --source ."]
 "#;
-const LAUNCH_PI_HOOK: &str = r#"// Adds the project wiki's code lines for the prompt before the model runs (installed by calque setup unless --no-hook).
+const LAUNCH_PI_HOOK: &str = r#"// Adds the project wiki's code lines for the prompt before the model runs (installed by calque setup --hook).
 import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -1907,7 +2047,7 @@ fn setup_local_from_the_kulman_home_adds_the_launch_line_through_claude() {
         let f = fixture(false, true);
         claude_stub_args(&f, "sh", shown);
         let exe = f.home_calque();
-        let args = ["--agent", "claude", "--scope", "local"];
+        let args = ["--agent", "claude", "--scope", "local", "--hook"];
         f.run(&exe, &args).assert().success();
         let added = format!("mcp get calque\nmcp add-json calque {LAUNCH_JSON} --scope local\n");
         assert_eq!(f.claude_log(), added);
@@ -2112,13 +2252,13 @@ fn setup_repo_warns_for_each_written_file_git_ignores() {
     let f = ignoring_claude();
     real_git(&f);
     let a = f
-        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .setup(&["--agent", "claude,pi", "--scope", "repo", "--hook"])
         .success();
     // `.mcp.json` and the pi files are written too and not ignored: no warning for them.
     assert_eq!(ignored_warnings(&a), [IGNORED]);
     // Nothing written the second time, so nothing to warn about.
     let a = f
-        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .setup(&["--agent", "claude,pi", "--scope", "repo", "--hook"])
         .success();
     assert_eq!(ignored_warnings(&a), Vec::<String>::new());
 }
@@ -2129,7 +2269,9 @@ fn setup_does_not_warn_about_ignored_files_outside_a_repository() {
     let f = ignoring_claude();
     real_git(&f);
     fs::remove_dir_all(f.root().join(".git")).unwrap();
-    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "repo", "--hook"])
+        .success();
     assert!(out(&a).contains("wrote .claude/settings.json prompt hook"));
     assert_eq!(ignored_warnings(&a), Vec::<String>::new());
 }
@@ -2139,8 +2281,203 @@ fn setup_local_does_not_warn_about_the_files_it_excludes_itself() {
     let f = ignoring_claude();
     real_git(&f);
     let a = f
-        .setup(&["--agent", "claude", "--scope", "local"])
+        .setup(&["--agent", "claude", "--scope", "local", "--hook"])
         .success();
     assert!(out(&a).contains("wrote .claude/settings.local.json prompt hook"));
     assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+/// `text` as `kalka setup` wrote it before the module was renamed calque.
+fn as_kalka(text: &str) -> String {
+    text.replace("calque", "kalka")
+}
+
+#[test]
+fn setup_removes_what_the_module_wrote_under_its_old_name_kalka() {
+    let f = fixture(true, true);
+    let r = f.root();
+    let kalka = |memory: &str| {
+        format!("{{\"command\": \"kalka\", \"args\": [\"serve\", \"--source\", \".\"{memory}]}}")
+    };
+    fs::write(
+        r.join(".mcp.json"),
+        format!(
+            "{{\"mcpServers\": {{\"kalka\": {}, \"other\": {{\"command\": \"x\"}}}}}}",
+            kalka("")
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(r.join(".pi/extensions/kalka-hint")).unwrap();
+    let pi_entry = kalka(", \"--memory\", \"none\"").replace('}', ", \"exposure\": \"direct\"}");
+    fs::write(
+        r.join(".pi/mcp.json"),
+        format!("{{\"mcpServers\": {{\"kalka\": {pi_entry}}}}}"),
+    )
+    .unwrap();
+    // As kalka setup wrote it, while the hook was on by default.
+    let hook = include_str!("../src/setup/calque-hint.ts")
+        .replace("<out>", ".kulman")
+        .replace("<cmd>", "calque")
+        .replace("setup --hook)", "setup unless --no-hook)");
+    fs::write(
+        r.join(".pi/extensions/kalka-hint/index.ts"),
+        as_kalka(&hook),
+    )
+    .unwrap();
+    fs::create_dir_all(r.join(".agents/skills/kalka-navigation")).unwrap();
+    fs::write(
+        r.join(".agents/skills/kalka-navigation/SKILL.md"),
+        as_kalka(&skill(".agents/memory")),
+    )
+    .unwrap();
+    let nav = format!(
+        "<!-- calque:navigation -->\n{}<!-- /calque:navigation -->\n",
+        include_str!("../src/setup/navigation.md")
+    );
+    fs::write(r.join("AGENTS.md"), format!("# Team\n\n{}", as_kalka(&nav))).unwrap();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    fs::write(
+        r.join(".claude/settings.json"),
+        ECHO_HOOK.replace(
+            "    \"UserPromptSubmit\": [\n",
+            "    \"UserPromptSubmit\": [\n      {\"hooks\": [{\"type\": \"command\", \"command\": \"kalka hint --claude-hook\"}]},\n",
+        ),
+    )
+    .unwrap();
+    // A kalka entry setup did not write is someone else's.
+    fs::create_dir_all(r.join(".cursor")).unwrap();
+    let cursor = "{\"mcpServers\": {\"kalka\": {\"command\": \"mine\"}}}";
+    fs::write(r.join(".cursor/mcp.json"), cursor).unwrap();
+    fs::create_dir_all(r.join(".codex")).unwrap();
+    fs::write(
+        r.join(".codex/config.toml"),
+        "model = \"o3\"\n\n[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n",
+    )
+    .unwrap();
+
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    let said = out(&a);
+    for what in [
+        ".mcp.json kalka server",
+        ".pi/mcp.json kalka server",
+        ".claude/settings.json kalka prompt hook",
+        ".pi/extensions/kalka-hint/index.ts kalka hook for pi",
+        ".agents/skills/kalka-navigation/SKILL.md kalka skill for pi",
+        "AGENTS.md kalka navigation steps",
+        ".codex/config.toml kalka server",
+    ] {
+        let line = format!("removed {what} (calque's old name)");
+        assert!(said.lines().any(|l| l == line), "{line} not in:\n{said}");
+    }
+    let mcp: serde_json::Value = serde_json::from_str(&read(&r.join(".mcp.json"))).unwrap();
+    let names: Vec<_> = mcp["mcpServers"].as_object().unwrap().keys().collect();
+    assert_eq!(names, ["other", "calque"]);
+    let pi: serde_json::Value = serde_json::from_str(&read(&r.join(".pi/mcp.json"))).unwrap();
+    let names: Vec<_> = pi["mcpServers"].as_object().unwrap().keys().collect();
+    assert_eq!(names, ["calque"]);
+    // No calque hook in its place: this run has no --hook.
+    let echo = serde_json::json!({"hooks": [{"type": "command", "command": "echo hi"}]});
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([echo])
+    );
+    assert!(!r.join(".pi/extensions/kalka-hint").exists());
+    assert!(!r.join(".agents/skills/kalka-navigation").exists());
+    assert_eq!(read(&r.join("AGENTS.md")), "# Team\n");
+    assert_eq!(read(&r.join(".cursor/mcp.json")), cursor);
+    assert_eq!(read(&r.join(".codex/config.toml")), "model = \"o3\"\n");
+}
+
+#[test]
+fn setup_local_removes_the_claude_local_server_kalka_wrote() {
+    // Exactly kalka's: removed. With a setting kalka setup did not write: someone's own, left.
+    for (extra, removed) in [("", true), ("  Environment:\\n    A=1\\n", false)] {
+        let f = fixture(true, true);
+        let t = f.tmp.path().display();
+        // A `claude` that has kalka's local server until it is removed, and no calque.
+        f.stub(
+            "claude",
+            &format!(
+                r#"echo "$@" >> {t}/claude.log
+case "$1 $2 $3" in
+"mcp get kalka") [ -f {t}/removed ] && {{ echo "No MCP server named \"kalka\"." >&2; exit 1; }}
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✗ Failed to connect\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n{extra}\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
+"mcp get calque") echo "No MCP server named \"calque\"." >&2; exit 1 ;;
+"mcp remove kalka") echo x > {t}/removed ;;
+esac"#
+            ),
+        );
+        let a = f
+            .setup(&["--agent", "claude", "--scope", "local"])
+            .success();
+        let line = "removed Claude Code local kalka server (calque's old name)";
+        assert_eq!(out(&a).lines().any(|l| l == line), removed, "{}", out(&a));
+        assert_eq!(
+            f.claude_log().contains("mcp remove kalka --scope local"),
+            removed
+        );
+    }
+}
+
+#[test]
+fn setup_local_leaves_kalka_entries_in_files_git_tracks_even_on_remove() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let r = f.root();
+    let mcp = "{\"mcpServers\": {\"kalka\": {\"command\": \"kalka\", \"args\": [\"serve\", \"--source\", \".\"]}, \"other\": {\"command\": \"x\"}}}";
+    fs::write(r.join(".mcp.json"), mcp).unwrap();
+    git(&r, &["add", ".mcp.json"]);
+    for remove in [false, true] {
+        let mut args = vec!["--agent", "pi", "--scope", "local"];
+        if remove {
+            args.push("--remove");
+        }
+        let a = f.setup(&args).success();
+        assert!(!out(&a).contains("kalka"), "{}", out(&a));
+        assert_eq!(read(&r.join(".mcp.json")), mcp);
+    }
+}
+
+#[test]
+fn setup_goes_on_past_a_file_it_cannot_check_for_kalka() {
+    let f = fixture(true, true);
+    let r = f.root();
+    fs::create_dir_all(r.join(".cursor")).unwrap();
+    fs::write(r.join(".cursor/mcp.json"), "{}").unwrap();
+    fs::set_permissions(
+        r.join(".cursor/mcp.json"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    fs::write(r.join("AGENTS.md"), b"\xff\xfe not UTF-8\n").unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    let said = out(&a);
+    for file in [".cursor/mcp.json", "AGENTS.md"] {
+        let start = format!("left {file} as it is: cannot check it for kalka ");
+        assert!(
+            said.lines().any(|l| l.starts_with(&start)),
+            "{start} not in:\n{said}"
+        );
+    }
+    assert_eq!(
+        fs::read(r.join("AGENTS.md")).unwrap(),
+        b"\xff\xfe not UTF-8\n"
+    );
+    fs::set_permissions(
+        r.join(".cursor/mcp.json"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+}
+
+#[test]
+fn setup_repo_makes_no_claude_call_at_all() {
+    // `claude_log` drops the look for kalka's local server; the raw log shows it is not made here.
+    let f = fixture(true, true);
+    let args = ["--agent", "claude", "--scope", "repo"];
+    f.setup(&args).success();
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(!f.tmp.path().join("claude.log").exists());
 }
