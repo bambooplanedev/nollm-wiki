@@ -177,6 +177,32 @@ fn a_try_has_an_arm_per_catch_and_a_throw_is_an_exit() {
     );
 }
 
+#[test]
+fn an_msvc_try_has_an_arm_per_except_its_finally_runs_after_and_a_leave_is_counted() {
+    let src = "int guard(int x) {\n    __try {\n        probe(x);\n        if (x > 3) __leave;\n        probe(x + 1);\n    } __except (1) {\n        note(x);\n        return -1;\n    }\n    return 0;\n}\nvoid tidy(int x) {\n    __try {\n        probe(x);\n    } __finally {\n        note(x);\n    }\n}\n";
+    assert_eq!(
+        flow_lines("a.c", src, "guard"),
+        [
+            "branch @2",
+            "  arm try @2",
+            "    call probe(x) @3",
+            "    branch @4",
+            "      arm x > 3 @4",
+            "    call probe(x + 1) @5",
+            "  arm __except (1) @6",
+            "    call note(x) @7",
+            "    exit return -1; @8",
+            "exit return 0; @10",
+        ]
+    );
+    assert_eq!(not_drawn("a.c", src, "guard"), [("try".to_string(), 2)]);
+    assert_eq!(
+        flow_lines("a.c", src, "tidy"),
+        ["call probe(x) @14", "finally @15", "  call note(x) @16"]
+    );
+    assert_eq!(not_drawn("a.c", src, "tidy"), [("try".to_string(), 1)]);
+}
+
 const TUNE: &str = "void tune(int n) {\n#ifdef TURBO\n    turbo(n);\n#elif defined(ECO)\n    eco(n);\n#else\n    normal(n);\n#endif\n#ifndef QUIET\n    say(n);\n#endif\n    settle();\n}\n";
 const TUNE_LINES: [&str; 11] = [
     "branch @2",

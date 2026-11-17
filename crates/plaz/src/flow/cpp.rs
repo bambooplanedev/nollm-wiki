@@ -49,7 +49,13 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "switch_statement" => switch(n, src),
         "while_statement" | "for_statement" | "for_range_loop" | "do_statement" => looping(n, src),
         "try_statement" => branch(try_arms(n, src), true),
+        // MSVC's `__try` with `__finally` is its body, then the `__finally`.
+        "seh_try_statement" if try_arms(n, src).len() > 1 => branch(try_arms(n, src), true),
         "try" if parent() == "try_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
+        "__try" if parent() == "seh_try_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
+        "seh_finally_clause" => FlowNode::Finally,
+        // A jump to the end of the `__try`, not drawn.
+        "seh_leave_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
         "return_statement" | "throw_statement" | "co_return_statement" | "goto_statement" => {
             FlowNode::Exit(ExitKind::Return)
         }
@@ -400,7 +406,7 @@ pub(super) fn bodiless(node: Node) -> Option<Bodiless> {
     })
 }
 
-/// The body as the arm `try`, each `catch (…)` as an arm.
+/// The body as the arm `try`, each `catch (…)` or `__except (…)` as an arm.
 fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
     let mut arms = vec![ArmNode {
         cond: Some("try".to_string()),
@@ -411,11 +417,12 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
         after: None,
     }];
     for h in n.named_children(&mut n.walk()) {
-        if h.kind() != "catch_clause" {
+        if !matches!(h.kind(), "catch_clause" | "seh_except_clause") {
             continue;
         }
         let end = h
             .child_by_field_name("parameters")
+            .or_else(|| h.child_by_field_name("filter"))
             .or_else(|| h.child(0))
             .map_or(h.start_byte(), |p| p.end_byte());
         arms.push(ArmNode {
