@@ -539,3 +539,25 @@ fn calls_through_an_import_alias_name_the_original() {
     let rs = "use crate::net::{self as n};\nfn h() {\n    n::connect();\n}\n";
     assert_eq!(sites("src/h.rs", rs, "h"), ["net::connect"]);
 }
+
+#[test]
+fn shell_shebang_names_sh_or_bash_on_a_first_line_within_the_head() {
+    let long = format!("#!/bin/sh {}\n", " ".repeat(SHEBANG_HEAD));
+    for (head, want) in [
+        ("#!/bin/sh\n", true),
+        ("#! /bin/sh\n", true),
+        ("#!/usr/bin/env bash\n", true),
+        ("#!/usr/bin/env -S bash -e\n", true),
+        ("#!/bin/bash\r\necho\r\n", true),
+        ("#!/bin/sh", true),
+        ("#!/bin/shx\n", false),
+        ("#!/bin/dash\n", false),
+        ("#!/bin/zsh\n", false),
+        ("#!/usr/bin/env python3\n", false),
+        ("\u{feff}#!/bin/sh\n", false),
+        ("echo hi\n", false),
+        (long.as_str(), false),
+    ] {
+        assert_eq!(shell_shebang(head.as_bytes()), want, "{head:?}");
+    }
+}

@@ -129,12 +129,51 @@ fn shell_pages_stay_out_of_import_resolution() {
 }
 
 #[test]
+fn a_shell_script_with_no_extension_stays_out_of_import_resolution() {
+    let base = [("app.py", "import deploy\n\ndef main():\n    deploy.run()\n")];
+    let (_a, _, out_a) = compiled(&base);
+    let (_b, _, out_b) = compiled(&[base[0], ("deploy", "#!/bin/sh\nrun() { :; }\n")]);
+    let read = |out: &std::path::Path| std::fs::read_to_string(out.join("app.md")).unwrap();
+    assert_eq!(read(&out_a), read(&out_b));
+}
+
+#[test]
 fn shell_page_in_another_directory_does_not_rename_the_existing_page() {
     let base = [("a/run.py", "def go():\n    pass\n")];
     let (_a, _, out_a) = compiled(&base);
     let (_b, _, out_b) = compiled(&[base[0], ("b/run.sh", "go() { :; }\n")]);
     assert_eq!(non_shell(&out_a), non_shell(&out_b));
     assert_eq!(index_entries(&out_b).len(), 2);
+}
+
+#[test]
+fn a_shell_wrapper_with_no_extension_takes_the_qualified_id() {
+    // A wrapper beside its module, as `deploy.sh` beside `deploy.py`: the
+    // module keeps its id, the wrapper is qualified with `sh`.
+    let base = [
+        ("bin/tool.py", "def t():\n    pass\n"),
+        ("scripts/pre_commit.py", "def check():\n    pass\n"),
+    ];
+    let (_a, _, out_a) = compiled(&base);
+    let mut with = base.to_vec();
+    with.push(("bin/tool", "#!/bin/sh\nexec python3 tool.py\n"));
+    with.push(("scripts/pre-commit", "#!/bin/sh\nrun() { :; }\n"));
+    let (_b, _, out_b) = compiled(&with);
+    let ids = |out: &std::path::Path| -> BTreeMap<String, String> {
+        index_entries(out)
+            .into_iter()
+            .map(|e| {
+                (
+                    e["path"].as_str().unwrap().to_string(),
+                    e["id"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let mut want = ids(&out_a);
+    want.insert("bin/tool".into(), "tool_sh".into());
+    want.insert("scripts/pre-commit".into(), "pre_commit_sh".into());
+    assert_eq!(ids(&out_b), want);
 }
 
 #[test]

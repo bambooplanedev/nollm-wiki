@@ -5,7 +5,7 @@
 use std::path::Path;
 
 pub use crate::formats::code::{
-    is_shell, module_stem, source_rank, validate_queries, CODE_EXTENSIONS,
+    ext_of, is_shell, module_stem, shell_shebang, source_rank, validate_queries, CODE_EXTENSIONS,
 };
 pub use crate::summary::{first_real_sentence, summarize};
 
