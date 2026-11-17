@@ -163,13 +163,13 @@ pub(crate) fn untemplated(t: &str) -> String {
 }
 
 /// What a call on a value of the written type `t` lands in: whether `t`
-/// is a `std::unique_ptr` or `std::shared_ptr`, and the class it names,
-/// the pointee's for one, `const` and `volatile` dropped (`Book` of
-/// `std::unique_ptr<Book const>`).
+/// is a `std::unique_ptr`, `std::shared_ptr` or `std::optional`, and the
+/// class it names, the pointee's for one, `const` and `volatile` dropped
+/// (`Book` of `std::unique_ptr<Book const>`).
 pub(crate) fn pointee(t: &str) -> (bool, &str) {
     let (head, arg) = t.split_once('<').unwrap_or((t, ""));
     let (smart, mut class) = match head.trim().trim_start_matches("std::") {
-        "unique_ptr" | "shared_ptr" => {
+        "unique_ptr" | "shared_ptr" | "optional" => {
             let arg = arg.rsplit_once('>').map_or(arg, |a| a.0);
             (true, arg.split(',').next().unwrap_or("").trim())
         }

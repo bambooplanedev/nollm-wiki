@@ -1785,6 +1785,15 @@ fn a_smart_pointer_to_a_const_project_class_is_its_pointee() {
 }
 
 #[test]
+fn an_optional_of_a_project_class_is_its_value_through_the_arrow() {
+    let src = "struct Lamp {\n    void glow(int n) {}\n    void reset() {}\n};\nstruct Holder {\n    std::optional<Lamp> lamp;\n    void run() {\n        lamp->glow(7);\n        lamp.reset();\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["lamp->glow(7) → src/a.cpp:2", "lamp.reset() → outside"]
+    );
+}
+
+#[test]
 fn a_function_like_macro_block_in_a_method_keeps_the_methods_fields() {
     let src = "struct Book {\n    void apply() {}\n};\nstruct Shelf {\n    Book book_;\n    std::vector<int> items_;\n    void run() {\n        EACH_ITEM(int i, items_) { book_.apply(); }\n    }\n};\n";
     assert_eq!(
