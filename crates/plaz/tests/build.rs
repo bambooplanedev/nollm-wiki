@@ -2580,6 +2580,7 @@ fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
         .stdout("map: 1 written, 0 unchanged, 0 removed\n");
 }
 
+// Pins the 512 MiB build stack: the flow walker recurses once per tree level.
 #[test]
 fn a_function_with_a_20000_term_expression_chain_builds() {
     let d = tempfile::tempdir().unwrap();
