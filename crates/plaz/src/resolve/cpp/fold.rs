@@ -214,10 +214,9 @@ impl<'a> Cpp<'a> {
     /// declaration is folded onto (`unfolded`), but not the one such
     /// definition another overload's declaration wants too. Never one of
     /// another class or specialization (`same_class`). Those of the
-    /// declaration's parameters, qualifiers dropped, when any; then only
-    /// those in a file that includes the declaration's or is included by
-    /// it, when any is, unless one overload matched by arity alone would
-    /// be left.
+    /// declaration's parameters, qualifiers dropped, in a file that
+    /// includes the declaration's or is included by it win, when any is;
+    /// else an include may keep several of the rest, never one.
     pub(in crate::resolve) fn definitions(&self) -> BTreeMap<FnRef, Vec<FnRef>> {
         let declared = (self.pages.iter().enumerate()).flat_map(|(page, (_, f))| {
             let all = f.cpp.declarations.iter();
@@ -243,25 +242,27 @@ impl<'a> Cpp<'a> {
         }
         let params = |d: FnRef| self.key(d).map(|k| unqualified(k.2));
         for (&c, defs) in &mut out {
-            // An overload of the declaration's parameters, qualifiers
-            // dropped, wins over the arity-only rest.
-            let exact =
-                params(c).is_some_and(|p| defs.iter().any(|&d| params(d) == Some(p.clone())));
-            if exact {
-                defs.retain(|&d| params(d) == params(c));
-            }
-            // Either file includes the other: a platform twin's is not it;
-            // of overloads matched by arity alone, never one picked so.
+            // Either file includes the other: a platform twin's is not it.
             let tied = |d: &FnRef| {
                 d.0 == c.0 || self.closure(d.0).contains(&c.0) || self.closure(c.0).contains(&d.0)
             };
-            let kept = defs.iter().filter(|d| tied(d)).count();
-            if kept > 0 && (exact || kept > 1) {
+            // The overloads of the declaration's parameters, qualifiers
+            // dropped, that an include ties win over the rest.
+            let same: Vec<FnRef> = (defs.iter().copied())
+                .filter(|&d| params(c).is_some() && params(d) == params(c))
+                .collect();
+            let tied_same: Vec<FnRef> = same.iter().copied().filter(tied).collect();
+            if !tied_same.is_empty() {
+                *defs = tied_same;
+            } else if defs.iter().filter(|d| tied(d)).count() > 1 {
+                // Of overloads matched by arity alone, an include never
+                // picks one.
                 defs.retain(tied);
             }
-            // The one definition two overloads want may be the other's.
+            // The one definition two overloads want by arity may be the
+            // other's.
             if let [d] = defs[..] {
-                if wanted.get(&d).is_some_and(|k| k.len() > 1) {
+                if !same.contains(&d) && wanted.get(&d).is_some_and(|k| k.len() > 1) {
                     defs.clear();
                 }
             }

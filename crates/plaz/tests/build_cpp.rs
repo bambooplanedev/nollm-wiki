@@ -150,7 +150,7 @@ fn a_deleted_or_in_class_defaulted_overload_defines_no_other_declaration() {
 }
 
 #[test]
-fn an_overload_of_the_declarations_parameters_wins_over_an_including_files_other_overload() {
+fn an_including_files_other_overload_is_not_alone_the_definition_another_program_gives() {
     // `tool.cpp` is another program: it includes nothing.
     let files = [
         ("src/h.h", "void log(int v);\n"),
@@ -161,7 +161,30 @@ fn an_overload_of_the_declarations_parameters_wins_over_an_including_files_other
     let page = common::map_page(&vault, "map/src/h_h");
     assert_eq!(
         last_line(&page, "log"),
-        "Defined at [[map/src/tool_cpp#log|log]]"
+        "Defined at one of: [[map/src/lib_cpp#log|log]], [[map/src/tool_cpp#log|log]]"
+    );
+}
+
+#[test]
+fn overloads_qualified_otherwise_than_declared_are_each_defined_by_their_own() {
+    // A second project `Lid` keeps the fold from reading `Lid` as `Box::Lid`.
+    let h = "struct Box {\n    struct Lid {};\n    static int pack(const Lid& l, int n);\n    static int pack(const Lid& l, double d);\n};\n";
+    let cpp = "#include \"box.h\"\nint Box::pack(const Box::Lid& l, int n) { return n; }\nint Box::pack(const Box::Lid& l, double d) { return 1; }\n";
+    let other = "struct Lid { int k; };\n";
+    let files = [
+        ("src/box.h", h),
+        ("src/box.cpp", cpp),
+        ("src/other.h", other),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/box_h");
+    assert_eq!(
+        last_line(&page, "box_pack"),
+        "Defined at [[map/src/box_cpp#box_pack|Box::pack]]"
+    );
+    assert_eq!(
+        last_line(&page, "box_pack_2"),
+        "Defined at [[map/src/box_cpp#box_pack_2|Box::pack]]"
     );
 }
 
