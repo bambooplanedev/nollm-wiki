@@ -112,9 +112,9 @@ pub(crate) fn included<T: Copy>(named: &[(T, &str)], from: &str, inc: &str) -> V
 
 /// Drops the files made to be included (`.inl`, `.ipp`, `.tcc`) that do
 /// not stand on their own. Such a file is read only when an include of a
-/// file that is read names it, it alone, and none does inside a
-/// namespace, class or function body, of which it would be a piece read
-/// without that body.
+/// file that is read names it, it alone, and no include does inside a
+/// namespace, class or function body, or from a file that is such a
+/// piece: it would be a piece of that body, read without it.
 fn drop_pieces(files: &mut BTreeMap<String, File>) {
     let piece = |path: &str| {
         let ext = path.rsplit_once('.').map(|p| p.1.to_ascii_lowercase());
@@ -135,16 +135,31 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
             includes.push((from.as_str(), named, nested));
         }
     }
-    // A piece of a body, or one of several an include may name.
+    // A piece of a body, or one of several an include may name; and so
+    // is whatever such a piece includes.
     let unsure = |i: &&(&str, Vec<&str>, bool)| i.2 || i.1.len() > 1;
-    let bad: BTreeSet<&str> = (includes.iter().filter(unsure))
-        .flat_map(|i| i.1.iter().copied())
+    let mut bad: BTreeSet<&str> = (includes.iter().filter(unsure))
+        .flat_map(|i| i.1.iter().copied().filter(|p| piece(p)))
         .collect();
-    let read: BTreeSet<String> = (includes.iter())
-        .flat_map(|i| i.1.iter().copied())
-        .filter(|p| !bad.contains(p))
-        .map(str::to_string)
+    // Read: what an include of a file that is read names, from the files
+    // that are no such piece on.
+    let mut read: BTreeSet<&str> = (files.keys().map(String::as_str))
+        .filter(|p| !piece(p))
         .collect();
+    loop {
+        let before = (bad.len(), read.len());
+        for (from, named, _) in &includes {
+            if bad.contains(from) {
+                bad.extend(named.iter().filter(|p| piece(p)));
+            } else if read.contains(from) {
+                read.extend(named.iter().filter(|p| !bad.contains(*p)));
+            }
+        }
+        if before == (bad.len(), read.len()) {
+            break;
+        }
+    }
+    let read: BTreeSet<String> = (read.difference(&bad)).map(|p| (*p).to_string()).collect();
     files.retain(|path, _| !piece(path) || read.contains(path));
 }
 

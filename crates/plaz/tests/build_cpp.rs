@@ -966,6 +966,36 @@ fn an_inline_file_is_read_by_the_path_an_include_names_not_by_its_name() {
 }
 
 #[test]
+fn an_inline_file_reached_only_through_one_that_is_not_read_is_not_read() {
+    // `inner.inl` is a piece of `Grid` too, through `outer.inl`; so is
+    // `loop.inl`, which only `inner.inl` and itself include.
+    let files = [
+        ("src/grid.h", "struct Grid {\n#include \"outer.inl\"\n};\n"),
+        ("src/outer.inl", "#include \"inner.inl\"\n"),
+        (
+            "src/inner.inl",
+            "#include \"loop.inl\"\nint fill(int v) { return v; }\n",
+        ),
+        (
+            "src/loop.inl",
+            "#include \"loop.inl\"\nint more(int v) { return v; }\n",
+        ),
+        (
+            "src/c.cpp",
+            "#include \"grid.h\"\nint fill(int v);\nint run() { return fill(3); }\n",
+        ),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/c.cpp", "run"),
+        ["fill(3) → src/c.cpp:2"]
+    );
+    let (_d, vault) = common::built(&files);
+    assert!(!vault.join("map/src/inner_inl.md").exists());
+    assert!(!vault.join("map/src/loop_inl.md").exists());
+    assert!(vault.join("map/src/grid_h.md").exists());
+}
+
+#[test]
 fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
     let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
     // C++: the definition of the same arity, not the overload; it may
