@@ -953,6 +953,23 @@ fn an_inline_file_included_at_file_scope_is_read_and_one_included_in_a_body_is_n
 }
 
 #[test]
+fn an_inline_file_included_in_a_class_body_is_not_read_though_a_header_includes_it_too() {
+    // `m.inl` is a piece of `Grid` in one place: read nowhere.
+    let files = [
+        ("src/a.h", "int fill(int v);\n#include \"m.inl\"\n"),
+        ("src/g.h", "struct Grid {\n#include \"m.inl\"\n};\n"),
+        ("src/m.inl", "int fill(int v) { return v; }\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    assert!(!vault.join("map/src/m_inl.md").exists());
+    let page = common::map_page(&vault, "map/src/a_h");
+    assert_eq!(
+        common::fn_block(&page, "fill"),
+        "## fill\n`int fill(int v)` · `src/a.h:1-1`\n\nNo definition in the project.\n"
+    );
+}
+
+#[test]
 fn an_inline_file_is_read_by_the_path_an_include_names_not_by_its_name() {
     // `b/vec.inl` is a piece of `Box`, included through a macro; only
     // `a/vec.inl` is included by its path.

@@ -105,6 +105,15 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
 /// macro written alone, `KIT_BEGIN`) or a declaration read with an error
 /// (a macro before it), either of which may have opened one.
 fn nested_include(file: &mut File, n: Node, src: &str) {
+    let trimmed = |p: Node| src[p.byte_range()].trim().trim_matches(['<', '>', '"']);
+    // In a class body the grammar reads the line as a directive it does
+    // not know.
+    let directive = n.child_by_field_name("directive");
+    if n.kind() == "preproc_call" && directive.is_some_and(|d| &src[d.byte_range()] == "#include") {
+        let named = n.child_by_field_name("argument").map(trimmed);
+        file.cpp.nested_includes.extend(named.map(str::to_string));
+        return;
+    }
     let Some(path) = (n.child_by_field_name("path")).filter(|_| n.kind() == "preproc_include")
     else {
         return;
@@ -119,8 +128,7 @@ fn nested_include(file: &mut File, n: Node, src: &str) {
     let after =
         around().any(|x| std::iter::successors(x.prev_sibling(), Node::prev_sibling).any(opened));
     if after || !around().skip(1).all(|p| outer(&p)) {
-        let name = src[path.byte_range()].trim_matches(['<', '>', '"']);
-        file.cpp.nested_includes.insert(name.to_string());
+        file.cpp.nested_includes.insert(trimmed(path).to_string());
     }
 }
 

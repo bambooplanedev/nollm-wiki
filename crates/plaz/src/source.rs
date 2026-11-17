@@ -124,10 +124,12 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
     // Per include: the file writing it, the files it names, is it in a body.
     let mut includes = Vec::new();
     for (from, f) in files.iter() {
-        for inc in f.code.imports.iter().filter_map(|i| project_include(i)) {
+        let nested = &f.cpp.nested_includes;
+        let plain = f.code.imports.iter().filter_map(|i| project_include(i));
+        let plain = plain.filter(|i| !nested.contains(*i)).map(|i| (i, false));
+        for (inc, nested) in plain.chain(nested.iter().map(|i| (i.as_str(), true))) {
             let named = by_name.get(inc.rsplit('/').next().unwrap_or(inc));
             let named = included(named.map_or(&[][..], Vec::as_slice), from, inc);
-            let nested = f.cpp.nested_includes.contains(inc);
             includes.push((from.as_str(), named, nested));
         }
     }
