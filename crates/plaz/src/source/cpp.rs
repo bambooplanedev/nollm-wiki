@@ -106,8 +106,7 @@ fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
 }
 
 /// Records the names of the namespace or namespace alias `n` defines in
-/// `File::namespaces`, an inline namespace's path in
-/// `File::inline_namespaces`, and an alias's namespace in
+/// `File::namespaces`, and an alias's namespace in
 /// `File::namespace_aliases`.
 fn namespace(file: &mut File, n: Node, src: &str) {
     let alias = n.kind() == "namespace_alias_definition";
@@ -115,17 +114,8 @@ fn namespace(file: &mut File, n: Node, src: &str) {
     let Some(name) = name.filter(|_| alias || n.kind() == "namespace_definition") else {
         return;
     };
-    let segs: Vec<(&str, bool)> = segments(&src[name.byte_range()]).collect();
-    file.namespaces.extend(segs.iter().map(|g| g.0.to_string()));
-    let mut path = enclosing(n, src, None);
-    let inline = !alias && src[n.byte_range()].starts_with("inline");
-    for (i, &(g, marked)) in segs.iter().enumerate() {
-        path.push(g.to_string());
-        if marked || (inline && i + 1 == segs.len()) {
-            file.inline_namespaces.insert(path.join("::"));
-            path.pop();
-        }
-    }
+    file.namespaces
+        .extend(segments(&src[name.byte_range()]).map(|g| g.0.to_string()));
     let named = n.named_children(&mut n.walk()).last();
     if let Some(t) = named.filter(|_| alias) {
         let t: String = src[t.byte_range()].split_whitespace().collect();

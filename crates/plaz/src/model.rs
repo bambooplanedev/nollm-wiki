@@ -58,17 +58,13 @@ pub struct File {
     /// Every segment of a C/C++ file's named namespaces and every namespace
     /// alias it defines.
     pub namespaces: BTreeSet<String>,
-    /// The path of each inline namespace a C/C++ file defines, the
-    /// inline namespaces around it left out (`a::v1`).
-    pub inline_namespaces: BTreeSet<String>,
     /// Per namespace alias a C/C++ file defines: the namespace it names,
     /// whitespace and a leading `::` dropped (`fs` → `std::filesystem`).
     pub namespace_aliases: BTreeMap<String, String>,
     /// Per C/C++ function item in a named namespace or with a qualified
     /// name: the enclosing namespaces, then the qualifier (`a::B` of
     /// `void a::B::f()` in no namespace), `::`-joined; anonymous and inline
-    /// namespaces left out, those of the qualifier by the project's
-    /// `inline_namespaces` (`source::uninlined`).
+    /// namespaces left out.
     pub scopes: BTreeMap<usize, String>,
     /// What each `using namespace N;` and `using N::f;` of a C/C++ file
     /// names: `N`, `N::f`, whitespace and a leading `::` dropped.
