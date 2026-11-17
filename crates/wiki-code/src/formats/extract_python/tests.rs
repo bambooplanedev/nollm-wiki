@@ -256,6 +256,12 @@ fn a_computed_all_falls_back_to_the_underscore_convention() {
     assert_has(&e.symbols, "def a()");
     // a non-literal __all__ must not gate anything
     assert_has(&e.symbols, "def b()");
+    // a set is neither list nor tuple, so it is no literal either, even with only strings in it
+    let e = crate::extract(
+        "m.py",
+        "__all__ = {\"a\"}\n\ndef a():\n    pass\n\ndef b():\n    pass\n",
+    );
+    assert_has(&e.symbols, "def b()");
 }
 
 #[test]
@@ -302,6 +308,10 @@ fn a_recomputed_all_after_a_literal_falls_back_to_the_underscore_convention() {
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "def a()");
     // a non-literal reassignment must fall back to the convention
+    assert_has(&e.symbols, "def b()");
+    // so must a reassignment to a set of strings: only a list or tuple counts as literal
+    let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = {\"a\"}\n";
+    let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "def b()");
 }
 

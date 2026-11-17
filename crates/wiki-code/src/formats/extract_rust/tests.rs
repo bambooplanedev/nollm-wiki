@@ -141,17 +141,12 @@ fn rust_without_test_module_round_trips_byte_identical() {
 
 #[test]
 fn rust_two_test_modules_get_two_markers_in_source_order() {
-    let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[test]\n    fn t1() {}\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t2() {}\n}\n";
+    let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[cfg(test)]\n    mod inner {\n        #[test]\n        fn t1() {}\n    }\n}\n\npub mod mid {\n    #[cfg(test)]\n    mod mid_tests {\n        #[test]\n        fn t2() {}\n    }\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t3() {}\n}\n";
     let e = crate::extract("t.rs", src);
-    let early = e.body.find("// [tests omitted: mod early_tests, 5 lines]");
-    let late = e.body.find("// [tests omitted: mod late_tests, 5 lines]");
-    assert!(early.is_some() && late.is_some(), "body: {}", e.body);
-    assert!(
-        early.unwrap() < late.unwrap(),
-        "markers out of order: {}",
-        e.body
+    assert_eq!(
+        e.body,
+        "pub fn a() {}\n\n// [tests omitted: mod early_tests, 8 lines]\n\npub mod mid {\n    // [tests omitted: mod mid_tests, 5 lines]\n}\n\npub fn b() {}\n\n// [tests omitted: mod late_tests, 5 lines]\n"
     );
-    assert!(!e.body.contains("fn t1") && !e.body.contains("fn t2"));
 }
 
 #[test]
