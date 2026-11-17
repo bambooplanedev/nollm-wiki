@@ -17,6 +17,23 @@ the real decisions of each function for people to read. Neither calls a model: t
 byte-identical output, and `kulman` installs both and sets them up in a project with one command
 each.
 
+## Why
+
+So that a person and an agent work from the same picture of the project. The person needs it to
+understand the business logic, meaning what happens and under which conditions, and to give the
+agent precise tasks. The agent needs it to find what it is looking for without spending tokens on
+reading it does not need. `calque` and `plaz` build that picture from the code, without a language
+model, to the same precision: down to the line and the condition.
+
+`plaz` draws a decision chart for each function, with the conditions copied from the code, and
+shows where each call leads. The branches are on the page, not in the reader's head.
+
+`calque` gives the agent search across the project: where things are and who calls a function. In
+a test on small purpose-written repositories, two inexpensive models read 67–82% fewer lines with
+it ([how it was measured](crates/calque/README.md#measured)).
+
+`kulman` installs and updates both with one command and verifies the release signature.
+
 ## The names
 
 | Name | Say it | The word |
@@ -98,7 +115,7 @@ output format and the measurements.
 
 **[plaz](crates/plaz/README.md)** writes, for every function, a Markdown page with a decision
 flowchart: the literal condition of each branch, who calls the function and what each call reaches.
-Rust and Python are charted; other languages get a "not covered yet" note.
+Rust, Python, C and C++ are charted; other languages get a "not covered yet" note.
 
 **[techlog](crates/techlog/README.md)** is a library: where agent memory lives — the project's
 `.agents/memory/` and the folders agents keep outside it — and who last changed each committed note.
