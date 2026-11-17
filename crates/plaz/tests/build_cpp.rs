@@ -132,6 +132,23 @@ fn a_declaration_spelled_otherwise_is_defined_by_the_one_definition_no_other_ove
     assert_eq!(line("fold_2"), "No definition in the project.");
 }
 
+/// The last line of the section `anchor` of `page`: its "Defined at" line.
+fn last_line(page: &str, anchor: &str) -> String {
+    let block = common::fn_block(page, anchor);
+    block.trim_end().lines().last().unwrap_or("").to_string()
+}
+
+#[test]
+fn a_deleted_or_in_class_defaulted_overload_defines_no_other_declaration() {
+    let h = "class Lamp {\npublic:\n    Lamp& operator=(const Lamp&) = delete;\n    Lamp& operator=(Lamp&&) noexcept;\n    void glow(int v);\n    void glow(const char* s) = delete;\n};\nclass Pipe {\npublic:\n    Pipe& operator=(const Pipe&) = default;\n    Pipe& operator=(Pipe&&) noexcept;\n};\n";
+    let (_d, vault) = common::built(&[("src/lamp.h", h)]);
+    let page = common::map_page(&vault, "map/src/lamp_h");
+    assert_eq!(last_line(&page, "lamp_operator"), "Deleted.");
+    for anchor in ["lamp_operator_2", "lamp_glow", "pipe_operator_2"] {
+        assert_eq!(last_line(&page, anchor), "No definition in the project.");
+    }
+}
+
 #[test]
 fn a_declaration_is_defined_by_a_defaulted_definition() {
     let h = "struct Pot {\n    Pot();\n    ~Pot();\n};\n";

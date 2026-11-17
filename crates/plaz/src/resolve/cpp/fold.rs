@@ -277,10 +277,13 @@ impl<'a> Cpp<'a> {
             .collect()
     }
 
-    /// Has `d` a section to link to: charted, defaulted or deleted?
+    /// Is `d` a definition with a section: charted, or defaulted out of
+    /// its class? A deleted function and one defaulted in its class are
+    /// their own first declarations.
     fn sectioned(&self, d: FnRef) -> bool {
         let f = self.pages[d.0].1;
-        f.flows.contains_key(&d.1) || f.cpp.declarations.contains_key(&d.1)
+        let defaulted = f.cpp.declarations.get(&d.1) == Some(&Bodiless::Defaulted);
+        f.flows.contains_key(&d.1) || (defaulted && self.out_of_line(d))
     }
 
     /// May `c` and `d` be methods of one class: placed in the same, else

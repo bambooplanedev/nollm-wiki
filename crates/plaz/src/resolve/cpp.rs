@@ -215,14 +215,19 @@ impl<'a> Cpp<'a> {
         file.code.items[c.1].kind == CodeItemKind::Method && !file.cpp.classes.contains_key(&c.1)
     }
 
-    /// Is `c` misread and written with a qualifier right before its name
-    /// and parameters (`ret_t Kern::f(…)`): a method of a class no fact
-    /// names?
+    /// Is `c` misread and written out of its class (`out_of_line`): a
+    /// method of a class no fact names?
     pub(super) fn misread_method(&self, c: FnRef) -> bool {
+        self.misread(c) && self.out_of_line(c)
+    }
+
+    /// Is `c` written with a qualifier right before its name and
+    /// parameters (`ret_t Kern::f(…)`)?
+    fn out_of_line(&self, c: FnRef) -> bool {
         let (it, sig) = (self.item(c), self.item(c).signature.as_str());
         let named = format!("::{}", it.name);
         let mut at = sig.match_indices(&named).map(|(i, _)| i + named.len());
-        self.misread(c) && at.any(|i| sig[i..].trim_start().starts_with('('))
+        at.any(|i| sig[i..].trim_start().starts_with('('))
     }
 
     /// Is `c` a function template an explicit specialization of the
