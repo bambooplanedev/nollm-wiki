@@ -199,12 +199,15 @@ fn walk_with(
 
 /// Whether a file `keep` refused by its name is a shell script it would keep
 /// as `<name>.sh`: the name has no extension (`pre-commit`) and the first line
-/// is a shell shebang (`shell_shebang`). Reads only that line's first bytes.
+/// is a shell shebang (`shell_shebang`). Reads only that line's first bytes,
+/// and only from a regular file: a FIFO would block the open, and the walk
+/// never follows a symlink.
 pub fn shell_script(abs_path: &Path, rel_path: &str, keep: &dyn Fn(&str) -> bool) -> bool {
     use std::io::Read;
     let mut head = Vec::new();
     ext_of(rel_path).is_empty()
         && keep(&format!("{rel_path}.sh"))
+        && std::fs::symlink_metadata(abs_path).is_ok_and(|m| m.is_file())
         && std::fs::File::open(abs_path)
             .and_then(|f| f.take(128).read_to_end(&mut head))
             .is_ok()
