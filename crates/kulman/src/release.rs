@@ -160,7 +160,7 @@ pub fn check_file(name: &str, place: &str) -> Result<()> {
 /// to it. A refusal shows the base as given.
 pub fn check_base(given: &str) -> Result<&str> {
     let base = given.trim_end_matches('/');
-    let https = base.strip_prefix("https://").is_some_and(|h| !h.is_empty());
+    let https = base.starts_with("https://");
     if !base.contains(['?', '#']) && (https || local_path(base).is_some()) {
         Ok(base)
     } else {
