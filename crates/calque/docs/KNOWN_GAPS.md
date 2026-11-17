@@ -40,6 +40,14 @@ per question is noise-level: treat single results as anecdotes.
   again", "why is the scan taking so long?"). No lexical gate measured so
   far separates these from short code questions, and short Ukrainian code
   questions are in no keyed set, so the gates' harm there is unmeasured.
+  Known harm: a question that names one identifier and nothing else the
+  project has (`where is hint_lines`, `де prompt_from_hook_json`) is
+  silent, as is one whose only project word is a plain dictionary word
+  (`where is the parser`). The gates are code-only: the agent-memory line
+  still follows the memory gate alone, so a prompt of function words can
+  show a note with no code lines. Applying the gates to it lost 17 of 56
+  keyed memory queries (shop 20 → 12 of 26, bigcpp 29 → 20 of 30,
+  2026-11-18), since its words often occur only in notes.
   A setup run without `--hook` removes a hook an earlier setup wrote; the
   choice is not remembered, so an opted-in project needs `--hook` on every
   setup run.
@@ -149,7 +157,7 @@ per question is noise-level: treat single results as anecdotes.
   "Where does it refuse to start" lands on the file, not on `decide`.
 - **`calque hint` shows at most 2 lines per page**, so a third relevant
   symbol in one file is not shown.
-- **`calque hint` is silent only on text whose words scatter.** Below half
+- **`calque hint`'s share rule is silent only on text whose words scatter.** Below half
   the prompt's available score it prints no code lines (2026-11-01: 80 of
   80 bench task prompts and code questions kept; 162 of 251 bench subagent
   briefs whose hint named no file the agent opened silenced, 26 of 75 that
@@ -158,7 +166,14 @@ per question is noise-level: treat single results as anecdotes.
   on 81 such texts over five wikis the best page scores a median 1.25 of
   the available score, above the code questions' lowest (0.59), and no
   measured statistic told them apart. Long task prompts lose lines too: 12
-  of 35 that showed the page their task names went silent.
+  of 35 that showed the page their task names went silent. The gates of
+  2026-11-17 (two project words; still named without function words) take
+  out about half of the remaining chat fires; see "The prompt hint fires on
+  chat" above.
+- **A prompt that opens with pasted tagged text is treated as harness
+  text.** `calque hint` is silent on any text whose first character is `<`
+  followed by a letter, so a person's prompt that starts with pasted XML or
+  HTML gets no hint (as since 0.6.1).
 
 ## Call chains (`neighbors` with `symbol`, `callers`)
 
@@ -451,6 +466,12 @@ per question is noise-level: treat single results as anecdotes.
   with pi 1.4.0: with both files present, each naming a different codeword, it saw only the
   `AGENTS.md` one.
 - Local scope skips (exit 1) a file git already tracks.
+- The prompt hook is wired per agent: a run limited to some agents
+  (`--agent claude`) neither writes nor removes the other agents' hook.
+- Adding or removing the hook rewrites `.claude/settings*.json` in place,
+  not atomically, and pretty-printed with serde_json's layout: a hand-made
+  indentation or spacing is not kept. A settings file
+  that is a symbolic link is followed and the target rewritten.
 - `--remove` leaves `.kulman/` and the ignore lines in place.
 - The JSON configs (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `.claude/settings*.json`) and
   `AGENTS.md` are read and written through a symlink, so setup, `--remove` and the removal of

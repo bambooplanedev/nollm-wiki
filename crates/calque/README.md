@@ -237,7 +237,8 @@ stderr and exits 0.
   about a third of chat prompts (see `docs/KNOWN_GAPS.md`). A run without `--hook` (`--no-hook` is
   the same) removes a hook an earlier setup wrote, matched exactly as `--remove` matches it, and
   prints `removed <file> …: the prompt hint is off by default now; run setup again with --hook to
-  keep it`. Re-run setup with `--hook` to keep it: setup does not remember the choice.
+  keep it`. Re-run setup with `--hook` to keep it: setup does not remember the choice. A run
+  limited to some agents (`--agent claude`) leaves the other agents' hook as it is.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's block only when it is
   exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`
   after it). Ignore lines, `.kulman/` and memory notes stay.
@@ -747,7 +748,10 @@ prompt. It prints no code lines when the best page scores below half of what the
 words could give one page (its words are spread over the project, as in a long brief or a list of
 instructions), when fewer than two of the text's words occur in the project, or when the best page
 falls below that half once the text's function words (Ukrainian and English prepositions,
-conjunctions, particles, pronouns and English auxiliaries) are removed.
+conjunctions, particles, pronouns and English auxiliaries) are removed. So a question that names
+one identifier and no other word the project has (`where is hint_lines`) is silent, and so is one
+whose only project word is a plain dictionary word. These gates apply to the code lines only; the
+memory line below follows its own gate.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.kulman`.
 
