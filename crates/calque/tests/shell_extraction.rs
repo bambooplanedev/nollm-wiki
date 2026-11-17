@@ -129,6 +129,15 @@ fn shell_pages_stay_out_of_import_resolution() {
 }
 
 #[test]
+fn a_shell_script_with_no_extension_stays_out_of_import_resolution() {
+    let base = [("app.py", "import deploy\n\ndef main():\n    deploy.run()\n")];
+    let (_a, _, out_a) = compiled(&base);
+    let (_b, _, out_b) = compiled(&[base[0], ("deploy", "#!/bin/sh\nrun() { :; }\n")]);
+    let read = |out: &std::path::Path| std::fs::read_to_string(out.join("app.md")).unwrap();
+    assert_eq!(read(&out_a), read(&out_b));
+}
+
+#[test]
 fn shell_page_in_another_directory_does_not_rename_the_existing_page() {
     let base = [("a/run.py", "def go():\n    pass\n")];
     let (_a, _, out_a) = compiled(&base);
