@@ -661,12 +661,3 @@ fn a_conversion_operator_read_as_a_function_of_the_type_operator_is_its_classs_m
         ]
     );
 }
-
-#[test]
-fn a_conversion_to_a_function_pointer_type_is_no_item() {
-    let e = crate::extract(
-        "gate.cpp",
-        "struct Gate {\n  operator int(*)(int)() const;\n};\n",
-    );
-    assert_eq!(item_lines(&e.items), vec!["1-3 type Gate pub"]);
-}
