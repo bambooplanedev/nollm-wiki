@@ -748,9 +748,10 @@ prompt. It prints no code lines when the best page scores below half of what the
 words could give one page (its words are spread over the project, as in a long brief or a list of
 instructions), when fewer than two of the text's words occur in the project, or when the best page
 falls below that half once the text's function words (Ukrainian and English prepositions,
-conjunctions, particles, pronouns and English auxiliaries) are removed. So a question that names
-one identifier and no other word the project has (`where is hint_lines`) is silent, and so is one
-whose only project word is a plain dictionary word. These gates apply to the code lines only; the
+conjunctions, particles, pronouns and English auxiliaries) are removed. A single project word
+written as code (with `_`, `::` or a lower-to-upper case change) counts as enough, so `where is
+hint_lines` fires; a single plain word (`where is the parser`) or a number (`глянь 46`) stays
+silent. These gates apply to the code lines only; the
 memory line below follows its own gate.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
 then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.kulman`.

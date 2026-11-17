@@ -91,8 +91,8 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
         wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     let named = best >= HINT_MIN_SHARE * available
-        && terms.len() >= HINT_MIN_TOKENS
-        && !rests_on_function_words(wiki, text);
+        && (terms.len() >= HINT_MIN_TOKENS || lone_identifier(text, &terms))
+        && !rests_on_function_words(wiki, text, &terms);
     let mut seen = HashSet::new();
     let mut rows: Vec<Row> = Vec::new();
     let mut left = HINT_LINES;
@@ -159,8 +159,10 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
 }
 
 /// Whether `text` names code only through its `FUNCTION_WORDS`: without them
-/// it has too few tokens, no hit, or a best page under `HINT_MIN_SHARE`.
-fn rests_on_function_words(wiki: &Wiki, text: &str) -> bool {
+/// it has too few tokens (unless the one left is a `lone_identifier`), no
+/// hit, or a best page under `HINT_MIN_SHARE`. `terms`: the prompt's words
+/// the project has.
+fn rests_on_function_words(wiki: &Wiki, text: &str, terms: &[String]) -> bool {
     let words = text.split_whitespace();
     let rest: Vec<&str> = words
         .clone()
@@ -175,12 +177,35 @@ fn rests_on_function_words(wiki: &Wiki, text: &str) -> bool {
     }
     let rest = rest.join(" ");
     if Wiki::prompt_tokens(&rest).len() < HINT_MIN_TOKENS {
-        return true;
+        return !lone_identifier(&rest, terms);
     }
     let (hits, available, _) =
         wiki.search_prompt(&rest, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
     hits.is_empty() || best < HINT_MIN_SHARE * available
+}
+
+/// Whether `text` has exactly one token of the project (one of `terms`, or
+/// the only prompt token) and it is written as code: with `_`, `::` or a
+/// lower-to-upper case change (`where is hint_lines`, `де parseOrder`).
+/// One plain word (`where is the parser`) or a number (`глянь 46`, `1-3
+/// так`) stays too few: with digits counted, 12 chat replies of 1,650
+/// measured prompts fired and no code question did (2026-11-18).
+fn lone_identifier(text: &str, terms: &[String]) -> bool {
+    let tokens = Wiki::prompt_tokens(text);
+    let known: Vec<&String> = tokens.iter().filter(|t| terms.contains(t)).collect();
+    let [one] = known[..] else {
+        return false;
+    };
+    text.split_whitespace().any(|w| {
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+        w.to_lowercase() == **one
+            && (w.contains('_')
+                || w.contains("::")
+                || w.chars()
+                    .zip(w.chars().skip(1))
+                    .any(|(a, b)| a.is_lowercase() && b.is_uppercase()))
+    })
 }
 
 /// How Claude Code's own notes open when it hands them to a

@@ -127,6 +127,61 @@ fn hint_is_silent_when_only_function_words_name_the_code() {
     assert!(hint_in(&tmp, "where is route_to_from routed").contains("route_to_from"));
 }
 
+/// A project whose functions have identifier names, for one-identifier questions.
+fn identifiers() -> TempDir {
+    project_of(&[
+        (
+            "src/hint.rs",
+            "/// The hint's lines.\npub fn hint_lines() {}\n\n/// Reads the hook input.\npub fn prompt_from_hook_json() {}\n",
+        ),
+        ("src/parse.rs", "/// Parses an order.\npub fn parser() {}\n"),
+        (
+            "src/limits.rs",
+            "/// Steps 1-3 of Q-1 cap it at 46 and v2.\npub fn cap() {}\n",
+        ),
+    ])
+}
+
+#[test]
+fn hint_answers_a_question_that_names_one_identifier() {
+    let tmp = identifiers();
+    for (prompt, name) in [
+        ("where is hint_lines", "hint_lines"),
+        (
+            "what does prompt_from_hook_json do",
+            "prompt_from_hook_json",
+        ),
+        ("де prompt_from_hook_json", "prompt_from_hook_json"),
+        ("where is hint_lines defined", "hint_lines"),
+        (
+            "what does prompt_from_hook_json return",
+            "prompt_from_hook_json",
+        ),
+        (
+            "де визначено prompt_from_hook_json",
+            "prompt_from_hook_json",
+        ),
+    ] {
+        let out = hint_in(&tmp, prompt);
+        assert!(
+            out.contains("src/hint.rs:") && out.contains(name),
+            "{prompt}: {out}"
+        );
+    }
+}
+
+#[test]
+fn hint_stays_silent_on_one_plain_word_or_an_identifier_the_project_lacks() {
+    let tmp = identifiers();
+    assert_eq!(hint_in(&tmp, "where is the parser"), "");
+    assert_eq!(hint_in(&tmp, "where is load_creds"), "");
+    assert_eq!(hint_in(&tmp, "where is parser zzqxw"), "");
+    // A number is not written as code.
+    for reply in ["глянь 46", "1-3 так", "що там з Q-1", "де v2"] {
+        assert_eq!(hint_in(&tmp, reply), "", "{reply}");
+    }
+}
+
 #[test]
 fn hint_drops_one_letter_words() {
     let tmp = project_of(&[

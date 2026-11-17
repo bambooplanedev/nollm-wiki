@@ -40,10 +40,12 @@ per question is noise-level: treat single results as anecdotes.
   again", "why is the scan taking so long?"). No lexical gate measured so
   far separates these from short code questions, and short Ukrainian code
   questions are in no keyed set, so the gates' harm there is unmeasured.
-  Known harm: a question that names one identifier and nothing else the
-  project has (`where is hint_lines`, `де prompt_from_hook_json`) is
-  silent, as is one whose only project word is a plain dictionary word
-  (`where is the parser`). The gates are code-only: the agent-memory line
+  A question whose one project word is an identifier written as code (with
+  `_`, `::` or a lower-to-upper case change: `where is hint_lines`,
+  `де prompt_from_hook_json`) still fires. Known harm: one whose only
+  project word is a plain dictionary word (`where is the parser`) or a
+  number (`глянь 46`) is silent; counting digits as code let 12 chat
+  replies of 1,650 prompts fire and no code question (2026-11-18). The gates are code-only: the agent-memory line
   still follows the memory gate alone, so a prompt of function words can
   show a note with no code lines. Applying the gates to it lost 17 of 56
   keyed memory queries (shop 20 → 12 of 26, bigcpp 29 → 20 of 30,
