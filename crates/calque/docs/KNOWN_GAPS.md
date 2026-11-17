@@ -27,6 +27,22 @@ per question is noise-level: treat single results as anecdotes.
   questions that ask for a call path. `symbol` is named only in the skill,
   the server instructions and the tool description; see the previous point.
   Off by default since 0.6.7 (`--tools` brings it back).
+- **The prompt hint fires on chat, so setup wires it only with `--hook`.**
+  Measured offline on 2026-11-17 over 1,514 Mac prompts and 136 bench
+  prompts from two writers: the hint fired on 66.8% and 48.5% of them. The
+  two gates it now always applies (two prompt words the project has; still
+  named without function words) cut that to 35.8% and 26.5% with no keyed
+  eval line lost, but on chat-like prompts (a lexical proxy) it still
+  fires on 37.1% (Mac) and 26.6% (bench), about a third. Most of the Mac
+  residue is Ukrainian content words matching inside the one page per tree
+  that holds Ukrainian text; most of the bench residue is English
+  orchestrator chat whose ordinary words hit code by substring ("Try
+  again", "why is the scan taking so long?"). No lexical gate measured so
+  far separates these from short code questions, and short Ukrainian code
+  questions are in no keyed set, so the gates' harm there is unmeasured.
+  A setup run without `--hook` removes a hook an earlier setup wrote; the
+  choice is not remembered, so an opted-in project needs `--hook` on every
+  setup run.
 - **The hook trades tools for hints.** With the prompt hook the agent
   reads the injected lines and almost never calls a tool, so a wrong hint
   line is not corrected by a search. Measured 2026-10-28 with

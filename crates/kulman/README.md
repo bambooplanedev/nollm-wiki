@@ -122,12 +122,12 @@ need `kulman setup --scope repo --remove` (or `--scope local`) first: before the
 terminal, as the last line otherwise.
 
     kulman setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
-                 [--scope repo|local] [--no-hook] [--remove] [--yes]
+                 [--scope repo|local] [--hook | --no-hook] [--remove] [--yes]
 
 Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current
 directory, in the release's order: every chosen module runs, whatever the earlier ones returned.
 Without `--modules` every installed module is set up. `--scope` goes to every module; `--agent`,
-`--no-hook` and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
+`--hook`/`--no-hook` (calque's prompt hook, off by default) and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
 chosen. Agent memory is on unless `--no-memory` is given (or the release turns it off). `--remove`
 undoes each module's setup. Before the first module runs, every chosen module's binary must be in
 `bin/` and executable; with no module installed there is nothing to set up (exit 1). The modules
