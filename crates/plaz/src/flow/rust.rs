@@ -101,6 +101,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 hidden_exit: hides_break(body, src),
                 orelse: None,
                 test_after: false,
+                once: false,
                 post: None,
             },
             None => FlowNode::Plain,

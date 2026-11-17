@@ -44,6 +44,8 @@ pub(crate) enum FlowNode<'a> {
         hidden_exit: bool,
         orelse: Option<Node<'a>>,
         test_after: bool,
+        /// See `Step::Loop::once`.
+        once: bool,
         post: Option<Node<'a>>,
     },
     /// A `finally` clause: its children are the body.
@@ -432,6 +434,7 @@ impl<'s> Walker<'s> {
                 hidden_exit,
                 orelse,
                 test_after,
+                once,
                 post,
             } => {
                 let except: Vec<Node> = each
@@ -456,6 +459,7 @@ impl<'s> Walker<'s> {
                     hidden_exit,
                     orelse: after,
                     test_after,
+                    once,
                     post,
                 });
                 out.extend(self.sub(None, rest, flow));

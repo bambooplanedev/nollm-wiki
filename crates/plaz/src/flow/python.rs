@@ -42,6 +42,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                     hidden_exit: false,
                     orelse: field("alternative"),
                     test_after: false,
+                    once: false,
                     post: None,
                 }
             }

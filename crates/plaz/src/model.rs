@@ -303,6 +303,8 @@ pub enum Step {
         /// The body runs before the header's test (`do … while`): the first
         /// edge enters the body, `pre` and the header follow it.
         test_after: bool,
+        /// The test never passes (`do … while (0)`): no edge goes back.
+        once: bool,
         /// Run after the body and before the header on every iteration (the
         /// update of a C `for`); the body's fall-off and `continue` enter it.
         post: Vec<Step>,

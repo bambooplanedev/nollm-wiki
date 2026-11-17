@@ -256,6 +256,7 @@ impl Chart<'_> {
             hidden_exit,
             orelse,
             test_after,
+            once,
             post,
             ..
         } = s
@@ -282,7 +283,9 @@ impl Chart<'_> {
             // Each pass starts at the body's first node, else what runs
             // before the test.
             let again = entry.or(test).unwrap_or(d);
-            self.edges_to(&[(d, Some("loop"))], again);
+            if !once {
+                self.edges_to(&[(d, Some("loop"))], again);
+            }
             (d, lp.breaks)
         } else {
             // A header run before every iteration is where each

@@ -746,6 +746,47 @@ fn a_statement_macro_without_a_semicolon_counts_the_call_it_swallows() {
 }
 
 #[test]
+fn a_do_loop_whose_test_never_passes_runs_its_body_once() {
+    // `continue` goes to the test, which ends the loop, as `break` does.
+    let src = "void once(int k) {\n    do {\n        if (k) continue;\n        if (k > 1) break;\n        work();\n    } while (0);\n    done();\n}\n";
+    assert_eq!(
+        drawn(src, "once"),
+        [
+            "n0([\"once\"])",
+            "n1{\"k\"}",
+            "n0 --> n1",
+            "n2[\"continue;\"]",
+            "n1 -->|yes| n2",
+            "n3{\"k #gt; 1\"}",
+            "n1 -->|no| n3",
+            "n4[\"break;\"]",
+            "n3 -->|yes| n4",
+            "n5>\"work()\"]:::hidden",
+            "n3 -->|no| n5",
+            "n6{\"while (0)\"}",
+            "n5 --> n6",
+            "n2 --> n6",
+            "n7>\"done()\"]:::hidden",
+            "n4 --> n7",
+            "n6 -->|done| n7",
+            "n8([\"end\"])",
+            "n7 --> n8",
+        ]
+    );
+    let src = src
+        .replace("while (0)", "while (false)")
+        .replace("once", "never");
+    let from_test = |l: &&String| l.starts_with("n6");
+    assert_eq!(
+        drawn(&src, "never")
+            .iter()
+            .filter(from_test)
+            .collect::<Vec<_>>(),
+        ["n6{\"while (false)\"}", "n6 -->|done| n7"]
+    );
+}
+
+#[test]
 fn a_do_loop_whose_body_draws_nothing_goes_back_to_its_tests_first_call() {
     let src = "void wait_ready(Port& p) {\n    do {\n        ++tries;\n    } while (!p.ready());\n    done();\n}\n";
     assert_eq!(

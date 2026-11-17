@@ -163,6 +163,7 @@ fn looping<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         hidden_exit: false,
         orelse: None,
         test_after: after,
+        once: after && cond.is_some_and(|c| never(c, src)),
         post: field("update"),
     }
 }
@@ -179,13 +180,24 @@ fn branch(arms: Vec<ArmNode>, exhaustive: bool) -> FlowNode {
 /// `true` or a nonzero number, bare or in parentheses: a test that never
 /// fails.
 fn always(c: Node, src: &str) -> bool {
+    let v = literal(c);
+    v.kind() == "true" || (v.kind() == "number_literal" && text(v, src) != "0")
+}
+
+/// `false` or `0`, bare or in parentheses: a test that never passes.
+fn never(c: Node, src: &str) -> bool {
+    let v = literal(c);
+    v.kind() == "false" || (v.kind() == "number_literal" && text(v, src) == "0")
+}
+
+/// The test `c` without its parentheses.
+fn literal(c: Node) -> Node {
     let inner = c.child_by_field_name("value").or_else(|| {
         (c.kind() == "parenthesized_expression")
             .then(|| c.named_child(0))
             .flatten()
     });
-    let v = inner.unwrap_or(c);
-    v.kind() == "true" || (v.kind() == "number_literal" && text(v, src) != "0")
+    inner.unwrap_or(c)
 }
 
 /// An `if` and its `else if` chain as arms, the final `else` last; a

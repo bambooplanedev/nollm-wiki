@@ -59,6 +59,7 @@ pub fn looping(header: &str, body: Vec<Step>, post: Vec<Step>, test_after: bool)
         hidden_exit: false,
         orelse: Vec::new(),
         test_after,
+        once: false,
         post,
     }
 }
