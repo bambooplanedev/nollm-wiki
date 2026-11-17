@@ -1436,6 +1436,12 @@ fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
         cpp_targets(&files, "src/a.cpp", "flat"),
         ["s.go() → src/a.cpp:11"]
     );
+    // A `using` in the class names the dependent base's member.
+    let named = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Named : Rack<T> {\n    using typename Rack<T>::Slot;\n    void named() { Slot s; s.go(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/n.cpp", named)], "src/n.cpp", "named"),
+        ["s.go() → src/n.cpp:6"]
+    );
     // `Wrap<int>` is no dependent base: what it derives from is searched.
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "mid"),

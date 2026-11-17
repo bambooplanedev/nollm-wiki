@@ -306,8 +306,13 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
 /// `inner_usings`.
 fn using(file: &mut File, n: Node, src: &str) {
     let named = n.named_children(&mut n.walk()).last();
-    let Some(named) = named.map(|u| src[u.byte_range()].split_whitespace().collect::<String>())
-    else {
+    // `using typename B<T>::K;` names `B<T>::K`.
+    let written = |u: Node| {
+        let mut words = src[u.byte_range()].split_whitespace().peekable();
+        words.next_if_eq(&"typename");
+        words.collect::<String>()
+    };
+    let Some(named) = named.map(written) else {
         return;
     };
     // `::Cfg` is `Cfg` of the global namespace.

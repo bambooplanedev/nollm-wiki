@@ -177,7 +177,20 @@ impl<'a> Cpp<'a> {
             if let Some(p) = own.filter(|_| owner_key(scope) == t) {
                 return Step::Found(p);
             }
-            match self.in_bases(scope, &|b| at(&[format!("{}::{t}", bare(b))]), sight) {
+            // `using typename Base<T>::t;` in the class names a
+            // dependent base's member.
+            let heads = self.classes.heads.get(scope).into_iter().flatten();
+            let usings: Vec<String> = heads
+                .flat_map(|h| &self.pages[*h.0].1.cpp.usings)
+                .map(|u| untemplated(u))
+                .collect();
+            let named = |b: &str| {
+                let member = format!("{}::{t}", owner_key(b));
+                let ends = |u: &String| *u == member || u.ends_with(&format!("::{member}"));
+                usings.iter().any(ends)
+            };
+            let nested = |b: &str| at(&[format!("{}::{t}", bare(b))]);
+            match self.in_bases(scope, &nested, &named, sight) {
                 Step::Nothing => {}
                 found @ (Step::Found(_) | Step::Unplaced) => return found,
             }
@@ -205,8 +218,15 @@ impl<'a> Cpp<'a> {
     /// What `nested(base)` gives for the nearest project bases of the
     /// class `scope` (the bases of the head `sight` sees) that give
     /// something: unplaced past a base no head places or when one level
-    /// gives several.
-    fn in_bases(&self, scope: &str, nested: &dyn Fn(&str) -> Step<'a>, sight: Sight) -> Step<'a> {
+    /// gives several. A dependent base of `scope` itself is searched only
+    /// when `named`: a `using` of the class names its member.
+    fn in_bases(
+        &self,
+        scope: &str,
+        nested: &dyn Fn(&str) -> Step<'a>,
+        named: &dyn Fn(&str) -> bool,
+        sight: Sight,
+    ) -> Step<'a> {
         let mut level = vec![scope];
         let mut seen = BTreeSet::from([scope]);
         while !level.is_empty() {
@@ -217,7 +237,9 @@ impl<'a> Cpp<'a> {
                     // A dependent base of `scope` itself is not searched for
                     // a name written bare; one of a base is, being that
                     // base's with its arguments known.
-                    Base::Class(p, dep) if !(dep && level == [scope]) && seen.insert(p) => {
+                    Base::Class(p, dep)
+                        if !(dep && level == [scope] && !named(p)) && seen.insert(p) =>
+                    {
                         next.push(p);
                     }
                     // An outside base hides no project type name.
