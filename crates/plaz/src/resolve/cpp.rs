@@ -267,6 +267,16 @@ impl<'a> Cpp<'a> {
         it.signature.starts_with("template") && named
     }
 
+    /// The names the call `c` gives a project macro where a declaration's
+    /// name may stand (`MapCall::given`: `b` of `DECLARE_BOX(b)`).
+    pub(super) fn macro_names<'c>(&self, c: &'c MapCall) -> &'c [String] {
+        if self.macros.contains(c.site.name.as_str()) {
+            &c.given
+        } else {
+            &[]
+        }
+    }
+
     fn local(&self, c: FnRef) -> bool {
         self.pages[c.0].1.cpp.local.contains(&c.1)
     }

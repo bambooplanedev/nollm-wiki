@@ -12,6 +12,7 @@ pub fn call(name: &str) -> Step {
             line: 1,
         },
         path: None,
+        given: Vec::new(),
         target: Target::Hidden,
     })
 }

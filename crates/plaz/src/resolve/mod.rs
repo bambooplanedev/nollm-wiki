@@ -115,9 +115,17 @@ pub fn resolve(mut project: Project) -> Resolved {
                         .as_deref()
                         .map(owner_key)
                         .filter(|k| !k.is_empty());
+                    // In C/C++, the names the body gives a project macro.
+                    let mut given = BTreeSet::new();
+                    if file.family == Family::Cpp {
+                        flow.each_call(&mut |_, c| {
+                            given.extend(cpp.macro_names(c).iter().cloned());
+                        });
+                    }
                     let cx = Caller {
                         index: &index,
                         page,
+                        given,
                         py: &py,
                         cpp: &cpp,
                         included,
@@ -160,6 +168,10 @@ struct Caller<'i, 'a> {
     /// A C/C++ method whose qualified name the grammar misread
     /// (`Cpp::misread_method`): no class is known.
     misread: bool,
+    /// The names a C/C++ caller's body, nested flows included, gives a
+    /// project macro (`Cpp::macro_names`): the macro may declare a local
+    /// of such a name.
+    given: BTreeSet<String>,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,

@@ -354,6 +354,10 @@ pub struct MapCall {
     pub site: CallSite,
     /// A path call's callee as written, to its arguments: `text` is clipped.
     pub path: Option<String>,
+    /// The names among a bare call's arguments that stand where a
+    /// declaration's name may (`b` of `F(b)`, of `F(T, *b)` and of
+    /// `F(b[4])`): a C/C++ macro so called may declare one.
+    pub given: Vec<String>,
     pub target: Target,
 }
 
