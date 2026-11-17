@@ -568,3 +568,26 @@ fn one_line_labels_are_unchanged_by_wrapping() {
         [(1, 3, "T1. A.".to_string()), (4, 4, "T2. B.".to_string())]
     );
 }
+
+#[test]
+fn table_rows_answer_only_when_no_label_does() {
+    let md = "## T1 plan\n| W | D |\n|---|---|\n| W21 | D12 |\n| W22 | see W21 |\n```\n| W21 | code |\n```\n";
+    let d = write_tmp("rows", md);
+    let docs = ["p.md".to_string()];
+    let ask = |q: &str| {
+        let (h, e, more, f) = doc_search(&d, &docs, q, None);
+        doc_lines(&h, &e, more, f.as_deref())
+    };
+    let note = "no label holds the words; table rows that hold them in a row:";
+    // The row led by the ID first, then the row that mentions it; never the fenced one.
+    assert_eq!(
+        ask("W21"),
+        format!("{note}\np.md\n  4-4  W21 | D12\n  5-5  W22 | see W21\n")
+    );
+    assert_eq!(ask("D12"), format!("{note}\np.md\n  4-4  W21 | D12\n"));
+    assert_eq!(ask("W21 D12"), format!("{note}\np.md\n  4-4  W21 | D12\n"));
+    // A label answers alone, and rows are not listed.
+    assert_eq!(ask("T1"), "p.md\n  1-8  T1 plan\n");
+    assert_eq!(ask(""), "p.md\n  1-8  T1 plan\n");
+    assert_eq!(ask("W99"), format!("{DOC_NO_MATCH}\n"));
+}

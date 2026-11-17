@@ -176,7 +176,8 @@ When no label holds the words in a row, a query that names several labels one af
 part of two or more words or one led by an ID opens its label, a single plain word must be the whole
 label, and the first line names the words that open none. Otherwise labels opened by the query's
 leading ID (`11.4`, `T3a`) answer, else labels holding all its words except stop words in any order;
-a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
+and when no label answers at all, the table rows holding the query's words in a row (`| W21 | D12 |`
+for `W21` or `D12`), a match in the first cell first; a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
 
 | agent | `calque setup` writes | what tells it to use the wiki |
 |---|---|---|
@@ -427,7 +428,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` (with `--tools`) | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
