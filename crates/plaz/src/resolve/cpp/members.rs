@@ -99,8 +99,7 @@ impl Caller<'_, '_, '_> {
     }
 
     /// `x.f()` or `x->f()` on the data member `x` (`after` the text after
-    /// it) of the caller's class, or `x(…)` with no `after`: as `on_member`;
-    /// as on no member when the body gives a project macro the name `x`.
+    /// it) of the caller's class, or `x(…)` with no `after`: as `on_member`.
     pub(super) fn on_field(
         &self,
         chain: &[FlowScope],
@@ -108,9 +107,8 @@ impl Caller<'_, '_, '_> {
         x: &str,
         after: Option<&str>,
     ) -> Evidence {
-        // A local a macro may have declared hides the member.
-        let field = (self.member_of(chain))
-            .filter(|_| !self.given.contains(x))
+        let field = self
+            .member_of(chain)
             .and_then(|c| self.cpp.field(c, x, self.sight()));
         self.on_member(call, field, after)
     }

@@ -10,7 +10,7 @@ mod members;
 
 use super::{Evidence, Rules};
 use crate::flow::FlowScope;
-use crate::model::{Bodiless, File, Flow, FnId, MapCall};
+use crate::model::{Bodiless, File, FnId, MapCall};
 use crate::source::{included, project_include, untemplated};
 use classes::{Classes, Missing, Sight};
 pub(crate) use fold::{fold_scope, namespace_owners, outer_scope};
@@ -233,16 +233,6 @@ impl<'a> Cpp<'a> {
         it.signature.starts_with("template") && named
     }
 
-    /// The names the call `c` gives a project macro where a declaration's
-    /// name may stand (`MapCall::given`: `b` of `DECLARE_BOX(b)`).
-    pub(super) fn macro_names<'c>(&self, c: &'c MapCall) -> &'c [String] {
-        if self.macros.contains(c.site.name.as_str()) {
-            &c.given
-        } else {
-            &[]
-        }
-    }
-
     fn local(&self, c: FnRef) -> bool {
         self.pages[c.0].1.cpp.local.contains(&c.1)
     }
@@ -293,10 +283,6 @@ pub(super) struct Caller<'c, 'i, 'a> {
     /// A method whose qualified name the grammar misread
     /// (`Cpp::misread_method`): no class is known.
     misread: bool,
-    /// The names the caller's body, nested flows included, gives a
-    /// project macro (`Cpp::macro_names`): the macro may declare a local
-    /// of such a name.
-    given: BTreeSet<String>,
 }
 
 impl<'i, 'a> std::ops::Deref for Caller<'_, 'i, 'a> {
@@ -308,19 +294,15 @@ impl<'i, 'a> std::ops::Deref for Caller<'_, 'i, 'a> {
 }
 
 impl<'c, 'i, 'a> Caller<'c, 'i, 'a> {
-    /// The rules for the calls of `flow`, the flow of `cx`'s item, the
-    /// `item`th of its file.
-    pub(super) fn new(cx: &'c super::Caller<'i, 'a>, item: usize, flow: &Flow) -> Self {
+    /// The rules for the calls of `cx`'s item, the `item`th of its file.
+    pub(super) fn new(cx: &'c super::Caller<'i, 'a>, item: usize) -> Self {
         let (cpp, c) = (cx.cpp, (cx.page, item));
-        let mut given = BTreeSet::new();
-        flow.each_call(&mut |_, call| given.extend(cpp.macro_names(call).iter().cloned()));
         Caller {
             cx,
             included: cpp.closure(c.0),
             ns: cx.file.cpp.scopes.get(&c.1).map_or("", String::as_str),
             class: cpp.class_of(c.0, c.1),
             misread: cpp.misread_method(c),
-            given,
         }
     }
 }

@@ -525,25 +525,10 @@ impl<'s> Walker<'s> {
                 |f| &text[f.byte_range()],
             );
             let path = matches!(c.site.via, CallVia::Path(_)).then(|| callee.to_string());
-            // Read from the whole call: `text` is clipped.
-            let args = lit.split_once('(').map_or("", |a| a.1);
-            let args = args.rsplit_once(')').map_or(args, |a| a.0);
-            let name = |a: &str| {
-                let a = a.split('[').next().unwrap_or("");
-                a.trim_matches(|c: char| c.is_whitespace() || c == '*')
-                    .to_string()
-            };
-            let word =
-                |a: &String| !a.is_empty() && a.chars().all(|c| c.is_alphanumeric() || c == '_');
-            let given = match c.site.via {
-                CallVia::Bare => args.split(',').map(name).filter(word).collect(),
-                CallVia::Path(_) | CallVia::SelfRecv | CallVia::Member(_) => Vec::new(),
-            };
             out.push(Step::Call(MapCall {
                 text: clip(lit, 80),
                 site: c.site,
                 path,
-                given,
                 target: Target::Hidden,
             }));
         }

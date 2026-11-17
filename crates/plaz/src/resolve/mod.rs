@@ -161,7 +161,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                     let (rust, python, c);
                     let rules: &dyn Rules = match file.family {
                         Family::Cpp => {
-                            c = cpp::Caller::new(&cx, item, flow);
+                            c = cpp::Caller::new(&cx, item);
                             &c
                         }
                         Family::Python => {
