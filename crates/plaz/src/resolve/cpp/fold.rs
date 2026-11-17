@@ -89,18 +89,25 @@ pub(super) fn unqualified(s: &str) -> String {
 }
 
 impl<'a> Cpp<'a> {
-    /// `key` with the parameter text of the one other spelling of its scope
-    /// and name that reads the same with qualifiers dropped, each name of
-    /// one ending the other's (`core::Kind` and `Kind`); none when a third
-    /// spelling reads the same too, or when a name the two spell apart is
-    /// that of two project types (`a::Kind` and `b::Kind`, or a nested
-    /// `Box::Kind`).
-    fn requalified(&self, key: Key<'a>) -> Option<Key<'a>> {
+    /// `key`, of the declaration `c`, with the parameter text of the one
+    /// other spelling of its scope and name that reads the same with
+    /// qualifiers dropped, each name of one ending the other's (`core::Kind`
+    /// and `Kind`) where the function writing the shorter shows it to be
+    /// the longer (`means`); none when a third spelling reads the same
+    /// too, or when a name the two spell apart is that of two project
+    /// types (`a::Kind` and `b::Kind`, or a nested `Box::Kind`).
+    fn requalified(&self, c: FnRef, key: Key<'a>) -> Option<Key<'a>> {
         let all = self.spellings.get(&(key.0, key.1, unqualified(key.2)))?;
         let mut other = all.iter().filter(|&&p| p != key.2);
         let (Some(&p), None, 2) = (other.next(), other.next(), all.len()) else {
             return None;
         };
+        // The functions spelled the other way.
+        let others = self.by_name.get(key.1).into_iter().flatten();
+        let others: Vec<FnRef> = others
+            .copied()
+            .filter(|&d| self.key(d) == Some((key.0, key.1, p)))
+            .collect();
         let names = |s: &'a str| {
             s.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
                 .filter(|w| !w.is_empty())
@@ -114,9 +121,65 @@ impl<'a> Cpp<'a> {
             );
             items.is_none_or(|&n| n < 2) && heads.is_none_or(|h| h.len() < 2)
         };
-        let same = (names(key.2).zip(names(p)))
-            .all(|(a, b)| a == b || ((ends(a, b) || ends(b, a)) && one(a)));
+        // The function writing the short name shows it to be the long one.
+        let shown = |a: &str, b: &str| {
+            (ends(a, b) && others.iter().all(|&d| self.means(d, b, a, c)))
+                || (ends(b, a) && others.iter().all(|&d| self.means(c, a, b, d)))
+        };
+        let same = (names(key.2).zip(names(p))).all(|(a, b)| a == b || (shown(a, b) && one(a)));
         same.then_some((key.0, key.1, p))
+    }
+
+    /// Does the function `x` show that `short`, a name in its parameters,
+    /// is `long`, which ends in it and is written by `y` (`Kind` and
+    /// `core::Kind`): `x` sits in the namespace or class `long` adds
+    /// (`core`, read through a namespace alias of `y`'s file or includes),
+    /// or a `using` of `x`'s file or includes names that namespace or
+    /// `long`, and none of them names another `short` (`using
+    /// std::string;` beside `my::string`); or `long` adds only the name
+    /// of the class `short` starts with (`Box::Box::Lid` is `Box::Lid`);
+    /// or the nearest alias `short` in a namespace around `x` names `long`.
+    fn means(&self, x: FnRef, short: &str, long: &str, y: FnRef) -> bool {
+        let facts = &self.pages[x.0].1.cpp;
+        let Some(added) = long.strip_suffix(short).and_then(|p| p.strip_suffix("::")) else {
+            return false;
+        };
+        if short.split("::").next() == Some(added) && !self.namespaces.contains(added) {
+            return true;
+        }
+        let (root, rest) = added.split_once("::").unwrap_or((added, ""));
+        let mut theirs = std::iter::once(&y.0).chain(self.closure(y.0));
+        let alias = theirs.find_map(|&p| self.pages[p].1.cpp.namespace_aliases.get(root));
+        let added = match alias {
+            Some(a) if rest.is_empty() => a.clone(),
+            Some(a) => format!("{a}::{rest}"),
+            None => added.to_string(),
+        };
+        let scopes = [&facts.classes, &facts.inline_scopes, &facts.scopes];
+        let at = scopes.iter().find_map(|s| s.get(&x.1));
+        let at = at.map_or("", String::as_str);
+        let sits = format!("::{at}::").contains(&format!("::{added}::"));
+        let pages = || std::iter::once(&x.0).chain(self.closure(x.0));
+        let usings: Vec<&String> = pages().flat_map(|&p| &self.pages[p].1.cpp.usings).collect();
+        let either = |a: &str, b: &str| {
+            a == b || a.ends_with(&format!("::{b}")) || b.ends_with(&format!("::{a}"))
+        };
+        // The nearest alias `short` around `x` names `long`.
+        let around = std::iter::successors(Some(at), |s| s.rsplit_once("::").map(|s| s.0));
+        let mut aliased = around.filter_map(|s| {
+            let path = format!("{s}::{short}");
+            pages().find_map(|&p| self.pages[p].1.cpp.aliases.get(&path))
+        });
+        if aliased
+            .next()
+            .is_some_and(|t| *t == format!("{added}::{short}"))
+        {
+            return true;
+        }
+        let name = short.rsplit("::").next();
+        let another = |u: &&String| u.rsplit_once("::").map(|u| u.1) == name && !either(u, long);
+        !usings.iter().any(another)
+            && (sits || usings.iter().any(|u| either(u, long) || either(u, &added)))
     }
 
     /// `key`, of the declaration `c` in an inline namespace, in the
@@ -176,7 +239,7 @@ impl<'a> Cpp<'a> {
                 None => self.shared.get(&key),
             };
             let defs = defs(key)
-                .or_else(|| defs(self.requalified(key)?))
+                .or_else(|| defs(self.requalified(c, key)?))
                 .or_else(|| defs(self.outer(c, key)?));
             if let Some(defs) = defs {
                 out.extend(defs);

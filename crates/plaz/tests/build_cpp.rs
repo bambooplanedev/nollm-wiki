@@ -378,6 +378,49 @@ fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
 }
 
 #[test]
+fn a_declaration_folds_across_a_qualifier_only_where_its_file_shows_the_short_name_is_the_long_one()
+{
+    // `put`'s `text` is the library's; `log`'s is `my::text`, by a `using`
+    // in an included header; `cut`'s `wide_t` is a global type of the
+    // library's header, nothing showing it to be `my::wide_t`.
+    let h = "#include <text>\n#include \"my.h\"\nusing lib::text;\nvoid put(const text& s);\nvoid cut(wide_t w);\n";
+    let my = "namespace my { struct text {}; struct wide_t {}; }\n";
+    let log = "#include <text>\n#include \"my.h\"\n#include \"use.h\"\nvoid log(const text& s);\n";
+    let def = "#include \"put.h\"\n#include \"log.h\"\nvoid put(const my::text& s) {}\nvoid log(const my::text& s) {}\nvoid cut(my::wide_t w) {}\n";
+    let main = "#include \"put.h\"\n#include \"log.h\"\nvoid run(const my::text& t, wide_t w) { put(\"x\"); log(t); cut(w); }\n";
+    let files = [
+        ("src/put.h", h),
+        ("src/my.h", my),
+        ("src/use.h", "using namespace my;\n"),
+        ("src/log.h", log),
+        ("src/put.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        [
+            "put(\"x\") → src/put.h:4",
+            "log(t) → src/put.cpp:4",
+            "cut(w) → src/put.h:5"
+        ]
+    );
+}
+
+#[test]
+fn a_declaration_folds_across_an_alias_of_its_namespace_or_its_classs_own_name() {
+    // `path` is the alias around `shift`, naming what `fs::path` names;
+    // `Crate::Crate::Lid` is `Crate::Lid`.
+    let h = "namespace io {\nusing path = lib::fs::path;\nint shift(const path& p);\n}\nstruct Crate {\n    struct Lid {};\n};\nint seal(const Crate::Lid& l);\n";
+    let def = "#include \"io.h\"\nnamespace io {\nnamespace fs = lib::fs;\nint shift(const fs::path& p) { return 1; }\n}\nint seal(const Crate::Crate::Lid& l) { return 2; }\n";
+    let main = "#include \"io.h\"\nint run(const io::path& p, const Crate::Lid& l) { return io::shift(p) + seal(l); }\n";
+    let files = [("src/io.h", h), ("src/io.cpp", def), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["io::shift(p) → src/io.cpp:4", "seal(l) → src/io.cpp:6"]
+    );
+}
+
+#[test]
 fn a_declaration_does_not_fold_across_a_nested_class_of_the_same_name() {
     let h = "namespace a { struct Kind {}; }\nstruct Box {\n    struct Kind {};\n    void f(Kind k);\n    void f(a::Kind k);\n};\n";
     let def = "#include \"box.h\"\nvoid Box::f(a::Kind k) {}\n";
