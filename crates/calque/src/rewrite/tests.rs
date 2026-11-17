@@ -24,10 +24,13 @@ fn fenced_notes_do_not_masquerade_as_preserved_notes() {
     let path = dir.path().join("p.md");
     std::fs::write(
         &path,
-        "## Body\n```\n## Notes\nexample notes\n```\n\n## Notes\nmy real notes\n",
+        "## Body\n```\n## Notes\nexample notes\n```\n\n## Notes\nmy real notes\n\n```\n## Notes\nquoted example\n```\n",
     )
     .unwrap();
-    assert_eq!(read_notes_from(&path), "my real notes");
+    assert_eq!(
+        read_notes_from(&path),
+        "my real notes\n\n```\n## Notes\nquoted example\n```"
+    );
 }
 
 #[test]

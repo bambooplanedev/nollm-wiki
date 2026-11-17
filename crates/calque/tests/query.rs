@@ -2365,7 +2365,10 @@ fn search_stays_silent_when_a_name_has_many_copies() {
         ("src/b.rs", "pub fn slice_cap_for() {}\n"),
         ("src/c.rs", "pub fn slice_cap_for() {}\n"),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.rs  A — pub fn slice_cap_for()\n  src/a.rs:1-1  slice_cap_for  pub fn slice_cap_for()\n"
+    );
 }
 
 #[test]
@@ -2374,7 +2377,10 @@ fn search_does_not_note_a_test_copy() {
         ("src/a.rs", "pub fn slice_cap_for() {}\n"),
         ("tests/b.rs", "fn slice_cap_for() {}\n"),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.rs  A — pub fn slice_cap_for()\n  src/a.rs:1-1  slice_cap_for  pub fn slice_cap_for()\n"
+    );
 }
 
 /// Names of the symbol lines of a response, in output order.
@@ -2573,7 +2579,10 @@ fn search_does_not_note_a_nested_copy() {
             "def run():\n    def slice_cap_for():\n        pass\n",
         ),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.py  A — def slice_cap_for()\n  src/a.py:1-2  slice_cap_for  def slice_cap_for()\n"
+    );
 }
 
 #[test]

@@ -123,7 +123,7 @@ mod tests {
         c.set("b", "2");
         let live: BTreeSet<String> = ["a".to_string()].into_iter().collect();
         c.retain_ids(&live);
-        assert!(!c.pages.contains_key("b"));
+        assert_eq!(c.pages.keys().collect::<Vec<_>>(), ["a"]);
     }
 
     #[test]
