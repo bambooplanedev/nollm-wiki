@@ -237,9 +237,11 @@ stderr and exits 0.
   exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`
   after it). Ignore lines, `.kulman/` and memory notes stay.
 - Every run, `--remove` included, also deletes what `kalka setup` (the module's name before 0.8.0)
-  wrote, exactly as it wrote it: server entries, hooks, the pi skill, the navigation steps and the
-  Codex block, each said as `removed <item> (calque's old name)`. Anything else named kalka stays,
-  as does a file git tracks on a `--scope local` run.
+  wrote, exactly as it wrote it: the server entries in the project's files, hooks, the pi skill, the
+  navigation steps and the Codex block, each said as `removed <item> (calque's old name)`. Claude
+  Code's local kalka server is removed only by a `--scope local` run that sets up claude. Anything
+  else named kalka stays, as does a file git tracks on a `--scope local` run; a file setup cannot
+  read is left and named (`left <file> as it is: …`) without failing the run.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
