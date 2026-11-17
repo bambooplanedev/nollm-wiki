@@ -113,6 +113,22 @@ pub fn labels(md: &str) -> Vec<Label> {
     out
 }
 
+/// The table rows of `md` (lines opening with `|`), skipping fenced code: each
+/// one line, its text the row without the outer pipes.
+fn rows(md: &str) -> Vec<Label> {
+    let masked = mask_fenced_code(md);
+    let row = |(i, l): (usize, &str)| {
+        let text = l.trim().strip_prefix('|')?.trim_end_matches('|').trim();
+        Some(Label {
+            start: i + 1,
+            end: i + 1,
+            level: BOLD + 1,
+            text: text.to_string(),
+        })
+    };
+    masked.lines().enumerate().filter_map(row).collect()
+}
+
 /// Hits returned for a query with words when no `limit` is given.
 pub const DOC_LIMIT: usize = 10;
 
@@ -121,7 +137,7 @@ pub const DOC_LIST_LIMIT: usize = 200;
 
 /// The line for an empty `docs` answer: why nothing matched and what to try.
 pub const DOC_NO_MATCH: &str =
-    "no matches: no label holds the query words in a row, opens with its leading ID, or holds all its words; try other words or an ID like T5k, or grep for text inside a doc";
+    "no matches: no label holds the query words in a row, opens with its leading ID, or holds all its words, and no table row holds them in a row; try other words or an ID like T5k, or grep for text inside a doc";
 
 /// A label found in one of the searched documents.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,7 +193,8 @@ const STOP_WORDS: &[&str] = &[
 /// else labels whose first or second word is
 /// the query's leading word answer if that word has a digit (an ID like `11.4`
 /// or `T3a`), else labels holding all its words but stop words (two or more)
-/// in any order. Returns the hits grouped
+/// in any order. When no label answers at all, the table rows holding the
+/// query's words in a row do, a match in the first cell first. Returns the hits grouped
 /// by doc, one error line per unusable path, how many matching labels the
 /// limit (or an empty query's default cap) cut, and the line naming the
 /// fallback that answered.
@@ -189,7 +206,7 @@ pub fn doc_search(
 ) -> (Vec<DocHit>, Vec<String>, usize, Option<String>) {
     let q = words(query);
     let qs = split_words(query);
-    let (mut ranked, errors) = matching(root, docs, |t| {
+    let in_a_row = |t: &str| {
         if q.is_empty() {
             return Some((false, 0));
         }
@@ -198,7 +215,8 @@ pub fn doc_search(
             None if qs.len() > 1 => find(&split_words(t), &qs).map(|at| (true, at)),
             None => None,
         }
-    });
+    };
+    let (mut ranked, errors) = matching(root, docs, labels, in_a_row);
     let mut fallback = None;
     if ranked.is_empty() && q.len() > 1 {
         let (parts, missed) = several(root, docs, query);
@@ -220,7 +238,7 @@ pub fn doc_search(
             .next()
             .filter(|w| w.contains(|c: char| c.is_ascii_digit()));
         if let Some(id) = id {
-            ranked = matching(root, docs, |t| {
+            ranked = matching(root, docs, labels, |t| {
                 find(&words(t), &q[..1])
                     .filter(|&at| at <= 1)
                     .map(|at| (false, at))
@@ -233,7 +251,7 @@ pub fn doc_search(
             .filter(|w| !STOP_WORDS.contains(&w.as_str()))
             .collect();
         if ranked.is_empty() && need.len() > 1 {
-            ranked = matching(root, docs, |t| {
+            ranked = matching(root, docs, labels, |t| {
                 let w = split_words(t);
                 need.iter().all(|n| w.contains(n)).then_some((false, 0))
             })
@@ -242,6 +260,12 @@ pub fn doc_search(
         }
         if !ranked.is_empty() {
             fallback = Some(format!("no label holds the words in a row; {note}:"));
+        }
+    }
+    if ranked.is_empty() && !q.is_empty() {
+        ranked = matching(root, docs, rows, in_a_row).0;
+        if !ranked.is_empty() {
+            fallback = Some("no label holds the words; table rows that hold them in a row:".into());
         }
     }
     if !q.is_empty() {
@@ -311,7 +335,7 @@ fn names(w: &[String], run: &[String]) -> Option<usize> {
 /// none is skipped and returned. The labels of the parts, in part order, each
 /// listed once; none unless two or more parts list a new label.
 fn several(root: &Path, docs: &[String], query: &str) -> (Ranked, Vec<String>) {
-    let all = matching(root, docs, |_| Some((false, 0))).0;
+    let all = matching(root, docs, labels, |_| Some((false, 0))).0;
     let lw: Vec<Vec<String>> = all.iter().map(|(_, _, h)| words(&h.text)).collect();
     let raw: Vec<&str> = raw_words(query).collect();
     let q = words(query);
@@ -345,12 +369,13 @@ fn several(root: &Path, docs: &[String], query: &str) -> (Ranked, Vec<String>) {
     (out, missed)
 }
 
-/// Rank key, `docs` index and hit of every label whose text `matches` (giving
+/// Rank key, `docs` index and hit of every label (what `lines` gives: `labels` or `rows`) whose text `matches` (giving
 /// whether it matched loosely and at which word), plus one error per unusable path.
 type Ranked = Vec<((bool, bool, bool), usize, DocHit)>;
 fn matching(
     root: &Path,
     docs: &[String],
+    lines: fn(&str) -> Vec<Label>,
     matches: impl Fn(&str) -> Option<(bool, usize)>,
 ) -> (Ranked, Vec<String>) {
     let mut ranked = Vec::new();
@@ -373,7 +398,7 @@ fn matching(
             errors.push(format!("{path}: not found"));
             continue;
         };
-        for l in labels(&md) {
+        for l in lines(&md) {
             if let Some((loose, at)) = matches(&l.text) {
                 let key = (loose, l.level == BOLD, at > 0);
                 let hit = DocHit {
