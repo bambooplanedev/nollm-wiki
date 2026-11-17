@@ -76,7 +76,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
             let mut items: Vec<usize> = file
                 .flows
                 .keys()
-                .chain(file.declarations.keys())
+                .chain(file.cpp.declarations.keys())
                 .copied()
                 .collect();
             items.sort_unstable();
@@ -93,7 +93,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     links.code(path, it.start_line, it.end_line)
                 ));
                 let Some(flow) = file.flows.get(&item) else {
-                    out.push_str(&match file.declarations.get(&item) {
+                    out.push_str(&match file.cpp.declarations.get(&item) {
                         Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
                         Some(Bodiless::Deleted) => "Deleted.\n".to_string(),
                         Some(Bodiless::Declared) | None => {
@@ -268,7 +268,7 @@ fn defined_at(
         let f = &p.files[&d.path];
         d != me
             && f.flows.contains_key(&d.item)
-            && (d.path == me.path || !f.local.contains(&d.item))
+            && (d.path == me.path || !f.cpp.local.contains(&d.item))
             && key(d) == key(me)
             && match (resolved.class(d), resolved.class(me)) {
                 (Some(a), Some(b)) => a == b,

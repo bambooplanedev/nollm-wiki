@@ -38,11 +38,11 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         let anonymous = std::iter::successors(node.parent(), Node::parent)
             .any(|n| n.kind() == "namespace_definition" && n.child_by_field_name("name").is_none());
         if it.kind == CodeItemKind::Fn && (is_static || anonymous) {
-            file.local.insert(i);
+            file.cpp.local.insert(i);
         }
         let f = declarator(node, &it.name, src.text());
         if let Some(p) = f.and_then(|f| params(f, src.text())) {
-            file.params.insert(i, p);
+            file.cpp.params.insert(i, p);
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
         let mut path = enclosing(node, src.text(), None);
@@ -54,7 +54,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         path.extend(segs().map(|s| s.trim().to_string()));
         path.retain(|s| !s.is_empty());
         if !path.is_empty() {
-            file.scopes.insert(i, path.join("::"));
+            file.cpp.scopes.insert(i, path.join("::"));
         }
         let in_class = std::iter::successors(node.parent(), Node::parent)
             .any(|n| n.kind() == "field_declaration_list");
@@ -67,12 +67,12 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         let class =
             (in_class || it.owner.as_ref().is_some_and(names_owner)).then(|| class.join("::"));
         if let Some(c) = class.filter(|_| it.kind == CodeItemKind::Method) {
-            file.classes.insert(i, untemplated(&c));
+            file.cpp.classes.insert(i, untemplated(&c));
         }
         if let Some(scope) = decl.and_then(|d| cast_scope(d, src.text())) {
             let mut class = enclosing(node, src.text(), Some(&anon));
             class.extend(scope.split("::").map(|s| s.trim().to_string()));
-            file.classes.insert(i, untemplated(&class.join("::")));
+            file.cpp.classes.insert(i, untemplated(&class.join("::")));
         }
     }
     for s in &a.sources {
@@ -120,29 +120,31 @@ fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
 }
 
 /// Records the names of the namespace or namespace alias `n` defines in
-/// `File::namespaces`, a namespace's path in `File::namespace_paths`, and
-/// an alias's namespace in `File::namespace_aliases`.
+/// `CppFacts::namespaces`, a namespace's path in `CppFacts::namespace_paths`, and
+/// an alias's namespace in `CppFacts::namespace_aliases`.
 fn namespace(file: &mut File, n: Node, src: &str) {
     let alias = n.kind() == "namespace_alias_definition";
     let name = n.child_by_field_name("name");
     let Some(name) = name.filter(|_| alias || n.kind() == "namespace_definition") else {
         return;
     };
-    file.namespaces
+    file.cpp
+        .namespaces
         .extend(segments(&src[name.byte_range()]).map(|g| g.0.to_string()));
     if !alias {
         let mut path = enclosing(n, src, None);
         let inline = src[n.byte_range()].starts_with("inline");
         for (seg, _) in segments(&src[name.byte_range()]).filter(|g| !(g.1 || inline)) {
             path.push(seg.to_string());
-            file.namespace_paths.insert(path.join("::"));
+            file.cpp.namespace_paths.insert(path.join("::"));
         }
     }
     let named = n.named_children(&mut n.walk()).last();
     if let Some(t) = named.filter(|_| alias) {
         let t: String = src[t.byte_range()].split_whitespace().collect();
         let t = t.trim_start_matches("::").to_string();
-        file.namespace_aliases
+        file.cpp
+            .namespace_aliases
             .insert(src[name.byte_range()].to_string(), t);
     }
 }
@@ -242,7 +244,7 @@ pub(super) fn unmacroed(
 }
 
 /// Records the class head `n` (a class, struct or union with a body) in
-/// `File::bases` and its data members in `File::fields`; `anonymous`
+/// `CppFacts::bases` and its data members in `CppFacts::fields`; `anonymous`
 /// names the file's anonymous namespaces.
 fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let class = matches!(
@@ -273,9 +275,13 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
     path.push(text(name).to_string());
     let class = untemplated(&path.join("::"));
     let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
-    file.bases.entry(class.clone()).or_default().extend(bases);
+    file.cpp
+        .bases
+        .entry(class.clone())
+        .or_default()
+        .extend(bases);
     // A member the file's two trees type differently has no type.
-    let fields = file.fields.entry(class).or_default();
+    let fields = file.cpp.fields.entry(class).or_default();
     for (name, ty) in flow::cpp_fields(body, src, &params) {
         let kept = fields.entry(name).or_insert_with(|| ty.clone());
         if *kept != ty {
@@ -285,7 +291,7 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
 }
 
 /// Records what the `using` declaration or directive `n` names in
-/// `File::usings`, and by where it stands in `file_usings` or
+/// `CppFacts::usings`, and by where it stands in `file_usings` or
 /// `inner_usings`.
 fn using(file: &mut File, n: Node, src: &str) {
     let named = n.named_children(&mut n.walk()).last();
@@ -301,14 +307,14 @@ fn using(file: &mut File, n: Node, src: &str) {
             || (p.kind() == "namespace_definition" && p.child_by_field_name("name").is_some())
     });
     match scope.map(|p| p.kind()) {
-        None => file.file_usings.insert(named.clone()),
+        None => file.cpp.file_usings.insert(named.clone()),
         Some("field_declaration_list") => false,
-        Some(_) => file.inner_usings.insert(named.clone()),
+        Some(_) => file.cpp.inner_usings.insert(named.clone()),
     };
-    file.usings.insert(named);
+    file.cpp.usings.insert(named);
 }
 
-/// Records in `File::variables` the names the declaration `n` outside any
+/// Records in `CppFacts::variables` the names the declaration `n` outside any
 /// function or class body declares as variables: each declarator's name
 /// unless it declares a function, but one in parentheses (`(*say)(const
 /// char*)`).
@@ -326,7 +332,7 @@ fn variables(file: &mut File, n: Node, src: &str) {
                 .or_else(|| d.named_child(0));
             match (d.kind(), inner) {
                 ("identifier", _) => {
-                    file.variables.insert(src[d.byte_range()].to_string());
+                    file.cpp.variables.insert(src[d.byte_range()].to_string());
                     break;
                 }
                 ("function_declarator", Some(i)) if i.kind() != "parenthesized_declarator" => break,
@@ -345,7 +351,7 @@ fn variables(file: &mut File, n: Node, src: &str) {
     }
 }
 
-/// Records in `File::specialized` the function template the explicit
+/// Records in `CppFacts::specialized` the function template the explicit
 /// specialization `n` (`template <> int pack<Wide>(Wide v)`, defined or
 /// declared) specializes.
 fn specialization(file: &mut File, n: Node, src: &str) {
@@ -362,7 +368,7 @@ fn specialization(file: &mut File, n: Node, src: &str) {
             let mut path = enclosing(n, src, None);
             let named = x.child_by_field_name("declarator");
             path.extend(named.map(|f| untemplated(&src[f.byte_range()])));
-            file.specialized.insert(path.join("::"));
+            file.cpp.specialized.insert(path.join("::"));
             return;
         }
         d = Some(x);
@@ -370,7 +376,7 @@ fn specialization(file: &mut File, n: Node, src: &str) {
 }
 
 /// Records the type alias `n` declares, if it is one outside any body,
-/// in `File::aliases`.
+/// in `CppFacts::aliases`.
 fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let text = |n: Node| &src[n.byte_range()];
     let names: Vec<&str> = match n.kind() {
@@ -431,7 +437,7 @@ fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
         let mut path = enclosing(n, src, Some(anonymous));
         path.push(name.to_string());
         // An alias the file's two trees read differently names nothing known.
-        let kept = file.aliases.entry(untemplated(&path.join("::")));
+        let kept = file.cpp.aliases.entry(untemplated(&path.join("::")));
         let kept = kept.or_insert_with(|| ty.clone());
         if *kept != ty {
             kept.clear();

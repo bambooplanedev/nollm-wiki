@@ -16,10 +16,10 @@ pub(super) type Key<'a> = (&'a str, &'a str, &'a str);
 /// (`core` of `int core::run(int)`) for `fold_scope`.
 pub(crate) fn namespace_owners<'a>(files: impl Iterator<Item = &'a File>) -> BTreeSet<&'a str> {
     let files: Vec<&File> = files.filter(|f| f.family == Family::Cpp).collect();
-    let classes: BTreeSet<&str> = (files.iter().flat_map(|f| f.bases.keys()))
+    let classes: BTreeSet<&str> = (files.iter().flat_map(|f| f.cpp.bases.keys()))
         .map(|c| owner_key(c))
         .collect();
-    let names = files.iter().flat_map(|f| &f.namespaces);
+    let names = files.iter().flat_map(|f| &f.cpp.namespaces);
     names
         .map(String::as_str)
         .filter(|n| !classes.contains(n))
@@ -55,14 +55,14 @@ impl Loose {
 /// The scope a C/C++ function item `i` of `file` shares with its
 /// declarations, `owners` as `namespace_owners` gives: a class method's
 /// owner key (`K` of `void n::K::f()` and of `f` declared in `K`); else
-/// the namespace path, a qualifier included (`File::scopes`: `a::core` of
+/// the namespace path, a qualifier included (`CppFacts::scopes`: `a::core` of
 /// `int a::core::run(int)` and of a `run` declared in `namespace a {
 /// namespace core {…} }`).
 pub(crate) fn fold_scope<'f>(file: &'f File, i: usize, owners: &BTreeSet<&str>) -> &'f str {
     let owner = file.code.items[i].owner.as_deref().map(owner_key);
     match owner.filter(|o| !owners.contains(o)) {
         Some(class) => class,
-        None => file.scopes.get(&i).map_or("", String::as_str),
+        None => file.cpp.scopes.get(&i).map_or("", String::as_str),
     }
 }
 
@@ -110,7 +110,7 @@ impl<'a> Cpp<'a> {
 
     pub(super) fn key(&self, c: FnRef) -> Option<Key<'a>> {
         let file = self.pages[c.0].1;
-        let params = file.params.get(&c.1)?;
+        let params = file.cpp.params.get(&c.1)?;
         let scope = fold_scope(file, c.1, &self.owners);
         Some((scope, self.item(c).name.as_str(), params.as_str()))
     }

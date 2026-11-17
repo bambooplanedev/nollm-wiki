@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 
 /// A data member name lookup finds.
 pub(in crate::resolve::cpp) struct Field<'a> {
-    /// Its written type (`File::fields`).
+    /// Its written type (`CppFacts::fields`).
     pub ty: Option<&'a str>,
     /// The class declaring it, and the page holding that class's head.
     pub class: &'a str,
@@ -35,7 +35,12 @@ impl<'a> Cpp<'a> {
                     None if heads.len() == 1 => *heads.keys().next()?,
                     None => return None,
                 };
-                let ty = self.pages[page].1.fields.get(c).and_then(|f| f.get(name));
+                let ty = self.pages[page]
+                    .1
+                    .cpp
+                    .fields
+                    .get(c)
+                    .and_then(|f| f.get(name));
                 found.extend(ty.map(|ty| Field {
                     ty: ty.as_deref(),
                     class: c,

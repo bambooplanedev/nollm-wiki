@@ -3,7 +3,7 @@
 mod cpp;
 
 use crate::flow;
-use crate::model::{File, NotDrawn, Project};
+use crate::model::{CppFacts, File, NotDrawn, Project};
 use crate::Error;
 use cpp::cpp_facts;
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,7 +53,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         }
     }
     let macros: BTreeSet<String> = (files.values().chain(misread.iter().map(|m| &m.3)))
-        .flat_map(|f| f.macros.iter().map(|m| m.0.clone()))
+        .flat_map(|f| f.cpp.macros.iter().map(|m| m.0.clone()))
         .collect();
     for (path, text, heads, read) in misread {
         let blanked = cpp::unmacroed(&text, &heads, &macros);
@@ -97,27 +97,14 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
         lines: text.lines().count().max(1),
         code: a.file.clone(),
         flows: BTreeMap::new(),
-        declarations: BTreeMap::new(),
-        macros: if family == Family::Cpp {
-            flow::cpp_macros(a)
-        } else {
-            Vec::new()
+        cpp: CppFacts {
+            macros: if family == Family::Cpp {
+                flow::cpp_macros(a)
+            } else {
+                Vec::new()
+            },
+            ..CppFacts::default()
         },
-        local: BTreeSet::new(),
-        params: BTreeMap::new(),
-        namespaces: BTreeSet::new(),
-        namespace_paths: BTreeSet::new(),
-        namespace_aliases: BTreeMap::new(),
-        scopes: BTreeMap::new(),
-        usings: BTreeSet::new(),
-        file_usings: BTreeSet::new(),
-        inner_usings: BTreeSet::new(),
-        classes: BTreeMap::new(),
-        bases: BTreeMap::new(),
-        aliases: BTreeMap::new(),
-        fields: BTreeMap::new(),
-        variables: BTreeSet::new(),
-        specialized: BTreeSet::new(),
     };
     flow::attach(&mut file, a);
     if family == Family::Cpp {
@@ -130,7 +117,7 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
 /// statement, nested flows' included, of a name some file of the project
 /// defines as a macro with a jump.
 fn hidden_jumps(files: &mut BTreeMap<String, File>) {
-    let jumps: BTreeSet<String> = (files.values().flat_map(|f| &f.macros))
+    let jumps: BTreeSet<String> = (files.values().flat_map(|f| &f.cpp.macros))
         .filter(|m| m.1)
         .map(|m| m.0.clone())
         .collect();

@@ -45,7 +45,7 @@ pub(super) struct Cpp<'a> {
     /// `namespace_owners`.
     owners: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
-    /// `File::specialized`, of every file: each path's scope and name.
+    /// `CppFacts::specialized`, of every file: each path's scope and name.
     specialized: BTreeSet<(&'a str, &'a str)>,
     /// Type names, the names of the classes the heads define, and owners
     /// of out-of-line definitions that are no namespace or misread.
@@ -79,17 +79,17 @@ impl<'a> Cpp<'a> {
             file_defs: BTreeMap::new(),
             spellings: BTreeMap::new(),
             namespaces: cpp()
-                .flat_map(|(_, (_, f))| &f.namespaces)
+                .flat_map(|(_, (_, f))| &f.cpp.namespaces)
                 .map(String::as_str)
                 .collect(),
             under: BTreeMap::new(),
             owners: namespace_owners(files.values()),
             macros: cpp()
-                .flat_map(|(_, (_, f))| &f.macros)
+                .flat_map(|(_, (_, f))| &f.cpp.macros)
                 .map(|m| m.0.as_str())
                 .collect(),
             specialized: cpp()
-                .flat_map(|(_, (_, f))| &f.specialized)
+                .flat_map(|(_, (_, f))| &f.cpp.specialized)
                 .map(|s| s.rsplit_once("::").unwrap_or(("", s)))
                 .collect(),
             types: BTreeSet::new(),
@@ -136,10 +136,10 @@ impl<'a> Cpp<'a> {
     /// Reads the items of `file`, at `page`: its types, its functions by
     /// name and its definitions by key.
     fn read_items(&mut self, page: usize, file: &'a File) {
-        let paths = (file.namespace_paths.iter())
-            .chain(file.bases.keys())
-            .chain(file.aliases.keys())
-            .chain(file.classes.values());
+        let paths = (file.cpp.namespace_paths.iter())
+            .chain(file.cpp.bases.keys())
+            .chain(file.cpp.aliases.keys())
+            .chain(file.cpp.classes.values());
         for path in paths {
             let mut above: Vec<&str> = Vec::new();
             for seg in path.split("::").filter(|s| !s.starts_with("(anonymous@")) {
@@ -177,7 +177,7 @@ impl<'a> Cpp<'a> {
             }
             match key {
                 Some(key) if !it.test && !self.declared(c) => {
-                    if !file.local.contains(&i) {
+                    if !file.cpp.local.contains(&i) {
                         self.shared.entry(key).or_default().push(c);
                     }
                     self.own.entry((page, key)).or_default().push(c);
@@ -236,7 +236,7 @@ impl<'a> Cpp<'a> {
     /// Is `c` a method no class holds: a name the grammar misread?
     fn misread(&self, c: FnRef) -> bool {
         let file = self.pages[c.0].1;
-        file.code.items[c.1].kind == CodeItemKind::Method && !file.classes.contains_key(&c.1)
+        file.code.items[c.1].kind == CodeItemKind::Method && !file.cpp.classes.contains_key(&c.1)
     }
 
     /// Is `c` misread and written with a qualifier right before its name
@@ -266,7 +266,7 @@ impl<'a> Cpp<'a> {
     }
 
     fn local(&self, c: FnRef) -> bool {
-        self.pages[c.0].1.local.contains(&c.1)
+        self.pages[c.0].1.cpp.local.contains(&c.1)
     }
 
     /// Does a definition among `fns` stand in the file of `page`? A call
@@ -276,7 +276,7 @@ impl<'a> Cpp<'a> {
     }
 
     fn declared(&self, c: FnRef) -> bool {
-        self.pages[c.0].1.declarations.get(&c.1) == Some(&Bodiless::Declared)
+        self.pages[c.0].1.cpp.declarations.get(&c.1) == Some(&Bodiless::Declared)
     }
 }
 
@@ -352,7 +352,7 @@ impl Caller<'_, '_> {
     /// file or its includes.
     fn aliased(&self, name: &str) -> Option<&str> {
         let mut pages = std::iter::once(&self.page).chain(self.included);
-        let alias = pages.find_map(|&p| self.cpp.pages[p].1.namespace_aliases.get(name));
+        let alias = pages.find_map(|&p| self.cpp.pages[p].1.cpp.namespace_aliases.get(name));
         alias.map(String::as_str)
     }
 
@@ -370,7 +370,7 @@ impl Caller<'_, '_> {
     fn at_root(&self, name: &str) -> bool {
         let pages = std::iter::once(&self.page).chain(self.included);
         let usings: Vec<&String> = pages
-            .flat_map(|&p| &self.cpp.pages[p].1.file_usings)
+            .flat_map(|&p| &self.cpp.pages[p].1.cpp.file_usings)
             .collect();
         let used = |path: &str| {
             let named = |u: &&String| path == u.as_str() || path.ends_with(&format!("::{u}"));
@@ -388,7 +388,7 @@ impl Caller<'_, '_> {
     /// namespace or type roots?
     fn foreign_using(&self, name: &str) -> bool {
         let cpp = self.cpp;
-        let usings = self.file.usings.iter();
+        let usings = self.file.cpp.usings.iter();
         let mut declared = usings.filter_map(|u| u.rsplit_once("::").filter(|u| u.1 == name));
         declared.any(|(q, _)| {
             let root = self.unaliased(q.split("::").next().unwrap_or(""));
@@ -519,7 +519,7 @@ impl Caller<'_, '_> {
         // A variable of the file or its includes: a function pointer, an
         // object with a call operator.
         let mut pages = std::iter::once(&self.page).chain(self.included);
-        if pages.any(|&p| cpp.pages[p].1.variables.contains(name)) {
+        if pages.any(|&p| cpp.pages[p].1.cpp.variables.contains(name)) {
             return Evidence::Hidden;
         }
         // A function whose name a macro before its return type misread as

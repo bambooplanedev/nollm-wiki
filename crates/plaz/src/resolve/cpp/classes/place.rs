@@ -68,9 +68,9 @@ impl<'a> Cpp<'a> {
         // Usings in a body or a named namespace may or may not reach
         // `from`: place with them and without.
         let file = self.pages[sight.page].1;
-        let outer: Vec<&str> = file.file_usings.iter().map(String::as_str).collect();
-        let inner = file.inner_usings.iter();
-        let inner = inner.filter(|u| !file.file_usings.contains(*u));
+        let outer: Vec<&str> = file.cpp.file_usings.iter().map(String::as_str).collect();
+        let inner = file.cpp.inner_usings.iter();
+        let inner = inner.filter(|u| !file.cpp.file_usings.contains(*u));
         let all: Vec<&str> = outer
             .iter()
             .copied()
@@ -96,12 +96,12 @@ impl<'a> Cpp<'a> {
     }
 
     /// The types the project aliases named `name` in reach of the file of
-    /// `sight` name (`File::aliases`).
+    /// `sight` name (`CppFacts::aliases`).
     pub(in crate::resolve::cpp) fn alias_targets(&self, name: &str, sight: Sight) -> Vec<&'a str> {
         let all = self.classes.aliases.get(name).into_iter().flatten();
         let reached = all.filter(|a| self.reaches(sight, a.0, a.1));
         reached
-            .filter_map(|a| self.pages[a.0].1.aliases.get(a.1).map(String::as_str))
+            .filter_map(|a| self.pages[a.0].1.cpp.aliases.get(a.1).map(String::as_str))
             .collect()
     }
 

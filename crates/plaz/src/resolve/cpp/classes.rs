@@ -1,5 +1,5 @@
 //! The classes of the project's C/C++ files, each by its path
-//! (`File::classes`): what its bases are, which classes derive from it,
+//! (`CppFacts::classes`): what its bases are, which classes derive from it,
 //! and what name lookup finds from it.
 
 mod field;
@@ -79,7 +79,7 @@ pub(super) struct Classes<'a> {
     /// Per class name (`owner_key`): the paths of the classes it names.
     pub(super) by_key: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per alias name (`owner_key`): the page and path of each project
-    /// alias of that name (`File::aliases`).
+    /// alias of that name (`CppFacts::aliases`).
     aliases: BTreeMap<&'a str, Vec<(usize, &'a str)>>,
 }
 
@@ -116,7 +116,7 @@ impl<'a> Cpp<'a> {
         let heads = || {
             let all = pages
                 .iter()
-                .flat_map(|&(p, f)| f.bases.iter().map(move |h| (p, h)));
+                .flat_map(|&(p, f)| f.cpp.bases.iter().map(move |h| (p, h)));
             all.map(|(p, (c, bases))| (p, c.as_str(), bases))
         };
         for (page, class, _) in heads() {
@@ -127,7 +127,7 @@ impl<'a> Cpp<'a> {
             at.insert(page, Vec::new());
         }
         for &(page, file) in &pages {
-            for a in file.aliases.keys() {
+            for a in file.cpp.aliases.keys() {
                 let at = self.classes.aliases.entry(owner_key(a)).or_default();
                 at.push((page, a.as_str()));
             }
@@ -180,18 +180,18 @@ impl<'a> Cpp<'a> {
         }
         let methods = pages
             .iter()
-            .flat_map(|&(p, f)| f.classes.keys().map(move |&i| (p, i)));
+            .flat_map(|&(p, f)| f.cpp.classes.keys().map(move |&i| (p, i)));
         let placed: Vec<(FnRef, &'a str)> = methods
             .filter_map(|(p, i)| Some(((p, i), self.place(p, i, sight(p))?)))
             .collect();
         self.classes.placed.extend(placed);
     }
 
-    /// The class of the method item `i` of `page` (`File::classes`): the
+    /// The class of the method item `i` of `page` (`CppFacts::classes`): the
     /// head of its path in the file's sight, else, unless the path names a
     /// namespace, the one class `place_name` gives.
     fn place(&self, page: usize, i: usize, sight: Sight) -> Option<&'a str> {
-        let written = self.pages[page].1.classes.get(&i)?.as_str();
+        let written = self.pages[page].1.cpp.classes.get(&i)?.as_str();
         let head = self.classes.heads.get_key_value(written);
         if let Some((&class, _)) = head.filter(|h| h.1.keys().any(|&p| sight.sees(p))) {
             return Some(class);
@@ -239,7 +239,7 @@ impl<'a> Cpp<'a> {
         if let Some(class) = self.placed((page, i)) {
             return Some(class);
         }
-        let written = self.pages[page].1.classes.get(&i)?.as_str();
+        let written = self.pages[page].1.cpp.classes.get(&i)?.as_str();
         (!self.namespaces.contains(owner_key(written))).then_some(written)
     }
 

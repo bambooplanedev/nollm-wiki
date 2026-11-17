@@ -94,7 +94,7 @@ pub fn resolve(mut project: Project) -> Resolved {
             .iter()
             .enumerate()
             .map(|(page, (path, file))| {
-                for &item in file.classes.keys() {
+                for &item in file.cpp.classes.keys() {
                     if let Some(class) = cpp.placed((page, item)) {
                         let f = FnId {
                             path: path.clone(),
@@ -121,7 +121,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                         py: &py,
                         cpp: &cpp,
                         included,
-                        ns: file.scopes.get(&item).map_or("", String::as_str),
+                        ns: file.cpp.scopes.get(&item).map_or("", String::as_str),
                         class: cpp.class_of(page, item),
                         misread: file.family == Family::Cpp && cpp.misread_method((page, item)),
                         scope: index.scope(page, own, &sees),
@@ -153,7 +153,7 @@ struct Caller<'i, 'a> {
     cpp: &'i Cpp<'a>,
     /// The pages a C/C++ caller's file includes, directly or not.
     included: &'i BTreeSet<usize>,
-    /// A C/C++ caller's namespace path, its qualifier included (`File::scopes`).
+    /// A C/C++ caller's namespace path, its qualifier included (`CppFacts::scopes`).
     ns: &'a str,
     /// A C/C++ method's own class (`Cpp::class_of`).
     class: Option<&'a str>,

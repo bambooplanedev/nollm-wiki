@@ -382,7 +382,7 @@ fn a_function_both_trees_list_gets_one_flow() {
     let f = file("a.cpp", src);
     assert_eq!(f.code.items.len(), 2);
     assert_eq!(f.flows.keys().collect::<Vec<_>>(), [&0]);
-    assert!(f.declarations.is_empty());
+    assert!(f.cpp.declarations.is_empty());
     assert_eq!(
         flow_lines("a.cpp", src, "span"),
         ["call grow(a) @6", "exit return grow(a); @6"]
@@ -495,10 +495,14 @@ fn a_body_less_declaration_is_no_flow() {
     };
     assert_eq!(names(f.flows.keys().copied().collect()), ["heat"]);
     assert_eq!(
-        names(f.declarations.keys().copied().collect()),
+        names(f.cpp.declarations.keys().copied().collect()),
         ["Kiln", "fire", "vent"]
     );
-    assert!(f.declarations.values().all(|b| *b == Bodiless::Declared));
+    assert!(f
+        .cpp
+        .declarations
+        .values()
+        .all(|b| *b == Bodiless::Declared));
 }
 
 #[test]
@@ -510,7 +514,12 @@ fn a_defaulted_or_deleted_function_is_no_flow() {
         f.flows.keys().map(named).collect::<Vec<_>>(),
         ["int size() const"]
     );
-    let bodiless: Vec<_> = f.declarations.iter().map(|(i, b)| (named(i), *b)).collect();
+    let bodiless: Vec<_> = f
+        .cpp
+        .declarations
+        .iter()
+        .map(|(i, b)| (named(i), *b))
+        .collect();
     assert_eq!(
         bodiless,
         [
@@ -679,7 +688,7 @@ fn a_files_macros_are_each_define_once_with_whether_its_body_has_a_jump_token() 
     let f = file("a.cpp", &src);
     assert!(f.syntax_errors);
     assert_eq!(
-        f.macros,
+        f.cpp.macros,
         [
             ("BAIL".to_string(), true),
             ("LIMIT".to_string(), false),
@@ -696,7 +705,7 @@ fn a_jump_after_a_quote_character_or_a_digit_separator_is_still_a_jump() {
         "a.cpp",
         "#define STOP_AT(c) if ((c) == '\"' || (c) > 1'000) return\n",
     );
-    assert_eq!(f.macros, [("STOP_AT".to_string(), true)]);
+    assert_eq!(f.cpp.macros, [("STOP_AT".to_string(), true)]);
 }
 
 /// The not-drawn counts and the call texts of `name` in `path` of a

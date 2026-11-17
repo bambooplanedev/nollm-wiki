@@ -169,7 +169,7 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
             .flatten()
         {
             if !it.test {
-                file.declarations.insert(i, b);
+                file.cpp.declarations.insert(i, b);
             }
             continue;
         }

@@ -28,9 +28,6 @@ pub struct File {
     pub family: Family,
     /// Keyed by index into `code.items`.
     pub flows: BTreeMap<usize, Flow>,
-    /// The C/C++ function items with no body to chart, by index into
-    /// `code.items`: a section each, with no flow.
-    pub declarations: BTreeMap<usize, Bodiless>,
     /// True when any of the file's trees has an error node.
     pub syntax_errors: bool,
     /// The file's line count, at least 1.
@@ -43,9 +40,20 @@ pub struct File {
     /// A call or a decision at module level (Python), a declaration
     /// outside any function initialized by a call (C/C++): no flow shows it.
     pub module_code: bool,
+    /// What a C/C++ file's trees show that its items do not; empty for
+    /// the other languages.
+    pub cpp: CppFacts,
+}
+
+/// The facts of a C/C++ file (`File::cpp`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CppFacts {
+    /// The C/C++ function items with no body to chart, by index into
+    /// `code.items`: a section each, with no flow.
+    pub declarations: BTreeMap<usize, Bodiless>,
     /// Every `#define` name of a C/C++ file, once, sorted, and whether a
     /// body of it holds a `return`, `goto`, `break`, `continue` or `throw`
-    /// token; empty for the other languages.
+    /// token.
     pub macros: Vec<(String, bool)>,
     /// The C/C++ function items, by index into `code.items`, that are
     /// `static` free functions or inside an anonymous namespace: seen only

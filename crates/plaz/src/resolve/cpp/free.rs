@@ -92,6 +92,7 @@ impl Caller<'_, '_> {
     pub(super) fn in_view(&self, c: FnRef, name: &str) -> bool {
         let at = self.cpp.pages[c.0]
             .1
+            .cpp
             .scopes
             .get(&c.1)
             .map_or("", String::as_str);
@@ -99,10 +100,10 @@ impl Caller<'_, '_> {
         let file = self.file;
         let names = |u: &str, exact: bool| at == u || (!exact && at.ends_with(&format!("::{u}")));
         let using = |u: &String| {
-            let exact = file.file_usings.contains(u) && !file.inner_usings.contains(u);
+            let exact = file.cpp.file_usings.contains(u) && !file.cpp.inner_usings.contains(u);
             let of = u.strip_suffix(name).and_then(|n| n.strip_suffix("::"));
             names(u, exact) || of.is_some_and(|n| names(n, exact))
         };
-        at.is_empty() || encloses || file.usings.iter().any(using)
+        at.is_empty() || encloses || file.cpp.usings.iter().any(using)
     }
 }
