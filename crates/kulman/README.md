@@ -98,7 +98,13 @@ in place it says `up to date` and does nothing. Each module it moves is named wi
 versions (`updated <name> <old> -> <new>`), a module the new release requires that was not
 installed is named `installed <name> <version>`, and the last line, when the version changed, is
 `restart running agent sessions; they keep the old binaries until then`. At the same version, files
-put back are named `repaired <name> <version>`, with no restart line.
+put back are named `repaired <name> <version>`, with no restart line. An installed module the new
+release no longer holds is removed, with its binary and link, once the rest is in place: when a
+module of the release lists it in `replaces` (a rename), that module is installed instead and the
+line is `removed <old>: renamed <new>; run "kulman setup --scope repo" (or local) again
+in each project set up with <old>`; otherwise `removed <name>: not in release <version>`. At a
+terminal any removal is asked first, at the installed version too, and the question ends
+`; removes <names>?`.
 
     kulman remove [--modules <MODULES>] [--yes]
 
@@ -210,6 +216,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
+      "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
         "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
