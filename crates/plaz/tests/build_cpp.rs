@@ -1001,6 +1001,39 @@ fn a_function_of_an_inline_namespace_is_its_own_and_its_parents_by_name() {
 }
 
 #[test]
+fn a_plain_namespace_of_another_library_at_an_inline_ones_path_does_not_take_its_declaration() {
+    // `lib2` has a plain `a::v1`; `src` an inline one, `h` defined in `a`.
+    let files = [
+        (
+            "src/n.h",
+            "namespace a { inline namespace v1 { int h(int v); } }\n",
+        ),
+        (
+            "src/n.cpp",
+            "#include \"n.h\"\nint a::h(int v) { return v; }\n",
+        ),
+        (
+            "lib2/o.cpp",
+            "namespace a { namespace v1 { int h(int v) { return 9; } } }\n",
+        ),
+        (
+            "src/m.cpp",
+            "#include \"n.h\"\nint run() { return a::h(2); }\n",
+        ),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/m.cpp", "run"),
+        ["a::h(2) → one of: lib2/o.cpp:1, src/n.cpp:2"]
+    );
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/n_h");
+    assert_eq!(
+        common::fn_block(&page, "h"),
+        "## h\n`int h(int v)` · `src/n.h:1-1`\n\nDefined at one of: [[map/lib2/o_cpp#h|h]], [[map/src/n_cpp#a_h|a::h]]\n"
+    );
+}
+
+#[test]
 fn two_inline_namespaces_of_one_parent_keep_their_functions_apart() {
     let h = "namespace rim {\ninline namespace v1 { int spoke(int v); int turn(int v); int hub(int v); }\ninline namespace v2 { int spoke(int v); int hub(int v); }\n}\n";
     // `hub` is defined in the parent, where either namespace's may be.

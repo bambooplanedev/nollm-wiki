@@ -251,11 +251,16 @@ impl<'a> Cpp<'a> {
                 Some(p) => self.own.get(&(p, key)),
                 None => self.shared.get(&key),
             };
-            let defs = defs(key)
-                .or_else(|| defs(self.requalified(c, key)?))
-                .or_else(|| defs(self.outer(c, key)?));
-            if let Some(defs) = defs {
-                out.extend(defs);
+            // One declared in an inline namespace may be defined in its
+            // parent, whatever else is defined at its own path.
+            let outer = self.outer(c, key).and_then(defs);
+            let named = defs(key).or_else(|| defs(self.requalified(c, key)?));
+            if named.is_some() || outer.is_some() {
+                let defs: Vec<FnRef> = (named.into_iter().chain(outer))
+                    .flatten()
+                    .copied()
+                    .collect();
+                out.extend(&defs);
                 if page.is_none() && self.item(c).kind == CodeItemKind::Fn {
                     // Either file includes the other (a header its `.inl`).
                     let includes = |d: &FnRef| {

@@ -301,7 +301,9 @@ fn defined_at(
             item,
         })
         .find(charted);
-    let defs = if let Some(d) = paired {
+    // The index pairs by name: it cannot tell the parent's definition from
+    // one at the inline namespace's own path.
+    let defs = if let Some(d) = paired.filter(|_| outer.is_none()) {
         vec![d]
     } else {
         let mut all = Vec::new();
