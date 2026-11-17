@@ -4,7 +4,7 @@
 //! [`pruned_dir`]; [`skipped`] and [`walk_memory`] serve the wiki compiler
 //! only and may change with it.
 
-use crate::formats::code::{ext_of, shell_shebang};
+use crate::formats::code::{ext_of, shell_shebang, SHEBANG_HEAD};
 use crate::support::{is_under, normalize_path};
 use ignore::{DirEntry, WalkBuilder};
 use std::collections::HashSet;
@@ -64,7 +64,9 @@ pub struct Walked {
 ///
 /// `keep` decides, from the relative path alone, whether a file is worth
 /// reading. It is consulted *before* the file is opened, which is the whole
-/// point: see the note at the read site below.
+/// point: see the note at the read site below. One exception: a regular file
+/// with no extension that `keep` refuses but would keep as `<name>.sh` has
+/// its first bytes read for a shell shebang (`shell_script`).
 pub fn walk(root: &Path, respect_ignore: bool, keep: &dyn Fn(&str) -> bool) -> Walked {
     walk_with(root, |b| project_rules(b, respect_ignore), keep)
 }
@@ -199,9 +201,9 @@ fn walk_with(
 
 /// Whether a file `keep` refused by its name is a shell script it would keep
 /// as `<name>.sh`: the name has no extension (`pre-commit`) and the first line
-/// is a shell shebang (`shell_shebang`). Reads only that line's first bytes,
-/// and only from a regular file: a FIFO would block the open, and the walk
-/// never follows a symlink.
+/// is a shell shebang (`shell_shebang`). Reads only the bytes that function
+/// looks at, plus one to tell a longer file, and only from a regular file: a
+/// FIFO would block the open, and the walk never follows a symlink.
 pub fn shell_script(abs_path: &Path, rel_path: &str, keep: &dyn Fn(&str) -> bool) -> bool {
     use std::io::Read;
     let mut head = Vec::new();
@@ -209,7 +211,7 @@ pub fn shell_script(abs_path: &Path, rel_path: &str, keep: &dyn Fn(&str) -> bool
         && keep(&format!("{rel_path}.sh"))
         && std::fs::symlink_metadata(abs_path).is_ok_and(|m| m.is_file())
         && std::fs::File::open(abs_path)
-            .and_then(|f| f.take(128).read_to_end(&mut head))
+            .and_then(|f| f.take(SHEBANG_HEAD as u64 + 1).read_to_end(&mut head))
             .is_ok()
         && shell_shebang(&head)
 }

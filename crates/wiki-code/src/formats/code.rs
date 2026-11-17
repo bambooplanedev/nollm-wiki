@@ -18,7 +18,7 @@ use doc::{item_doc_line, item_doc_text, leading_doc};
 pub(crate) use doc::{plain_comment_text, plain_doc};
 pub use lang::{
     ext_of, handles, is_cpp, is_cpp_fragment, is_shell, shell_shebang, source_rank,
-    validate_queries, CODE_EXTENSIONS,
+    validate_queries, CODE_EXTENSIONS, SHEBANG_HEAD,
 };
 use lang::{lang_for_ext, QUERIES};
 pub(crate) use lang::{LangSpec, Lead, Placement};
