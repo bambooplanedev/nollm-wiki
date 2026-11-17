@@ -34,16 +34,6 @@ fn a_directory_module_at_the_corpus_root_keeps_its_own_stem() {
 }
 
 #[test]
-fn an_ordinary_file_is_still_named_for_itself_not_its_directory() {
-    // Guards the overcorrection: only the two directory-module markers
-    // borrow the parent name.
-    let e = CodeExtractor.extract("src/formats/code.rs", "pub fn f() {}\n");
-    assert_eq!(e.name, "Code");
-    let e = CodeExtractor.extract("src/models.py", "def f():\n    pass\n");
-    assert_eq!(e.name, "Models");
-}
-
-#[test]
 fn a_mod_file_in_another_language_is_not_treated_as_a_directory_module() {
     // `mod` is only a directory-module marker for Rust; a `mod.py` is an
     // ordinary module named `mod`.

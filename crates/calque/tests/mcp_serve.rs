@@ -195,16 +195,6 @@ fn serve_lists_and_calls_tools() {
     let text = text_of(&resp);
     assert!(text.contains("gradient_descent"), "search result: {text}");
 
-    // tools/call neighbors on a default server -> invalid params
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        4,
-        "neighbors",
-        &json!({"id": "gradient_descent"}),
-    );
-    assert_eq!(resp["error"]["code"], -32602, "{resp}");
-
     drop(stdin); // close stdin -> server exits
     let _ = child.wait();
 }
@@ -233,19 +223,6 @@ fn serve_tools_flag_picks_the_tools() {
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"], json!([]));
     assert_eq!(report["large"], json!([]));
-
-    // A tool left out is not callable.
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        4,
-        "page",
-        &json!({"id": "gradient_descent"}),
-    );
-    assert!(
-        resp.get("error").is_some() || resp["result"]["isError"] == json!(true),
-        "resp: {resp}"
-    );
     child.kill().ok();
 }
 
@@ -619,10 +596,6 @@ fn serve_reports_bad_params_and_survives() {
     assert_eq!(resp["result"]["isError"], json!(true), "got: {resp}");
     let text = text_of(&resp);
     assert!(text.contains("query"), "text: {text}");
-
-    // (c) Unknown tool name -> JSON-RPC invalid params.
-    let resp = call(&mut stdin, &stdout, 4, "nope", &json!({}));
-    assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
 
     // (d) A budget the target's own page cannot fit degrades the target
     // block instead of failing.

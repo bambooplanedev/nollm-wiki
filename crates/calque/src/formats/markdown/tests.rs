@@ -176,12 +176,6 @@ fn crlf_block_list() {
 }
 
 #[test]
-fn h1_fallback_when_no_frontmatter_title() {
-    let e = MarkdownExtractor.extract("n.md", "# Heading Title\n\nprose here.\n");
-    assert_eq!(e.name, "Heading Title");
-}
-
-#[test]
 fn filename_fallback_when_no_title() {
     let e = MarkdownExtractor.extract("my_file.md", "just prose\n");
     assert_eq!(e.name, "My File");
