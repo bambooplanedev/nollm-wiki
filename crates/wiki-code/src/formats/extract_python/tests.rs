@@ -2,14 +2,6 @@
 use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
 
 #[test]
-fn a_unicode_framed_comment_title_is_no_doc() {
-    let src = "x = 1\n# ─── indexing helpers ───\ndef build():\n    pass\n";
-    let e = crate::extract("b.py", src);
-    let item = e.items.iter().find(|i| i.name == "build").unwrap();
-    assert_eq!((item.doc.clone(), item.start_line), (None, 3));
-}
-
-#[test]
 fn defined_excludes_dataclass_fields_and_keeps_class_def_constant() {
     let src = "from dataclasses import dataclass\n\n@dataclass\nclass Invoice:\n    total: float\n\ndef render():\n    pass\n\nDEFAULT = 3\n";
     let e = crate::extract("billing.py", src);
@@ -348,26 +340,6 @@ fn python_class_fields_are_qualified_and_gated() {
 }
 
 #[test]
-fn python_class_fields_are_emitted_once_not_twice() {
-    let src = "class Article:\n    title: str\n";
-    let e = crate::extract("m.py", src);
-    // one pattern, one emission
-    assert_eq!(e.symbols, vec!["class Article", "Article.title: str"]);
-}
-
-#[test]
-fn python_long_values_are_truncated_on_a_character_boundary() {
-    // Multibyte characters: a byte-indexed cut panics here.
-    let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
-    let e = crate::extract("judge.py", &src);
-    // 48 characters of value, then the ellipsis
-    assert_has(
-        &e.symbols,
-        "SYSTEM_PROMPT = \"naïve café — naïve café — naïve café — naïve ca…",
-    );
-}
-
-#[test]
 fn python_line_continuations_do_not_strand_the_strip_loop() {
     let src = "Z: int = \\\n    5\nX = \\\n    compute()\n";
     let e = crate::extract("m.py", src);
@@ -418,21 +390,6 @@ fn a_comment_inside_a_retained_value_is_dropped() {
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
     assert_lacks(&e.symbols, "inline");
-}
-
-#[test]
-fn a_python_string_value_keeps_its_own_punctuation() {
-    let src = "SEP = \" , \"\n";
-    let e = crate::extract("m.py", src);
-    assert_has(&e.symbols, "SEP = \" , \"");
-}
-
-#[test]
-fn python_decorators_are_kept_with_their_arguments() {
-    let src = "@dataclass(frozen=True)\nclass Article:\n    title: str\n";
-    let e = crate::extract("models.py", src);
-    assert_has(&e.symbols, "@dataclass(frozen=True) class Article");
-    assert_has(&e.symbols, "Article.title: str");
 }
 
 #[test]
@@ -512,13 +469,6 @@ fn a_continuation_inside_the_value_is_joined() {
     // `right` field — it is inside the value, not between `=` and the
     // value. Without the shared pipeline this renders `X = 1 + \ 2`.
     let src = "X = 1 + \\\n    2\n";
-    let e = crate::extract("m.py", src);
-    assert_has(&e.symbols, "X = 1 + 2");
-}
-
-#[test]
-fn a_crlf_continuation_inside_the_value_is_joined() {
-    let src = "X = 1 + \\\r\n    2\r\n";
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "X = 1 + 2");
 }

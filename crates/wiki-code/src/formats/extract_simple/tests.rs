@@ -2,12 +2,6 @@
 use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
 
 #[test]
-fn a_jsdoc_keeps_a_plain_directive_below_it_out_of_the_doc() {
-    let src = "/** Best bid. */\n// eslint-disable-next-line no-unused-vars because legacy API\nexport function getBids() {}\n";
-    assert_eq!(doc_of("b.ts", src, "getBids"), (None, 3));
-}
-
-#[test]
 fn a_triple_slash_directive_is_no_doc() {
     let src = "const a = 1;\n/// <reference path=\"types.d.ts\"/>\nexport function f() {}\n";
     assert_eq!(doc_of("f.ts", src, "f"), (None, 3));

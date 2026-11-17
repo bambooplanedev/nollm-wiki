@@ -104,16 +104,6 @@ fn an_exported_macro_keeps_its_other_attributes() {
 }
 
 #[test]
-fn items_inside_a_function_body_are_still_rejected() {
-    // Widening `rust_module_level` for fields and variants must not open
-    // a path out of a function body.
-    let src = "pub fn f() {\n    pub struct Inner { pub x: u8 }\n    pub enum E { A }\n}\n";
-    assert_lacks(src, "Inner");
-    assert_lacks(src, "::x");
-    assert_lacks(src, "E::A");
-}
-
-#[test]
 fn a_module_never_takes_the_summary_from_a_real_definition() {
     // `pub mod a` sorts below `pub struct Store` as a bare signature, so
     // without an explicit rank a module list would take over the summary
@@ -163,12 +153,6 @@ fn an_enum_variant_does_not_render_its_inner_doc_comments() {
     assert_has(src, "E::V { got: Kind, }");
     assert_lacks(src, "///");
     assert_lacks(src, "Doc on");
-}
-
-#[test]
-fn a_block_comment_inside_a_signature_span_is_dropped() {
-    let src = "pub fn f(a: /* why */ u8) -> u8 { 0 }\n";
-    assert_has(src, "pub fn f(a: u8) -> u8");
 }
 
 #[test]

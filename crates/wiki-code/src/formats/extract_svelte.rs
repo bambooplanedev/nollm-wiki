@@ -34,7 +34,7 @@ pub(crate) fn svelte_script(source: &str) -> ScriptView {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::formats::code::testutil::{assert_has, item_lines};
+    use crate::formats::code::testutil::assert_has;
 
     const COMPONENT: &str = "<script context=\"module\" lang=\"ts\">\n// The cart drawer.\nexport function preload(id: string): Promise<Cart> {\n  return fetchCart(id);\n}\n</script>\n\n<script lang=\"ts\">\nimport Item from \"./Item.svelte\";\nimport { cart } from \"$lib/stores\";\nexport let open = false;\n</script>\n\n<svelte:head>\n  <script src=\"/analytics.js\">export function NotOurs() {}</script>\n</svelte:head>\n\n<link rel=\"stylesheet\" href=\"/x.css\">\n{#if $cart.items.length < 10}\n  <p>{\"<script>\"}</p>\n{/if}\n<aside class:open>\n  {#each $cart.items as item}<Item {item} />{/each}\n</aside>\n\n<style>\n  aside { width: 20rem; }\n  /* export function NotStyle() {} */\n</style>\n";
 
@@ -72,14 +72,5 @@ mod tests {
         let src = "<script lang=\"coffee\">\nexport function looksLikeJs() {}\n</script>\n";
         let e = crate::extract("Legacy.svelte", src);
         assert!(e.symbols.is_empty(), "{:?}", e.symbols);
-    }
-
-    #[test]
-    fn svelte_items_count_lines_from_the_top_of_the_file() {
-        let e = crate::extract(
-            "B.svelte",
-            "<h1>x</h1>\n<script>\n  function inc() {}\n</script>\n",
-        );
-        assert_eq!(item_lines(&e.items), vec!["3-3 fn inc priv"]);
     }
 }

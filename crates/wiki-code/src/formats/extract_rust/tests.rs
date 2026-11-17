@@ -86,19 +86,8 @@ fn generic_inherent_impl_strips_type_arguments() {
 }
 
 #[test]
-fn function_local_items_are_not_module_exports() {
-    let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n}\n";
-    let e = crate::extract("t.rs", src);
-    assert_has(&e.symbols, "pub fn outer()");
-    for leaked in ["Local", "hidden", "nested"] {
-        // each name lives in a function body and is not module surface
-        assert_lacks(&e.symbols, leaked);
-    }
-}
-
-#[test]
 fn function_local_trait_impls_and_traits_are_not_exports() {
-    let src = "pub fn outer() {\n    struct Local;\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
+    let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n    pub struct Inner { pub x: u8 }\n    pub enum E { A }\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
     let e = crate::extract("t.rs", src);
     assert_eq!(e.symbols, vec!["pub fn outer()".to_string()]);
 }
