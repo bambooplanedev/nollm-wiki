@@ -789,10 +789,10 @@ fn serve_source_catches_up_an_existing_wiki() {
     let mut id = 2;
     let resp = search_until_compiled(&mut stdin, &stdout, &mut id, "zebrafish");
     assert_eq!(stale_block(&resp), None, "{resp}");
-    for word in ["zebrafish", "quokka"] {
+    for (word, page) in [("zebrafish", "alpha"), ("quokka", "gamma")] {
         id += 1;
         let resp = search(&mut stdin, &stdout, id, word);
-        assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+        assert_eq!(hit_ids(&resp), [page], "{resp}");
         assert_eq!(stale_block(&resp), None);
     }
 
