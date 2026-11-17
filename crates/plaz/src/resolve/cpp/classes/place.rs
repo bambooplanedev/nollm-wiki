@@ -180,8 +180,14 @@ impl<'a> Cpp<'a> {
             // `using typename Base<T>::t;` in the class names a
             // dependent base's member.
             let heads = self.classes.heads.get(scope).into_iter().flatten();
+            // The usings written in a class body of the head's file.
             let usings: Vec<String> = heads
-                .flat_map(|h| &self.pages[*h.0].1.cpp.usings)
+                .map(|h| &self.pages[*h.0].1.cpp)
+                .flat_map(|f| {
+                    let at_class =
+                        |u: &&String| !(f.file_usings.contains(*u) || f.inner_usings.contains(*u));
+                    f.usings.iter().filter(at_class)
+                })
                 .map(|u| untemplated(u))
                 .collect();
             let named = |b: &str| {
@@ -191,6 +197,15 @@ impl<'a> Cpp<'a> {
             };
             let nested = |b: &str| at(&[format!("{}::{t}", bare(b))]);
             match self.in_bases(scope, &nested, &named, sight) {
+                // `using typename T::t;`: what it names, which no head
+                // shows; `using t::t;` brings constructors, no type.
+                Step::Nothing
+                    if usings.iter().any(|u| {
+                        u.ends_with(&format!("::{t}")) && !u.ends_with(&format!("{t}::{t}"))
+                    }) =>
+                {
+                    return Step::Unplaced;
+                }
                 Step::Nothing => {}
                 found @ (Step::Found(_) | Step::Unplaced) => return found,
             }

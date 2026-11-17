@@ -1598,6 +1598,19 @@ fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
         cpp_targets(&[("src/n.cpp", named)], "src/n.cpp", "named"),
         ["s.go() → src/n.cpp:6"]
     );
+    // A `using` in the class that names no base's member: the name is
+    // what it says, which no head shows.
+    let other = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Lent : Rack<T> {\n    using typename T::Slot;\n    void lent() { Slot s; s.go(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/o.cpp", other)], "src/o.cpp", "lent"),
+        ["s.go() → one of: src/o.cpp:2, src/o.cpp:6, or outside"]
+    );
+    // `using Rack::Rack;` brings constructors: `Rack` stays the base.
+    let ctor = "struct Rack {\n    Rack(int v) {}\n    static int count() { return 1; }\n};\nstruct Tall : Rack {\n    using Rack::Rack;\n    int tall() { return Rack::count(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/t.cpp", ctor)], "src/t.cpp", "tall"),
+        ["Rack::count() → src/t.cpp:3"]
+    );
     // `Wrap<int>` is no dependent base: what it derives from is searched.
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "mid"),
