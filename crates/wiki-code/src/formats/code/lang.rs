@@ -216,9 +216,11 @@ pub fn is_shell(source_path: &str) -> bool {
     matches!(ext_of(source_path).as_str(), "sh" | "bash")
 }
 
-/// Every extension `extract` has a grammar for (`handles` checks it). A test
-/// pins it to the extensions `QUERIES` builds a query for, so the two cannot
-/// drift: a missing query would strip that language of all symbols and imports.
+/// Every extension `handles` claims. `extract` also parses the C++ fragments
+/// (`.inl`, `.ipp`, `.tcc`) when handed one, but they are not listed here. A
+/// test pins the list to the extensions `QUERIES` builds a query for, so the
+/// two cannot drift: a missing query would strip that language of all symbols
+/// and imports.
 pub const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
     "hxx", "h", "c", "mjs", "cjs", "sh", "bash",
@@ -279,5 +281,5 @@ pub fn handles(rel_path: &str) -> bool {
 /// it as C++, but `handles` does not claim it, since alone it may be a piece
 /// of a class or namespace body.
 pub fn is_cpp_fragment(rel_path: &str) -> bool {
-    is_cpp(&ext_of(rel_path)) && !handles(rel_path)
+    matches!(ext_of(rel_path).as_str(), "inl" | "ipp" | "tcc")
 }
