@@ -126,6 +126,40 @@ fn a_declaration_is_defined_only_by_a_namesake_of_its_own_namespace() {
 }
 
 #[test]
+fn a_methods_declaration_is_defined_only_by_a_method_of_its_own_class() {
+    let h = "namespace one { struct Gear { void spin(int v); }; }\nnamespace two { struct Gear { void spin(int v); }; }\nstruct Gear { void spin(int v); };\n";
+    let def = "#include \"gear.h\"\nvoid one::Gear::spin(int v) {}\nnamespace two { void Gear::spin(int v) {} }\nvoid Gear::spin(int v) {}\n";
+    let (_d, vault) = common::built(&[("src/gear.h", h), ("src/gear.cpp", def)]);
+    let page = common::map_page(&vault, "map/src/gear_h");
+    for (anchor, line, def) in [
+        ("gear_spin", 1, "gear_spin"),
+        ("gear_spin_2", 2, "gear_spin_2"),
+        ("gear_spin_3", 3, "gear_spin_3"),
+    ] {
+        assert_eq!(
+            common::fn_block(&page, anchor).trim_end(),
+            format!("## {anchor}\n`void spin(int v)` · `src/gear.h:{line}-{line}`\n\nDefined at [[map/src/gear_cpp#{def}|Gear::spin]]")
+        );
+    }
+}
+
+#[test]
+fn a_methods_declaration_keeps_a_definition_whose_class_no_head_places() {
+    // `Gear` at file scope may be either class: as when a parse error
+    // loses the namespace around the definition.
+    let h = "namespace one { struct Gear { void spin(int v); }; }\nnamespace two { struct Gear { void spin(int v); }; }\n";
+    let def = "#include \"gear.h\"\nvoid Gear::spin(int v) {}\n";
+    let (_d, vault) = common::built(&[("src/gear.h", h), ("src/gear.cpp", def)]);
+    let page = common::map_page(&vault, "map/src/gear_h");
+    for (anchor, line) in [("gear_spin", 1), ("gear_spin_2", 2)] {
+        assert_eq!(
+            common::fn_block(&page, anchor).trim_end(),
+            format!("## {anchor}\n`void spin(int v)` · `src/gear.h:{line}-{line}`\n\nDefined at [[map/src/gear_cpp#gear_spin|Gear::spin]]")
+        );
+    }
+}
+
+#[test]
 fn a_function_both_trees_list_is_one_call_target_with_a_heading() {
     let src = "#ifdef WIDE\nlong span(long a) {\n#else\nint span(int a) {\n#endif\n    return grow(a);\n}\nint use_it() { return span(1); }\n";
     let (_d, vault) = common::built(&[("a.cpp", src)]);

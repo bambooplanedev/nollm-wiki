@@ -97,7 +97,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                         Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
                         Some(Bodiless::Deleted) => "Deleted.\n".to_string(),
                         Some(Bodiless::Declared) | None => {
-                            defined_at(&index, p, names, &owners, &me)
+                            defined_at(&index, r, names, &owners, &me)
                         }
                     });
                     continue;
@@ -241,14 +241,16 @@ fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
 /// pairs it with; else the charted functions of the same language, scope
 /// (`fold_scope`, `owners` as `namespace_owners` gives) and name, only
 /// those of its own file when it has any, in source order; never one
-/// another file keeps to itself.
+/// another file keeps to itself, nor a method of another class when heads
+/// place both (`Resolved::class`).
 fn defined_at(
     index: &Index<File>,
-    p: &Project,
+    resolved: &Resolved,
     names: &Names,
     owners: &BTreeSet<&str>,
     me: &FnId,
 ) -> String {
+    let p = resolved.project();
     let file = &p.files[&me.path];
     let it = &file.code.items[me.item];
     let site = CallSite {
@@ -268,6 +270,10 @@ fn defined_at(
             && f.flows.contains_key(&d.item)
             && (d.path == me.path || !f.local.contains(&d.item))
             && key(d) == key(me)
+            && match (resolved.class(d), resolved.class(me)) {
+                (Some(a), Some(b)) => a == b,
+                _ => true,
+            }
     };
     let paired = (index.page_of(&me.path).into_iter())
         .flat_map(|page| index.pick(page, &site, |c| c == (page, me.item)))

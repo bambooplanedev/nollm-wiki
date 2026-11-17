@@ -15,12 +15,18 @@ use wiki_code::imports::Imports;
 use wiki_code::index::{owner_key, sees, Family, FnRef, Index, Scope};
 use wiki_code::model::{CallVia, CodeItem, CodeItemKind};
 
-/// A project whose call targets have been resolved.
-pub struct Resolved(Project);
+/// A project whose call targets have been resolved, with the path of the
+/// class a head places each C/C++ method in (`Cpp::class_of`).
+pub struct Resolved(Project, BTreeMap<FnId, String>);
 
 impl Resolved {
     pub fn project(&self) -> &Project {
         &self.0
+    }
+
+    /// The path of the class a head places the C/C++ method `f` in.
+    pub fn class(&self, f: &FnId) -> Option<&str> {
+        self.1.get(f).map(String::as_str)
     }
 }
 
@@ -54,6 +60,7 @@ fn from_evidence(e: Evidence) -> Target {
 }
 
 pub fn resolve(mut project: Project) -> Resolved {
+    let mut classes = BTreeMap::new();
     let resolved: Vec<(String, BTreeMap<usize, crate::model::Flow>)> = {
         let index = Index::new(&project.files);
         let imports = Imports::new(&project.files);
@@ -87,6 +94,15 @@ pub fn resolve(mut project: Project) -> Resolved {
             .iter()
             .enumerate()
             .map(|(page, (path, file))| {
+                for &item in file.classes.keys() {
+                    if let Some(class) = cpp.placed((page, item)) {
+                        let f = FnId {
+                            path: path.clone(),
+                            item,
+                        };
+                        classes.insert(f, class.to_string());
+                    }
+                }
                 let sees = sees(page, pages_of);
                 let in_scope = in_scope(path, file, &imports, &index, &py.roots, &project.crates);
                 // Empty but for a C/C++ file.
@@ -127,7 +143,7 @@ pub fn resolve(mut project: Project) -> Resolved {
     for (path, flows) in resolved {
         project.files.get_mut(&path).expect("own key").flows = flows;
     }
-    Resolved(project)
+    Resolved(project, classes)
 }
 
 struct Caller<'i, 'a> {

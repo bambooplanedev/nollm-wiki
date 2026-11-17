@@ -227,11 +227,16 @@ impl<'a> Cpp<'a> {
         named.copied().collect()
     }
 
+    /// The class a head places the method `c` in.
+    pub fn placed(&self, c: FnRef) -> Option<&'a str> {
+        self.classes.placed.get(&c).copied()
+    }
+
     /// The class of the method item `i` of `page`: the one a head places;
     /// none for a namespace's function; else the path as written, which no
     /// head and no placed method has: a class lookup reads as unseen.
     pub fn class_of(&self, page: usize, i: usize) -> Option<&'a str> {
-        if let Some(&class) = self.classes.placed.get(&(page, i)) {
+        if let Some(class) = self.placed((page, i)) {
             return Some(class);
         }
         let written = self.pages[page].1.classes.get(&i)?.as_str();
