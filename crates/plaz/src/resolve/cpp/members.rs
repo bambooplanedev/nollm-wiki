@@ -12,12 +12,12 @@ use wiki_code::model::{CallSite, CodeItemKind};
 /// The candidates of either of two classes a name may be, as found on
 /// each: never certain.
 pub(super) fn either(one: Evidence, other: Evidence) -> Evidence {
-    match one.and(other) {
-        Evidence::Found { fns, open } => Evidence::Found {
-            open: open || fns.len() < 2,
-            fns,
-        },
-        e @ (Evidence::Outside | Evidence::Hidden) => e,
+    let Evidence::Found { fns, open } = one.and(other, false) else {
+        return Evidence::Hidden;
+    };
+    Evidence::Found {
+        open: open || fns.len() < 2,
+        fns,
     }
 }
 

@@ -43,9 +43,9 @@ enum Evidence {
 
 impl Evidence {
     /// The candidates of both, which may also be something outside when
-    /// either may, or shows no candidate.
-    fn and(self, other: Evidence) -> Evidence {
-        let (mut fns, mut open) = (BTreeSet::new(), false);
+    /// `open`, when either may, or when either shows no candidate.
+    fn and(self, other: Evidence, open: bool) -> Evidence {
+        let (mut fns, mut open) = (BTreeSet::new(), open);
         for e in [self, other] {
             match e {
                 Evidence::Found {
@@ -59,17 +59,6 @@ impl Evidence {
             }
         }
         Evidence::Found { fns, open }
-    }
-
-    /// Candidates that may also be something outside when `open`.
-    fn open_if(self, open: bool) -> Evidence {
-        match self {
-            Evidence::Found { fns, open: was } => Evidence::Found {
-                fns,
-                open: was || open,
-            },
-            e @ (Evidence::Outside | Evidence::Hidden) => e,
-        }
     }
 }
 

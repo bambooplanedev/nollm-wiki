@@ -493,7 +493,7 @@ impl Caller<'_, '_, '_> {
                         open: false,
                     };
                     let free = self.free(site, None).unwrap_or(Evidence::Outside);
-                    return members.and(free).open_if(local);
+                    return members.and(free, local);
                 }
                 Ok(found) => return self.found(found),
                 Err(Missing::Outside) if !local => {
@@ -565,7 +565,7 @@ impl Caller<'_, '_, '_> {
     /// of a class no head shows (`or` found) may be any method too.
     fn or_free(&self, site: &CallSite, or: Evidence) -> Evidence {
         match (self.free(site, None), or) {
-            (Some(free @ Evidence::Found { .. }), or) => free.and(or).open_if(true),
+            (Some(free @ Evidence::Found { .. }), or) => free.and(or, true),
             (Some(_) | None, or) => or,
         }
     }
