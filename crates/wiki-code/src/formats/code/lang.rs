@@ -171,7 +171,10 @@ pub(super) fn lang_for_ext(ext: &str) -> Option<LangSpec> {
 
 /// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them too.
 pub fn is_cpp(ext: &str) -> bool {
-    matches!(ext, "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" | "c")
+    matches!(
+        ext,
+        "cpp" | "cc" | "cxx" | "hpp" | "hh" | "hxx" | "h" | "c" | "inl" | "ipp" | "tcc"
+    )
 }
 
 /// The lowercased extension of `rel_path`, or `""` when the basename has no
@@ -217,7 +220,7 @@ pub fn is_shell(source_path: &str) -> bool {
 /// drift: a missing query would strip that language of all symbols and imports.
 pub const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
-    "hxx", "h", "c", "mjs", "cjs", "sh", "bash",
+    "hxx", "h", "c", "inl", "ipp", "tcc", "mjs", "cjs", "sh", "bash",
 ];
 
 /// Each grammar's query, compiled once per process instead of once per file,

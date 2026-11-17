@@ -122,6 +122,10 @@ pub struct CppFacts {
     /// bodies, function pointers included (`say` of `static void
     /// (*say)(const char*);`): a call of one is no function's.
     pub variables: BTreeSet<String>,
+    /// The file name of each `#include` written inside a namespace, class
+    /// or function body (`rows.inl` of `struct Grid { #include
+    /// "parts/rows.inl" };`): what it includes is a piece of that body.
+    pub nested_includes: BTreeSet<String>,
     /// The function templates a C/C++ file explicitly specializes, whose
     /// specializations no call is matched to: each by its path, the enclosing
     /// named namespaces then the name as written, template arguments

@@ -851,6 +851,42 @@ fn an_angle_include_with_a_directory_reaches_a_project_header() {
 }
 
 #[test]
+fn an_inline_file_included_at_file_scope_is_read_and_one_included_in_a_body_is_not() {
+    // `gauge.inl` stands on its own; `rows.inl` is a piece of `Grid`'s
+    // body, where `fill` is a method, and `spare.ipp` is included nowhere.
+    let h = "namespace kit {\nstruct Gauge {\n    template <class T> int read(T v);\n};\nint trim(int v);\n}\n#include \"gauge.inl\"\n";
+    let inl = "namespace kit {\ntemplate <class T> int Gauge::read(T v) { return trim(1); }\ninline int trim(int v) { return v; }\n}\n";
+    let grid = "#include \"gauge.h\"\nstruct Grid {\n#include \"rows.inl\"\n};\nint fill(int v);\nint run(kit::Gauge& g) { return g.read(2) + fill(3) + kit::trim(4); }\n";
+    let files = [
+        ("src/gauge.h", h),
+        ("src/gauge.inl", inl),
+        ("src/rows.inl", "int fill(int v) { return v; }\n"),
+        ("src/spare.ipp", "int fill(int v) { return v + 1; }\n"),
+        ("src/grid.cpp", grid),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/grid.cpp", "run"),
+        [
+            "g.read(2) → src/gauge.inl:2",
+            "fill(3) → src/grid.cpp:5",
+            "kit::trim(4) → src/gauge.inl:3"
+        ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/gauge.inl", "read"),
+        ["trim(1) → src/gauge.inl:3"]
+    );
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/gauge_h");
+    assert_eq!(
+        common::fn_block(&page, "trim"),
+        "## trim\n`int trim(int v)` · `src/gauge.h:5-5`\n\nDefined at [[map/src/gauge_inl#trim|trim]]\n"
+    );
+    assert!(!vault.join("map/src/rows_inl.md").exists());
+    assert!(!vault.join("map/src/spare_ipp.md").exists());
+}
+
+#[test]
 fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
     let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
     // C++: the definition of the same arity, not the overload; it may

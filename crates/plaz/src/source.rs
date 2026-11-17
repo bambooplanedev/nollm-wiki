@@ -61,6 +61,25 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         let f = a.map_or(read, |a| file(&path, &text, &a));
         files.insert(path, f);
     }
+    // A file made to be included (`.inl`, `.ipp`, `.tcc`) is read only
+    // when it stands on its own: a file of the project includes it, and
+    // none does inside a namespace, class or function body, of which it
+    // would be a piece read without that body.
+    let name = |path: &str| {
+        let path = path.trim_matches(['<', '>', '"']);
+        path.rsplit('/').next().unwrap_or(path).to_string()
+    };
+    let included: BTreeSet<String> = (files.values())
+        .flat_map(|f| f.code.imports.iter().map(|i| name(i)))
+        .collect();
+    let nested: BTreeSet<String> = (files.values())
+        .flat_map(|f| f.cpp.nested_includes.iter().cloned())
+        .collect();
+    files.retain(|path, _| {
+        let ext = path.rsplit_once('.').map(|p| p.1.to_ascii_lowercase());
+        let piece = ext.is_some_and(|e| matches!(e.as_str(), "inl" | "ipp" | "tcc"));
+        !piece || (included.contains(&name(path)) && !nested.contains(&name(path)))
+    });
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();

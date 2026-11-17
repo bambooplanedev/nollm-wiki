@@ -213,8 +213,9 @@ impl<'a> Cpp<'a> {
     /// none, its file's one definition of that name (and arity, in C++,
     /// where it may be another overload); a declaration with neither
     /// stays. A free function's declarations none
-    /// of whose definitions' files includes one (`extern int main(int,
-    /// char**);` beside each program's `main`) may be any program's: each
+    /// of whose definitions' files includes one or is included by its file
+    /// (`extern int main(int, char**);` beside each program's `main`) may
+    /// be any program's: each
     /// definition of that name and arity, and the set is open. So is it
     /// for a declaration in a header an unread file (`Project::twins`) shares a
     /// stem with (`pad.hpp`, `pad.mm`).
@@ -244,7 +245,12 @@ impl<'a> Cpp<'a> {
             if let Some(defs) = defs {
                 out.extend(defs);
                 if page.is_none() && self.item(c).kind == CodeItemKind::Fn {
-                    let includes = |d: &FnRef| d.0 == c.0 || self.closure(d.0).contains(&c.0);
+                    // Either file includes the other (a header its `.inl`).
+                    let includes = |d: &FnRef| {
+                        d.0 == c.0
+                            || self.closure(d.0).contains(&c.0)
+                            || self.closure(c.0).contains(&d.0)
+                    };
                     tied.entry(key).or_insert((c, false)).1 |= defs.iter().any(includes);
                 }
                 continue;

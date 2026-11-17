@@ -88,6 +88,18 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             if n.kind() == "using_declaration" {
                 using(file, n, s.text());
             }
+            let outer =
+                |p: &Node| p.kind() == "translation_unit" || p.kind().starts_with("preproc_");
+            let path = n.child_by_field_name("path");
+            let path = path.filter(|_| {
+                n.kind() == "preproc_include"
+                    && !std::iter::successors(n.parent(), Node::parent).all(|p| outer(&p))
+            });
+            if let Some(p) = path {
+                let name = s.text()[p.byte_range()].trim_matches(['<', '>', '"']);
+                let name = name.rsplit('/').next().unwrap_or(name);
+                file.cpp.nested_includes.insert(name.to_string());
+            }
             stack.extend(n.named_children(&mut n.walk()));
         }
     }
