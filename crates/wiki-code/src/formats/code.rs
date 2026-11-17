@@ -16,7 +16,10 @@ use calls::{arity_of, attach_call_sites};
 pub(crate) use calls::{calls_at, import_aliases, is_function};
 use doc::{item_doc_line, item_doc_text, leading_doc};
 pub(crate) use doc::{plain_comment_text, plain_doc};
-pub use lang::{ext_of, handles, is_cpp, is_shell, source_rank, validate_queries, CODE_EXTENSIONS};
+pub use lang::{
+    ext_of, handles, is_cpp, is_cpp_fragment, is_shell, source_rank, validate_queries,
+    CODE_EXTENSIONS,
+};
 use lang::{lang_for_ext, QUERIES};
 pub(crate) use lang::{LangSpec, Lead, Placement};
 pub(crate) use signature::is_comment_kind;
