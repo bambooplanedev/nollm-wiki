@@ -78,6 +78,10 @@ pub struct CppFacts {
     /// `void a::B::f()` in no namespace), `::`-joined; anonymous and inline
     /// namespaces left out.
     pub scopes: BTreeMap<usize, String>,
+    /// Per C/C++ function item inside an inline namespace: its path as
+    /// `scopes` gives it, the inline namespaces kept (`a::v2` of `f` in
+    /// `namespace a { inline namespace v2 {…} }`).
+    pub inline_scopes: BTreeMap<usize, String>,
     /// What each `using namespace N;` and `using N::f;` of a C/C++ file
     /// names: `N`, `N::f`, whitespace and a leading `::` dropped.
     pub usings: BTreeSet<String>,

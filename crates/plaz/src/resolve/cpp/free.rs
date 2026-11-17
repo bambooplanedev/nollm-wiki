@@ -1,6 +1,6 @@
 //! The free functions a call may name: by tier, in view of the caller.
 
-use super::{fits, fold_scope, Caller, Evidence};
+use super::{fits, fold_scope, outer_scope, Caller, Evidence};
 use wiki_code::index::FnRef;
 use wiki_code::model::{CallSite, CodeItem, CodeItemKind};
 use wiki_code::support::source_rank;
@@ -32,9 +32,12 @@ impl Caller<'_, '_> {
         let in_ns = |c: FnRef| match ns {
             None => cpp.item(c).kind == CodeItemKind::Fn,
             // `int a::core::run(int)` is `run` of the namespace `a::core`.
+            // One in an inline namespace is its parent's by name too.
             Some(q) => {
-                let at = fold_scope(cpp.pages[c.0].1, c.1, &cpp.owners);
-                at == q || (!exact && at.ends_with(&format!("::{q}")))
+                let file = cpp.pages[c.0].1;
+                let at = fold_scope(file, c.1, &cpp.owners);
+                let named = |at: &str| at == q || (!exact && at.ends_with(&format!("::{q}")));
+                named(at) || outer_scope(file, c.1, at).is_some_and(named)
             }
         };
         let named = cpp
@@ -90,15 +93,16 @@ impl Caller<'_, '_> {
     /// the file's `using`s: exactly by one at file scope only, else by
     /// the end of its path (an inner one may name a nested namespace)?
     pub(super) fn in_view(&self, c: FnRef, name: &str) -> bool {
-        let at = self.cpp.pages[c.0]
-            .1
-            .cpp
-            .scopes
-            .get(&c.1)
-            .map_or("", String::as_str);
+        let facts = &self.cpp.pages[c.0].1.cpp;
+        let at = facts.scopes.get(&c.1).map_or("", String::as_str);
         let encloses = self.ns == at || self.ns.starts_with(&format!("{at}::"));
         let file = self.file;
-        let names = |u: &str, exact: bool| at == u || (!exact && at.ends_with(&format!("::{u}")));
+        // A `using` may name the inline namespace the function is in.
+        let inline = facts.inline_scopes.get(&c.1).map(String::as_str);
+        let names = |u: &str, exact: bool| {
+            let named = |at: &str| at == u || (!exact && at.ends_with(&format!("::{u}")));
+            named(at) || inline.is_some_and(named)
+        };
         let using = |u: &String| {
             let exact = file.cpp.file_usings.contains(u) && !file.cpp.inner_usings.contains(u);
             let of = u.strip_suffix(name).and_then(|n| n.strip_suffix("::"));

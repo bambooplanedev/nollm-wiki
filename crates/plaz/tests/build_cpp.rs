@@ -838,23 +838,81 @@ fn a_namespace_named_like_inline_keeps_its_name() {
 }
 
 #[test]
-fn a_call_qualified_by_an_inline_namespace_never_links_to_its_siblings_function() {
-    // A known limitation pinned on purpose: an inline namespace in a
-    // qualifier is not folded, so `rim::v2::spoke` is not its declaration's.
-    let h = "namespace rim {\ninline namespace v1 { int spoke(int v); }\ninline namespace v2 { int spoke(int v); }\n}\n";
-    let def = "#include \"rim.h\"\nint rim::v2::spoke(int v) { return v; }\n";
-    let main = "#include \"rim.h\"\nint run() { return rim::v1::spoke(1) + rim::v2::spoke(2); }\n";
+fn a_function_of_an_inline_namespace_is_its_own_and_its_parents_by_name() {
+    // `h` is defined with the inline namespace written, `k` without it.
+    let h = "inline namespace v1 { int h(int v); }\nnamespace outer { inline namespace v2 { int k(int v); } }\n";
+    let def =
+        "#include \"n.h\"\nint v1::h(int v) { return v; }\nint outer::k(int v) { return v; }\n";
+    let main =
+        "#include \"n.h\"\nusing namespace outer::v2;\nint run() { return h(1) + v1::h(2) + outer::k(3) + outer::v2::k(4) + k(5); }\n";
+    let files = [("src/n.h", h), ("src/n.cpp", def), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        [
+            "h(1) → src/n.cpp:2",
+            "v1::h(2) → src/n.cpp:2",
+            "outer::k(3) → src/n.cpp:3",
+            "outer::v2::k(4) → src/n.cpp:3",
+            "k(5) → src/n.cpp:3"
+        ]
+    );
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/n_h");
+    assert_eq!(
+        common::fn_block(&page, "h"),
+        "## h\n`int h(int v)` · `src/n.h:1-1`\n\nDefined at [[map/src/n_cpp#v1_h|v1::h]]\n\n"
+    );
+    assert_eq!(
+        common::fn_block(&page, "k"),
+        "## k\n`int k(int v)` · `src/n.h:2-2`\n\nDefined at [[map/src/n_cpp#outer_k|outer::k]]\n"
+    );
+}
+
+#[test]
+fn two_inline_namespaces_of_one_parent_keep_their_functions_apart() {
+    let h = "namespace rim {\ninline namespace v1 { int spoke(int v); int turn(int v); int hub(int v); }\ninline namespace v2 { int spoke(int v); int hub(int v); }\n}\n";
+    // `hub` is defined in the parent, where either namespace's may be.
+    let def = "#include \"rim.h\"\nnamespace rim { inline namespace v2 { int spoke(int v) { return v; } } }\nnamespace rim { inline namespace v1 { int turn(int v) { return spoke(v); } } }\nint rim::hub(int v) { return v; }\n";
+    let main = "#include \"rim.h\"\nint run() { return rim::v1::spoke(1) + rim::v2::spoke(2) + rim::spoke(3) + rim::v1::hub(4); }\n";
+    // Another library's plain namespace of an inline one's name.
+    let other = "namespace v1 { int h(int v) { return v; } }\nint h(int v) { return v + 1; }\nint both() { return v1::h(1) + h(2); }\n";
     let files = [
         ("src/rim.h", h),
         ("src/rim.cpp", def),
         ("src/main.cpp", main),
+        ("lib/n.h", "inline namespace v1 { int h(int v); }\n"),
+        ("other/o.cpp", other),
     ];
     assert_eq!(
         cpp_targets(&files, "src/main.cpp", "run"),
         [
-            "rim::v1::spoke(1) → hidden",
-            "rim::v2::spoke(2) → one of: src/rim.cpp:2, or outside"
+            "rim::v1::spoke(1) → src/rim.h:2",
+            "rim::v2::spoke(2) → src/rim.cpp:2",
+            "rim::spoke(3) → one of: src/rim.cpp:2, src/rim.h:2",
+            "rim::v1::hub(4) → src/rim.h:2"
         ]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/rim.cpp", "turn"),
+        ["spoke(v) → one of: src/rim.cpp:2, src/rim.h:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "other/o.cpp", "both"),
+        ["v1::h(1) → other/o.cpp:1", "h(2) → other/o.cpp:2"]
+    );
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/rim_h");
+    assert_eq!(
+        common::fn_block(&page, "spoke"),
+        "## spoke\n`int spoke(int v)` · `src/rim.h:2-2`\n\nNo definition in the project.\n\n"
+    );
+    assert_eq!(
+        common::fn_block(&page, "hub"),
+        "## hub\n`int hub(int v)` · `src/rim.h:2-2`\n\nNo definition in the project.\n\n"
+    );
+    assert_eq!(
+        common::fn_block(&page, "spoke_2"),
+        "## spoke_2\n`int spoke(int v)` · `src/rim.h:3-3`\n\nDefined at [[map/src/rim_cpp#spoke|spoke]]\n"
     );
 }
 

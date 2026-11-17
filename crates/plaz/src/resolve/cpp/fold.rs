@@ -55,15 +55,26 @@ impl Loose {
 /// The scope a C/C++ function item `i` of `file` shares with its
 /// declarations, `owners` as `namespace_owners` gives: a class method's
 /// owner key (`K` of `void n::K::f()` and of `f` declared in `K`); else
-/// the namespace path, a qualifier included (`CppFacts::scopes`: `a::core` of
-/// `int a::core::run(int)` and of a `run` declared in `namespace a {
-/// namespace core {…} }`).
+/// the namespace path, a qualifier included, inline namespaces too
+/// (`CppFacts::inline_scopes`, else `CppFacts::scopes`: `a::core` of `int
+/// a::core::run(int)` and of a `run` declared in `namespace a { namespace
+/// core {…} }`).
 pub(crate) fn fold_scope<'f>(file: &'f File, i: usize, owners: &BTreeSet<&str>) -> &'f str {
     let owner = file.code.items[i].owner.as_deref().map(owner_key);
     match owner.filter(|o| !owners.contains(o)) {
         Some(class) => class,
-        None => file.cpp.scopes.get(&i).map_or("", String::as_str),
+        None => {
+            (file.cpp.inline_scopes.get(&i).or(file.cpp.scopes.get(&i))).map_or("", String::as_str)
+        }
     }
+}
+
+/// The scope a function item `i` of `file` whose `fold_scope` is `scope`
+/// is also named by: with `scope` its path through inline namespaces,
+/// that path without them (`a` of `f` in `a::v2`, `v2` inline).
+pub(crate) fn outer_scope<'f>(file: &'f File, i: usize, scope: &str) -> Option<&'f str> {
+    file.cpp.inline_scopes.get(&i).filter(|s| *s == scope)?;
+    Some(file.cpp.scopes.get(&i).map_or("", String::as_str))
 }
 
 /// `s` with every qualifier dropped (`vector<Kind>` of
@@ -108,6 +119,25 @@ impl<'a> Cpp<'a> {
         same.then_some((key.0, key.1, p))
     }
 
+    /// `key`, of the declaration `c` in an inline namespace, in the
+    /// namespace around it, where its definition may be written (`int
+    /// a::f()` for `f` of `a::v2`, `v2` inline); none when another
+    /// declaration is that one's too: one written there, or one of
+    /// another inline namespace.
+    fn outer(&self, c: FnRef, key: Key<'a>) -> Option<Key<'a>> {
+        let at = |d: FnRef, key: Key<'a>| {
+            Some((outer_scope(self.pages[d.0].1, d.1, key.0)?, key.1, key.2))
+        };
+        let outer = at(c, key)?;
+        let named = self.by_name.get(key.1).into_iter().flatten();
+        let mut others = named.filter(|&&d| self.declared(d) && self.key(d) != Some(key));
+        let rival = others.any(|&d| {
+            let other = self.key(d);
+            other == Some(outer) || other.and_then(|k| at(d, k)) == Some(outer)
+        });
+        (!rival).then_some(outer)
+    }
+
     pub(super) fn key(&self, c: FnRef) -> Option<Key<'a>> {
         let file = self.pages[c.0].1;
         let params = file.cpp.params.get(&c.1)?;
@@ -145,7 +175,9 @@ impl<'a> Cpp<'a> {
                 Some(p) => self.own.get(&(p, key)),
                 None => self.shared.get(&key),
             };
-            let defs = defs(key).or_else(|| defs(self.requalified(key)?));
+            let defs = defs(key)
+                .or_else(|| defs(self.requalified(key)?))
+                .or_else(|| defs(self.outer(c, key)?));
             if let Some(defs) = defs {
                 out.extend(defs);
                 if page.is_none() && self.item(c).kind == CodeItemKind::Fn {

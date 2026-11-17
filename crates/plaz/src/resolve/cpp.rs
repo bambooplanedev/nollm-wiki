@@ -13,7 +13,7 @@ use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, FnId, MapCall};
 use crate::source::untemplated;
 use classes::{Classes, Missing, Sight};
-pub(crate) use fold::{fold_scope, namespace_owners};
+pub(crate) use fold::{fold_scope, namespace_owners, outer_scope};
 use fold::{Key, Loose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
@@ -250,14 +250,16 @@ impl<'a> Cpp<'a> {
     }
 
     /// Is `c` a function template an explicit specialization of the
-    /// project names: of its name, in its scope (`fold_scope`) or a path
-    /// ending in it?
+    /// project names: of its name, in its scope (`fold_scope`,
+    /// `outer_scope`) or a path ending in it?
     fn specialized(&self, c: FnRef) -> bool {
-        let (it, scope) = (
-            self.item(c),
-            fold_scope(self.pages[c.0].1, c.1, &self.owners),
-        );
-        let at = |path: &str| path == scope || path.ends_with(&format!("::{scope}"));
+        let (it, file) = (self.item(c), self.pages[c.0].1);
+        let scope = fold_scope(file, c.1, &self.owners);
+        let ends = |path: &str, s: &str| path == s || path.ends_with(&format!("::{s}"));
+        // One written in an inline namespace is found by its parent's path.
+        let at = |path: &str| {
+            ends(path, scope) || outer_scope(file, c.1, scope).is_some_and(|s| ends(path, s))
+        };
         let named = self
             .specialized
             .iter()

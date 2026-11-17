@@ -5,7 +5,7 @@ use crate::chart::{chart, coverage, relative};
 use crate::flow::hooks;
 use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
-use crate::resolve::{fold_scope, namespace_owners, Resolved};
+use crate::resolve::{fold_scope, namespace_owners, outer_scope, Resolved};
 use crate::write::Links;
 use std::collections::BTreeSet;
 use wiki_code::index::{owner_key, Family, Index};
@@ -239,7 +239,7 @@ fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
 
 /// The line of the declaration `me`'s section: the definition the index
 /// pairs it with; else the charted functions of the same language, scope
-/// (`fold_scope`, `owners` as `namespace_owners` gives) and name, only
+/// (`fold_scope` or `outer_scope`, `owners` as `namespace_owners` gives) and name, only
 /// those of its own file when it has any, in source order; never one
 /// another file keeps to itself, nor a method of another class when heads
 /// place both (`Resolved::class`).
@@ -263,13 +263,32 @@ fn defined_at(
         let f = &p.files[&d.path];
         (fold_scope(f, d.item, owners), &f.code.items[d.item].name)
     };
+    // One declared in an inline namespace may be defined in its parent,
+    // unless another declaration is that one's: one written there, or one
+    // of another inline namespace.
+    let rival = |outer: &str| {
+        let declared = p.files.values().flat_map(|f| {
+            let all = f.cpp.declarations.iter();
+            all.filter(|d| *d.1 == Bodiless::Declared)
+                .map(move |d| (f, *d.0))
+        });
+        declared
+            .filter(|&(f, i)| f.code.items[i].name == it.name)
+            .map(|(f, i)| (f, i, fold_scope(f, i, owners)))
+            .any(|(f, i, at)| {
+                at != key(me).0 && (at == outer || outer_scope(f, i, at) == Some(outer))
+            })
+    };
+    let outer = outer_scope(file, me.item, key(me).0)
+        .filter(|o| !rival(o))
+        .map(|s| (s, &it.name));
     // A `static` or anonymous-namespace function of another file is not it.
     let charted = |d: &FnId| {
         let f = &p.files[&d.path];
         d != me
             && f.flows.contains_key(&d.item)
             && (d.path == me.path || !f.cpp.local.contains(&d.item))
-            && key(d) == key(me)
+            && (key(d) == key(me) || Some(key(d)) == outer)
             && match (resolved.class(d), resolved.class(me)) {
                 (Some(a), Some(b)) => a == b,
                 _ => true,

@@ -45,22 +45,29 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             file.cpp.params.insert(i, p);
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
-        let mut path = enclosing(node, src.text(), None);
         let declared = f.and_then(|f| f.child_by_field_name("declarator"));
         let qualifier = declared
             .and_then(|d| text(d).rsplit_once("::"))
             .map(|q| q.0);
         let segs = || qualifier.into_iter().flat_map(|q| q.split("::"));
-        path.extend(segs().map(|s| s.trim().to_string()));
-        path.retain(|s| !s.is_empty());
+        let scope = |inline: bool| {
+            let mut path = enclosing(node, src.text(), None, inline);
+            path.extend(segs().map(|s| s.trim().to_string()));
+            path.retain(|s| !s.is_empty());
+            path.join("::")
+        };
+        let (path, full) = (scope(false), scope(true));
+        if full != path {
+            file.cpp.inline_scopes.insert(i, full);
+        }
         if !path.is_empty() {
-            file.cpp.scopes.insert(i, path.join("::"));
+            file.cpp.scopes.insert(i, path);
         }
         let in_class = std::iter::successors(node.parent(), Node::parent)
             .any(|n| n.kind() == "field_declaration_list");
         let names_owner =
             |o: &String| declared.is_some_and(|d| text(d).contains(&format!("{o}::")));
-        let mut class = enclosing(node, src.text(), Some(&anon));
+        let mut class = enclosing(node, src.text(), Some(&anon), false);
         if !in_class {
             class.extend(segs().map(|s| s.trim().to_string()));
         }
@@ -70,7 +77,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             file.cpp.classes.insert(i, untemplated(&c));
         }
         if let Some(scope) = decl.and_then(|d| cast_scope(d, src.text())) {
-            let mut class = enclosing(node, src.text(), Some(&anon));
+            let mut class = enclosing(node, src.text(), Some(&anon), false);
             class.extend(scope.split("::").map(|s| s.trim().to_string()));
             file.cpp.classes.insert(i, untemplated(&class.join("::")));
         }
@@ -132,7 +139,7 @@ fn namespace(file: &mut File, n: Node, src: &str) {
         .namespaces
         .extend(segments(&src[name.byte_range()]).map(|g| g.0.to_string()));
     if !alias {
-        let mut path = enclosing(n, src, None);
+        let mut path = enclosing(n, src, None, false);
         let inline = src[n.byte_range()].starts_with("inline");
         for (seg, _) in segments(&src[name.byte_range()]).filter(|g| !(g.1 || inline)) {
             path.push(seg.to_string());
@@ -271,7 +278,7 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
         args.split(|c: char| !(c.is_alphanumeric() || c == '_'))
             .any(|w| params.contains(w))
     };
-    let mut path = enclosing(n, src, Some(anonymous));
+    let mut path = enclosing(n, src, Some(anonymous), false);
     path.push(text(name).to_string());
     let class = untemplated(&path.join("::"));
     let bases = bases.map(|b| (untemplated(text(b)), dependent(text(b))));
@@ -365,7 +372,7 @@ fn specialization(file: &mut File, n: Node, src: &str) {
     // Past a pointer or reference return type to the function declarator.
     while let Some(x) = d.and_then(|x| x.child_by_field_name("declarator")) {
         if x.kind() == "function_declarator" {
-            let mut path = enclosing(n, src, None);
+            let mut path = enclosing(n, src, None, false);
             let named = x.child_by_field_name("declarator");
             path.extend(named.map(|f| untemplated(&src[f.byte_range()])));
             file.cpp.specialized.insert(path.join("::"));
@@ -434,7 +441,7 @@ fn alias(file: &mut File, n: Node, src: &str, anonymous: &str) {
         }
     });
     for name in names.into_iter().filter(|_| !body) {
-        let mut path = enclosing(n, src, Some(anonymous));
+        let mut path = enclosing(n, src, Some(anonymous), false);
         path.push(name.to_string());
         // An alias the file's two trees read differently names nothing known.
         let kept = file.cpp.aliases.entry(untemplated(&path.join("::")));
@@ -466,10 +473,11 @@ fn template_params<'s>(n: Node, src: &'s str) -> BTreeSet<&'s str> {
     out
 }
 
-/// The names of the named namespaces (inline ones left out) around
-/// `node`, outermost first; with `anonymous`, an anonymous namespace as
-/// that segment, and the names of the classes, structs and unions too.
-fn enclosing(node: Node, src: &str, anonymous: Option<&str>) -> Vec<String> {
+/// The names of the named namespaces (inline ones only with `inline`)
+/// around `node`, outermost first; with `anonymous`, an anonymous
+/// namespace as that segment, and the names of the classes, structs and
+/// unions too.
+fn enclosing(node: Node, src: &str, anonymous: Option<&str>, inline: bool) -> Vec<String> {
     let mut path = Vec::new();
     for n in std::iter::successors(node.parent(), Node::parent) {
         let Some(name) = n.child_by_field_name("name") else {
@@ -481,8 +489,8 @@ fn enclosing(node: Node, src: &str, anonymous: Option<&str>) -> Vec<String> {
         let name = &src[name.byte_range()];
         let classes = anonymous.is_some();
         match n.kind() {
-            "namespace_definition" if !src[n.byte_range()].starts_with("inline") => {
-                let segs = segments(name).filter(|s| !s.1);
+            "namespace_definition" if inline || !src[n.byte_range()].starts_with("inline") => {
+                let segs = segments(name).filter(|s| inline || !s.1);
                 path.splice(0..0, segs.map(|s| s.0.to_string()));
             }
             "class_specifier" | "struct_specifier" | "union_specifier" if classes => {
