@@ -63,6 +63,10 @@ pub struct CppFacts {
     /// default values, `struct` and whitespace but one space between two
     /// words dropped (`int,const char*`).
     pub params: BTreeMap<usize, String>,
+    /// Per C/C++ function item inside a template: the names of the
+    /// template parameters in scope, its own and those of the classes
+    /// around it.
+    pub template_params: BTreeMap<usize, BTreeSet<String>>,
     /// Every segment of a C/C++ file's named namespaces and every namespace
     /// alias it defines.
     pub namespaces: BTreeSet<String>,

@@ -40,6 +40,11 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         if it.kind == CodeItemKind::Fn && (is_static || anonymous) {
             file.cpp.local.insert(i);
         }
+        let inside = template_params(decl.unwrap_or(node), src.text());
+        if !inside.is_empty() {
+            let names = inside.into_iter().map(str::to_string).collect();
+            file.cpp.template_params.insert(i, names);
+        }
         let f = declarator(node, &it.name, src.text());
         if let Some(p) = f.and_then(|f| params(f, src.text())) {
             file.cpp.params.insert(i, p);
@@ -491,8 +496,13 @@ fn template_params<'s>(n: Node, src: &'s str) -> BTreeSet<&'s str> {
             continue;
         };
         for p in list.named_children(&mut list.walk()) {
+            // The last name in it: past the `template <class>` of a
+            // template template parameter.
             let name = p.child_by_field_name("name").or_else(|| {
-                let named = p.named_children(&mut p.walk()).last();
+                let inner = std::iter::successors(Some(p), |x| {
+                    x.named_child(u32::try_from(x.named_child_count()).ok()?.checked_sub(1)?)
+                });
+                let named = inner.skip(1).last();
                 named.filter(|l| matches!(l.kind(), "type_identifier" | "identifier"))
             });
             out.extend(name.map(|i| &src[i.byte_range()]));

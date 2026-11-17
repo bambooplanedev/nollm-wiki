@@ -437,6 +437,19 @@ fn a_template_parameter_named_like_a_type_is_no_evidence_for_a_fold() {
         cpp_targets(&files, "src/main.cpp", "run"),
         ["core::pour(1) → src/t.h:3"]
     );
+    // So is a parameter of the class template around the declaration, a
+    // constrained one too.
+    let h = "namespace core {\nstruct Kind {};\ntemplate <class Kind> struct Box {\n    void put(Kind k);\n    void put(core::Kind k);\n};\ntemplate <Plain Kind> struct Bin {\n    void drop(Kind k);\n    void drop(core::Kind k);\n};\n}\n";
+    let def = "#include \"b.h\"\nnamespace core {\ntemplate <class T> void Box<T>::put(core::Kind k) {}\ntemplate <Plain T> void Bin<T>::drop(core::Kind k) {}\n}\n";
+    let main = "#include \"b.h\"\nvoid run(core::Box<int>& b, core::Bin<int>& n) { b.put(1); n.drop(2); }\n";
+    let files = [("src/b.h", h), ("src/b.cpp", def), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        [
+            "b.put(1) → one of: src/b.cpp:3, src/b.h:4",
+            "n.drop(2) → one of: src/b.cpp:4, src/b.h:8"
+        ]
+    );
 }
 
 #[test]
