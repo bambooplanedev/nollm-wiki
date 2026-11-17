@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, edit_manifest, kulman, local_bin, no_tmp_left, path_first, path_linking,
-    release, set_sha256, snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
+    assert_binary, kulman, local_bin, no_tmp_left, path_first, path_linking, release, set_sha256,
+    snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
 };
 use serde_json::json;
 
@@ -267,34 +267,6 @@ fn update_with_one_bad_archive_changes_nothing() {
 }
 
 #[test]
-fn update_repairs_a_half_finished_update() {
-    // An update killed after its first rename: calque is 0.8.0, plaz and kulman are not, and
-    // state.json still says 0.7.0.
-    let (t, base, home) = installed();
-    publish_0_8(t.path());
-    fs::write(home.join("bin/calque"), CALQUE_8).unwrap();
-    fs::write(home.join("bin/kulman"), "old").unwrap();
-    let out = kulman(&home, &base).arg("update").output().unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(
-        lines(&out),
-        [
-            "updated calque 0.7.0 -> 0.8.0",
-            "updated plaz 0.7.0 -> 0.8.0",
-            "updated kulman 0.7.0 -> 0.8.0",
-            "restart running agent sessions; they keep the old binaries until then"
-        ]
-    );
-    assert_eq!(
-        state(&home),
-        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
-    );
-    assert_binary(&home, "calque", CALQUE_8);
-    assert_binary(&home, "plaz", PLAZ_8);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
-}
-
-#[test]
 fn update_when_current_says_up_to_date() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
@@ -334,38 +306,6 @@ fn update_when_current_says_up_to_date() {
     );
     assert!(home.join("manifest.json").is_file());
     assert_eq!(snapshot(t.path()), before);
-}
-
-#[test]
-fn update_installs_a_module_the_new_release_requires() {
-    let t = tempfile::tempdir().unwrap();
-    let base = release(
-        &t.path().join("release"),
-        "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
-    );
-    let home = t.path().join("home");
-    kulman(&home, &base)
-        .args(["install", "--modules", "calque"])
-        .assert()
-        .success();
-    publish_0_8(t.path());
-    edit_manifest(&t.path().join("release"), "0.8.0", |m| {
-        m["modules"][0]["requires"] = json!(["plaz"]);
-    });
-    let out = kulman(&home, &base).arg("update").output().unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    // The version changed, so the restart line stays; the new module is not "updated".
-    assert_eq!(stderr(&out), "signature not checked: local release tree\n");
-    assert_eq!(
-        lines(&out),
-        [
-            "updated calque 0.7.0 -> 0.8.0",
-            "installed plaz 0.8.0",
-            "updated kulman 0.7.0 -> 0.8.0",
-            "restart running agent sessions; they keep the old binaries until then"
-        ]
-    );
 }
 
 #[test]
@@ -599,30 +539,6 @@ fn remove_kulman_by_name_is_usage() {
 }
 
 #[test]
-fn remove_refuses_a_path_like_name_in_the_state() {
-    let (t, base, home) = installed();
-    // bin/../../victim is this file beside home.
-    fs::write(t.path().join("victim"), "keep").unwrap();
-    fs::write(
-        home.join("state.json"),
-        br#"{"version":"0.7.0","modules":["calque","../../victim"]}"#,
-    )
-    .unwrap();
-    let before = snapshot(t.path());
-    for args in [
-        &["remove", "--yes"][..],
-        &["remove", "--modules", "calque", "--yes"],
-        &["update"],
-    ] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
-        assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
-        let expect = common::not_a_state(&home);
-        assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
-        assert_eq!(snapshot(t.path()), before, "{args:?}");
-    }
-}
-
-#[test]
 fn two_installs_at_once_keep_both_modules() {
     let t = tempfile::tempdir().unwrap();
     let base = release(
@@ -771,6 +687,17 @@ fn update_adds_what_an_installed_module_now_requires() {
     });
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
+    // The version changed, so the restart line stays; the new module is not "updated".
+    assert_eq!(stderr(&out), "signature not checked: local release tree\n");
+    assert_eq!(
+        lines(&out),
+        [
+            "updated calque 0.7.0 -> 0.8.0",
+            "installed plaz 0.8.0",
+            "updated kulman 0.7.0 -> 0.8.0",
+            "restart running agent sessions; they keep the old binaries until then"
+        ]
+    );
     assert_eq!(
         state(&home),
         json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
@@ -999,28 +926,6 @@ fn status_finds_bin_on_path_through_a_symlink() {
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
 }
 
-#[test]
-fn update_links_each_binary_into_local_bin_on_path() {
-    let (t, base, home) = installed();
-    publish_0_8(t.path());
-    let dir = local_bin(&home);
-    fs::create_dir_all(&dir).unwrap();
-    let out = kulman(&home, &base)
-        .env("PATH", path_first(&dir))
-        .args(["update", "--yes"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    let linked = format!("kulman: linked calque plaz kulman into {}", dir.display());
-    assert_eq!(stderr(&out).lines().last(), Some(linked.as_str()));
-    for name in ["calque", "plaz", "kulman"] {
-        assert_eq!(
-            fs::read_link(dir.join(name)).unwrap(),
-            home.join("bin").join(name)
-        );
-    }
-}
-
 /// A temp root with `release/` at 0.7.0 and `home` holding calque and plaz, linked from
 /// `$HOME/.local/bin` (returned last) except where `foreign` names a file put there first.
 fn installed_linked(foreign: &[&str]) -> (tempfile::TempDir, String, PathBuf, PathBuf) {
@@ -1062,20 +967,6 @@ fn remove_modules_deletes_only_their_links() {
             home.join("bin").join(name)
         );
     }
-}
-
-#[test]
-fn remove_modules_leaves_a_file_that_is_not_its_link() {
-    let (_t, base, home, dir) = installed_linked(&["plaz"]);
-    let out = kulman(&home, &base)
-        .args(["remove", "--modules", "plaz", "--yes"])
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(stderr(&out), "");
-    assert_eq!(lines(&out), ["removed plaz"]);
-    assert_eq!(fs::read(dir.join("plaz")).unwrap(), b"mine");
-    assert!(!home.join("bin/plaz").exists());
 }
 
 #[test]

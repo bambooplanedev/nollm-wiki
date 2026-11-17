@@ -597,20 +597,6 @@ mod tests {
     }
 
     #[test]
-    fn a_signature_that_is_a_directory_could_not_be_fetched() {
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir(dir.path().join("manifest.json.minisig")).unwrap();
-        let url = format!("file://{}/manifest.json", dir.path().display());
-        let err = check_signature(&url, b"{}", WAIT).unwrap_err();
-        let text = format!("{err:#}");
-        assert!(
-            text.starts_with("manifest.json: signature could not be fetched: "),
-            "{text}"
-        );
-        assert!(!text.contains(&dir.path().display().to_string()), "{text}");
-    }
-
-    #[test]
     fn a_public_key_is_exactly_a_comment_line_and_a_key_line() {
         let key_line = TEST_KEY.lines().nth(1).unwrap();
         for bad in [

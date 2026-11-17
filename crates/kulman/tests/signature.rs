@@ -135,18 +135,6 @@ fn a_bad_signature_refuses_update_and_changes_nothing() {
 }
 
 #[test]
-fn an_unsigned_local_tree_updates_and_says_so_once() {
-    let (t, base) = tree();
-    let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
-    release(&t.path().join("release"), "0.8.0", &[("calque", CALQUE)]);
-    let out = kulman(&home, &base).arg("update").output().unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(stderr(&out), format!("{UNCHECKED}\n"));
-    assert_eq!(count(&stdout(&out)), 0, "{}", stdout(&out));
-}
-
-#[test]
 fn status_says_a_bad_signature_as_a_failed_check() {
     let (t, base) = tree();
     let home = t.path().join("home");

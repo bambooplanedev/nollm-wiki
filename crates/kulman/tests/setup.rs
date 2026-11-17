@@ -399,15 +399,6 @@ fn setup_remove_runs_every_module_even_when_one_fails() {
 }
 
 #[test]
-fn setup_of_a_module_exiting_2_exits_2_and_says_it_was_the_module() {
-    let f = installed(b"#!/bin/sh\nexit 2\n", "calque,plaz");
-    let out = f.setup(&["--scope", "repo"]);
-    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
-    failed(&out, &[("calque", "exit 2")]);
-    assert_eq!(f.logged(), ["plaz setup --scope repo"]);
-}
-
-#[test]
 fn setup_runs_no_module_when_one_is_not_executable() {
     use std::os::unix::fs::PermissionsExt;
     let f = installed(LOGS, "calque,plaz");

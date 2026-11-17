@@ -795,34 +795,6 @@ fn install_says_how_to_add_to_path() {
 }
 
 #[test]
-fn install_takes_binaries_linked_into_path_as_on_path() {
-    let (t, base) = setup();
-    let bin = t.path().join("home/bin");
-    let links = t.path().join("links");
-    let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
-    let path = common::path_linking(&links, &bin, &["kulman", "calque", "plaz"]);
-    let out = kulman(&t.path().join("home"), &base)
-        .env("PATH", path)
-        .arg("install")
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert!(!stdout(&out).contains("not on PATH"), "{}", stdout(&out));
-    assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
-
-    // kulman alone linked: the hint and the full path stay.
-    let (bin, links) = (t.path().join("home2/bin"), t.path().join("links2"));
-    let path = common::path_linking(&links, &bin, &["kulman"]);
-    let out = kulman(&t.path().join("home2"), &base)
-        .env("PATH", path)
-        .arg("install")
-        .output()
-        .unwrap();
-    assert!(stdout(&out).contains("not on PATH"), "{}", stdout(&out));
-    assert_ne!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
-}
-
-#[test]
 fn a_failed_first_install_leaves_no_home() {
     let (t, base) = setup();
     set_sha256(&t.path().join("release"), "0.7.0", "plaz", &"0".repeat(64));

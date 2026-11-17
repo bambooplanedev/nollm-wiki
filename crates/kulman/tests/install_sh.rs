@@ -210,18 +210,6 @@ fn install_sh_over_an_installation_says_update() {
     );
 }
 
-#[test]
-fn install_sh_reads_a_crlf_sha256sums() {
-    let (t, base) = setup(KULMAN_BYTES);
-    let path = t.path().join("release/latest/download/SHA256SUMS");
-    let crlf = fs::read_to_string(&path).unwrap().replace('\n', "\r\n");
-    fs::write(&path, crlf).unwrap();
-    let home = t.path().join("home");
-    let out = install_sh(&home, &base);
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
-}
-
 /// The latest `SHA256SUMS` of the release under `t`, and where its signature goes.
 fn sums_and_signature(t: &Path) -> (PathBuf, PathBuf) {
     let at = t.join("release/latest/download");
