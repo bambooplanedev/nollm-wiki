@@ -11,7 +11,7 @@ use std::path::Path;
 use wiki_code::index::Family;
 use wiki_code::model::CallVia;
 use wiki_code::walk::walk;
-use wiki_code::{analyze, handles, pair_declarations, Analyzed};
+use wiki_code::{analyze, handles, is_cpp_fragment, pair_declarations, Analyzed};
 
 /// `(relative path, text)` pairs in, `Project` out. A code file the parser
 /// fails on is not in `files`; it is listed in `unreadable`. Other non-code
@@ -36,7 +36,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             continue;
         }
         let Some(a) = analyze(&path, &text) else {
-            if handles(&path) {
+            if handles(&path) || is_cpp_fragment(&path) {
                 unreadable.push(path);
             }
             continue;
@@ -116,10 +116,6 @@ pub(crate) fn included<T: Copy>(named: &[(T, &str)], from: &str, inc: &str) -> V
 /// namespace, class or function body, or from a file that is such a
 /// piece: it would be a piece of that body, read without it.
 fn drop_pieces(files: &mut BTreeMap<String, File>) {
-    let piece = |path: &str| {
-        let ext = path.rsplit_once('.').map(|p| p.1.to_ascii_lowercase());
-        ext.is_some_and(|e| matches!(e.as_str(), "inl" | "ipp" | "tcc"))
-    };
     let mut by_name: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
     for path in files.keys() {
         let name = path.rsplit('/').next().unwrap_or(path);
@@ -139,18 +135,18 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
     // is whatever such a piece includes.
     let unsure = |i: &&(&str, Vec<&str>, bool)| i.2 || i.1.len() > 1;
     let mut bad: BTreeSet<&str> = (includes.iter().filter(unsure))
-        .flat_map(|i| i.1.iter().copied().filter(|p| piece(p)))
+        .flat_map(|i| i.1.iter().copied().filter(|p| is_cpp_fragment(p)))
         .collect();
     // Read: what an include of a file that is read names, from the files
     // that are no such piece on.
     let mut read: BTreeSet<&str> = (files.keys().map(String::as_str))
-        .filter(|p| !piece(p))
+        .filter(|p| !is_cpp_fragment(p))
         .collect();
     loop {
         let before = (bad.len(), read.len());
         for (from, named, _) in &includes {
             if bad.contains(from) {
-                bad.extend(named.iter().filter(|p| piece(p)));
+                bad.extend(named.iter().filter(|p| is_cpp_fragment(p)));
             } else if read.contains(from) {
                 read.extend(named.iter().filter(|p| !bad.contains(*p)));
             }
@@ -160,7 +156,7 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
         }
     }
     let read: BTreeSet<String> = (read.difference(&bad)).map(|p| (*p).to_string()).collect();
-    files.retain(|path, _| !piece(path) || read.contains(path));
+    files.retain(|path, _| !is_cpp_fragment(path) || read.contains(path));
 }
 
 /// The file at `path` of the text `text`, analysed as `a`.
@@ -306,7 +302,8 @@ pub fn load(root: &Path) -> Result<Project, Error> {
     if !root.is_dir() {
         return Err(Error::NotADirectory(root.to_path_buf()));
     }
-    let walked = walk(root, true, &|p| handles(p) || manifest(p) || twin(p));
+    let read = |p: &str| handles(p) || is_cpp_fragment(p) || manifest(p) || twin(p);
+    let walked = walk(root, true, &read);
     let mut p = project(
         walked
             .files
