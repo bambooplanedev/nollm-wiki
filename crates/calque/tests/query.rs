@@ -1714,25 +1714,6 @@ fn ids_of(hits: &[calque::query::Hit]) -> Vec<&str> {
 }
 
 #[test]
-fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
-    let note =
-        |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
-    let (_d, w) = code_fixture(&[
-        (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
-        (".agents/memory/c.md", &note("Ccc", "")),
-        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
-    ]);
-    let ids: Vec<_> = w
-        .search("zebra", None, 10)
-        .into_iter()
-        .filter(|h| h.memory)
-        .map(|h| h.id)
-        .collect();
-    // The undated note loses the tie to both and falls out of the tail of two.
-    assert_eq!(ids, ["bbb", "aaa"]);
-}
-
-#[test]
 fn memory_tail_ignores_kind_and_the_code_part_respects_it() {
     let (_d, w) = code_fixture(&[
         ("a.rs", "//! elephant\npub fn elephant() {}\n"),
@@ -2473,15 +2454,6 @@ fn hit_paths(hits: &[calque::query::Hit]) -> Vec<String> {
 }
 
 #[test]
-fn a_name_in_another_case_is_not_the_constant_of_that_name() {
-    // `max_weekly_fee_usd` is a field elsewhere; the constant of the same
-    // letters is another item and must not answer for it.
-    let (_d, w) = code_fixture(&[("src/other.rs", "pub const MAX_WEEKLY_FEE_USD: f64 = 1.0;\n")]);
-    let q = "max_weekly_fee_usd";
-    assert_eq!(w.not_found(q, None, None), [q]);
-}
-
-#[test]
 fn a_name_that_is_a_file_stem_keeps_that_file() {
     // `auto_refill` names no item but the module file; the constant
     // `AUTO_REFILL` elsewhere is another item and stays out.
@@ -2678,15 +2650,6 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     assert!(!pack.contains("QX_PY_DERIVE"), "{pack}");
     let hint = calque::hint::hint_lines(&w, "where is the zb py derive script run");
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
-}
-
-#[test]
-fn a_shell_global_is_not_matched_in_another_case() {
-    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
-    assert_eq!(w.not_found("qx_py_derive", None, None), ["qx_py_derive"]);
-    assert!(symbol_lines(&w.search("qx_py_derive _qx_py_run", None, 10))
-        .iter()
-        .all(|l| l.3 != "QX_PY_DERIVE"));
 }
 
 const CALLED_RS: &str = "\

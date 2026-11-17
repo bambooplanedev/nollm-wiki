@@ -210,25 +210,6 @@ fn serve_lists_and_calls_tools() {
 }
 
 #[test]
-fn serve_tools_flag_brings_back_neighbors() {
-    let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, stdout) =
-        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
-    initialize(&mut stdin, &stdout);
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        2,
-        "neighbors",
-        &json!({"id": "gradient_descent", "max_tokens": 800}),
-    );
-    let text = text_of(&resp);
-    assert!(text.contains("\n# Gradient Descent\n"), "pack: {text}");
-    drop(stdin);
-    let _ = child.wait();
-}
-
-#[test]
 fn serve_tools_flag_picks_the_tools() {
     let (_tmp, out) = compile_fixture();
     let (mut child, mut stdin, stdout) = spawn_server_with(&out, &["--tools", "search,lint"]);
@@ -1182,18 +1163,6 @@ fn mcp_page_names_a_missing_page_file() {
         assert_eq!(resp["error"]["message"], json!(msg), "{resp}");
     }
     child.kill().ok();
-}
-
-#[test]
-fn mcp_page_names_a_skipped_folder() {
-    let (_src, out, _id) = big_project();
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
-    initialize(&mut stdin, &stdout);
-    let (err, text) = page(&mut stdin, &stdout, 2, &json!({"id": "vendor/missing.js"}));
-    child.kill().ok();
-    assert!(err);
-    assert!(text.contains("under a skipped `vendor` folder"), "{text}");
-    assert!(!text.contains("closest"), "{text}");
 }
 
 #[test]

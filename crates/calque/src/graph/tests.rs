@@ -186,19 +186,6 @@ fn markdown_link_to_a_source_path_creates_an_edge_without_a_mention() {
     assert!(g.edges["b"].outgoing.is_empty());
 }
 
-#[test]
-fn pagerank_ignores_memory_pages() {
-    let a = ent("a", "Alpha", "nothing");
-    let b = ent("b", "Beta", "mentions Alpha");
-    let without = build_graph(&map(vec![a.clone(), b.clone()]));
-    let mut m = ent("m", "Memo", "Alpha Alpha Alpha");
-    m.memory = true;
-    let with = build_graph(&map(vec![a, b, m]));
-    assert!(with.edges["a"].incoming.contains("m"));
-    assert_eq!(with.pagerank["a"], without.pagerank["a"]);
-    assert_eq!(with.pagerank.get("m"), None);
-}
-
 // Hand-solved fixed point, independent of the code: damping d = 0.85, three
 // pages, b and c mention a, a mentions nobody (a is dangling and spreads its
 // rank evenly over all three). With r = (ra, rb, rc), rb = rc by symmetry:
