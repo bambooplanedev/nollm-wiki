@@ -68,11 +68,17 @@ fn qualify(base: &str, source_path: &str, depth: usize) -> String {
 /// distinguishes it — `v1`, not `v1_md`, which would name nothing. A
 /// directory-module page (`pkg/__init__.py`) discarded no tail and uses the
 /// stem for the same reason.
+///
+/// A code page with no extension is a shell script (`is_shell`) and takes
+/// `sh`, as `deploy.sh` does beside `deploy.py`.
 fn discriminator(entity: &Entity) -> String {
     let base = basename(&entity.source_path);
     let stem = base.split('.').next().unwrap_or(base);
-    let named_after_stem =
-        matches!(entity.kind, SourceKind::Code { .. }) && module_stem(&entity.source_path) == stem;
+    let code = matches!(entity.kind, SourceKind::Code { .. });
+    if code && wiki_code::support::ext_of(base).is_empty() {
+        return "sh".to_string();
+    }
+    let named_after_stem = code && module_stem(&entity.source_path) == stem;
     if named_after_stem {
         let mut segs: Vec<&str> = base.split('.').collect();
         if segs.len() > 1 {

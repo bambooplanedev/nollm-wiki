@@ -138,6 +138,36 @@ fn shell_page_in_another_directory_does_not_rename_the_existing_page() {
 }
 
 #[test]
+fn a_shell_wrapper_with_no_extension_takes_the_qualified_id() {
+    // A wrapper beside its module, as `deploy.sh` beside `deploy.py`: the
+    // module keeps its id, the wrapper is qualified with `sh`.
+    let base = [
+        ("bin/tool.py", "def t():\n    pass\n"),
+        ("scripts/pre_commit.py", "def check():\n    pass\n"),
+    ];
+    let (_a, _, out_a) = compiled(&base);
+    let mut with = base.to_vec();
+    with.push(("bin/tool", "#!/bin/sh\nexec python3 tool.py\n"));
+    with.push(("scripts/pre-commit", "#!/bin/sh\nrun() { :; }\n"));
+    let (_b, _, out_b) = compiled(&with);
+    let ids = |out: &std::path::Path| -> BTreeMap<String, String> {
+        index_entries(out)
+            .into_iter()
+            .map(|e| {
+                (
+                    e["path"].as_str().unwrap().to_string(),
+                    e["id"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let mut want = ids(&out_a);
+    want.insert("bin/tool".into(), "tool_sh".into());
+    want.insert("scripts/pre-commit".into(), "pre_commit_sh".into());
+    assert_eq!(ids(&out_b), want);
+}
+
+#[test]
 fn summary_is_the_header_comment_only() {
     let src = "#!/usr/bin/env bash\n# Ships the release.\n\nfoo() {\n  # inner note\n  :\n}\n";
     let (_d, _, out) = compiled(&[("ship.sh", src)]);
