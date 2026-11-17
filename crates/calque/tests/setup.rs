@@ -677,6 +677,21 @@ fn a_run_without_the_hook_flag_removes_the_hooks_an_earlier_setup_wrote() {
 }
 
 #[test]
+fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let r = f.root();
+    // A teammate's repo-scope setup committed the pi hook.
+    f.setup(&["--agent", "pi", "--scope", "repo", "--hook"])
+        .success();
+    git(&r, &["add", PI_EXT]);
+    let hook = read(&r.join(PI_EXT));
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert_eq!(read(&r.join(PI_EXT)), hook);
+    assert!(!out(&a).contains("hook"), "{}", out(&a));
+}
+
+#[test]
 fn a_run_without_the_hook_flag_removes_an_older_pi_hook_and_leaves_an_edited_one() {
     let f = fixture(true, true);
     let r = f.root();
