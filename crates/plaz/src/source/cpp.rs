@@ -120,8 +120,8 @@ fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
 }
 
 /// Records the names of the namespace or namespace alias `n` defines in
-/// `File::namespaces`, and an alias's namespace in
-/// `File::namespace_aliases`.
+/// `File::namespaces`, a namespace's path in `File::namespace_paths`, and
+/// an alias's namespace in `File::namespace_aliases`.
 fn namespace(file: &mut File, n: Node, src: &str) {
     let alias = n.kind() == "namespace_alias_definition";
     let name = n.child_by_field_name("name");
@@ -130,6 +130,14 @@ fn namespace(file: &mut File, n: Node, src: &str) {
     };
     file.namespaces
         .extend(segments(&src[name.byte_range()]).map(|g| g.0.to_string()));
+    if !alias {
+        let mut path = enclosing(n, src, None);
+        let inline = src[n.byte_range()].starts_with("inline");
+        for (seg, _) in segments(&src[name.byte_range()]).filter(|g| !(g.1 || inline)) {
+            path.push(seg.to_string());
+            file.namespace_paths.insert(path.join("::"));
+        }
+    }
     let named = n.named_children(&mut n.walk()).last();
     if let Some(t) = named.filter(|_| alias) {
         let t: String = src[t.byte_range()].split_whitespace().collect();

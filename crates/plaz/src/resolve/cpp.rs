@@ -38,6 +38,10 @@ pub(super) struct Cpp<'a> {
     /// (`fold::unqualified`): each parameter text of a function so keyed.
     spellings: BTreeMap<(&'a str, &'a str, String), BTreeSet<&'a str>>,
     namespaces: BTreeSet<&'a str>,
+    /// Per name of a namespace, a class, an alias or a method's written
+    /// class: each path one of that name stands directly under, anonymous
+    /// namespaces dropped; empty for the global namespace.
+    under: BTreeMap<&'a str, BTreeSet<String>>,
     /// `namespace_owners`.
     owners: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
@@ -78,6 +82,7 @@ impl<'a> Cpp<'a> {
                 .flat_map(|(_, (_, f))| &f.namespaces)
                 .map(String::as_str)
                 .collect(),
+            under: BTreeMap::new(),
             owners: namespace_owners(files.values()),
             macros: cpp()
                 .flat_map(|(_, (_, f))| &f.macros)
@@ -131,6 +136,18 @@ impl<'a> Cpp<'a> {
     /// Reads the items of `file`, at `page`: its types, its functions by
     /// name and its definitions by key.
     fn read_items(&mut self, page: usize, file: &'a File) {
+        let paths = (file.namespace_paths.iter())
+            .chain(file.bases.keys())
+            .chain(file.aliases.keys())
+            .chain(file.classes.values());
+        for path in paths {
+            let mut above: Vec<&str> = Vec::new();
+            for seg in path.split("::").filter(|s| !s.starts_with("(anonymous@")) {
+                let at = self.under.entry(seg).or_default();
+                at.insert(above.join("::"));
+                above.push(seg);
+            }
+        }
         for (i, it) in file.code.items.iter().enumerate() {
             if it.kind == CodeItemKind::Type {
                 self.types.insert(&it.name);
@@ -346,6 +363,25 @@ impl Caller<'_, '_> {
             .map_or(root, |a| a.split("::").next().unwrap_or(""))
     }
 
+    /// Can a qualifier written `::name` name something of the project: a
+    /// namespace, class or alias `name` of the global namespace, or one a
+    /// file-scope `using` of the caller's file or its includes brings
+    /// there (`using namespace n;`, `using n::name;`)?
+    fn at_root(&self, name: &str) -> bool {
+        let pages = std::iter::once(&self.page).chain(self.included);
+        let usings: Vec<&String> = pages
+            .flat_map(|&p| &self.cpp.pages[p].1.file_usings)
+            .collect();
+        let used = |path: &str| {
+            let named = |u: &&String| path == u.as_str() || path.ends_with(&format!("::{u}"));
+            usings.iter().any(named)
+        };
+        let above = self.cpp.under.get(name).into_iter().flatten();
+        above
+            .into_iter()
+            .any(|a| a.is_empty() || used(a) || used(&format!("{a}::{name}")))
+    }
+
     /// Does a using-declaration of the caller's file (at file scope or in
     /// a body: scopes of usings are not modelled) name a function `name`
     /// of a namespace from outside the project: `std`, or one no project
@@ -372,9 +408,14 @@ impl Caller<'_, '_> {
         let root = root.unwrap_or(q);
         // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
         // `filesystem`) starts at `std`.
+        // `::a` the project has only under another namespace is not it.
+        let absent =
+            written.starts_with("::") && self.aliased(root).is_none() && !self.at_root(root);
         let root = self.unaliased(root);
-        let project =
-            cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
+        let project = !absent
+            && (cpp.types.contains(root)
+                || cpp.namespaces.contains(root)
+                || self.index.is_module(root));
         if (chain.iter()).any(|f| f.rebound.contains(root)) {
             // A template parameter or a local type: any type's method.
             self.any_method(call)

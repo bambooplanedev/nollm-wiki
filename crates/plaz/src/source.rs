@@ -106,6 +106,7 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
         local: BTreeSet::new(),
         params: BTreeMap::new(),
         namespaces: BTreeSet::new(),
+        namespace_paths: BTreeSet::new(),
         namespace_aliases: BTreeMap::new(),
         scopes: BTreeMap::new(),
         usings: BTreeSet::new(),
