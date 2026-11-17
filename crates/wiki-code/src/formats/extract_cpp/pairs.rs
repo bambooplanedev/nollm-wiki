@@ -8,12 +8,15 @@ use std::collections::BTreeMap;
 type Key<'a> = (Option<&'a str>, &'a str, Option<usize>);
 
 /// The `(owner, name, arity)` keys that occur exactly once among the
-/// `Fn`/`Method` items given, each with the location `L` it was given with.
-/// Overloads with the same parameter count share a key, so they drop out here.
+/// `Fn`/`Method` items given, each with the location `L` it was given with,
+/// leaving out `NoDefinition` items. Overloads with the same parameter count
+/// share a key, so they drop out here.
 fn unique_keys<'a, L>(items: impl IntoIterator<Item = (L, &'a CodeItem)>) -> BTreeMap<Key<'a>, L> {
     let mut seen: BTreeMap<Key<'a>, Option<L>> = BTreeMap::new();
     for (at, it) in items {
-        if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+        if matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method)
+            && it.pair_role != PairRole::NoDefinition
+        {
             let key = (
                 it.owner.as_deref(),
                 it.name.as_str(),
@@ -125,8 +128,8 @@ pub fn pair_declarations<U: CodeUnit>(entities: &mut BTreeMap<String, U>) {
 /// items of all C++ headers and exactly once among those of all
 /// implementation files. Only a `Declaration` header item and an
 /// `OutOfLineDefinition` implementation item pair (`pair_role`), but
-/// uniqueness counts every item, whatever its role and paired or not, so an
-/// item the same-stem step paired blocks any other partner. There is no
+/// uniqueness counts every item but a `NoDefinition` one, paired or not, so
+/// an item the same-stem step paired blocks any other partner. There is no
 /// "already paired" set: a key unique project-wide is unique inside its file
 /// pair too, so this step can only re-find a same-stem pair, and applying a
 /// pair twice leaves `twin` and `doc` as after once (the definition's `doc`
@@ -165,6 +168,57 @@ fn pair_project<U: CodeUnit>(
 mod tests {
     use super::*;
     use crate::CodeFile;
+
+    /// Every item after pairing `files`, file by file: its span, then
+    /// ` > ` and its twin when it has one. Every twin is mutual: if X's
+    /// twin is Y, Y's twin is X.
+    fn twins_after(files: &[(&str, &str)]) -> Vec<String> {
+        let mut parsed: BTreeMap<String, CodeFile> = files
+            .iter()
+            .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
+            .collect();
+        pair_declarations(&mut parsed);
+        let all: Vec<(String, &CodeItem)> = (parsed.iter())
+            .flat_map(|(p, f)| f.items.iter().map(move |i| (i.span(p), i)))
+            .collect();
+        for (s, i) in &all {
+            if let Some(t) = &i.twin {
+                let back = |(s2, i2): &(String, &CodeItem)| s2 == t && i2.twin.as_ref() == Some(s);
+                assert!(all.iter().any(back), "{s} > {t} is one-way");
+            }
+        }
+        let line = |p: &str, i: &CodeItem| match &i.twin {
+            Some(t) => format!("{} > {t}", i.span(p)),
+            None => i.span(p),
+        };
+        files
+            .iter()
+            .flat_map(|(p, _)| parsed[*p].items.iter().map(|i| line(p, i)))
+            .collect()
+    }
+
+    #[test]
+    fn a_deleted_or_in_class_defaulted_sibling_does_not_block_pairing() {
+        // Each sibling has the same parameter types as the declaration
+        // beside it, so only being left out of uniqueness lets that pair.
+        // `= default` on a copy assignment may carry a ref-qualifier
+        // (C++20), so the `&&` overload is the one defined out of line.
+        let h = "class B {\n  const int& get() const&;\n  const int& get() const&& = delete;\n};\nstruct P {\n  P& operator=(const P& o) & = default;\n  P& operator=(const P& o) &&;\n};\n";
+        let c = "const int& B::get() const& { static int v; return v; }\nP& P::operator=(const P& o) && { return *this; }\n";
+        assert_eq!(
+            twins_after(&[("lib/b.h", h), ("lib/b.cpp", c)]),
+            [
+                "lib/b.h:1-4",
+                "lib/b.h:2-2 > lib/b.cpp:1-1",
+                "lib/b.h:3-3",
+                "lib/b.h:5-8",
+                "lib/b.h:6-6",
+                "lib/b.h:7-7 > lib/b.cpp:2-2",
+                "lib/b.cpp:1-1 > lib/b.h:2-2",
+                "lib/b.cpp:2-2 > lib/b.h:7-7",
+            ]
+        );
+    }
 
     fn len_twin(
         files: [(&str, &str); 3],

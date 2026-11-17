@@ -57,7 +57,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    warning on stderr. Finally `wiki_code::pair_declarations` pairs each C++
    header's declarations with the definitions in its same-stem implementation
    file (only its body-less declarations and guarded definitions; an
-   out-of-line `= default` counts as a definition), else, for a body-less
+   out-of-line `= default` counts as a definition; `= delete` and in-class
+   `= default` count toward no key), else, for a body-less
    declaration, with the one guarded definition (out of line, not `static`,
    not in an anonymous namespace) of a key unique across the project: the
    definition inherits the doc and both items' `twin` name the other's lines;

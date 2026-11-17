@@ -111,9 +111,12 @@ pub struct CodeItem {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum PairRole {
     /// Not a candidate: other languages; inline or in-class bodies,
-    /// `= delete`, `static` or anonymous-namespace definitions.
+    /// `static` or anonymous-namespace definitions.
     #[default]
     Neither,
+    /// `= delete`, or `= default` inside its class: never defined
+    /// elsewhere, so it neither pairs nor counts toward a key's uniqueness.
+    NoDefinition,
     /// A body-less declaration.
     Declaration,
     /// An out-of-line definition: a body or `= default`, no class-body

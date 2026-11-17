@@ -224,7 +224,8 @@ per question is noise-level: treat single results as anecdotes.
   among all implementation items. In both steps (same-stem and
   project-wide) a header item with a body never pairs, and neither does a
   `static`, anonymous-namespace or class-body definition in a `.cpp`. Two
-  definitions of one key never pair. Uniqueness can still
+  definitions of one key never pair. A `= delete` or in-class `= default`
+  function counts toward no key, so it never blocks a sibling. Uniqueness can still
   mislead: namespaces are not compared (a unique-key free function in
   another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file

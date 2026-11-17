@@ -547,25 +547,30 @@ pub(super) fn arity(signature: &str, name: &str) -> Option<usize> {
 /// it, so `MyOpts::` in a parameter cannot pass for a qualifier), not
 /// `static` (in any specifier position) and not in an anonymous namespace.
 /// An out-of-line `X::X() = default;` has no `body` but counts as one: it is
-/// the definition. `= delete` does not. Inline and in-class bodies are
+/// the definition. `= delete`, and `= default` inside its class, can have no
+/// definition elsewhere: `NoDefinition`. Inline and in-class bodies are
 /// neither: they still count toward uniqueness in both pairing steps, so
 /// they block but never pair.
 pub(crate) fn pair_role(def: Node, text: &str) -> PairRole {
     if def.kind() != "function_definition" {
         return PairRole::Declaration;
     }
-    let mut cursor = def.walk();
+    let clause = |k: &str| def.children(&mut def.walk()).any(|c| c.kind() == k);
     let is_static = def
-        .children(&mut cursor)
+        .children(&mut def.walk())
         .any(|c| c.kind() == "storage_class_specifier" && &text[c.byte_range()] == "static");
-    let local = std::iter::successors(def.parent(), Node::parent).any(|a| {
-        a.kind() == "field_declaration_list"
-            || (a.kind() == "namespace_definition" && a.child_by_field_name("name").is_none())
-    });
-    let defaulted = def
-        .children(&mut cursor)
-        .any(|c| c.kind() == "default_method_clause");
-    if (def.child_by_field_name("body").is_none() && !defaulted) || is_static || local {
+    let ancestors = || std::iter::successors(def.parent(), Node::parent);
+    let in_class = ancestors().any(|a| a.kind() == "field_declaration_list");
+    let anonymous = ancestors()
+        .any(|a| a.kind() == "namespace_definition" && a.child_by_field_name("name").is_none());
+    let defaulted = clause("default_method_clause");
+    if clause("delete_method_clause") || (defaulted && in_class) {
+        PairRole::NoDefinition
+    } else if (def.child_by_field_name("body").is_none() && !defaulted)
+        || is_static
+        || in_class
+        || anonymous
+    {
         PairRole::Neither
     } else {
         PairRole::OutOfLineDefinition
