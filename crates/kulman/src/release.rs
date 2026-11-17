@@ -30,6 +30,9 @@ pub struct Module {
     pub default: bool,
     #[serde(default)]
     pub requires: Vec<String>,
+    /// Earlier names of this module: an update puts it in their place.
+    #[serde(default)]
+    pub replaces: Vec<String>,
     #[serde(default)]
     pub options: Vec<ModuleOption>,
     #[serde(default)]
@@ -69,7 +72,7 @@ impl Manifest {
             if module.name == "kulman" {
                 bail!("bad name in manifest: kulman");
             }
-            for name in &module.requires {
+            for name in module.requires.iter().chain(&module.replaces) {
                 check_name(name, "manifest")?;
             }
         }

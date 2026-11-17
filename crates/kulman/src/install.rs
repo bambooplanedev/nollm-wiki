@@ -284,11 +284,23 @@ fn renew(
         }
         _ => {}
     }
-    // The installed modules, plus what they require in the latest release.
-    for name in &state.modules {
+    // The installed modules, plus what they require in the latest release. One the release no
+    // longer holds goes, the module that `replaces` it (if any) taking its place.
+    let renamed = |old: &String| {
+        (manifest.modules.iter())
+            .find(|m| m.replaces.contains(old))
+            .map(|m| m.name.clone())
+    };
+    let (kept, gone): (Vec<String>, Vec<String>) =
+        (state.modules.iter().cloned()).partition(|name| manifest.module(name).is_some());
+    let wanted: Vec<String> = kept
+        .into_iter()
+        .chain(gone.iter().filter_map(renamed))
+        .collect();
+    for name in &wanted {
         manifest.archive(name, target)?;
     }
-    let modules = choose(manifest, Some(state.modules.clone()))?;
+    let modules = choose(manifest, Some(wanted))?;
     if ask && release::version_key(latest) > release::version_key(have) {
         let question = format!("Update {} module(s) to {latest}?", modules.len());
         if !ask_yes(&question, true)? {
@@ -305,6 +317,10 @@ fn renew(
         modules: modules.into_iter().collect(),
     };
     store::commit(home, &staged, raw, &state)?;
+    // Only once what replaces them is in place.
+    if !gone.is_empty() {
+        store::remove_modules(home, &gone, &state)?;
+    }
     for s in &staged {
         // A module the release newly requires was not there before; at the same version, files
         // are only put back.
@@ -314,6 +330,15 @@ fn renew(
             println!("repaired {} {latest}", s.name);
         } else {
             println!("updated {} {have} -> {latest}", s.name);
+        }
+    }
+    for old in &gone {
+        match renamed(old) {
+            Some(new) => println!(
+                "removed {old}: renamed {new} in {latest}; run \"kulman setup --scope repo\" \
+                 (or local) again in each project set up with {old}"
+            ),
+            None => println!("removed {old}: not in release {latest}"),
         }
     }
     if have != latest {

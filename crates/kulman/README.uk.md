@@ -102,6 +102,11 @@ kulman link)`), а `kulman remove` видаляє лише власні поси
 було встановлено, — `installed <name> <version>`, а останній рядок, коли версія змінилася, —
 `restart running agent sessions; they keep the old binaries until then`. На тій самій версії
 повернуті на місце файли названо `repaired <name> <version>`, без рядка про перезапуск.
+Встановлений модуль, якого новий реліз уже не містить, видаляється разом із бінарником і посиланням,
+коли решта вже на місці: якщо модуль релізу називає його в `replaces` (перейменування), натомість
+встановлюється той модуль, а рядок — `removed <old>: renamed <new> in <version>; run "kulman setup
+--scope repo" (or local) again in each project set up with <old>`; інакше —
+`removed <name>: not in release <version>`.
 
     kulman remove [--modules <MODULES>] [--yes]
 
@@ -216,6 +221,7 @@ errors: <modules>` і виходить з кодом першого модуля
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
+      "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
         "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
