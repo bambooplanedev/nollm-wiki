@@ -1255,6 +1255,20 @@ fn a_type_name_in_a_class_is_first_a_class_nested_in_its_bases() {
 }
 
 #[test]
+fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
+    let src = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\nstruct Shelf {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Deep : Rack<T> {\n    void deep() { Slot s; s.go(); }\n};\nstruct Flat : Shelf {\n    void flat() { Slot s; s.go(); }\n};\n";
+    let files = [("src/a.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "deep"),
+        ["s.go() → src/a.cpp:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "flat"),
+        ["s.go() → src/a.cpp:11"]
+    );
+}
+
+#[test]
 fn a_typed_receiver_in_a_class_with_an_outside_base_is_its_project_class() {
     let src = "struct Cfg {\n    int load() { return 1; }\n};\nstruct App : lib::Base {\n    int run(Cfg& c) { return c.load(); }\n};\n";
     assert_eq!(
