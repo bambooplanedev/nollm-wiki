@@ -34,7 +34,8 @@ impl<'a> Cpp<'a> {
     /// includer may provide too (every header's, outside its anonymous
     /// namespaces) besides those in files `sight` sees, and over those in
     /// files `sight` sees only; a class at one path counts once. Both find
-    /// it, or only the first does: that class. They differ: either. An
+    /// it, or only the first does: that class, unless no includer may
+    /// provide what the file names (`Cpp::shared`). They differ: either. An
     /// alias, a base no head places, or several classes met on the way:
     /// unplaced.
     pub(in crate::resolve::cpp) fn place_name(
@@ -61,6 +62,7 @@ impl<'a> Cpp<'a> {
             match (all, mine) {
                 (Step::Unplaced, _) | (_, Step::Unplaced) => Placed::Unplaced,
                 (Step::Found(a), Step::Found(m)) if a != m => Placed::Either(a, m),
+                (Step::Found(_), Step::Nothing) if !self.shared(sight.page) => Placed::Unplaced,
                 (Step::Found(a), _) => Placed::Class(a),
                 (Step::Nothing, Step::Found(m)) => Placed::Class(m),
                 (Step::Nothing, Step::Nothing) => Placed::Nothing,

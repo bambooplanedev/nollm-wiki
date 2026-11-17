@@ -1829,6 +1829,41 @@ fn a_type_name_no_file_in_view_defines_is_outside() {
 }
 
 #[test]
+fn a_class_of_a_header_a_source_file_neither_includes_nor_is_included_with_is_not_certain() {
+    // `run.cpp` names `Knob` through a library header; no includer of it
+    // can bring in `src/ui/knob.h`.
+    let h = "struct Knob {\n    static Knob spin();\n    int turns();\n};\n";
+    let defs = "#include \"knob.h\"\nKnob Knob::spin() { return Knob(); }\nint Knob::turns() { return 1; }\n";
+    let run =
+        "#include <ext/knob.h>\nint run(Knob& k) {\n    Knob::spin();\n    return k.turns();\n}\n";
+    let files = [
+        ("src/ui/knob.h", h),
+        ("src/ui/knob.cpp", defs),
+        ("src/cli/run.cpp", run),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/cli/run.cpp", "run"),
+        [
+            "Knob::spin() → one of: src/ui/knob.cpp:2, or outside",
+            "k.turns() → one of: src/ui/knob.cpp:3, or outside"
+        ]
+    );
+    // A header gets what it names from its includer: still that class.
+    let files = [
+        ("src/ui/knob.h", h),
+        ("src/ui/knob.cpp", defs),
+        ("src/cli/run.h", run),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/cli/run.h", "run"),
+        [
+            "Knob::spin() → src/ui/knob.cpp:2",
+            "k.turns() → src/ui/knob.cpp:3"
+        ]
+    );
+}
+
+#[test]
 fn a_qualifier_is_placed_through_the_bases_the_callers_file_sees() {
     let common =
         "struct Base {\n    struct Cfg {\n        static int load() { return 2; }\n    };\n};\n";

@@ -26,6 +26,8 @@ pub(super) struct Cpp<'a> {
     pages: Vec<(&'a str, &'a File)>,
     /// Per page: the pages its file includes, directly or through another.
     closures: Vec<BTreeSet<usize>>,
+    /// The pages some file includes, directly or through another.
+    included: BTreeSet<usize>,
     /// The functions by name, a function both trees list once; an
     /// operator's name without spaces (`operator->` of `operator -> ()`).
     by_name: BTreeMap<String, Vec<FnRef>>,
@@ -74,6 +76,7 @@ impl<'a> Cpp<'a> {
         }
         let mut out = Cpp {
             closures: Vec::new(),
+            included: BTreeSet::new(),
             by_name: BTreeMap::new(),
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
@@ -109,6 +112,7 @@ impl<'a> Cpp<'a> {
             out.read_items(page, file);
         }
         out.closures = closures(&includes);
+        out.included = out.closures.iter().flatten().copied().collect();
         out.read_classes();
         out
     }
@@ -188,6 +192,12 @@ impl<'a> Cpp<'a> {
     /// The pages the file of `page` includes, directly or through another.
     pub fn closure(&self, page: usize) -> &BTreeSet<usize> {
         &self.closures[page]
+    }
+
+    /// May an includer provide what the file of `page` names: is it a
+    /// header, or a file another includes?
+    fn shared(&self, page: usize) -> bool {
+        source_rank(self.pages[page].0) < 2 || self.included.contains(&page)
     }
 
     fn item(&self, c: FnRef) -> &'a CodeItem {
@@ -416,10 +426,8 @@ impl Caller<'_, '_, '_> {
         // `::a` the project has only under another namespace is not it;
         // in a header, or a file another includes, a `using` of the
         // includer may still bring it out.
-        let shared = source_rank(cpp.pages[self.page].0) < 2
-            || cpp.closures.iter().any(|c| c.contains(&self.page));
         let absent = written.starts_with("::")
-            && !shared
+            && !cpp.shared(self.page)
             && self.aliased(root).is_none()
             && !self.at_root(root);
         let root = self.unaliased(root);
