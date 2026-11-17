@@ -407,7 +407,11 @@ fn serve_refuses_path_traversal_outside_index() {
         }}),
     );
     let resp = read_response(&stdout, 2);
-    assert!(resp["error"].is_object(), "expected error, got: {resp}");
+    assert_eq!(resp["error"]["code"], json!(-32002), "got: {resp}");
+    assert_eq!(
+        resp["error"]["message"], "no such resource: wiki://page/../secret",
+        "got: {resp}"
+    );
 
     drop(stdin);
     let _ = child.wait();
@@ -754,7 +758,7 @@ fn serve_source_compiles_missing_wiki_and_answers() {
 
     let resp = search(&mut stdin, &stdout, 2, "oldword");
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    assert_eq!(ids, ["alpha"]);
     assert!(project.path().join(".kulman/index.json").exists());
     assert_eq!(stale_block(&resp), None);
 
@@ -871,7 +875,7 @@ fn serve_source_sees_file_in_new_subdir() {
     .unwrap();
     let resp = search(&mut stdin, &stdout, 3, "quokka");
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("beta")), "ids: {ids:?}");
+    assert_eq!(ids, ["beta"]);
 
     drop(stdin);
     let _ = child.wait();
@@ -908,11 +912,13 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
     std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    assert_eq!(ids, ["alpha"]);
     let stale = stale_block(&resp);
     assert!(stale.is_some(), "no stale line: {resp}");
+    let stale = stale.unwrap();
+    assert!(stale.starts_with("wiki may be stale: "), "{stale}");
     assert!(
-        !stale.unwrap().contains("recompile still running"),
+        !stale.contains("recompile still running"),
         "the compile should have failed, not timed out: {resp}"
     );
 

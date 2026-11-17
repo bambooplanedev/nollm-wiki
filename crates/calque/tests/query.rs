@@ -1314,7 +1314,7 @@ const CALLBACK_TS: &str = "export function renderCartLine(x: number): string {\n
 
 #[test]
 fn empty_callers_say_what_is_not_seen() {
-    const CLAUSE: &str = " (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
+    use common::CLAUSE;
     // The b3 case: a function passed as a value has no seen callers.
     let (_d, w) = code_fixture(&[("src/cart.ts", CALLBACK_TS)]);
     assert_eq!(

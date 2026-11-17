@@ -12,6 +12,9 @@
 
 #![allow(dead_code)]
 
+/// The tail of a `callers` line that found no caller, up to the symbol name.
+pub const CLAUSE: &str = " (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
+
 use calque::query::Wiki;
 use calque::{compile, CompileOptions};
 use std::path::{Path, PathBuf};
