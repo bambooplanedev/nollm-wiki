@@ -428,6 +428,9 @@ per question is noise-level: treat single results as anecdotes.
   `AGENTS.md` one.
 - Local scope skips (exit 1) a file git already tracks.
 - `--remove` leaves `.kulman/` and the ignore lines in place.
+- The JSON configs (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `.claude/settings*.json`) and
+  `AGENTS.md` are read and written through a symlink, so setup, `--remove` and the removal of
+  kalka's entries edit the link's target wherever it is. Only `.codex/config.toml` refuses a link.
 
 ## Agent memory
 
