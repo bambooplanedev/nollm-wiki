@@ -26,8 +26,9 @@ impl<'a> Cpp<'a> {
     /// or class of that path (the file's `using` directives at the global
     /// scope), the class itself by its own name, then the aliases and
     /// classes nested in its nearest project bases (a base outside the
-    /// project hides none, nor does one whose template arguments name a
-    /// template parameter; one no head places stops the lookup); last, the
+    /// project hides none, nor does one of the class itself whose template
+    /// arguments name a template parameter; one no head places stops the
+    /// lookup); last, the
     /// one class whose path ends in `t`, unless `t` starts with `::`, which
     /// names the global namespace only. Run twice: over the classes an
     /// includer may provide too (every header's, outside its anonymous
@@ -213,9 +214,13 @@ impl<'a> Cpp<'a> {
             let bases = level.iter().filter_map(|c| self.bases_of(c, sight));
             for b in bases.flatten() {
                 match b {
-                    Base::Class(p, false) if seen.insert(p) => next.push(p),
-                    // An outside base hides no project type name; a
-                    // dependent one is not searched for a name written bare.
+                    // A dependent base of `scope` itself is not searched for
+                    // a name written bare; one of a base is, being that
+                    // base's with its arguments known.
+                    Base::Class(p, dep) if !(dep && level == [scope]) && seen.insert(p) => {
+                        next.push(p);
+                    }
+                    // An outside base hides no project type name.
                     Base::Class(..) | Base::Outside => {}
                     Base::Unseen => return Step::Unplaced,
                 }

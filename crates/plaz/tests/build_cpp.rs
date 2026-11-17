@@ -1416,7 +1416,7 @@ fn a_type_name_in_a_class_is_first_a_class_nested_in_its_bases() {
 
 #[test]
 fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
-    let src = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\nstruct Shelf {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Deep : Rack<T> {\n    void deep() { Slot s; s.go(); }\n};\nstruct Flat : Shelf {\n    void flat() { Slot s; s.go(); }\n};\n";
+    let src = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\nstruct Shelf {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Deep : Rack<T> {\n    void deep() { Slot s; s.go(); }\n};\nstruct Flat : Shelf {\n    void flat() { Slot s; s.go(); }\n};\ntemplate <class U> struct Wrap : Rack<U> {};\ntemplate <class T> struct Mid : Wrap<int> {\n    void mid() { Slot s; s.go(); }\n};\n";
     let files = [("src/a.cpp", src)];
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "deep"),
@@ -1425,6 +1425,11 @@ fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "flat"),
         ["s.go() → src/a.cpp:11"]
+    );
+    // `Wrap<int>` is no dependent base: what it derives from is searched.
+    assert_eq!(
+        cpp_targets(&files, "src/a.cpp", "mid"),
+        ["s.go() → src/a.cpp:6"]
     );
 }
 
