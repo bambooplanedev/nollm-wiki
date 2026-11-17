@@ -345,6 +345,78 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
     run().unwrap_or_else(Outcome::Foreign)
 }
 
+/// Removes from `root` exactly what `kalka setup` wrote before the module was renamed calque: its
+/// own text with `calque` read as `kalka`, started by name on `PATH`. So no entry, hook or file is
+/// left starting a `kalka` that is gone; anything else named kalka is left, and on a local-scope
+/// run so is a file git tracks. Claude Code's local server is asked for only with `claude_local`.
+/// Not looked at: the ignore lines.
+fn forget_kalka(root: &Path, r: &mut Report, claude_local: bool) -> Result<(), WikiError> {
+    const OLD: &str = "kalka";
+    let old = |s: &str| s.replace(CMD, OLD);
+    let by_name = [true, false].map(|m| entry(CMD, m));
+    let entries = by_name.clone().map(|mut e| {
+        e["command"] = json!(OLD);
+        e
+    });
+    let pi_entries = entries.clone().map(|mut e| {
+        e["exposure"] = json!("direct");
+        e
+    });
+    let hooks = [json!({"hooks": [{"type": "command", "command": "kalka hint --claude-hook"}]})];
+    let skills = [true, false].map(|m| old(&skill_text(m)));
+    let skills = skills.each_ref().map(String::as_str);
+    let pi_hook = old(&pi_hook(CMD));
+    let nav = old(&format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n"));
+    if claude_local && claude_local_mcp(root, OLD, &entries, true) == Outcome::Done {
+        r.line("removed Claude Code local kalka server (calque's old name)")?;
+    }
+    let servers = ["mcpServers"];
+    for file in [".mcp.json", ".cursor/mcp.json"] {
+        forget(r, root, file, "kalka server", |p| {
+            edit::remove_entry(root, p, &servers, OLD, &entries)
+        })?;
+    }
+    forget(r, root, ".pi/mcp.json", "kalka server", |p| {
+        edit::remove_entry(root, p, &servers, OLD, &pi_entries)
+    })?;
+    for file in [".claude/settings.json", ".claude/settings.local.json"] {
+        forget(r, root, file, "kalka prompt hook", |p| {
+            edit::remove_item(root, p, &["hooks", "UserPromptSubmit"], &hooks)
+        })?;
+    }
+    let file = ".pi/extensions/kalka-hint/index.ts";
+    forget(r, root, file, "kalka hook for pi", |p| {
+        edit::remove_file(root, p, &[&pi_hook])
+    })?;
+    let file = ".agents/skills/kalka-navigation/SKILL.md";
+    forget(r, root, file, "kalka skill for pi", |p| {
+        edit::remove_file(root, p, &skills)
+    })?;
+    forget(r, root, "AGENTS.md", "kalka navigation steps", |p| {
+        edit::remove_block(root, p, &nav)
+    })?;
+    forget(r, root, codex::FILE, "kalka server", |_| {
+        codex::forget_kalka(root, &by_name)
+    })
+}
+
+/// One item of [`forget_kalka`]: said only when it was there and is now removed.
+fn forget(
+    r: &mut Report,
+    root: &Path,
+    file: &str,
+    what: &str,
+    remove: impl FnOnce(&Path) -> std::io::Result<Outcome>,
+) -> Result<(), WikiError> {
+    if r.guard_tracked && tracked(root, file) {
+        return Ok(());
+    }
+    if remove(&root.join(file))? == Outcome::Done {
+        r.line(&format!("removed {file} {what} (calque's old name)"))?;
+    }
+    Ok(())
+}
+
 /// The agents found in `root`.
 pub fn detect(root: &Path) -> Vec<Agent> {
     let mut a = Vec::new();
@@ -407,6 +479,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             r.line("warning: this is not the git toplevel; agents must be started from here")?;
         }
     }
+    forget_kalka(root, &mut r, local && opts.agents.contains(&Agent::Claude))?;
 
     // Own variants, this run's choice first; setup rewrites any of them and `--remove` takes any.
     let home = kulman_home();

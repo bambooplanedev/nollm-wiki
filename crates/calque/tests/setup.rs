@@ -31,8 +31,10 @@ impl Fixture {
         fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
     }
+    /// The calls to `claude`, without the look for kalka's old server every local run makes first.
     fn claude_log(&self) -> String {
-        fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default()
+        let log = fs::read_to_string(self.tmp.path().join("claude.log")).unwrap_or_default();
+        log.replace("mcp get kalka\n", "")
     }
     fn setup(&self, args: &[&str]) -> assert_cmd::assert::Assert {
         self.run(Path::new(env!("CARGO_BIN_EXE_calque")), args)
@@ -2143,4 +2145,134 @@ fn setup_local_does_not_warn_about_the_files_it_excludes_itself() {
         .success();
     assert!(out(&a).contains("wrote .claude/settings.local.json prompt hook"));
     assert_eq!(ignored_warnings(&a), Vec::<String>::new());
+}
+
+/// `text` as `kalka setup` wrote it before the module was renamed calque.
+fn as_kalka(text: &str) -> String {
+    text.replace("calque", "kalka")
+}
+
+#[test]
+fn setup_removes_what_the_module_wrote_under_its_old_name_kalka() {
+    let f = fixture(true, true);
+    let r = f.root();
+    let kalka = |memory: &str| {
+        format!("{{\"command\": \"kalka\", \"args\": [\"serve\", \"--source\", \".\"{memory}]}}")
+    };
+    fs::write(
+        r.join(".mcp.json"),
+        format!(
+            "{{\"mcpServers\": {{\"kalka\": {}, \"other\": {{\"command\": \"x\"}}}}}}",
+            kalka("")
+        ),
+    )
+    .unwrap();
+    fs::create_dir_all(r.join(".pi/extensions/kalka-hint")).unwrap();
+    let pi_entry = kalka(", \"--memory\", \"none\"").replace('}', ", \"exposure\": \"direct\"}");
+    fs::write(
+        r.join(".pi/mcp.json"),
+        format!("{{\"mcpServers\": {{\"kalka\": {pi_entry}}}}}"),
+    )
+    .unwrap();
+    let hook = include_str!("../src/setup/calque-hint.ts")
+        .replace("<out>", ".kulman")
+        .replace("<cmd>", "calque");
+    fs::write(
+        r.join(".pi/extensions/kalka-hint/index.ts"),
+        as_kalka(&hook),
+    )
+    .unwrap();
+    fs::create_dir_all(r.join(".agents/skills/kalka-navigation")).unwrap();
+    fs::write(
+        r.join(".agents/skills/kalka-navigation/SKILL.md"),
+        as_kalka(&skill(".agents/memory")),
+    )
+    .unwrap();
+    let nav = format!(
+        "<!-- calque:navigation -->\n{}<!-- /calque:navigation -->\n",
+        include_str!("../src/setup/navigation.md")
+    );
+    fs::write(r.join("AGENTS.md"), format!("# Team\n\n{}", as_kalka(&nav))).unwrap();
+    fs::create_dir_all(r.join(".claude")).unwrap();
+    fs::write(
+        r.join(".claude/settings.json"),
+        ECHO_HOOK.replace(
+            "    \"UserPromptSubmit\": [\n",
+            "    \"UserPromptSubmit\": [\n      {\"hooks\": [{\"type\": \"command\", \"command\": \"kalka hint --claude-hook\"}]},\n",
+        ),
+    )
+    .unwrap();
+    // A kalka entry setup did not write is someone else's.
+    fs::create_dir_all(r.join(".cursor")).unwrap();
+    let cursor = "{\"mcpServers\": {\"kalka\": {\"command\": \"mine\"}}}";
+    fs::write(r.join(".cursor/mcp.json"), cursor).unwrap();
+    fs::create_dir_all(r.join(".codex")).unwrap();
+    fs::write(
+        r.join(".codex/config.toml"),
+        "model = \"o3\"\n\n[mcp_servers.kalka]\ncommand = \"kalka\"\nargs = [\"serve\", \"--source\", \".\"]\n",
+    )
+    .unwrap();
+
+    let a = f
+        .setup(&["--agent", "claude,pi", "--scope", "repo"])
+        .success();
+    let said = out(&a);
+    for what in [
+        ".mcp.json kalka server",
+        ".pi/mcp.json kalka server",
+        ".claude/settings.json kalka prompt hook",
+        ".pi/extensions/kalka-hint/index.ts kalka hook for pi",
+        ".agents/skills/kalka-navigation/SKILL.md kalka skill for pi",
+        "AGENTS.md kalka navigation steps",
+        ".codex/config.toml kalka server",
+    ] {
+        let line = format!("removed {what} (calque's old name)");
+        assert!(said.lines().any(|l| l == line), "{line} not in:\n{said}");
+    }
+    let mcp: serde_json::Value = serde_json::from_str(&read(&r.join(".mcp.json"))).unwrap();
+    let names: Vec<_> = mcp["mcpServers"].as_object().unwrap().keys().collect();
+    assert_eq!(names, ["other", "calque"]);
+    let pi: serde_json::Value = serde_json::from_str(&read(&r.join(".pi/mcp.json"))).unwrap();
+    let names: Vec<_> = pi["mcpServers"].as_object().unwrap().keys().collect();
+    assert_eq!(names, ["calque"]);
+    let echo = serde_json::json!({"hooks": [{"type": "command", "command": "echo hi"}]});
+    assert_eq!(
+        prompt_hooks(&r.join(".claude/settings.json")),
+        serde_json::json!([echo, hook_item()])
+    );
+    assert!(!r.join(".pi/extensions/kalka-hint").exists());
+    assert!(!r.join(".agents/skills/kalka-navigation").exists());
+    assert_eq!(read(&r.join("AGENTS.md")), "# Team\n");
+    assert_eq!(read(&r.join(".cursor/mcp.json")), cursor);
+    assert_eq!(read(&r.join(".codex/config.toml")), "model = \"o3\"\n");
+}
+
+#[test]
+fn setup_local_removes_the_claude_local_server_kalka_wrote() {
+    let f = fixture(true, true);
+    let t = f.tmp.path().display();
+    // A `claude` that has kalka's local server until it is removed, and calque's once added.
+    f.stub(
+        "claude",
+        &format!(
+            r#"echo "$@" >> {t}/claude.log
+case "$1 $2 $3" in
+"mcp get kalka") [ -f {t}/removed ] && {{ echo "No MCP server named \"kalka\"." >&2; exit 1; }}
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✗ Failed to connect\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
+"mcp get calque") echo "No MCP server named \"calque\"." >&2; exit 1 ;;
+"mcp remove kalka") echo x > {t}/removed ;;
+esac"#
+        ),
+    );
+    let a = f
+        .setup(&["--agent", "claude", "--scope", "local"])
+        .success();
+    assert!(
+        out(&a)
+            .lines()
+            .any(|l| l == "removed Claude Code local kalka server (calque's old name)"),
+        "{}",
+        out(&a)
+    );
+    assert!(f.claude_log().contains("mcp remove kalka --scope local"));
 }
