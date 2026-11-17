@@ -407,6 +407,25 @@ fn a_declaration_folds_across_a_qualifier_only_where_its_file_shows_the_short_na
 }
 
 #[test]
+fn a_using_inside_a_body_or_another_namespace_is_no_evidence_for_a_fold() {
+    // `Kind` at file scope is the library's: neither `using` reaches it.
+    let h = "#include <lib/kind.h>\n#include \"far.h\"\nnamespace core { struct Kind {}; struct Mark {}; }\nvoid f(Kind k);\nvoid g(Mark m);\ninline void helper() { using namespace core; }\n";
+    let far = "namespace core { struct Mark; }\nnamespace other { using core::Mark; }\n";
+    let def = "#include \"f.h\"\nvoid f(core::Kind k) {}\nvoid g(core::Mark m) {}\n";
+    let main = "#include \"f.h\"\nvoid run(Kind k, Mark m) { f(k); g(m); }\n";
+    let files = [
+        ("src/f.h", h),
+        ("src/far.h", far),
+        ("src/f.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["f(k) → src/f.h:4", "g(m) → src/f.h:5"]
+    );
+}
+
+#[test]
 fn a_declaration_folds_across_an_alias_of_its_namespace_or_its_classs_own_name() {
     // `path` is the alias around `shift`, naming what `fs::path` names;
     // `Crate::Crate::Lid` is `Crate::Lid`.

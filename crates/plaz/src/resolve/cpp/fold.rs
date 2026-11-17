@@ -134,8 +134,8 @@ impl<'a> Cpp<'a> {
     /// is `long`, which ends in it and is written by `y` (`Kind` and
     /// `core::Kind`): `x` sits in the namespace or class `long` adds
     /// (`core`, read through a namespace alias of `y`'s file or includes),
-    /// or a `using` of `x`'s file or includes names that namespace or
-    /// `long`, and none of them names another `short` (`using
+    /// or a file-scope `using` of `x`'s file or includes names that
+    /// namespace or `long`, and no `using` there names another `short` (`using
     /// std::string;` beside `my::string`); or `long` adds only the name
     /// of the class `short` starts with (`Box::Box::Lid` is `Box::Lid`);
     /// or the nearest alias `short` in a namespace around `x` names `long`.
@@ -178,8 +178,10 @@ impl<'a> Cpp<'a> {
         }
         let name = short.rsplit("::").next();
         let another = |u: &&String| u.rsplit_once("::").map(|u| u.1) == name && !either(u, long);
+        // Only a `using` at file scope is known to reach `x`.
+        let mut reaching = pages().flat_map(|&p| &self.pages[p].1.cpp.file_usings);
         !usings.iter().any(another)
-            && (sits || usings.iter().any(|u| either(u, long) || either(u, &added)))
+            && (sits || reaching.any(|u| either(u, long) || either(u, &added)))
     }
 
     /// `key`, of the declaration `c` in an inline namespace, in the
