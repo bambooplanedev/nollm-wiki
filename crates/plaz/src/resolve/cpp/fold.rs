@@ -81,7 +81,8 @@ impl<'a> Cpp<'a> {
     /// `key` with the parameter text of the one other spelling of its scope
     /// and name that reads the same with qualifiers dropped, each name of
     /// one ending the other's (`core::Kind` and `Kind`); none when a third
-    /// spelling reads the same too.
+    /// spelling reads the same too, or when a name the two spell apart is
+    /// that of two project types (`a::Kind` and `b::Kind`).
     fn requalified(&self, key: Key<'a>) -> Option<Key<'a>> {
         let all = self.spellings.get(&(key.0, key.1, unqualified(key.2)))?;
         let mut other = all.iter().filter(|&&p| p != key.2);
@@ -93,9 +94,9 @@ impl<'a> Cpp<'a> {
                 .filter(|w| !w.is_empty())
         };
         let ends = |a: &str, b: &str| a == b || a.ends_with(&format!("::{b}"));
-        let same = names(key.2)
-            .zip(names(p))
-            .all(|(a, b)| ends(a, b) || ends(b, a));
+        let one = |a: &str| self.type_items.get(owner_key(a)).is_none_or(|&n| n < 2);
+        let same = (names(key.2).zip(names(p)))
+            .all(|(a, b)| a == b || ((ends(a, b) || ends(b, a)) && one(a)));
         same.then_some((key.0, key.1, p))
     }
 

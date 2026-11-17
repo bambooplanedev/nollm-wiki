@@ -46,6 +46,8 @@ pub(super) struct Cpp<'a> {
     /// Type names, the names of the classes the heads define, and owners
     /// of out-of-line definitions that are no namespace or misread.
     types: BTreeSet<&'a str>,
+    /// Per type name: how many type items the C/C++ files declare by it.
+    type_items: BTreeMap<&'a str, usize>,
     classes: Classes<'a>,
     /// The stems of the project's unread files (`Project::twins`).
     unread: BTreeSet<&'a str>,
@@ -86,6 +88,7 @@ impl<'a> Cpp<'a> {
                 .map(|s| s.rsplit_once("::").unwrap_or(("", s)))
                 .collect(),
             types: BTreeSet::new(),
+            type_items: BTreeMap::new(),
             classes: Classes::default(),
             unread: (twins.iter())
                 .filter_map(|p| p.rsplit('/').next()?.rsplit_once('.'))
@@ -131,6 +134,7 @@ impl<'a> Cpp<'a> {
         for (i, it) in file.code.items.iter().enumerate() {
             if it.kind == CodeItemKind::Type {
                 self.types.insert(&it.name);
+                *self.type_items.entry(&it.name).or_default() += 1;
             }
             let owner = it.owner.as_deref().map(owner_key);
             let misread = self.misread((page, i));

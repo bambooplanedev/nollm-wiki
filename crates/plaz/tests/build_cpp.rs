@@ -351,11 +351,11 @@ fn a_declaration_folds_onto_a_definition_spelled_with_top_level_const_or_another
 
 #[test]
 fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
-    // `w` reads `Pad` unqualified in two definitions: either may be it.
-    let h = "namespace one { struct Pad {}; }\nnamespace two { struct Pad {}; }\nstruct Pad {};\nvoid put(int n);\nvoid f(const char* s);\nvoid g(const Pad& p);\nvoid q(one::Pad p);\nvoid w(Pad p);\n";
-    let def = "#include \"put.h\"\nvoid put(double d) {}\nvoid f(char* s) {}\nvoid g(Pad& p) {}\nvoid q(two::Pad p) {}\nvoid w(one::Pad p) {}\nvoid w(two::Pad p) {}\n";
-    let main =
-        "#include \"put.h\"\nvoid run(Pad p, one::Pad o) { put(1); f(\"x\"); g(p); q(o); w(p); }\n";
+    // `w` reads `Pad` unqualified in two definitions: either may be it;
+    // `v`'s `Pad` may name another class than `two::Pad`.
+    let h = "namespace one { struct Pad {}; }\nnamespace two { struct Pad {}; }\nstruct Pad {};\nvoid put(int n);\nvoid f(const char* s);\nvoid g(const Pad& p);\nvoid q(one::Pad p);\nvoid w(Pad p);\nvoid v(Pad p);\n";
+    let def = "#include \"put.h\"\nvoid put(double d) {}\nvoid f(char* s) {}\nvoid g(Pad& p) {}\nvoid q(two::Pad p) {}\nvoid w(one::Pad p) {}\nvoid w(two::Pad p) {}\nvoid v(two::Pad p) {}\n";
+    let main = "#include \"put.h\"\nvoid run(Pad p, one::Pad o) { put(1); f(\"x\"); g(p); q(o); w(p); v(p); }\n";
     assert_eq!(
         cpp_targets(
             &[
@@ -371,7 +371,8 @@ fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
             "f(\"x\") → src/put.h:5",
             "g(p) → src/put.h:6",
             "q(o) → src/put.h:7",
-            "w(p) → src/put.h:8"
+            "w(p) → src/put.h:8",
+            "v(p) → src/put.h:9"
         ]
     );
 }
