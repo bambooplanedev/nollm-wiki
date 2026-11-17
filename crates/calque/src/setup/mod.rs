@@ -347,10 +347,11 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
 
 /// Removes from `root` exactly what `kalka setup` wrote before the module was renamed calque: its
 /// own text with `calque` read as `kalka`, started by name on `PATH`. So no entry, hook or file is
-/// left starting a `kalka` that is gone; anything else named kalka is left, and on a local-scope
-/// run so is a file git tracks. Claude Code's local server is asked for only with `claude_local`.
+/// left starting a `kalka` that is gone; anything else named kalka is left, and on a `local` run
+/// (`--remove` too) so is a file git tracks. Claude Code's local server is asked for only on a
+/// `local` run that sets up `claude`.
 /// Not looked at: the ignore lines.
-fn forget_kalka(root: &Path, r: &mut Report, claude_local: bool) -> Result<(), WikiError> {
+fn forget_kalka(root: &Path, r: &mut Report, local: bool, claude: bool) -> Result<(), WikiError> {
     const OLD: &str = "kalka";
     let old = |s: &str| s.replace(CMD, OLD);
     let by_name = [true, false].map(|m| entry(CMD, m));
@@ -367,35 +368,35 @@ fn forget_kalka(root: &Path, r: &mut Report, claude_local: bool) -> Result<(), W
     let skills = skills.each_ref().map(String::as_str);
     let pi_hook = old(&pi_hook(CMD));
     let nav = old(&format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n"));
-    if claude_local && claude_local_mcp(root, OLD, &entries, true) == Outcome::Done {
+    if local && claude && claude_local_mcp(root, OLD, &entries, true) == Outcome::Done {
         r.line("removed Claude Code local kalka server (calque's old name)")?;
     }
     let servers = ["mcpServers"];
     for file in [".mcp.json", ".cursor/mcp.json"] {
-        forget(r, root, file, "kalka server", |p| {
+        forget(r, root, local, file, "kalka server", |p| {
             edit::remove_entry(root, p, &servers, OLD, &entries)
         })?;
     }
-    forget(r, root, ".pi/mcp.json", "kalka server", |p| {
+    forget(r, root, local, ".pi/mcp.json", "kalka server", |p| {
         edit::remove_entry(root, p, &servers, OLD, &pi_entries)
     })?;
     for file in [".claude/settings.json", ".claude/settings.local.json"] {
-        forget(r, root, file, "kalka prompt hook", |p| {
+        forget(r, root, local, file, "kalka prompt hook", |p| {
             edit::remove_item(root, p, &["hooks", "UserPromptSubmit"], &hooks)
         })?;
     }
     let file = ".pi/extensions/kalka-hint/index.ts";
-    forget(r, root, file, "kalka hook for pi", |p| {
+    forget(r, root, local, file, "kalka hook for pi", |p| {
         edit::remove_file(root, p, &[&pi_hook])
     })?;
     let file = ".agents/skills/kalka-navigation/SKILL.md";
-    forget(r, root, file, "kalka skill for pi", |p| {
+    forget(r, root, local, file, "kalka skill for pi", |p| {
         edit::remove_file(root, p, &skills)
     })?;
-    forget(r, root, "AGENTS.md", "kalka navigation steps", |p| {
+    forget(r, root, local, "AGENTS.md", "kalka navigation steps", |p| {
         edit::remove_block(root, p, &nav)
     })?;
-    forget(r, root, codex::FILE, "kalka server", |_| {
+    forget(r, root, local, codex::FILE, "kalka server", |_| {
         codex::forget_kalka(root, &by_name)
     })
 }
@@ -404,11 +405,12 @@ fn forget_kalka(root: &Path, r: &mut Report, claude_local: bool) -> Result<(), W
 fn forget(
     r: &mut Report,
     root: &Path,
+    local: bool,
     file: &str,
     what: &str,
     remove: impl FnOnce(&Path) -> std::io::Result<Outcome>,
 ) -> Result<(), WikiError> {
-    if r.guard_tracked && tracked(root, file) {
+    if local && tracked(root, file) {
         return Ok(());
     }
     if remove(&root.join(file))? == Outcome::Done {
@@ -479,7 +481,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             r.line("warning: this is not the git toplevel; agents must be started from here")?;
         }
     }
-    forget_kalka(root, &mut r, local && opts.agents.contains(&Agent::Claude))?;
+    forget_kalka(root, &mut r, local, opts.agents.contains(&Agent::Claude))?;
 
     // Own variants, this run's choice first; setup rewrites any of them and `--remove` takes any.
     let home = kulman_home();

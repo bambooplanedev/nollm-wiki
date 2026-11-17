@@ -2276,3 +2276,22 @@ esac"#
     );
     assert!(f.claude_log().contains("mcp remove kalka --scope local"));
 }
+
+#[test]
+fn setup_local_leaves_kalka_entries_in_files_git_tracks_even_on_remove() {
+    let f = fixture(true, true);
+    real_git(&f);
+    let r = f.root();
+    let mcp = "{\"mcpServers\": {\"kalka\": {\"command\": \"kalka\", \"args\": [\"serve\", \"--source\", \".\"]}, \"other\": {\"command\": \"x\"}}}";
+    fs::write(r.join(".mcp.json"), mcp).unwrap();
+    git(&r, &["add", ".mcp.json"]);
+    for remove in [false, true] {
+        let mut args = vec!["--agent", "pi", "--scope", "local"];
+        if remove {
+            args.push("--remove");
+        }
+        let a = f.setup(&args).success();
+        assert!(!out(&a).contains("kalka"), "{}", out(&a));
+        assert_eq!(read(&r.join(".mcp.json")), mcp);
+    }
+}
