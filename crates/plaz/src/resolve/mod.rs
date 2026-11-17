@@ -9,7 +9,7 @@ use crate::model::{File, FnId, MapCall, Project, Target};
 use crate::uses::{defines, in_scope, in_trait, is_trait, own_crate, standard, InScope};
 use cpp::Cpp;
 pub(crate) use cpp::{fold_scope, namespace_owners, outer_scope};
-use python::{Own, Python};
+use python::Python;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::imports::Imports;
 use wiki_code::index::{owner_key, sees, Family, FnRef, Index, Scope};
@@ -105,8 +105,6 @@ pub fn resolve(mut project: Project) -> Resolved {
                 }
                 let sees = sees(page, pages_of);
                 let in_scope = in_scope(path, file, &imports, &index, &py.roots, &project.crates);
-                // Empty but for a C/C++ file.
-                let included = cpp.closure(page);
                 let mut flows = file.flows.clone();
                 for (&item, flow) in &mut flows {
                     // An owner like `<W as Display>` has no key: no own methods.
@@ -115,23 +113,11 @@ pub fn resolve(mut project: Project) -> Resolved {
                         .as_deref()
                         .map(owner_key)
                         .filter(|k| !k.is_empty());
-                    // In C/C++, the names the body gives a project macro.
-                    let mut given = BTreeSet::new();
-                    if file.family == Family::Cpp {
-                        flow.each_call(&mut |_, c| {
-                            given.extend(cpp.macro_names(c).iter().cloned());
-                        });
-                    }
                     let cx = Caller {
                         index: &index,
                         page,
-                        given,
                         py: &py,
                         cpp: &cpp,
-                        included,
-                        ns: file.cpp.scopes.get(&item).map_or("", String::as_str),
-                        class: cpp.class_of(page, item),
-                        misread: file.family == Family::Cpp && cpp.misread_method((page, item)),
                         scope: index.scope(page, own, &sees),
                         file,
                         item: &file.code.items[item],
@@ -140,8 +126,23 @@ pub fn resolve(mut project: Project) -> Resolved {
                         types: &types,
                         crates: &project.crates,
                     };
+                    let (rust, python, c);
+                    let rules: &dyn Rules = match file.family {
+                        Family::Cpp => {
+                            c = cpp::Caller::new(&cx, item, flow);
+                            &c
+                        }
+                        Family::Python => {
+                            python = python::Caller(&cx);
+                            &python
+                        }
+                        Family::Rust | Family::Go | Family::Shell | Family::Ecma => {
+                            rust = Rust(&cx);
+                            &rust
+                        }
+                    };
                     flow.each_call_mut(&mut |chain, call| {
-                        call.target = from_evidence(cx.evidence(chain, call));
+                        call.target = from_evidence(rules.evidence(chain, call));
                     });
                 }
                 (path.clone(), flows)
@@ -154,24 +155,19 @@ pub fn resolve(mut project: Project) -> Resolved {
     Resolved(project, classes)
 }
 
+/// One language family's call rules.
+trait Rules {
+    /// What the code shows about the target of `call`, `chain` the flows
+    /// enclosing it, outermost first.
+    fn evidence(&self, chain: &[FlowScope], call: &MapCall) -> Evidence;
+}
+
+/// What every family's rules read about the function a call is in.
 struct Caller<'i, 'a> {
     index: &'i Index<'a, File>,
     page: usize,
     py: &'i Python<'a>,
     cpp: &'i Cpp<'a>,
-    /// The pages a C/C++ caller's file includes, directly or not.
-    included: &'i BTreeSet<usize>,
-    /// A C/C++ caller's namespace path, its qualifier included (`CppFacts::scopes`).
-    ns: &'a str,
-    /// A C/C++ method's own class (`Cpp::class_of`).
-    class: Option<&'a str>,
-    /// A C/C++ method whose qualified name the grammar misread
-    /// (`Cpp::misread_method`): no class is known.
-    misread: bool,
-    /// The names a C/C++ caller's body, nested flows included, gives a
-    /// project macro (`Cpp::macro_names`): the macro may declare a local
-    /// of such a name.
-    given: BTreeSet<String>,
     scope: Scope<'i, 'a, File>,
     /// The caller's file and item; the item's owner is as written (`S`, `<S as Tr>`).
     file: &'a File,
@@ -183,7 +179,68 @@ struct Caller<'i, 'a> {
     crates: &'a BTreeSet<(String, String)>,
 }
 
-impl Caller<'_, '_> {
+/// The innermost flow of `chain` that binds the value `x`.
+fn binder<'c>(chain: &'c [FlowScope], x: &str) -> Option<&'c FlowScope> {
+    chain.iter().rev().find(|f| f.locals.contains(x))
+}
+
+/// Is `x` a generic parameter, or an item declared in a body, in `chain`?
+fn rebound(chain: &[FlowScope], x: &str) -> bool {
+    chain.iter().any(|f| f.rebound.contains(x))
+}
+
+/// Rust's call rules.
+struct Rust<'c, 'i, 'a>(&'c Caller<'i, 'a>);
+
+impl Rules for Rust<'_, '_, '_> {
+    fn evidence(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
+        let (cx, site) = (self.0, &call.site);
+        let rebound = |x: &str| rebound(chain, x);
+        match &site.via {
+            CallVia::Bare if binder(chain, &site.name).is_some() || rebound(&site.name) => {
+                Evidence::Hidden
+            }
+            CallVia::Bare => cx.bare(call),
+            CallVia::Path(q) if q == "Self" => self.on_self(call, &rebound, false),
+            CallVia::Path(q) => cx.path(call, q, &rebound),
+            CallVia::SelfRecv => self.on_self(call, &rebound, true),
+            CallVia::Member(Some(x)) => match binder(chain, x) {
+                Some(f) => cx.on_local(call, f, x, &rebound),
+                None if rebound(x) => cx.any_method(call),
+                None if cx.index.is_type(x) || cx.index.is_module(x) => {
+                    let fns = cx.imported_from(x, &site.name, cx.scope.qualified(site, x));
+                    cx.found_or_hidden(fns, !cx.sure(x))
+                }
+                None => cx.any_method(call),
+            },
+            CallVia::Member(None) => cx.any_method(call),
+        }
+    }
+}
+
+impl Rust<'_, '_, '_> {
+    /// `self.f()` (`dot`) and `Self::f()`: a call on the caller's own
+    /// type (`Caller::own`).
+    fn on_self(&self, call: &MapCall, rebound: &dyn Fn(&str) -> bool, dot: bool) -> Evidence {
+        let (cx, own) = (self.0, self.0.own());
+        // In a trait's default method `self` is any implementor.
+        if cx.in_trait {
+            return cx.any_method(call);
+        }
+        let found = if own.is_empty() || rebound(own) {
+            Evidence::Hidden
+        } else {
+            cx.of_type(call, own, false)
+        };
+        match found {
+            // Not the type's own method: a trait's, or a deref target's.
+            Evidence::Hidden if dot => cx.any_method(call),
+            Evidence::Hidden | Evidence::Outside | Evidence::Found { .. } => found,
+        }
+    }
+}
+
+impl<'a> Caller<'_, 'a> {
     fn ids(&self, fns: impl IntoIterator<Item = FnRef>) -> BTreeSet<FnId> {
         fns.into_iter()
             // Test code is not compiled into the code that calls it.
@@ -258,119 +315,75 @@ impl Caller<'_, '_> {
         }
     }
 
-    fn evidence(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
-        let (s, site) = (&self.scope, &call.site);
-        // The innermost flow that binds the value `x`.
-        let binder = |x: &str| chain.iter().rev().find(|f| f.locals.contains(x));
-        // A generic parameter, or an item declared in a body.
-        let rebound = |x: &str| chain.iter().any(|f| f.rebound.contains(x));
-        let python = self.file.family == Family::Python;
-        match &site.via {
-            _ if self.file.family == Family::Cpp => self.cpp(chain, call),
-            CallVia::Bare
-                if binder(&site.name).is_some()
-                    || rebound(&site.name)
-                    || self.rebinds_alias(chain, call) =>
-            {
-                Evidence::Hidden
-            }
-            CallVia::Bare => self.bare(call),
-            CallVia::Path(q) if q == "Self" => self.on_self(call, &rebound, false),
-            CallVia::Path(q) if q == "self" => self.bare(call),
-            // Not this file's own `f` first: any function of that name.
-            CallVia::Path(q) if matches!(q.as_str(), "crate" | "super") => Evidence::Found {
-                fns: self.ids(s.fns_anywhere(site)),
-                open: false,
-            },
-            CallVia::Path(q) => {
-                let root = call
-                    .path
-                    .as_deref()
-                    .map_or(q.as_str(), |p| p.split("::").next().unwrap_or("").trim());
-                if standard(self.file, root) {
-                    Evidence::Outside
-                } else if let Some(&std) = self.names.external.get(root) {
-                    self.external(std, s.qualified(site, q))
-                } else if rebound(root) || self.renamed(root) {
-                    // A generic parameter: any type the caller is given.
-                    self.any_method(call)
-                // A module the file declares or imports shadows the crate.
-                } else if own_crate(self.file, root, self.crates)
-                    && !defines(self.file, root)
-                    && !self.names.local(root)
-                {
-                    // `mycrate::f()` is `crate::f()` of that crate.
-                    let found = if root == q {
-                        Evidence::Found {
-                            fns: self.ids(s.fns_anywhere(site)),
-                            open: false,
-                        }
-                    } else {
-                        self.of_type(call, q, false)
-                    };
-                    self.in_crate(root, found)
-                // An alias of a project module or type: `q` is what it names.
-                } else if self.project_root(root, root == q) || self.names.aliases.contains(root) {
-                    self.of_type(call, q, root == q && !self.sure(q))
-                } else {
-                    Evidence::Hidden
-                }
-            }
-            CallVia::SelfRecv => self.on_self(call, &rebound, true),
-            CallVia::Member(Some(x)) if self.is_cls(x) => self.on_self(call, &rebound, true),
-            CallVia::Member(Some(x)) => match binder(x) {
-                // A local: its type, when the flow knows one, decides.
-                Some(f) => match f.types.get(x) {
-                    Some(t) => self.typed(call, t, &rebound),
-                    None => self.any_method(call),
-                },
-                // A Python module from outside the project.
-                None if python
-                    && self.names.external.contains_key(x)
-                    && !self.project_alias(call, x) =>
-                {
-                    self.external(self.names.external[x], s.qualified(site, x))
-                }
-                None if rebound(x) || (python && self.py_value(x)) => self.any_method(call),
-                None if self.index.is_type(x) || self.index.is_module(x) => {
-                    // A Python name no import or class of the file binds.
-                    let unbound = !self.names.imported.contains(x) && !defines(self.file, x);
-                    let open = !self.sure(x) || (python && unbound);
-                    self.found_or_hidden(
-                        self.imported_from(x, &site.name, s.qualified(site, x)),
-                        open,
-                    )
-                }
-                None => self.any_method(call),
-            },
-            CallVia::Member(None) if python => self.dotted(chain, call),
-            CallVia::Member(None) => self.any_method(call),
-        }
-    }
-
-    /// `self.f()` (`dot`) and `Self::f()`: a call on the caller's own
-    /// type, the `S` of an owner `S` or `<S as Tr>`.
-    fn on_self(&self, call: &MapCall, rebound: &dyn Fn(&str) -> bool, dot: bool) -> Evidence {
-        let own = self.item.owner.as_deref().map_or("", |o| {
+    /// The caller's own type: the `S` of an owner `S` or `<S as Tr>`.
+    fn own(&self) -> &'a str {
+        self.item.owner.as_deref().map_or("", |o| {
             owner_key(
                 o.strip_prefix('<')
                     .map_or(o, |o| o.split(" as ").next().unwrap_or("")),
             )
-        });
-        let found = match self.file.family {
-            // In a trait's default method `self` is any implementor.
-            Family::Rust if self.in_trait => return self.any_method(call),
-            Family::Rust if own.is_empty() || rebound(own) => Evidence::Hidden,
-            Family::Rust => self.of_type(call, own, false),
-            Family::Python => return self.py_on_self(call, own, Own::Object),
-            // C++ calls are `Caller::cpp`'s. In the others a subclass may
-            // override `f`: no certainty.
-            Family::Cpp | Family::Ecma | Family::Go | Family::Shell => return Evidence::Hidden,
-        };
-        match found {
-            // Not the type's own method: a trait's, or a deref target's.
-            Evidence::Hidden if dot => self.any_method(call),
-            Evidence::Hidden | Evidence::Outside | Evidence::Found { .. } => found,
+        })
+    }
+
+    /// `x.f()` on the local `x` the flow `f` binds: its type, when the
+    /// flow knows one, decides.
+    fn on_local(
+        &self,
+        call: &MapCall,
+        f: &FlowScope,
+        x: &str,
+        rebound: &dyn Fn(&str) -> bool,
+    ) -> Evidence {
+        match f.types.get(x) {
+            Some(t) => self.typed(call, t, rebound),
+            None => self.any_method(call),
+        }
+    }
+
+    /// `q::f()`, `q` not `Self`.
+    fn path(&self, call: &MapCall, q: &str, rebound: &dyn Fn(&str) -> bool) -> Evidence {
+        let (s, site) = (&self.scope, &call.site);
+        if q == "self" {
+            return self.bare(call);
+        }
+        // Not this file's own `f` first: any function of that name.
+        if matches!(q, "crate" | "super") {
+            return Evidence::Found {
+                fns: self.ids(s.fns_anywhere(site)),
+                open: false,
+            };
+        }
+        let root = call
+            .path
+            .as_deref()
+            .map_or(q, |p| p.split("::").next().unwrap_or("").trim());
+        if standard(self.file, root) {
+            Evidence::Outside
+        } else if let Some(&std) = self.names.external.get(root) {
+            self.external(std, s.qualified(site, q))
+        } else if rebound(root) || self.renamed(root) {
+            // A generic parameter: any type the caller is given.
+            self.any_method(call)
+        // A module the file declares or imports shadows the crate.
+        } else if own_crate(self.file, root, self.crates)
+            && !defines(self.file, root)
+            && !self.names.local(root)
+        {
+            // `mycrate::f()` is `crate::f()` of that crate.
+            let found = if root == q {
+                Evidence::Found {
+                    fns: self.ids(s.fns_anywhere(site)),
+                    open: false,
+                }
+            } else {
+                self.of_type(call, q, false)
+            };
+            self.in_crate(root, found)
+        // An alias of a project module or type: `q` is what it names.
+        } else if self.project_root(root, root == q) || self.names.aliases.contains(root) {
+            self.of_type(call, q, root == q && !self.sure(q))
+        } else {
+            Evidence::Hidden
         }
     }
 

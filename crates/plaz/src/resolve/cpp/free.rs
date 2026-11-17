@@ -5,7 +5,7 @@ use wiki_code::index::FnRef;
 use wiki_code::model::{CallSite, CodeItem, CodeItemKind};
 use wiki_code::support::source_rank;
 
-impl Caller<'_, '_> {
+impl Caller<'_, '_, '_> {
     /// The free functions `site` names, of a namespace whose path ends in
     /// `ns` (the qualifier as written) when given, or is it after a leading
     /// `::`: in C those of the

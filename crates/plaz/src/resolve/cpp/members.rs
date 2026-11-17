@@ -75,7 +75,7 @@ fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
     (!x.is_empty() && text.ends_with('…')).then_some((x, after))
 }
 
-impl Caller<'_, '_> {
+impl Caller<'_, '_, '_> {
     /// `x.f()`, `x->a.f()` (`x` as the call site gives it, or none):
     /// the innermost flow binding `x` gives its type; with none, a data
     /// member of that name. `this->a.f()`: the caller's class.

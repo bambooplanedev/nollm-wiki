@@ -8,9 +8,9 @@ mod fold;
 mod free;
 mod members;
 
-use super::{Caller, Evidence};
+use super::{Evidence, Rules};
 use crate::flow::FlowScope;
-use crate::model::{Bodiless, File, FnId, MapCall};
+use crate::model::{Bodiless, File, Flow, FnId, MapCall};
 use crate::source::untemplated;
 use classes::{Classes, Missing, Sight};
 pub(crate) use fold::{fold_scope, namespace_owners, outer_scope};
@@ -315,9 +315,52 @@ fn fits(it: &CodeItem, site: &CallSite) -> bool {
     }
 }
 
-impl Caller<'_, '_> {
-    /// The target of a call in a C/C++ function.
-    pub(super) fn cpp(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
+/// C and C++'s call rules, with what only they read about the caller.
+pub(super) struct Caller<'c, 'i, 'a> {
+    cx: &'c super::Caller<'i, 'a>,
+    /// The pages the caller's file includes, directly or not.
+    included: &'i BTreeSet<usize>,
+    /// The caller's namespace path, its qualifier included (`CppFacts::scopes`).
+    ns: &'a str,
+    /// A method's own class (`Cpp::class_of`).
+    class: Option<&'a str>,
+    /// A method whose qualified name the grammar misread
+    /// (`Cpp::misread_method`): no class is known.
+    misread: bool,
+    /// The names the caller's body, nested flows included, gives a
+    /// project macro (`Cpp::macro_names`): the macro may declare a local
+    /// of such a name.
+    given: BTreeSet<String>,
+}
+
+impl<'i, 'a> std::ops::Deref for Caller<'_, 'i, 'a> {
+    type Target = super::Caller<'i, 'a>;
+
+    fn deref(&self) -> &Self::Target {
+        self.cx
+    }
+}
+
+impl<'c, 'i, 'a> Caller<'c, 'i, 'a> {
+    /// The rules for the calls of `flow`, the flow of `cx`'s item, the
+    /// `item`th of its file.
+    pub(super) fn new(cx: &'c super::Caller<'i, 'a>, item: usize, flow: &Flow) -> Self {
+        let (cpp, c) = (cx.cpp, (cx.page, item));
+        let mut given = BTreeSet::new();
+        flow.each_call(&mut |_, call| given.extend(cpp.macro_names(call).iter().cloned()));
+        Caller {
+            cx,
+            included: cpp.closure(c.0),
+            ns: cx.file.cpp.scopes.get(&c.1).map_or("", String::as_str),
+            class: cpp.class_of(c.0, c.1),
+            misread: cpp.misread_method(c),
+            given,
+        }
+    }
+}
+
+impl Rules for Caller<'_, '_, '_> {
+    fn evidence(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
         let via = &call.site.via;
         let found = match via {
             CallVia::Bare => self.cpp_bare(chain, call),
@@ -343,7 +386,9 @@ impl Caller<'_, '_> {
             e @ (Evidence::Found { .. } | Evidence::Outside | Evidence::Hidden) => e,
         }
     }
+}
 
+impl Caller<'_, '_, '_> {
     /// The class whose members a name in the innermost flow of `chain`
     /// may be: the caller's, unless a local class's method nested in the
     /// caller holds it (the caller's own flow is an item, never one).

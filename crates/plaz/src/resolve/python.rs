@@ -1,13 +1,13 @@
 //! Python's own call rules: the file an import names, the class a `self`,
 //! `cls` or `super()` call starts from, and dotted receivers.
 
-use super::{Caller, Evidence};
+use super::{binder, rebound, Evidence, Rules};
 use crate::flow::FlowScope;
 use crate::model::{File, MapCall};
-use crate::uses::{bases, python_import, PyRoots, Whose};
+use crate::uses::{bases, defines, python_import, PyRoots, Whose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
-use wiki_code::model::{CodeItem, CodeItemKind};
+use wiki_code::model::{CallVia, CodeItem, CodeItemKind};
 use wiki_code::support::module_stem;
 
 /// What the project's Python files say before any call is looked at. A
@@ -255,15 +255,65 @@ pub(super) enum Own {
     Super,
 }
 
-impl Caller<'_, '_> {
+/// Python's call rules.
+pub(super) struct Caller<'c, 'i, 'a>(pub &'c super::Caller<'i, 'a>);
+
+impl Rules for Caller<'_, '_, '_> {
+    fn evidence(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
+        let (cx, site) = (self.0, &call.site);
+        let rebound = |x: &str| rebound(chain, x);
+        // `self.f()`, `cls.f()`: a call on the caller's own class.
+        let on_self = || cx.py_on_self(call, cx.own(), Own::Object);
+        match &site.via {
+            CallVia::Bare
+                if binder(chain, &site.name).is_some()
+                    || rebound(&site.name)
+                    || rebinds_alias(chain, call) =>
+            {
+                Evidence::Hidden
+            }
+            CallVia::Bare => cx.bare(call),
+            CallVia::Path(q) if q == "Self" => on_self(),
+            CallVia::Path(q) => cx.path(call, q, &rebound),
+            CallVia::SelfRecv => on_self(),
+            CallVia::Member(Some(x)) if cx.is_cls(x) => on_self(),
+            CallVia::Member(Some(x)) => match binder(chain, x) {
+                Some(f) => cx.on_local(call, f, x, &rebound),
+                // A module from outside the project.
+                None if cx.names.external.contains_key(x) && !cx.project_alias(call, x) => {
+                    cx.external(cx.names.external[x], cx.scope.qualified(site, x))
+                }
+                None if rebound(x) || cx.py_value(x) => cx.any_method(call),
+                None if cx.index.is_type(x) || cx.index.is_module(x) => {
+                    // A name no import or class of the file binds.
+                    let unbound = !cx.names.imported.contains(x) && !defines(cx.file, x);
+                    let fns = cx.imported_from(x, &site.name, cx.scope.qualified(site, x));
+                    cx.found_or_hidden(fns, !cx.sure(x) || unbound)
+                }
+                None => cx.any_method(call),
+            },
+            CallVia::Member(None) => cx.dotted(chain, call),
+        }
+    }
+}
+
+/// Does a body around the call bind the name the call is written with,
+/// where the call site names what a file-level `import … as` says that
+/// name stands for?
+fn rebinds_alias(chain: &[FlowScope], call: &MapCall) -> bool {
+    let written = call.text.split('(').next().unwrap_or("").trim();
+    let bound = |f: &FlowScope| f.locals.contains(written) || f.rebound.contains(written);
+    written != call.site.name && chain.iter().any(bound)
+}
+
+impl super::Caller<'_, '_> {
     /// Is `x` the class in a classmethod of the caller's own? The first
     /// parameter of a method that is no staticmethod, named `cls`.
     pub(super) fn is_cls(&self, x: &str) -> bool {
         let sig = self.item.signature.as_str();
         let params = sig.split_once(&format!("def {}(", self.item.name));
         let first = params.and_then(|(_, p)| p.split([',', ')', ':', '=']).next());
-        self.file.family == Family::Python
-            && x == "cls"
+        x == "cls"
             && self.item.owner.is_some()
             && first.map(str::trim) == Some("cls")
             && !sig.contains("@staticmethod")
@@ -350,15 +400,6 @@ impl Caller<'_, '_> {
             }
             None => fns,
         }
-    }
-
-    /// Does a body around the call bind the name the call is written
-    /// with, where the call site names what a file-level `import … as`
-    /// says that name stands for?
-    pub(super) fn rebinds_alias(&self, chain: &[FlowScope], call: &MapCall) -> bool {
-        let written = call.text.split('(').next().unwrap_or("").trim();
-        let bound = |f: &FlowScope| f.locals.contains(written) || f.rebound.contains(written);
-        self.file.family == Family::Python && written != call.site.name && chain.iter().any(bound)
     }
 
     /// Is the receiver written as an alias a project import binds, where
