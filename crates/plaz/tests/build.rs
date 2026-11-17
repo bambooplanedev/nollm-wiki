@@ -1,14 +1,12 @@
 mod common;
 
+use common::headings;
+
 use std::path::Path;
 
 const A: &str = "use std::collections::BTreeMap;\nuse crate::b::Store;\n\npub fn run(x: u8, cb: impl Fn(u8), m: BTreeMap<u8, u8>, s: &Store) {\n    helper(x);\n    cb(x);\n    m.get(&x);\n    s.get(x);\n    BTreeMap::<u8, u8>::new();\n    std::mem::drop(x);\n    other_crate::go();\n    let t = make();\n    t.get(x);\n}\nfn helper(_x: u8) {}\nfn make() -> crate::b::Store { todo!() }\n";
 const B: &str = "pub struct Store;\nimpl Store {\n    pub fn get(&self, _k: u8) {}\n}\npub struct Cache;\nimpl Cache {\n    pub fn get(&self, _k: u8) {}\n}\n";
 const LIB: &str = "mod a;\nmod b;\n";
-
-fn headings(page: &str) -> Vec<&str> {
-    page.lines().filter_map(|l| l.strip_prefix("## ")).collect()
-}
 
 #[test]
 fn rust_calls_take_the_four_forms() {

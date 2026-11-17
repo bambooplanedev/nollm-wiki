@@ -9,7 +9,7 @@ size — the real decisions of each function.
 
 It is a module of the [kulman set](../../README.md), beside [calque](../calque/README.md). It depends on `wiki-code` of this workspace by path and nothing of calque's wiki. Its version is the workspace's.
 
-**Preview.** Rust and Python are charted; other languages get a "not covered yet" note. `kulman install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
+**Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `kulman install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
 
 ## Build
 
@@ -21,7 +21,7 @@ It is a module of the [kulman set](../../README.md), beside [calque](../calque/R
     plaz build [--source DIR] [--vault DIR]
     plaz setup [--source DIR] --scope repo|local [--remove]
 
-`plaz build` reads the code under `--source` (default `.`) and writes the pages to `<source>/.kulman/map/`, or to `map/` under `--vault`. Pages carry the front matter `tags: ["plaz"]` and `kind: map`; a file at a page path without it is left alone and counted. Unchanged pages are not rewritten, pages of files that are gone are removed, and the output is the same on every run. A tree with no code file leaves the folder as it is, with a warning. Code references become wikilinks to calque's code pages when the vault holds a compiled calque wiki, and plain `path:start-end` otherwise.
+`plaz build` reads the code under `--source` (default `.`) and writes the pages to `<source>/.kulman/map/`, or to `map/` under `--vault`. Pages carry the front matter `tags: ["plaz"]` and `kind: map`; a file at a page path without it is left alone and counted. Unchanged pages are not rewritten, pages of files that are gone are removed, and the output is the same on every run. A tree with no code file leaves the folder as it is, with a warning. Directories named `third_party`, `third-party`, `vendor`, `vendored` or `node_modules` are skipped; a line in a `.ignore` file (such as `extern/`) skips any other bundled code. Code references become wikilinks to calque's code pages when the vault holds a compiled calque wiki, and plain `path:start-end` otherwise.
 
 `plaz setup` builds the map and makes sure `.kulman/` is ignored by git:
 

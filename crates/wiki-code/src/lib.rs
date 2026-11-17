@@ -2,9 +2,9 @@
 //!
 //! What a second consumer may rely on (the contract):
 //!
-//! - [`extract`], [`handles`], [`CodeFile`], [`CodeUnit`] and
-//!   [`pair_declarations`]: one file's items, and the C/C++ pairing across
-//!   files;
+//! - [`extract`], [`handles`], [`is_cpp_fragment`], [`CodeFile`],
+//!   [`CodeUnit`] and [`pair_declarations`]: one file's items, and the C/C++
+//!   pairing across files;
 //! - [`analyze()`] with [`Analyzed`], [`Source`], [`Def`] and [`Call`]: the same
 //!   items with the trees they came from, each item's node, the calls under a
 //!   node with their literal text, and comment text. `analyze` is `None` for
@@ -50,6 +50,6 @@ mod formats {
 mod summary;
 
 pub use analyze::{analyze, Analyzed, Call, Def, Source};
-pub use formats::code::{extract, handles, CodeFile, CodeUnit};
+pub use formats::code::{extract, handles, is_cpp_fragment, CodeFile, CodeUnit};
 pub use formats::extract_cpp::pair_declarations;
 pub use tree_sitter;

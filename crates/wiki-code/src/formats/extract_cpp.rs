@@ -67,6 +67,14 @@ pub use pairs::pair_declarations;
 /// data declarator would classify both alike), pre-existing and rare:
 /// documented, not fixed.
 ///
+/// A conversion operator has two shapes. Parsed correctly, it is an
+/// `operator_cast` declarator with no `function_declarator` around it, which
+/// the `operator_cast` pattern below captures whole. After `inline` or
+/// `constexpr`, `K::operator bool()` parses as a function `bool` returning
+/// the type `K::operator`, which the plain patterns capture: `misread_cast`
+/// tells it, and it is the method `K::operator bool`, its signature as
+/// written. `code::name_text` cuts either one's name to `operator bool`.
+///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
 ///   * declarator nesting beyond ONE wrapper — the wrapper patterns reach
 ///     exactly one deep, and `int** f()` is
@@ -75,43 +83,49 @@ pub use pairs::pair_declarations;
 ///   * an out-of-line nested class (`class Outer::Inner { … }`), whose
 ///     `class_specifier` names itself with a `qualified_identifier`, not the
 ///     `type_identifier` these patterns require;
-///   * template specializations, whose head is a `template_declaration`
-///     wrapping a `class_specifier` named by a `template_type`;
-///   * a conversion operator (`operator bool()`) parses as an `operator_cast`
-///     declarator under an `abstract_function_declarator`, not an
-///     `operator_name` under a `function_declarator`, so no pattern here
-///     reaches it;
+///   * class template specializations, whose head is a `template_declaration`
+///     wrapping a `class_specifier` named by a `template_type`. A function's
+///     explicit specialization (`template <> int blank<int>()`) is an item:
+///     its declarator names a `template_function`, captured whole, so the
+///     item is named `blank<int>` as written and stays apart from the
+///     primary template `blank`;
 ///   * a file-scope most-vexing parse (`Level* p(q);` at namespace scope)
 ///     matches the pointer-declarator wrapper pattern and is exported as a
 ///     function: `cpp_placement`'s rejection only fires inside a
 ///     `compound_statement`, which a namespace or file scope is not.
 const QUERY: &str = r"
 (function_definition declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 (field_declaration declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 (declaration declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 
 (function_definition declarator: (function_declarator declarator: [
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))])) @def
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))])) @def
 
 (function_definition declarator: [
   (pointer_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))
   (reference_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))]) @def
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))]) @def
 (field_declaration declarator: [
   (pointer_declarator (function_declarator declarator: (_) @name))
   (reference_declarator (function_declarator declarator: (_) @name))]) @def
 (declaration declarator: [
   (pointer_declarator (function_declarator declarator: (_) @name))
   (reference_declarator (function_declarator declarator: (_) @name))]) @def
+
+(function_definition declarator: [
+  (operator_cast) @name
+  (qualified_identifier name: (operator_cast) @name)
+  (qualified_identifier name: (qualified_identifier name: (operator_cast) @name))]) @def
+(declaration declarator: (operator_cast) @name) @def
 
 (class_specifier   name: (type_identifier) @name) @def
 (struct_specifier  name: (type_identifier) @name) @def
@@ -289,6 +303,22 @@ fn cpp_owner_anchor(name: Node) -> Node {
     outermost(name, |k| k == "qualified_identifier")
 }
 
+/// The `operator` of a conversion operator the grammar misread, `name` the
+/// name it gave the function: after `inline` or `constexpr`, `K::operator
+/// bool()` parses as a function `bool` returning the type `K::operator`.
+/// `operator` is a keyword, so a type so named is always this misreading.
+/// The node is that type's last name; the scope before it is the class.
+pub(crate) fn misread_cast<'t>(name: Node<'t>, text: &str) -> Option<Node<'t>> {
+    let written = outermost(name, |k| k == "qualified_identifier");
+    let function = written.parent()?;
+    let mut ty = (function.parent()?.child_by_field_name("type"))
+        .filter(|_| function.kind() == "function_declarator")?;
+    while ty.kind() == "qualified_identifier" {
+        ty = ty.child_by_field_name("name")?;
+    }
+    (text.get(ty.byte_range()) == Some("operator")).then_some(ty)
+}
+
 /// Reject first, then resolve the owner. The order matters: `int x;` inside a
 /// `struct Tmp` declared inside a method has a `field_declaration_list`
 /// ancestor, so an owner-first rule would export `int Tmp::x` from a function
@@ -357,8 +387,7 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 ///     `parenthesized_declarator`, which the general `(_)` capture once
 ///     extracted as the garbage name `(*get_fn(void))`. The narrowed
 ///     patterns also miss a pointer-returning definition qualified three or
-///     more levels deep (`Level* a::b::Book::top()`) and a definition named
-///     by a template-id (`void f<int>(int)`);
+///     more levels deep (`Level* a::b::Book::top()`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
@@ -376,7 +405,18 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
             .named_children(&mut declarator.walk())
             .find(|c| c.kind() == "function_declarator")?;
     }
-    let inner = declarator.child_by_field_name("declarator")?;
+    // A conversion operator's `operator_cast` sits under the qualifier
+    // itself, with no `function_declarator` around it.
+    let inner = if declarator.kind() == "qualified_identifier" {
+        declarator
+    } else {
+        declarator.child_by_field_name("declarator")?
+    };
+    // `K` of a misread `K::operator bool()`, whatever qualifies `bool`.
+    if let Some(operator) = misread_cast(inner, text) {
+        let class = operator.parent()?.child_by_field_name("scope")?;
+        return text.get(class.byte_range()).map(str::to_string);
+    }
     if inner.kind() != "qualified_identifier" {
         return None;
     }
@@ -442,8 +482,9 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
     }
 }
 
-/// True when `d` declares a FUNCTION: a `function_declarator`, or one wrapped
-/// in a single pointer/reference wrapper.
+/// True when `d` declares a FUNCTION: a `function_declarator`, a conversion
+/// operator's `operator_cast`, or a `function_declarator` wrapped in a single
+/// pointer/reference wrapper.
 ///
 /// `extract_code`'s `is_function` gate reads the `declarator` field of a
 /// `field_declaration`/`declaration` to tell a C++ header's method
@@ -460,7 +501,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
 /// that no pattern extracts.
 pub(crate) fn is_function_declarator(d: Node) -> bool {
-    if d.kind() == "function_declarator" {
+    if matches!(d.kind(), "function_declarator" | "operator_cast") {
         return true;
     }
     if !matches!(d.kind(), "pointer_declarator" | "reference_declarator") {

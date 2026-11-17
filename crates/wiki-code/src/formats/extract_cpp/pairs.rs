@@ -1,7 +1,7 @@
 //! C++ declaration pairing: matches header declarations to their implementations, per file pair and per project.
 
 use super::arity;
-use crate::formats::code::{ext_of, is_cpp, module_stem, source_rank, CodeUnit};
+use crate::formats::code::{ext_of, is_cpp, is_cpp_fragment, module_stem, source_rank, CodeUnit};
 use crate::model::{CodeItem, CodeItemKind, PairRole};
 use std::collections::BTreeMap;
 
@@ -36,7 +36,14 @@ fn header_and_impl<'a, U: CodeUnit>(
     ids: &[&'a str],
 ) -> Option<(&'a str, &'a str)> {
     let rank = |id: &str| source_rank(entities[id].path());
-    let impls: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == 2).collect();
+    let mut impls: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == 2).collect();
+    // A fragment is an implementation only when no real implementation file is there.
+    if impls
+        .iter()
+        .any(|id| !is_cpp_fragment(entities[*id].path()))
+    {
+        impls.retain(|id| !is_cpp_fragment(entities[*id].path()));
+    }
     let min = ids.iter().map(|id| rank(id)).min().filter(|r| *r < 2)?;
     let headers: Vec<&str> = ids.iter().copied().filter(|id| rank(id) == min).collect();
     match (impls.as_slice(), headers.as_slice()) {
@@ -151,5 +158,75 @@ fn pair_project<U: CodeUnit>(
                 pairs.push((hid.to_string(), hi, cid.to_string(), ci));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::CodeFile;
+
+    #[test]
+    fn a_same_stem_fragment_is_no_second_implementation() {
+        let mut files: BTreeMap<String, CodeFile> = [
+            ("lib/vec.h", "class Vec {\n  int len() const;\n};\n"),
+            ("lib/vec.cpp", "int Vec::len() const { return 0; }\n"),
+            ("lib/vec.inl", "int Vec::len() const { return 1; }\n"),
+        ]
+        .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
+        .into();
+        pair_declarations(&mut files);
+        let len = |p: &str| files[p].items.iter().find(|i| i.name == "len").unwrap();
+        assert_eq!(
+            len("lib/vec.h").twin,
+            Some(len("lib/vec.cpp").span("lib/vec.cpp"))
+        );
+    }
+
+    fn len_twin(
+        files: [(&str, &str); 3],
+        hdr: &str,
+        imp: &str,
+    ) -> (Option<String>, Option<String>) {
+        let mut files: BTreeMap<String, CodeFile> = files
+            .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
+            .into();
+        pair_declarations(&mut files);
+        let len = |p: &str| files[p].items.iter().find(|i| i.name == "len").unwrap();
+        (len(hdr).twin.clone(), len(imp).twin.clone())
+    }
+
+    #[test]
+    fn a_fragment_is_the_implementation_when_it_is_the_only_companion() {
+        let h = "class Vec {\n  int len() const;\n};\n";
+        let d = "int Vec::len() const { return 0; }\n";
+        let (ht, it) = len_twin(
+            [("lib/vec.h", h), ("lib/vec.inl", d), ("lib/other.cpp", d)],
+            "lib/vec.h",
+            "lib/vec.inl",
+        );
+        assert_eq!(ht.as_deref(), Some("lib/vec.inl:1-1"));
+        assert_eq!(it.as_deref(), Some("lib/vec.h:2-2"));
+    }
+
+    #[test]
+    fn a_real_implementation_wins_over_two_fragments() {
+        let h = "class Vec {\n  int len() const;\n};\n";
+        let d = "int Vec::len() const { return 0; }\n";
+        let mut files: BTreeMap<String, CodeFile> = [
+            ("lib/vec.h", h),
+            ("lib/vec.cpp", d),
+            ("lib/vec.inl", d),
+            ("lib/vec.tcc", d),
+        ]
+        .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
+        .into();
+        pair_declarations(&mut files);
+        let hdr = files["lib/vec.h"]
+            .items
+            .iter()
+            .find(|i| i.name == "len")
+            .unwrap();
+        assert_eq!(hdr.twin.as_deref(), Some("lib/vec.cpp:1-1"));
     }
 }

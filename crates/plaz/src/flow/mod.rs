@@ -1,19 +1,25 @@
 //! The flow stage: each function body as a decision flow, walked by one
 //! walker that asks a language's `Hooks` what each node is.
 
+mod calls;
+mod cpp;
 mod python;
 mod rust;
 
+pub use calls::FlowScope;
+
+pub(crate) use cpp::{fields as cpp_fields, macros as cpp_macros, module_code as cpp_module_code};
 pub(crate) use python::{module_code, module_imports};
 
 use crate::model::{Arm, Comment, ExitKind, File, Flow, MapCall, NotDrawn, Step, Target};
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use wiki_code::index::Family;
-use wiki_code::model::{CallVia, CodeItemKind};
+use wiki_code::model::{CallSite, CallVia, CodeItemKind};
 use wiki_code::support::{clip, one_line};
 use wiki_code::tree_sitter::Node;
-use wiki_code::{Analyzed, Source};
+use wiki_code::{Analyzed, Def, Source};
 
 /// What one node is to the flow.
 pub(crate) enum FlowNode<'a> {
@@ -23,9 +29,11 @@ pub(crate) enum FlowNode<'a> {
         head: Option<String>,
         arms: Vec<ArmNode<'a>>,
         exhaustive: bool,
+        breakable: bool,
     },
     /// The children outside `body`, `each` and `orelse` are walked before
     /// the loop; `each`, run before every iteration, into its `pre`;
+    /// `post`, run after the body, into its `post`;
     /// `orelse` (Python's loop `else`) runs when the loop ends unbroken.
     Loop {
         header: String,
@@ -35,6 +43,10 @@ pub(crate) enum FlowNode<'a> {
         endless: bool,
         hidden_exit: bool,
         orelse: Option<Node<'a>>,
+        test_after: bool,
+        /// See `Step::Loop::once`.
+        once: bool,
+        post: Option<Node<'a>>,
     },
     /// A `finally` clause: its children are the body.
     Finally,
@@ -47,6 +59,9 @@ pub(crate) enum FlowNode<'a> {
     },
     /// Counted, then walked as `Plain`.
     NotDrawn(NotDrawn),
+    /// A name written as a whole statement (a C macro): kept in
+    /// `Flow::words`, then walked as `Plain`.
+    Word(String),
 }
 
 pub(crate) struct ArmNode<'a> {
@@ -58,6 +73,7 @@ pub(crate) struct ArmNode<'a> {
     pub at: Node<'a>,
     /// Walked in order as the arm's body.
     pub body: Vec<Node<'a>>,
+    pub falls: bool,
     /// Walked as the arm's `after`.
     pub after: Option<Node<'a>>,
 }
@@ -68,6 +84,10 @@ pub(crate) struct Bindings {
     pub types: BTreeMap<String, String>,
     /// See `Flow::rebound`.
     pub rebound: BTreeSet<String>,
+    /// See `Flow::local_class`.
+    pub local_class: bool,
+    /// See `Flow::inner`.
+    pub inner: BTreeSet<String>,
 }
 
 impl Bindings {
@@ -91,6 +111,8 @@ impl Bindings {
                 .collect(),
             names: seen.into_keys().collect(),
             rebound: BTreeSet::new(),
+            local_class: false,
+            inner: BTreeSet::new(),
         }
     }
 }
@@ -98,40 +120,101 @@ impl Bindings {
 pub(crate) struct Hooks {
     pub flow_node: for<'a> fn(Node<'a>, &str) -> FlowNode<'a>,
     pub bindings: fn(Node, &str) -> Bindings,
+    /// A call site that is no call to chart (a C++ cast).
+    pub skips_call: fn(&CallSite) -> bool,
 }
 
 pub(crate) fn hooks(family: Family) -> Option<&'static Hooks> {
     match family {
         Family::Rust => Some(&rust::HOOKS),
         Family::Python => Some(&python::HOOKS),
-        Family::Cpp | Family::Go | Family::Shell | Family::Ecma => None,
+        Family::Cpp => Some(&cpp::HOOKS),
+        Family::Go | Family::Shell | Family::Ecma => None,
     }
 }
 
 /// Fill `file.flows` for every function item that is not a test, not nested
-/// and has a node; count the tests in `file.test_fns`.
+/// and has a node that is a function definition, and `file.declarations`
+/// for those whose node is a declaration; count the tests in
+/// `file.test_fns`.
+///
+/// With two trees (C/C++, `sources` being `[first-branch copy, main]`), a
+/// function of the copy is walked in the main tree when its range there
+/// is a whole function definition; otherwise in the copy, with the
+/// directive groups in its range counted. A main-tree item overlapping a
+/// copy function is that function read from another branch: marked
+/// `nested`, so it has no section, no anchor and is no call target.
 pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
     let Some(hooks) = hooks(file.family) else {
         return;
     };
-    for (i, (it, def)) in file.code.items.iter().zip(&analyzed.defs).enumerate() {
-        let is_fn = matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method);
-        let Some(def) = def.as_ref().filter(|_| is_fn && !it.nested) else {
+    let main = analyzed.sources.len().saturating_sub(1);
+    let fn_defs: Vec<(usize, &Def)> = (file.code.items.iter().zip(&analyzed.defs))
+        .enumerate()
+        .filter(|(_, (it, _))| matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method))
+        .filter_map(|(i, (it, d))| Some((i, d.as_ref().filter(|_| !it.nested)?)))
+        .collect();
+    for &(i, def) in &fn_defs {
+        let it = &file.code.items[i];
+        let twice = main > 0
+            && def.source == main
+            && (fn_defs.iter()).any(|(_, c)| {
+                c.source < main && c.start_byte < def.end_byte && def.start_byte < c.end_byte
+            });
+        let mut source = &analyzed.sources[def.source];
+        if twice {
+            file.code.items[i].nested = true;
+            continue;
+        }
+        let Some(mut node) = source.node(def) else {
             continue;
         };
+        if let Some(b) = (file.family == Family::Cpp)
+            .then(|| cpp::bodiless(node))
+            .flatten()
+        {
+            if !it.test {
+                file.cpp.declarations.insert(i, b);
+            }
+            continue;
+        }
         if it.test {
             file.test_fns += 1;
             continue;
         }
-        let source = &analyzed.sources[def.source];
-        if let Some(node) = source.node(def) {
-            let w = Walker {
-                source,
-                hooks,
-                comments: comments(source, node),
-            };
-            file.flows.insert(i, w.flow(node));
+        let mut groups = Vec::new();
+        if def.source < main {
+            let whole = &analyzed.sources[main];
+            match whole
+                .node(def)
+                .filter(|m| m.kind() == "function_definition" && !m.has_error())
+            {
+                Some(m) => (source, node) = (whole, m),
+                None => groups = cpp::directive_groups(source.text(), def.start_byte..def.end_byte),
+            }
         }
+        let w = Walker {
+            source,
+            hooks,
+            comments: comments(source, node),
+            groups,
+            drawn: RefCell::new(BTreeSet::new()),
+        };
+        let mut flow = w.flow(node);
+        let hidden = w.groups.len() - w.drawn.borrow().len();
+        let early = match file.family {
+            Family::Cpp => cpp::before_case(node, source.text()),
+            Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => 0,
+        };
+        for (k, n) in [
+            (NotDrawn::Preprocessor, hidden),
+            (NotDrawn::BeforeCase, early),
+        ] {
+            if n > 0 {
+                *flow.not_drawn.entry(k).or_default() += n;
+            }
+        }
+        file.flows.insert(i, flow);
     }
 }
 
@@ -171,6 +254,10 @@ struct Walker<'s> {
     source: &'s Source,
     hooks: &'static Hooks,
     comments: Vec<Note>,
+    /// Charting from a C/C++ first-branch tree: the directive groups in
+    /// the function's range, and the indices of those drawn as branches.
+    groups: Vec<cpp::Group>,
+    drawn: RefCell<BTreeSet<usize>>,
 }
 
 fn text<'t>(n: Node, src: &'t str) -> &'t str {
@@ -193,6 +280,8 @@ impl<'s> Walker<'s> {
             locals: b.names,
             types: b.types,
             rebound: b.rebound,
+            local_class: b.local_class,
+            inner: b.inner,
             syntax_errors: root.has_error(),
             ..Flow::default()
         };
@@ -203,8 +292,51 @@ impl<'s> Walker<'s> {
     }
 
     fn children(&self, n: Node, flow: &mut Flow, out: &mut Vec<Step>) {
-        for c in n.children(&mut n.walk()) {
-            self.walk(c, flow, out);
+        let kids: Vec<Node> = n.children(&mut n.walk()).collect();
+        self.run(&kids, &n.byte_range(), flow, out);
+    }
+
+    /// Walks `kids` in order. A run of them in the first branch of a
+    /// directive group opening in `within`, when it has a step, is the arm
+    /// of that group's branch: if the group has no other branch, the way
+    /// past it skips the run; else the group stays counted and the way
+    /// past runs through branches not drawn (`Step::Branch::unseen`).
+    fn run(&self, kids: &[Node], within: &Range<usize>, flow: &mut Flow, out: &mut Vec<Step>) {
+        let mut kids = kids.iter().copied().peekable();
+        while let Some(c) = kids.next() {
+            let Some((i, g)) = cpp::holding(&self.groups, c, within) else {
+                self.walk(c, flow, out);
+                continue;
+            };
+            let mut body = vec![c];
+            body.extend(std::iter::from_fn(|| {
+                kids.next_if(|k| k.end_byte() <= g.body.end)
+            }));
+            let mut steps = Vec::new();
+            self.run(&body, &g.body, flow, &mut steps);
+            // A group holding no step (a `#define`) stays counted.
+            if steps.is_empty() {
+                continue;
+            }
+            if g.only {
+                self.drawn.borrow_mut().insert(i);
+            }
+            out.push(Step::Branch {
+                head: None,
+                line: g.line,
+                arms: vec![Arm {
+                    cond: Some(g.cond.clone()),
+                    line: g.line,
+                    comment: None,
+                    pre: Vec::new(),
+                    body: steps,
+                    falls: false,
+                    after: Vec::new(),
+                }],
+                exhaustive: false,
+                breakable: false,
+                unseen: !g.only,
+            });
         }
     }
 
@@ -234,12 +366,20 @@ impl<'s> Walker<'s> {
         after
     }
 
-    /// The steps of `nodes`, each walked in order.
-    fn sub<'t>(&self, nodes: impl IntoIterator<Item = Node<'t>>, flow: &mut Flow) -> Vec<Step> {
+    /// The steps of `nodes`, walked in order as `run` walks a sequence:
+    /// the groups that open among them (after `from`, else after the
+    /// first) recognised.
+    fn sub<'t>(
+        &self,
+        from: Option<usize>,
+        nodes: impl IntoIterator<Item = Node<'t>>,
+        flow: &mut Flow,
+    ) -> Vec<Step> {
+        let nodes: Vec<Node> = nodes.into_iter().collect();
+        let start = from.or_else(|| nodes.first().map(Node::start_byte));
+        let within = start.unwrap_or(0)..nodes.last().map_or(0, Node::end_byte);
         let mut out = Vec::new();
-        for c in nodes {
-            self.walk(c, flow, &mut out);
-        }
+        self.run(&nodes, &within, flow, &mut out);
         out
     }
 
@@ -251,6 +391,11 @@ impl<'s> Walker<'s> {
             }
             FlowNode::NotDrawn(k) => {
                 *flow.not_drawn.entry(k).or_default() += 1;
+                self.children(n, flow, out);
+                self.calls(n, out);
+            }
+            FlowNode::Word(w) => {
+                flow.words.push(w);
                 self.children(n, flow, out);
                 self.calls(n, out);
             }
@@ -271,11 +416,15 @@ impl<'s> Walker<'s> {
                     body,
                 });
             }
-            FlowNode::Nested { name, body } => out.push(Step::Nested {
-                name: name.unwrap_or_else(|| format!("closure L{}", line(n))),
-                line: line(n),
-                flow: self.flow(body),
-            }),
+            FlowNode::Nested { name, body } => {
+                let mut nested = self.flow(body);
+                flow.words.append(&mut nested.words);
+                out.push(Step::Nested {
+                    name: name.unwrap_or_else(|| format!("closure L{}", line(n))),
+                    line: line(n),
+                    flow: nested,
+                });
+            }
             FlowNode::Loop {
                 header,
                 body,
@@ -284,12 +433,21 @@ impl<'s> Walker<'s> {
                 endless,
                 hidden_exit,
                 orelse,
+                test_after,
+                once,
+                post,
             } => {
-                let except: Vec<Node> = each.into_iter().chain([body]).chain(orelse).collect();
+                let except: Vec<Node> = each
+                    .into_iter()
+                    .chain([body])
+                    .chain(post)
+                    .chain(orelse)
+                    .collect();
                 let rest = self.around(n, &except, flow, out);
-                let pre = self.sub(each, flow);
-                let steps = self.sub([body], flow);
-                let after = self.sub(orelse, flow);
+                let pre = self.sub(None, each, flow);
+                let steps = self.sub(None, [body], flow);
+                let post = self.sub(None, post, flow);
+                let after = self.sub(None, orelse, flow);
                 out.push(Step::Loop {
                     header,
                     line: line(n),
@@ -300,13 +458,17 @@ impl<'s> Walker<'s> {
                     endless,
                     hidden_exit,
                     orelse: after,
+                    test_after,
+                    once,
+                    post,
                 });
-                out.extend(self.sub(rest, flow));
+                out.extend(self.sub(None, rest, flow));
             }
             FlowNode::Branch {
                 head,
                 arms,
                 exhaustive,
+                breakable,
             } => {
                 let inner: Vec<Node> = arms
                     .iter()
@@ -324,15 +486,17 @@ impl<'s> Walker<'s> {
                             .last()
                             .or(a.cond_node.as_ref())
                             .map_or(after, Node::end_byte);
-                        let pre = self.sub(a.cond_node, flow);
-                        let body = self.sub(a.body, flow);
-                        let late = self.sub(a.after, flow);
+                        let pre = self.sub(None, a.cond_node, flow);
+                        // A `case` arm's group may open right after its label.
+                        let body = self.sub(Some(a.at.start_byte()), a.body, flow);
+                        let late = self.sub(None, a.after, flow);
                         Arm {
                             cond: a.cond,
                             line: line(a.at),
                             comment,
                             pre,
                             body,
+                            falls: a.falls,
                             after: late,
                         }
                     })
@@ -342,8 +506,10 @@ impl<'s> Walker<'s> {
                     line: line(n),
                     arms,
                     exhaustive,
+                    breakable,
+                    unseen: false,
                 });
-                out.extend(self.sub(rest, flow));
+                out.extend(self.sub(None, rest, flow));
             }
         }
     }
@@ -351,13 +517,31 @@ impl<'s> Walker<'s> {
     fn calls(&self, n: Node, out: &mut Vec<Step>) {
         let text = self.source.text();
         for c in self.source.calls_at(n) {
+            if (self.hooks.skips_call)(&c.site) {
+                continue;
+            }
             let lit = &text[c.start_byte..c.end_byte];
-            let root = matches!(c.site.via, CallVia::Path(_))
-                .then(|| lit.split("::").next().unwrap_or("").trim().to_string());
+            // The callee is the call node's own: a `(` may stand in its
+            // template arguments (`K<decltype(f())>::g()`).
+            let whole = |x: &Node| x.byte_range() == (c.start_byte..c.end_byte);
+            let inner = n.descendant_for_byte_range(c.start_byte, c.end_byte);
+            let node = std::iter::successors(inner, Node::parent)
+                .take_while(whole)
+                .find_map(|x| x.child_by_field_name("function"))
+                .map(|f| &text[f.byte_range()]);
+            // A chain's first `(` opens its receiver's call: a member call's
+            // callee is its node's only.
+            let callee = match c.site.via {
+                CallVia::Path(_) => {
+                    Some(node.unwrap_or_else(|| lit.split('(').next().unwrap_or("")))
+                }
+                CallVia::Member(None) => node,
+                CallVia::Bare | CallVia::SelfRecv | CallVia::Member(Some(_)) => None,
+            };
             out.push(Step::Call(MapCall {
                 text: clip(lit, 80),
                 site: c.site,
-                root,
+                callee: callee.map(str::to_string),
                 target: Target::Hidden,
             }));
         }
@@ -397,202 +581,5 @@ impl<'s> Walker<'s> {
     }
 }
 
-/// A copy of one enclosing flow's names, for [`Flow::each_call_mut`].
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FlowScope {
-    pub locals: BTreeSet<String>,
-    pub types: BTreeMap<String, String>,
-    pub rebound: BTreeSet<String>,
-}
-
-impl Flow {
-    /// Every call once, in source order, nested flows included, with the
-    /// chain of flows enclosing it, outermost first.
-    pub fn each_call<'a>(&'a self, f: &mut impl FnMut(&[&'a Flow], &'a MapCall)) {
-        fn walk<'a>(
-            steps: &'a [Step],
-            chain: &mut Vec<&'a Flow>,
-            f: &mut impl FnMut(&[&'a Flow], &'a MapCall),
-        ) {
-            for s in steps {
-                match s {
-                    Step::Call(c) => f(chain, c),
-                    Step::Branch { arms, .. } => {
-                        for a in arms {
-                            walk(&a.pre, chain, f);
-                            walk(&a.body, chain, f);
-                        }
-                        for a in arms {
-                            walk(&a.after, chain, f);
-                        }
-                    }
-                    Step::Loop {
-                        pre, body, orelse, ..
-                    } => {
-                        walk(pre, chain, f);
-                        walk(body, chain, f);
-                        walk(orelse, chain, f);
-                    }
-                    Step::Finally { body, .. } => walk(body, chain, f),
-                    Step::Nested { flow, .. } => {
-                        chain.push(flow);
-                        walk(&flow.steps, chain, f);
-                        chain.pop();
-                    }
-                    Step::Exit { .. } => {}
-                }
-            }
-        }
-        walk(&self.steps, &mut vec![self], f);
-    }
-
-    /// [`Flow::each_call`] with each call mutable and the chain as copies.
-    pub fn each_call_mut(&mut self, f: &mut impl FnMut(&[FlowScope], &mut MapCall)) {
-        fn walk(
-            steps: &mut [Step],
-            chain: &mut Vec<FlowScope>,
-            f: &mut impl FnMut(&[FlowScope], &mut MapCall),
-        ) {
-            for s in steps {
-                match s {
-                    Step::Call(c) => f(chain, c),
-                    Step::Branch { arms, .. } => {
-                        for a in arms.iter_mut() {
-                            walk(&mut a.pre, chain, f);
-                            walk(&mut a.body, chain, f);
-                        }
-                        for a in arms {
-                            walk(&mut a.after, chain, f);
-                        }
-                    }
-                    Step::Loop {
-                        pre, body, orelse, ..
-                    } => {
-                        walk(pre, chain, f);
-                        walk(body, chain, f);
-                        walk(orelse, chain, f);
-                    }
-                    Step::Finally { body, .. } => walk(body, chain, f),
-                    Step::Nested { flow, .. } => scoped(flow, chain, f),
-                    Step::Exit { .. } => {}
-                }
-            }
-        }
-        fn scoped(
-            flow: &mut Flow,
-            chain: &mut Vec<FlowScope>,
-            f: &mut impl FnMut(&[FlowScope], &mut MapCall),
-        ) {
-            chain.push(FlowScope {
-                locals: flow.locals.clone(),
-                types: flow.types.clone(),
-                rebound: flow.rebound.clone(),
-            });
-            walk(&mut flow.steps, chain, f);
-            chain.pop();
-        }
-        scoped(self, &mut Vec::new(), f);
-    }
-}
-
 #[cfg(test)]
-pub(crate) mod testutil {
-    use crate::model::{File, Step};
-
-    pub fn file(path: &str, src: &str) -> File {
-        crate::source::project([(path.to_string(), src.to_string())])
-            .files
-            .remove(path)
-            .unwrap()
-    }
-
-    fn flow<'f>(f: &'f File, name: &str) -> &'f crate::model::Flow {
-        let i = f.code.items.iter().position(|it| it.name == name).unwrap();
-        &f.flows[&i]
-    }
-
-    /// One line per step, two spaces per depth.
-    pub fn flow_lines(path: &str, src: &str, name: &str) -> Vec<String> {
-        fn lines(steps: &[Step], depth: usize, out: &mut Vec<String>) {
-            let pad = "  ".repeat(depth);
-            for s in steps {
-                match s {
-                    Step::Branch {
-                        head, line, arms, ..
-                    } => {
-                        let head = head.as_ref().map_or(String::new(), |h| format!(" {h}"));
-                        out.push(format!("{pad}branch{head} @{line}"));
-                        for a in arms {
-                            let mut pre = Vec::new();
-                            lines(&a.pre, depth + 1, &mut pre);
-                            out.extend(
-                                pre.into_iter()
-                                    .map(|l| format!("{pad}  pre {}", &l[pad.len() + 2..])),
-                            );
-                            let cond = a.cond.as_deref().unwrap_or("else");
-                            let note = a.comment.as_ref().map_or(String::new(), |c| {
-                                format!(" # {}", c.text.replace('\n', "\\n"))
-                            });
-                            out.push(format!("{pad}  arm {cond} @{}{note}", a.line));
-                            lines(&a.body, depth + 2, out);
-                        }
-                        for a in arms.iter().filter(|a| !a.after.is_empty()) {
-                            out.push(format!(
-                                "{pad}  after {}",
-                                a.cond.as_deref().unwrap_or("else")
-                            ));
-                            lines(&a.after, depth + 2, out);
-                        }
-                    }
-                    Step::Finally { line, body } => {
-                        out.push(format!("{pad}finally @{line}"));
-                        lines(body, depth + 1, out);
-                    }
-                    Step::Loop {
-                        header,
-                        line,
-                        pre,
-                        body,
-                        orelse,
-                        ..
-                    } => {
-                        out.push(format!("{pad}loop {header} @{line}"));
-                        let mut p = Vec::new();
-                        lines(pre, depth + 1, &mut p);
-                        out.extend(
-                            p.into_iter()
-                                .map(|l| format!("{pad}  pre {}", &l[pad.len() + 2..])),
-                        );
-                        lines(body, depth + 1, out);
-                        if !orelse.is_empty() {
-                            out.push(format!("{pad}  else"));
-                            lines(orelse, depth + 2, out);
-                        }
-                    }
-                    Step::Call(c) => out.push(format!("{pad}call {} @{}", c.text, c.site.line)),
-                    Step::Exit { text, line, .. } => out.push(format!("{pad}exit {text} @{line}")),
-                    Step::Nested { name, line, flow } => {
-                        out.push(format!("{pad}nested {name} @{line}"));
-                        lines(&flow.steps, depth + 1, out);
-                    }
-                }
-            }
-        }
-        let f = file(path, src);
-        let mut out = Vec::new();
-        lines(&flow(&f, name).steps, 0, &mut out);
-        out
-    }
-
-    /// The function's not-drawn counts by label, sorted by label.
-    pub fn not_drawn(path: &str, src: &str, name: &str) -> Vec<(String, usize)> {
-        let f = file(path, src);
-        let mut v: Vec<_> = flow(&f, name)
-            .not_drawn
-            .iter()
-            .map(|(k, n)| (k.label().to_string(), *n))
-            .collect();
-        v.sort();
-        v
-    }
-}
+pub(crate) mod testutil;

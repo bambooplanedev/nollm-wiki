@@ -10,6 +10,7 @@ use wiki_code::Analyzed;
 pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
+    skips_call: |_| false,
 };
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
@@ -20,6 +21,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             head: None,
             arms: if_arms(n, src),
             exhaustive: false,
+            breakable: false,
         },
         "match_statement" => match_branch(n, src),
         "for_statement" | "while_statement" => match field("body") {
@@ -39,6 +41,9 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                     }),
                     hidden_exit: false,
                     orelse: field("alternative"),
+                    test_after: false,
+                    once: false,
+                    post: None,
                 }
             }
             None => FlowNode::Plain,
@@ -49,6 +54,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             head: None,
             arms: try_arms(n, src),
             exhaustive: true,
+            breakable: false,
         },
         "try" if parent == "try_statement" => FlowNode::NotDrawn(NotDrawn::TryBlock),
         "finally_clause" => FlowNode::Finally,
@@ -85,6 +91,7 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
             cond_node: cond,
             at,
             body: at.child_by_field_name("consequence").into_iter().collect(),
+            falls: false,
             after: None,
         }
     };
@@ -98,6 +105,7 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
                 cond_node: None,
                 at: alt,
                 body: alt.child_by_field_name("body").into_iter().collect(),
+                falls: false,
                 after: None,
             }
         });
@@ -146,6 +154,7 @@ fn match_branch<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 cond_node: guard,
                 at: c,
                 body: c.child_by_field_name("consequence").into_iter().collect(),
+                falls: false,
                 after: None,
             }
         })
@@ -154,6 +163,7 @@ fn match_branch<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         head,
         arms,
         exhaustive,
+        breakable: false,
     }
 }
 
@@ -170,6 +180,7 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
         cond_node: None,
         at: n,
         body: n.child_by_field_name("body").into_iter().collect(),
+        falls: false,
         // The `else` runs after the body only.
         after: n
             .named_children(&mut n.walk())
@@ -189,6 +200,7 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
             cond_node: h.child_by_field_name("value"),
             at: h,
             body: body.into_iter().collect(),
+            falls: false,
             after: None,
         });
     }

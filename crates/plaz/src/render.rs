@@ -3,10 +3,11 @@
 
 use crate::chart::{chart, coverage, relative};
 use crate::flow::hooks;
-use crate::model::{FnId, Target};
+use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
 use crate::resolve::Resolved;
 use crate::write::Links;
+use wiki_code::index::{owner_key, Family};
 
 pub use crate::chart::mermaid_label;
 
@@ -64,77 +65,38 @@ pub struct Page {
 
 pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
     let p = r.project();
-    let link = |f: &FnId| {
-        let it = &p.files[&f.path].code.items[f.item];
-        format!(
-            "[[{}#{}|{}]]",
-            names.page(&f.path),
-            names.anchor(f),
-            link_text(&it.qualified_name())
-        )
-    };
     p.files
         .iter()
         .map(|(path, file)| {
-            let (dir, name) = path
-                .rsplit_once('/')
-                .map_or(("", path.as_str()), |(d, n)| (d, n));
-            let title = if dir.is_empty() {
-                name.to_string()
-            } else {
-                format!("{name} · {dir}")
-            };
-            let mut out = format!(
-                "---\ntitle: {}\ntags: [\"plaz\"]\nkind: map\nsource: {}\n---\n",
-                yaml_str(&title),
-                yaml_str(path)
-            );
-            out.push_str(&format!("Code: {}\n", links.code(path, 1, file.lines)));
-            if file.syntax_errors {
-                out.push_str(
-                    "\nSyntax errors in this file: some functions may be missing from the map.\n",
-                );
-            }
-            if hooks(file.family).is_none() {
-                out.push_str(&format!(
-                    "\nNot covered yet: {} flowcharts.\n",
-                    file.family.as_str()
-                ));
-            }
-            if file.module_code {
-                out.push_str("\nModule-level code is not charted.\n");
-            }
-            if file.test_fns > 0 {
-                let s = if file.test_fns == 1 { "" } else { "s" };
-                out.push_str(&format!(
-                    "\nTest code is not charted: {} function{s}.\n",
-                    file.test_fns
-                ));
-            }
-            for (&item, flow) in &file.flows {
+            let mut out = head(path, file, links);
+            let mut items: Vec<usize> = file
+                .flows
+                .keys()
+                .chain(file.cpp.declarations.keys())
+                .copied()
+                .collect();
+            items.sort_unstable();
+            for item in items {
                 let it = &file.code.items[item];
                 let me = FnId {
                     path: path.clone(),
                     item,
                 };
                 out.push_str(&format!(
-                    "\n## {}\n{} · {}\n\n**Called from**\n",
+                    "\n## {}\n{} · {}\n\n",
                     names.anchor(&me),
                     inline_code(&it.signature),
                     links.code(path, it.start_line, it.end_line)
                 ));
-                let callers = names.callers(&me);
-                if callers.is_empty() {
-                    out.push_str("- none found\n");
-                }
-                for (caller, line, certain) in callers {
-                    let how = if *certain {
-                        "certainly".to_string()
-                    } else {
-                        format!("may call (if this {} is this one)", inline_code(&it.name))
-                    };
-                    out.push_str(&format!("- {how}: {} L{line}\n", link(caller)));
-                }
+                let Some(flow) = file.flows.get(&item) else {
+                    out.push_str(&match file.cpp.declarations.get(&item) {
+                        Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
+                        Some(Bodiless::Deleted) => "Deleted.\n".to_string(),
+                        Some(Bodiless::Declared) | None => defined_at(r, names, &me),
+                    });
+                    continue;
+                };
+                out.push_str(&called_from(p, names, &me));
                 let href = |t: &FnId| {
                     format!(
                         "{}#{}",
@@ -147,36 +109,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     chart(&it.qualified_name(), path, flow, &href),
                     coverage(flow)
                 ));
-                out.push_str("\n**Calls**\n");
-                let mut calls = Vec::new();
-                flow.each_call(&mut |_, c| {
-                    let to = match &c.target {
-                        Target::Resolved(t) => link(t),
-                        Target::OneOf {
-                            candidates,
-                            outside,
-                        } => {
-                            let all: Vec<String> = candidates.iter().map(link).collect();
-                            let or = if *outside {
-                                ", or outside the project"
-                            } else {
-                                ""
-                            };
-                            format!("one of: {}{or}", all.join(", "))
-                        }
-                        Target::Outside => "outside the project".to_string(),
-                        Target::Hidden => "target not visible".to_string(),
-                    };
-                    calls.push(format!(
-                        "- {} L{} → {to}\n",
-                        inline_code(&c.text),
-                        c.site.line
-                    ));
-                });
-                if calls.is_empty() {
-                    calls.push("- none found\n".to_string());
-                }
-                out.push_str(&calls.concat());
+                out.push_str(&calls(p, names, flow));
             }
             Page {
                 rel_path: format!("{}.md", names.page(path)),
@@ -184,6 +117,130 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
             }
         })
         .collect()
+}
+
+/// `[[page#anchor|Qualified::name]]` of the function `f`.
+fn link(p: &Project, names: &Names, f: &FnId) -> String {
+    let it = &p.files[&f.path].code.items[f.item];
+    format!(
+        "[[{}#{}|{}]]",
+        names.page(&f.path),
+        names.anchor(f),
+        link_text(&it.qualified_name())
+    )
+}
+
+/// The front matter, the code link and the page's notes.
+fn head(path: &str, file: &File, links: &Links) -> String {
+    let (dir, name) = path.rsplit_once('/').map_or(("", path), |(d, n)| (d, n));
+    let title = if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} · {dir}")
+    };
+    let mut out = format!(
+        "---\ntitle: {}\ntags: [\"plaz\"]\nkind: map\nsource: {}\n---\n",
+        yaml_str(&title),
+        yaml_str(path)
+    );
+    out.push_str(&format!("Code: {}\n", links.code(path, 1, file.lines)));
+    if file.syntax_errors {
+        out.push_str("\nSyntax errors in this file: some functions may be missing from the map.\n");
+    }
+    if hooks(file.family).is_none() {
+        out.push_str(&format!(
+            "\nNot covered yet: {} flowcharts.\n",
+            file.family.as_str()
+        ));
+    }
+    if file.module_code {
+        out.push_str("\nModule-level code is not charted.\n");
+    }
+    if file.test_fns > 0 {
+        let s = if file.test_fns == 1 { "" } else { "s" };
+        out.push_str(&format!(
+            "\nTest code is not charted: {} function{s}.\n",
+            file.test_fns
+        ));
+    }
+    out
+}
+
+/// The **Called from** list of the charted function `me`.
+fn called_from(p: &Project, names: &Names, me: &FnId) -> String {
+    let file = &p.files[&me.path];
+    let it = &file.code.items[me.item];
+    let mut out = String::from("**Called from**\n");
+    let callers = names.callers(me);
+    // A C++ constructor, destructor or operator is mostly called by code
+    // no call site shows.
+    let unseen = file.family == Family::Cpp
+        && (it.name.starts_with('~')
+            || it.owner.as_deref().map(owner_key) == Some(it.name.as_str())
+            || it
+                .name
+                .strip_prefix("operator")
+                .is_some_and(|r| !r.starts_with(|c: char| c.is_alphanumeric() || c == '_')));
+    if callers.is_empty() && unseen {
+        out.push_str("- constructions and operator uses are not traced\n");
+    } else if callers.is_empty() {
+        out.push_str("- none found\n");
+    }
+    for (caller, line, certain) in callers {
+        let how = if *certain {
+            "certainly".to_string()
+        } else {
+            format!("may call (if this {} is this one)", inline_code(&it.name))
+        };
+        out.push_str(&format!("- {how}: {} L{line}\n", link(p, names, caller)));
+    }
+    out
+}
+
+/// The **Calls** list of `flow`.
+fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
+    let link = |f: &FnId| link(p, names, f);
+    let mut calls = Vec::new();
+    flow.each_call(&mut |_, c| {
+        let to = match &c.target {
+            Target::Resolved(t) => link(t),
+            Target::OneOf {
+                candidates,
+                outside,
+            } => {
+                let all: Vec<String> = candidates.iter().map(link).collect();
+                let or = if *outside {
+                    ", or outside the project"
+                } else {
+                    ""
+                };
+                format!("one of: {}{or}", all.join(", "))
+            }
+            Target::Outside => "outside the project".to_string(),
+            Target::Hidden => "target not visible".to_string(),
+        };
+        calls.push(format!(
+            "- {} L{} → {to}\n",
+            inline_code(&c.text),
+            c.site.line
+        ));
+    });
+    if calls.is_empty() {
+        calls.push("- none found\n".to_string());
+    }
+    format!("\n**Calls**\n{}", calls.concat())
+}
+
+/// The line of the declaration `me`'s section: its definitions
+/// (`Resolved::definitions`).
+fn defined_at(resolved: &Resolved, names: &Names, me: &FnId) -> String {
+    let link = |d: &FnId| link(resolved.project(), names, d);
+    let all: Vec<String> = resolved.definitions(me).iter().map(link).collect();
+    match all.as_slice() {
+        [] => "No definition in the project.\n".to_string(),
+        [one] => format!("Defined at {one}\n"),
+        _ => format!("Defined at one of: {}\n", all.join(", ")),
+    }
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ use wiki_code::tree_sitter::Node;
 pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
+    skips_call: |_| false,
 };
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];
@@ -38,6 +39,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             head: None,
             arms: if_arms(n, src),
             exhaustive: false,
+            breakable: false,
         },
         // `let P = v else { … };`: the pattern is the decision.
         "let_declaration" => match (field("value"), field("alternative")) {
@@ -49,6 +51,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                         cond_node: Some(value),
                         at: n,
                         body: Vec::new(),
+                        falls: false,
                         after: None,
                     },
                     ArmNode {
@@ -56,10 +59,12 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                         cond_node: None,
                         at: alt,
                         body: vec![alt],
+                        falls: false,
                         after: None,
                     },
                 ],
                 exhaustive: false,
+                breakable: false,
             },
             _ => FlowNode::Plain,
         },
@@ -76,6 +81,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                                 cond_node: pattern,
                                 at: a,
                                 body: a.child_by_field_name("value").into_iter().collect(),
+                                falls: false,
                                 after: None,
                             }
                         })
@@ -83,6 +89,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 })
                 .unwrap_or_default(),
             exhaustive: true,
+            breakable: false,
         },
         "for_expression" | "while_expression" | "loop_expression" => match field("body") {
             Some(body) => FlowNode::Loop {
@@ -93,6 +100,9 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 endless: n.kind() == "loop_expression",
                 hidden_exit: hides_break(body, src),
                 orelse: None,
+                test_after: false,
+                once: false,
+                post: None,
             },
             None => FlowNode::Plain,
         },
@@ -227,6 +237,7 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
             cond_node: cond,
             at: i,
             body: i.child_by_field_name("consequence").into_iter().collect(),
+            falls: false,
             after: None,
         });
         let Some(e) = i.child_by_field_name("alternative") else {
@@ -240,6 +251,7 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
                 cond_node: None,
                 at: e,
                 body: body.into_iter().collect(),
+                falls: false,
                 after: None,
             }),
         }

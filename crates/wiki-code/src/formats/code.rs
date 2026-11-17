@@ -16,7 +16,10 @@ use calls::{arity_of, attach_call_sites};
 pub(crate) use calls::{calls_at, import_aliases, is_function};
 use doc::{item_doc_line, item_doc_text, leading_doc};
 pub(crate) use doc::{plain_comment_text, plain_doc};
-pub use lang::{ext_of, handles, is_cpp, is_shell, source_rank, validate_queries, CODE_EXTENSIONS};
+pub use lang::{
+    ext_of, handles, is_cpp, is_cpp_fragment, is_shell, source_rank, validate_queries,
+    CODE_EXTENSIONS,
+};
 use lang::{lang_for_ext, QUERIES};
 pub(crate) use lang::{LangSpec, Lead, Placement};
 pub(crate) use signature::is_comment_kind;
@@ -627,7 +630,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 Placement::Nested => (Vec::new(), true),
                 Placement::Rejected => continue,
             };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+            let name_text = parts.name.and_then(|n| name_text(n, text));
             let shape = (spec.shape)(def);
             let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
             let public = if nested {
@@ -638,8 +641,13 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     // Resolved once, after `placement` has accepted the item, and
                     // then used for both the signature and the classification, so
                     // the node's kind is derived once.
-                    let sig =
-                        build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
+                    // A misread conversion operator already reads `K::operator
+                    // bool` in the source: nothing for the owner to replace.
+                    let misread = parts
+                        .name
+                        .is_some_and(|n| super::extract_cpp::misread_cast(n, text).is_some());
+                    let spliced = owner.as_deref().filter(|_| !misread);
+                    let sig = build_signature(text, def, parts.name, spliced, &spec, &shape);
                     if !sig.is_empty() {
                         let kind = classify(parts.name, owner.as_deref(), shape.rank);
                         let group = group_key(owner.as_deref(), name_text, def, text, &spec);
@@ -780,6 +788,28 @@ fn last_row(node: Node) -> usize {
     }
 }
 
+/// The text an `@name` node names. A C++ conversion operator has no node
+/// for its name alone: its `@name` is the whole `operator_cast`
+/// (`operator Kind*() const`), and the name is what precedes the function
+/// declarator nested in it (`operator Kind*`). `None` for a cast with no
+/// function declarator, which names nothing.
+fn name_text<'a>(name: Node, text: &'a str) -> Option<&'a str> {
+    // A misread one's name runs from its `operator` to the type it names.
+    if let Some(operator) = super::extract_cpp::misread_cast(name, text) {
+        let end = outermost(name, |k| k == "qualified_identifier").end_byte();
+        return text.get(operator.start_byte()..end);
+    }
+    if name.kind() != "operator_cast" {
+        return text.get(name.byte_range());
+    }
+    let params = std::iter::successors(name.child_by_field_name("declarator"), |d| {
+        d.named_child(u32::try_from(d.named_child_count()).ok()?.checked_sub(1)?)
+    })
+    .find(|d| d.kind() == "abstract_function_declarator")?;
+    text.get(name.start_byte()..params.start_byte())
+        .map(str::trim_end)
+}
+
 /// Whether nothing but whitespace precedes `node` on its first line. A
 /// comment trailing code (`int n; ///< Count.`, `var n = 5 // the limit`)
 /// belongs to that code, so the lead walk must not read it as the next
@@ -834,7 +864,7 @@ fn code_item<'t>(
         return None;
     }
 
-    let name_text = text.get(name.byte_range())?;
+    let name_text = name_text(name, text)?;
     let top = (spec.sig_start)(def);
     // `first` is where the range starts unless the plain block becomes the
     // doc; `cursor` is how far the walk has climbed, over that block too.
