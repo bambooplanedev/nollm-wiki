@@ -689,6 +689,16 @@ fn a_call_written_from_the_global_namespace_skips_the_callers_namespaces() {
             "::Lone::make() → one of: src/x.h:7, or outside"
         ]
     );
+    // A header may get such a `using` from the file that includes it.
+    let lean = "inline int lean() { return ::port::open(6) + ::Lone::make(); }\n";
+    let files = [("src/x.h", h), ("src/lean.h", lean)];
+    assert_eq!(
+        cpp_targets(&files, "src/lean.h", "lean"),
+        [
+            "::port::open(6) → hidden",
+            "::Lone::make() → one of: src/x.h:7, or outside"
+        ]
+    );
 }
 
 #[test]

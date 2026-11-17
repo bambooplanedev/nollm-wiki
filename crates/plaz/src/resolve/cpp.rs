@@ -18,6 +18,7 @@ use fold::{Key, Loose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallSite, CallVia, CodeItem, CodeItemKind};
+use wiki_code::support::source_rank;
 
 /// What the project's C/C++ files say before any call is looked at. A page
 /// is a position in the project's key order, as in the index.
@@ -465,9 +466,15 @@ impl Caller<'_, '_, '_> {
         let root = root.unwrap_or(q);
         // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
         // `filesystem`) starts at `std`.
-        // `::a` the project has only under another namespace is not it.
-        let absent =
-            written.starts_with("::") && self.aliased(root).is_none() && !self.at_root(root);
+        // `::a` the project has only under another namespace is not it;
+        // in a header, or a file another includes, a `using` of the
+        // includer may still bring it out.
+        let shared = source_rank(cpp.pages[self.page].0) < 2
+            || cpp.closures.iter().any(|c| c.contains(&self.page));
+        let absent = written.starts_with("::")
+            && !shared
+            && self.aliased(root).is_none()
+            && !self.at_root(root);
         let root = self.unaliased(root);
         let project = !absent
             && (cpp.types.contains(root)
