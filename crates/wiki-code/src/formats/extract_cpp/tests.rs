@@ -455,6 +455,9 @@ fn blank_line_or_trailing_comment_is_not_a_doc() {
     let src = "int a;\n// Frobs the widget.\n\nvoid f();\nint n; // Counts the rows.\nvoid g();\n";
     assert_eq!(doc_of("f.h", src, "f"), (None, 4));
     assert_eq!(doc_of("f.h", src, "g"), (None, 6));
+    // A comment trailing the opening brace has no code node beside it.
+    let src = "class Book { /// Opens the book.\n  void open();\n};\n";
+    assert_eq!(doc_of("b.h", src, "open"), (None, 2));
 }
 
 #[test]
