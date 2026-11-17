@@ -145,7 +145,7 @@ fn rust_placement(def: Node, text: &str) -> Placement {
 ///
 /// Shared by both callers so they cannot drift: `rust_owner` reaches an
 /// `impl_item` from a member inside its `declaration_list`, while
-/// `rust_header_group` starts at the header itself — and a member must land in
+/// the `header_group` hook starts at the header itself — and a member must land in
 /// the same group its own header does.
 fn trait_impl_owner(impl_item: Node, text: &str) -> Option<String> {
     let ty = text.get(impl_item.child_by_field_name("type")?.byte_range())?;
@@ -160,14 +160,6 @@ fn trait_impl_owner(impl_item: Node, text: &str) -> Option<String> {
 /// read; keep it next to the one place it is written.
 pub(crate) fn is_trait_impl(owner: &str) -> bool {
     owner.starts_with('<')
-}
-
-/// The group a trait-impl header shares with its own methods.
-fn rust_header_group(def: Node, text: &str) -> Option<String> {
-    if def.kind() != "impl_item" {
-        return None;
-    }
-    trait_impl_owner(def, text)
 }
 
 /// Rust's grammar-specific shapes.
@@ -273,7 +265,7 @@ pub(crate) fn rust_spec() -> LangSpec {
         strip_trailing: &[';', '=', '{'],
         placement: rust_placement,
         owner_sep: "::",
-        header_group: rust_header_group,
+        header_group: trait_impl_owner,
         item_lead: rust_lead,
         // Every public item also matches a @def pattern in `QUERY`, whose gate
         // decides it; an @item-only match is private or restricted.
