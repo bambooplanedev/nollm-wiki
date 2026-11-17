@@ -336,8 +336,8 @@ pub struct Comment {
 pub struct MapCall {
     pub text: String,
     pub site: CallSite,
-    /// First segment of a multi-segment path.
-    pub root: Option<String>,
+    /// A path call's callee as written, to its arguments: `text` is clipped.
+    pub path: Option<String>,
     pub target: Target,
 }
 

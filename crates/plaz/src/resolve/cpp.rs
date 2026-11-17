@@ -365,13 +365,10 @@ impl Caller<'_, '_> {
         let (cpp, site) = (self.cpp, &call.site);
         // `::a::b` of `::a::b::f<T>(…)`: a leading `::` names the global
         // namespace only, wherever the qualifier is looked up.
-        let callee = untemplated(call.text.split('(').next().unwrap_or(""));
+        let callee = untemplated(call.path.as_deref().unwrap_or(""));
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
-        // `Box<int>` of `Box<int>::f()` is the type `Box`; `a` of `::a::f()`.
-        let root = match call.root.as_deref() {
-            Some("") => written.trim_start_matches("::").split("::").next(),
-            r => r.map(owner_key),
-        };
+        // `Box` of `Box<int>::f()`; `a` of `::a::f()`.
+        let root = written.trim_start_matches("::").split("::").next();
         let root = root.unwrap_or(q);
         // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
         // `filesystem`) starts at `std`.

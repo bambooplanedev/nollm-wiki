@@ -513,12 +513,12 @@ impl<'s> Walker<'s> {
                 continue;
             }
             let lit = &text[c.start_byte..c.end_byte];
-            let root = matches!(c.site.via, CallVia::Path(_))
-                .then(|| lit.split("::").next().unwrap_or("").trim().to_string());
+            let path = matches!(c.site.via, CallVia::Path(_))
+                .then(|| lit.split('(').next().unwrap_or("").to_string());
             out.push(Step::Call(MapCall {
                 text: clip(lit, 80),
                 site: c.site,
-                root,
+                path,
                 target: Target::Hidden,
             }));
         }

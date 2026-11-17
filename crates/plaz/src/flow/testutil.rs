@@ -11,7 +11,7 @@ pub fn call(name: &str) -> Step {
             args: Some(0),
             line: 1,
         },
-        root: None,
+        path: None,
         target: Target::Hidden,
     })
 }

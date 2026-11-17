@@ -271,7 +271,10 @@ impl Caller<'_, '_> {
                 open: false,
             },
             CallVia::Path(q) => {
-                let root = call.root.as_deref().unwrap_or(q);
+                let root = call
+                    .path
+                    .as_deref()
+                    .map_or(q.as_str(), |p| p.split("::").next().unwrap_or("").trim());
                 if standard(self.file, root) {
                     Evidence::Outside
                 } else if let Some(&std) = self.names.external.get(root) {
