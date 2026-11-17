@@ -382,7 +382,9 @@ impl Caller<'_, '_> {
         } else if cpp.types.contains(q) {
             self.on_qualifier(call, q, written)
         } else if cpp.namespaces.contains(q) {
-            self.free(site, Some(written)).unwrap_or(Evidence::Hidden)
+            // `::a::b` of `::a::b::f()` keeps its colons.
+            let rooted = callee.rsplit_once("::").map_or(q, |w| w.0);
+            self.free(site, Some(rooted)).unwrap_or(Evidence::Hidden)
         } else {
             Evidence::Hidden
         }
@@ -449,7 +451,8 @@ impl Caller<'_, '_> {
                 Err(Missing::Outside | Missing::Unseen | Missing::Nowhere) => {}
             }
         }
-        if let Some(found) = self.free(site, None) {
+        let global = call.text.starts_with("::").then_some("::");
+        if let Some(found) = self.free(site, global) {
             return found;
         }
         self.made(name, Evidence::Outside)

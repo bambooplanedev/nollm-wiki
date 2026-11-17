@@ -563,6 +563,25 @@ fn a_call_qualified_from_the_global_namespace_reaches_its_free_function() {
 }
 
 #[test]
+fn a_call_written_from_the_global_namespace_skips_the_callers_namespaces() {
+    let h = "namespace net { namespace port { int open(int fd); } }\nint open(int fd);\nnamespace io { int open(int fd); }\nnamespace detail { int helper(int v); }\nnamespace b { namespace detail { int helper(int v); } }\n";
+    let main = "#include \"x.h\"\nnamespace net { int a() { return ::port::open(1); } }\nnamespace io { int c() { return ::open(2); } }\nnamespace b { int d() { return ::detail::helper(3); } }\n";
+    let files = [("src/x.h", h), ("src/main.cpp", main)];
+    let calls: Vec<String> = ["a", "c", "d"]
+        .iter()
+        .flat_map(|f| cpp_targets(&files, "src/main.cpp", f))
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            "::port::open(1) → hidden",
+            "::open(2) → src/x.h:2",
+            "::detail::helper(3) → src/x.h:4"
+        ]
+    );
+}
+
+#[test]
 fn a_declaration_does_not_fold_onto_a_namesake_in_another_outer_namespace() {
     let h = "namespace snow { namespace util {\nint melt(int v);\n} }\n";
     let def = "#include \"snow.h\"\nnamespace rain { namespace util {\nint melt(int v) { return v; }\n} }\n";

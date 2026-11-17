@@ -7,7 +7,8 @@ use wiki_code::support::source_rank;
 
 impl Caller<'_, '_> {
     /// The free functions `site` names, of a namespace whose path ends in
-    /// `ns` (the qualifier as written) when given: in C those of the
+    /// `ns` (the qualifier as written) when given, or is it after a leading
+    /// `::`: in C those of the
     /// caller's file first; those of the caller's file and the files it
     /// includes; else any other not local to its file (in a header, called
     /// from a header, it may be), which may also be something outside. A
@@ -15,8 +16,11 @@ impl Caller<'_, '_> {
     /// is open. None by argument count: the same over the variadic ones.
     pub(super) fn free(&self, site: &CallSite, ns: Option<&str>) -> Option<Evidence> {
         let cpp = self.cpp;
+        // `::a` is `a` of the global namespace only; `::` that namespace.
+        let exact = ns.is_some_and(|w| w.starts_with("::"));
         // `k::b` under `namespace k = a;` is `a::b`.
         let ns = ns.map(|w| {
+            let w = w.trim_start_matches("::");
             let (root, rest) = w.split_once("::").map_or((w, None), |(r, t)| (r, Some(t)));
             match (self.aliased(root), rest) {
                 (Some(a), Some(rest)) => format!("{a}::{rest}"),
@@ -30,7 +34,7 @@ impl Caller<'_, '_> {
             // `int a::core::run(int)` is `run` of the namespace `a::core`.
             Some(q) => {
                 let at = fold_scope(cpp.pages[c.0].1, c.1, &cpp.owners);
-                at == q || at.ends_with(&format!("::{q}"))
+                at == q || (!exact && at.ends_with(&format!("::{q}")))
             }
         };
         let named = cpp
