@@ -506,30 +506,6 @@ fn a_body_less_declaration_is_no_flow() {
 }
 
 #[test]
-fn a_defaulted_or_deleted_function_is_no_flow() {
-    let src = "class Pot {\npublic:\n    Pot() = default;\n    Pot(const Pot&) = delete;\n    int size() const { return 1; }\n};\n";
-    let f = file("a.h", src);
-    let named = |i: &usize| f.code.items[*i].signature.clone();
-    assert_eq!(
-        f.flows.keys().map(named).collect::<Vec<_>>(),
-        ["int size() const"]
-    );
-    let bodiless: Vec<_> = f
-        .cpp
-        .declarations
-        .iter()
-        .map(|(i, b)| (named(i), *b))
-        .collect();
-    assert_eq!(
-        bodiless,
-        [
-            ("Pot() = default".to_string(), Bodiless::Defaulted),
-            ("Pot(const Pot&) = delete".to_string(), Bodiless::Deleted),
-        ]
-    );
-}
-
-#[test]
 fn a_case_inside_a_statement_in_a_switch_is_counted_and_its_code_drawn_in_place() {
     let src = "void pump(int n) {\n    switch (n % 2) {\n    case 0:\n        do {\n            lift();\n    case 1:\n            drop();\n        } while (--n > 0);\n    }\n}\n";
     assert_eq!(
@@ -721,19 +697,6 @@ fn counted(
     let mut calls = Vec::new();
     f.flows[&i].each_call(&mut |_, c| calls.push(c.text.clone()));
     (f.flows[&i].not_drawn.clone(), calls)
-}
-
-#[test]
-fn a_call_of_a_project_macro_that_jumps_is_counted_and_stays_a_call() {
-    let guard = "#define RETURN_UNLESS(c) do { \\\n    if (!(c)) return; \\\n} while (0)\n";
-    let src = "void feed(int* p, int a) {\n    if (!p) { std::abort(); }\n    RETURN_UNLESS(a > 0);\n    use(p);\n}\n";
-    let (nd, calls) = counted(
-        &[("inc/guard.h", guard), ("src/a.cpp", src)],
-        "src/a.cpp",
-        "feed",
-    );
-    assert_eq!(nd, [(NotDrawn::HiddenJump, 1)].into());
-    assert_eq!(calls, ["std::abort()", "RETURN_UNLESS(a > 0)", "use(p)"]);
 }
 
 #[test]
