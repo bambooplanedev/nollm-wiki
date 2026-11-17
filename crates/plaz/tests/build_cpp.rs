@@ -660,10 +660,20 @@ fn a_call_written_from_the_global_namespace_skips_the_callers_namespaces() {
 
 #[test]
 fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
-    let src = "struct Crate {\n    static int make(int v) { return v; }\n    template <class A, class B, class C> struct Tray {\n        static int make(int v) { return v + 1; }\n    };\n};\nint run() {\n    return Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigned long long>::make(1);\n}\n";
+    let src = "struct Crate {\n    static int make(int v) { return v; }\n    template <class A, class B, class C> struct Tray {\n        static int make(int v) { return v + 1; }\n    };\n};\nint run() {\n    return Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigned long long>::make(1);\n}\nint cut() { return Crate::Tray<int, int, decltype(run())>::make(2) + Crate::Tray<int, int, sizeof(int)>::make(3); }\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
         ["Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigne… → src/a.cpp:4"]
+    );
+    // A parenthesis in the template arguments does not end the qualifier.
+    let mut cut = cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "cut");
+    cut.retain(|c| c.starts_with("Crate"));
+    assert_eq!(
+        cut,
+        [
+            "Crate::Tray<int, int, decltype(run())>::make(2) → src/a.cpp:4",
+            "Crate::Tray<int, int, sizeof(int)>::make(3) → src/a.cpp:4"
+        ]
     );
 }
 
