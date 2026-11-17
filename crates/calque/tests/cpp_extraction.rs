@@ -211,6 +211,42 @@ fn same_stem_files_in_several_directories_pair_within_their_directory() {
     assert!(run("b/book.cpp").get("doc").is_none());
 }
 
+#[test]
+fn a_cpp_fragment_gets_no_page_and_leaves_its_stem_group_paired() {
+    let idx = compile_with_items(&[
+        (
+            "a/vec.h",
+            "struct Vec {\n  /// Count of items.\n  int size() const;\n};\n#include \"vec.inl\"\n",
+        ),
+        (
+            "a/vec.cpp",
+            "#include \"vec.h\"\nint Vec::size() const { return 1; }\n",
+        ),
+        ("a/vec.inl", "inline int helper() { return 2; }\n"),
+        ("b/vec.h", "struct Vec {\n  int size() const;\n};\n"),
+        (
+            "b/vec.cpp",
+            "#include \"vec.h\"\nint Vec::size() const { return 2; }\n",
+        ),
+        ("a/grid.h", "struct Grid {\n#include \"rows.ipp\"\n};\n"),
+        ("a/rows.ipp", "int fill(int v) { return v; }\n"),
+        ("a/box.tcc", "template <class T> T id(T v) { return v; }\n"),
+    ]);
+    let paths: Vec<&str> = idx.0["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths.len(), 5, "{paths:?}");
+    let size = items_of(&idx, "a/vec.cpp")
+        .into_iter()
+        .find(|i| i["name"] == "size")
+        .unwrap();
+    assert_eq!(size["twin"], "a/vec.h:2-3");
+    assert_eq!(size["doc"], "Count of items.");
+}
+
 fn sig_of(items: &[serde_json::Value], owner: Option<&str>, name: &str) -> String {
     let it = items
         .iter()

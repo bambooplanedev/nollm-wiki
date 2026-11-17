@@ -22,6 +22,16 @@ fn ext_of_lowercases_and_source_rank_totally_orders_headers() {
 }
 
 #[test]
+fn a_cpp_fragment_is_read_as_cpp_but_not_handled() {
+    for path in ["a/vec.inl", "a/rows.IPP", "a/box.tcc"] {
+        assert!(is_cpp_fragment(path) && !handles(path), "{path}");
+        let e = crate::extract(path, "int fill(int v) { return v; }\n");
+        assert_eq!((e.lang.as_str(), e.symbols.len()), ("cpp", 1), "{path}");
+    }
+    assert!(!is_cpp_fragment("a/vec.h") && !is_cpp_fragment("a/vec.rs"));
+}
+
+#[test]
 fn defined_keeps_top_level_names_only() {
     // Module declaration, struct field, trait-impl method, trait with a
     // bound, typed const, free fn. Only the four top-level definitions

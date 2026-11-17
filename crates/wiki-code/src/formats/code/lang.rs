@@ -169,7 +169,8 @@ pub(super) fn lang_for_ext(ext: &str) -> Option<LangSpec> {
     })
 }
 
-/// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them too.
+/// The extensions the C++ spec claims; `CODE_EXTENSIONS` lists them all but
+/// the fragments (see `is_cpp_fragment`).
 pub fn is_cpp(ext: &str) -> bool {
     matches!(
         ext,
@@ -220,7 +221,7 @@ pub fn is_shell(source_path: &str) -> bool {
 /// drift: a missing query would strip that language of all symbols and imports.
 pub const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "jsx", "tsx", "vue", "svelte", "go", "cpp", "cc", "cxx", "hpp", "hh",
-    "hxx", "h", "c", "inl", "ipp", "tcc", "mjs", "cjs", "sh", "bash",
+    "hxx", "h", "c", "mjs", "cjs", "sh", "bash",
 ];
 
 /// Each grammar's query, compiled once per process instead of once per file,
@@ -272,4 +273,11 @@ pub fn validate_queries() {
 /// (see `ext_of`) and is not handled.
 pub fn handles(rel_path: &str) -> bool {
     CODE_EXTENSIONS.contains(&ext_of(rel_path).as_str())
+}
+
+/// A C++ file made to be included (`.inl`, `.ipp`, `.tcc`): `extract` reads
+/// it as C++, but `handles` does not claim it, since alone it may be a piece
+/// of a class or namespace body.
+pub fn is_cpp_fragment(rel_path: &str) -> bool {
+    is_cpp(&ext_of(rel_path)) && !handles(rel_path)
 }
