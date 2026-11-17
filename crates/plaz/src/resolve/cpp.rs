@@ -523,24 +523,14 @@ impl Caller<'_, '_, '_> {
                 // A bare call in a template does not search a dependent
                 // base: the free functions may be meant.
                 Ok(found) if found.dependent || local => {
-                    let mut fns = self.ids(found.fns);
-                    return match self.free(site, None) {
-                        Some(Evidence::Found { fns: free, open }) => {
-                            fns.extend(free);
-                            Evidence::Found {
-                                fns,
-                                open: open || local,
-                            }
-                        }
-                        Some(_) | None => Evidence::Found { fns, open: true },
-                    };
-                }
-                Ok(found) => {
-                    return Evidence::Found {
+                    let members = Evidence::Found {
                         fns: self.ids(found.fns),
-                        open: found.open,
-                    }
+                        open: false,
+                    };
+                    let free = self.free(site, None).unwrap_or(Evidence::Outside);
+                    return members.and(free).open_if(local);
                 }
+                Ok(found) => return self.found(found),
                 Err(Missing::Outside) if !local => {
                     return or_free(self.made(name, Evidence::Outside))
                 }
@@ -610,13 +600,16 @@ impl Caller<'_, '_, '_> {
     /// of a class no head shows (`or` found) may be any method too.
     fn or_free(&self, site: &CallSite, or: Evidence) -> Evidence {
         match (self.free(site, None), or) {
-            (Some(Evidence::Found { mut fns, .. }), or) => {
-                if let Evidence::Found { fns: more, .. } = or {
-                    fns.extend(more);
-                }
-                Evidence::Found { fns, open: true }
-            }
+            (Some(free @ Evidence::Found { .. }), or) => free.and(or).open_if(true),
             (Some(_) | None, or) => or,
+        }
+    }
+
+    /// What a lookup found, as evidence.
+    fn found(&self, found: classes::Found) -> Evidence {
+        Evidence::Found {
+            fns: self.ids(found.fns),
+            open: found.open,
         }
     }
 }

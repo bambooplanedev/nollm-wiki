@@ -41,6 +41,38 @@ enum Evidence {
     },
 }
 
+impl Evidence {
+    /// The candidates of both, which may also be something outside when
+    /// either may, or shows no candidate.
+    fn and(self, other: Evidence) -> Evidence {
+        let (mut fns, mut open) = (BTreeSet::new(), false);
+        for e in [self, other] {
+            match e {
+                Evidence::Found {
+                    fns: more,
+                    open: also,
+                } => {
+                    fns.extend(more);
+                    open |= also;
+                }
+                Evidence::Outside | Evidence::Hidden => open = true,
+            }
+        }
+        Evidence::Found { fns, open }
+    }
+
+    /// Candidates that may also be something outside when `open`.
+    fn open_if(self, open: bool) -> Evidence {
+        match self {
+            Evidence::Found { fns, open: was } => Evidence::Found {
+                fns,
+                open: was || open,
+            },
+            e @ (Evidence::Outside | Evidence::Hidden) => e,
+        }
+    }
+}
+
 /// The one place a `Target` is built. The caller stays among its own
 /// candidates: `self.child.depth()` in `depth` may be recursion.
 fn from_evidence(e: Evidence) -> Target {

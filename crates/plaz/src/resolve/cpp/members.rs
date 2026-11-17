@@ -6,28 +6,19 @@ use super::{fits, Caller, Evidence};
 use crate::flow::FlowScope;
 use crate::model::MapCall;
 use crate::source::pointee;
-use std::collections::BTreeSet;
 use wiki_code::index::owner_key;
 use wiki_code::model::{CallSite, CodeItemKind};
 
 /// The candidates of either of two classes a name may be, as found on
 /// each: never certain.
 pub(super) fn either(one: Evidence, other: Evidence) -> Evidence {
-    let (mut fns, mut open) = (BTreeSet::new(), false);
-    for e in [one, other] {
-        match e {
-            Evidence::Found {
-                fns: more,
-                open: also,
-            } => {
-                fns.extend(more);
-                open |= also;
-            }
-            Evidence::Outside | Evidence::Hidden => open = true,
-        }
+    match one.and(other) {
+        Evidence::Found { fns, open } => Evidence::Found {
+            open: open || fns.len() < 2,
+            fns,
+        },
+        e @ (Evidence::Outside | Evidence::Hidden) => e,
     }
-    open |= fns.len() < 2;
-    Evidence::Found { fns, open }
 }
 
 /// The data member `a` and the text after it, of the text after a
@@ -189,10 +180,7 @@ impl Caller<'_, '_, '_> {
     /// project method `f`.
     pub(super) fn on_class(&self, call: &MapCall, class: &str) -> Evidence {
         match self.cpp.lookup(class, &call.site, self.sight(), true) {
-            Ok(found) => Evidence::Found {
-                fns: self.ids(found.fns),
-                open: found.open,
-            },
+            Ok(found) => self.found(found),
             Err(missing) => self.on_data(call, class).unwrap_or_else(|| match missing {
                 Missing::Outside => Evidence::Outside,
                 Missing::Nowhere | Missing::Unseen => self.any_method(call),
@@ -205,10 +193,7 @@ impl Caller<'_, '_, '_> {
     /// an outside base may give it.
     pub(super) fn qualified(&self, call: &MapCall, class: &str) -> Evidence {
         match self.cpp.lookup(class, &call.site, self.sight(), false) {
-            Ok(found) => Evidence::Found {
-                fns: self.ids(found.fns),
-                open: found.open,
-            },
+            Ok(found) => self.found(found),
             Err(missing) => self.on_data(call, class).unwrap_or_else(|| match missing {
                 Missing::Outside => Evidence::Outside,
                 Missing::Unseen => self.any_method(call),
