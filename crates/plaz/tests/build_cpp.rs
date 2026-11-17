@@ -817,6 +817,17 @@ fn a_call_qualified_by_an_inline_namespace_never_links_to_its_siblings_function(
 }
 
 #[test]
+fn an_out_of_line_conversion_operator_calls_its_classs_members() {
+    let h = "namespace rig {\nstruct Gate {\n    int charge;\n    bool valid(int c) const;\n    operator int() const;\n};\n}\n";
+    let src = "#include \"gate.h\"\nbool rig::Gate::valid(int c) const { return c > 0; }\nrig::Gate::operator int() const { return valid(charge); }\n";
+    let files = [("src/gate.h", h), ("src/gate.cpp", src)];
+    assert_eq!(
+        cpp_targets(&files, "src/gate.cpp", "operator int"),
+        ["valid(charge) → src/gate.cpp:2"]
+    );
+}
+
+#[test]
 fn a_cpp_lambda_capturing_by_default_calls_a_local_of_the_enclosing_function_unseen() {
     let src = "int pick() { return 0; }\nint handler(int v) { return v; }\nvoid run() {\n    auto handler = pick();\n    auto go = [&] { handler(1); };\n    go();\n}\n";
     assert_eq!(

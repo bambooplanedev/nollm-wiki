@@ -91,10 +91,24 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
     }
 }
 
-/// The class of `K::operator bool()` when the grammar reads the
-/// definition `d` (after `inline`) as a function `bool` of the type
-/// `K::operator`: no type is named `operator`, so the scope is `K`.
+/// The class of the conversion operator `K::operator bool()` defined by
+/// `d`: the qualifier before its `operator_cast` (`a::K` of
+/// `a::K::operator int()`); or, when the grammar reads the definition
+/// (after `inline`) as a function `bool` of the type `K::operator`, which
+/// no type is named, `K`.
 fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
+    let mut name = d.child_by_field_name("declarator");
+    let start = name.map_or(0, |n| n.start_byte());
+    while let Some(n) = name.filter(|n| n.kind() == "qualified_identifier") {
+        name = n.child_by_field_name("name");
+    }
+    if let Some(cast) = name.filter(|n| n.kind() == "operator_cast" && n.start_byte() > start) {
+        return Some(
+            src[start..cast.start_byte()]
+                .trim_end()
+                .trim_end_matches("::"),
+        );
+    }
     let ty = d
         .child_by_field_name("type")
         .filter(|t| t.kind() == "qualified_identifier")?;
