@@ -4,6 +4,7 @@
 //! [`pruned_dir`]; [`skipped`] and [`walk_memory`] serve the wiki compiler
 //! only and may change with it.
 
+use crate::formats::code::{ext_of, shell_shebang};
 use crate::support::{is_under, normalize_path};
 use ignore::{DirEntry, WalkBuilder};
 use std::collections::HashSet;
@@ -172,7 +173,7 @@ fn walk_with(
         // Deciding afterwards (when the caller extracts, on the extension) is
         // too late: one stray 20GB video sitting in the input tree costs 20GB
         // of RSS before anything ever looks at its name.
-        if !keep(&rel_path) {
+        if !keep(&rel_path) && !shell_script(&abs_path, &rel_path, keep) {
             continue;
         }
         let Ok(bytes) = std::fs::read(&abs_path) else {
@@ -194,6 +195,20 @@ fn walk_with(
         dirs,
         unreadable,
     }
+}
+
+/// Whether a file `keep` refused by its name is a shell script it would keep
+/// as `<name>.sh`: the name has no extension (`pre-commit`) and the first line
+/// is a shell shebang (`shell_shebang`). Reads only that line's first bytes.
+pub fn shell_script(abs_path: &Path, rel_path: &str, keep: &dyn Fn(&str) -> bool) -> bool {
+    use std::io::Read;
+    let mut head = Vec::new();
+    ext_of(rel_path).is_empty()
+        && keep(&format!("{rel_path}.sh"))
+        && std::fs::File::open(abs_path)
+            .and_then(|f| f.take(128).read_to_end(&mut head))
+            .is_ok()
+        && shell_shebang(&head)
 }
 
 /// Walk a memory folder: every ignore rule off (a memory folder is usually

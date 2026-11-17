@@ -17,8 +17,8 @@ pub(crate) use calls::{calls_at, import_aliases, is_function};
 use doc::{item_doc_line, item_doc_text, leading_doc};
 pub(crate) use doc::{plain_comment_text, plain_doc};
 pub use lang::{
-    ext_of, handles, is_cpp, is_cpp_fragment, is_shell, source_rank, validate_queries,
-    CODE_EXTENSIONS,
+    ext_of, handles, is_cpp, is_cpp_fragment, is_shell, shell_shebang, source_rank,
+    validate_queries, CODE_EXTENSIONS,
 };
 use lang::{lang_for_ext, QUERIES};
 pub(crate) use lang::{LangSpec, Lead, Placement};
@@ -101,7 +101,10 @@ pub(crate) type Found = (Vec<Source>, Vec<Option<Def>>);
 /// The one extraction path behind `extract` and `analyze`: the file, and
 /// what its items were built from when its extension has a grammar.
 pub(crate) fn extract_file(rel_path: &str, text: &str) -> (CodeFile, Option<Found>) {
-    let ext = ext_of(rel_path);
+    let ext = match ext_of(rel_path) {
+        e if e.is_empty() && shell_shebang(text.as_bytes()) => "sh".to_string(),
+        e => e,
+    };
     let ext = ext.as_str();
 
     // Test modules are orientation noise that inflate the page body, its

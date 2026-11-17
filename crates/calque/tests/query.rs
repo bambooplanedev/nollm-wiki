@@ -2554,6 +2554,40 @@ fn a_name_in_the_wrong_case_is_not_found_but_its_page_is_listed() {
     assert!(hits.contains(&"src/util.py".to_string()), "{hits:?}");
 }
 
+#[test]
+fn a_shell_script_without_an_extension_is_indexed_by_its_shebang() {
+    let (_d, w) = code_fixture(&[
+        (
+            "scripts/hooks/pre-commit",
+            "#!/bin/sh\nrun_checks() {\n  cargo test\n}\nrun_checks\n",
+        ),
+        (
+            "scripts/deploy",
+            "#!/usr/bin/env bash\nship_release() {\n  true\n}\n",
+        ),
+        // Only a shell shebang counts: no shebang, or another interpreter.
+        ("LICENSE", "lint_unread_marker\n"),
+        (
+            "bin/tool",
+            "#!/usr/bin/env python3\ndef lint_unread_marker():\n    pass\n",
+        ),
+    ]);
+    assert_eq!(
+        symbol_lines(&w.search("run_checks", None, 10)),
+        [(
+            "scripts/hooks/pre-commit".to_string(),
+            2,
+            4,
+            "run_checks".to_string()
+        )]
+    );
+    assert_eq!(
+        hit_paths(&w.search("ship_release", None, 10)),
+        ["scripts/deploy"]
+    );
+    assert!(w.search("lint_unread_marker", None, 10).is_empty());
+}
+
 const NESTED_PY: &str = "\
 def outer(x):
     def mk_run(y):

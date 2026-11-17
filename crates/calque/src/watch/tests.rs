@@ -57,6 +57,15 @@ fn new_handled_file_in_visited_dir_is_relevant() {
 }
 
 #[test]
+fn new_shell_script_without_an_extension_is_relevant() {
+    let (_d, r, w) = compiled();
+    std::fs::write(r.join("src/hook"), "#!/bin/sh\necho hi\n").unwrap();
+    std::fs::write(r.join("src/NOTES"), "plain words\n").unwrap();
+    assert!(w.relevant(&r.join("src/hook")));
+    assert!(!w.relevant(&r.join("src/NOTES")));
+}
+
+#[test]
 fn unhandled_file_is_not_relevant() {
     let (_d, r, w) = compiled();
     assert!(!w.relevant(&r.join("src/a.o")));

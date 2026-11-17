@@ -271,6 +271,9 @@ per question is noise-level: treat single results as anecdotes.
 - **Shell (`.sh`, `.bash`) lists only function definitions.** Top-level
   UPPERCASE assignments are found by `search` only by their exact name; other
   variables (lowercase, inside a function or an `if`) are not indexed.
+  A file with no extension is read only on a `sh` or `bash` shebang
+  (`#!/bin/sh`, `#!/usr/bin/env bash`); a `zsh` or `python3` shebang, or a
+  shell script with another extension (`.zsh`, `.ksh`), is not indexed.
   An assignment with a trailing redirect (`HISTSIZE=-1 2>/dev/null`) is not indexed: the grammar reads it as a command with a missing name, which also swallows an assignment on the next line.
   In a file with parse errors, an assignment inside a function the line regex finds is skipped, and one the grammar could not parse spans its first line only.
   A function passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call

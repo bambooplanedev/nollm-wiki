@@ -205,15 +205,34 @@ pub fn source_rank(source_path: &str) -> u8 {
     match ext_of(source_path).as_str() {
         "h" => 0,
         "hpp" | "hh" | "hxx" => 1,
-        "sh" | "bash" => 3,
+        "sh" | "bash" | "" => 3,
         _ => 2,
     }
 }
 
 /// A shell script: reached only by its path (`source`), never by a module
 /// stem or a defined name, so `import deploy` in Python cannot link `deploy.sh`.
+/// A code file with no extension is one: only a shell shebang
+/// (`shell_shebang`) makes such a file code.
 pub fn is_shell(source_path: &str) -> bool {
-    matches!(ext_of(source_path).as_str(), "sh" | "bash")
+    matches!(ext_of(source_path).as_str(), "sh" | "bash" | "")
+}
+
+/// Whether `head`, a file's first bytes, opens with a `sh` or `bash` shebang
+/// (`#!/bin/sh`, `#!/usr/bin/env bash`): what makes a file with no extension
+/// (`pre-commit`) a shell script.
+pub fn shell_shebang(head: &[u8]) -> bool {
+    let Some(line) = head.strip_prefix(b"#!") else {
+        return false;
+    };
+    let line = line.split(|&b| b == b'\n').next().unwrap_or_default();
+    let line = String::from_utf8_lossy(line);
+    let mut words = line.split_whitespace();
+    let mut program = words.next().map(|w| w.rsplit('/').next().unwrap_or(w));
+    if program == Some("env") {
+        program = words.find(|w| !w.starts_with('-'));
+    }
+    matches!(program, Some("sh" | "bash"))
 }
 
 /// Every extension `handles` claims. `extract` also parses the C++ fragments

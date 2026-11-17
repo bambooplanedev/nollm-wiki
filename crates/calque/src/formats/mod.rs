@@ -78,9 +78,15 @@ impl Registry {
     }
 
     /// Decode bytes lossily, dispatch by extension, fill `source_path` + `content_hash`.
+    /// A file with no extension and a shell shebang goes to the `sh` extractor.
     pub fn extract(&self, rel_path: &str, bytes: &[u8]) -> Option<Entity> {
-        let ext = Self::ext_of(rel_path)?;
-        let extractor = self.by_ext.get(&ext)?;
+        let ext = Self::ext_of(rel_path).filter(|e| self.by_ext.contains_key(e));
+        let shell = || {
+            (wiki_code::support::ext_of(rel_path).is_empty()
+                && wiki_code::support::shell_shebang(bytes))
+            .then(|| "sh".to_string())
+        };
+        let extractor = self.by_ext.get(&ext.or_else(shell)?)?;
         let text = String::from_utf8_lossy(bytes);
         let mut entity = extractor.extract(rel_path, &text);
         entity.source_path = rel_path.to_string();
