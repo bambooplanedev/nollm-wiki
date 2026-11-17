@@ -334,9 +334,10 @@ impl<'a> Cpp<'a> {
 
     pub(super) fn key(&self, c: FnRef) -> Option<Key<'a>> {
         let file = self.pages[c.0].1;
-        let params = file.cpp.params.get(&c.1)?;
+        let item = self.item(c);
+        let params = item.params.as_deref()?;
         let scope = fold_scope(file, c.1, &self.owners);
-        Some((scope, self.item(c).name.as_str(), params.as_str()))
+        Some((scope, item.name.as_str(), params))
     }
 
     /// `fns`, each declaration taken as the definitions of its key: of its

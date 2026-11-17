@@ -173,23 +173,27 @@ fn overloads_pair_by_parameter_count() {
 }
 
 #[test]
-fn overloads_are_left_unpaired() {
+fn same_arity_overloads_pair_by_their_parameter_types() {
     let idx = compile_with_items(&[
-        ("book.h", "class Book {\npublic:\n  /// Int.\n  void apply(int o);\n  void apply(double o);\n};\n"),
-        ("book.cpp", "void Book::apply(int o) {}\nvoid Book::apply(double o) {}\n"),
+        ("book.h", "class Book {\npublic:\n  /// Int.\n  void apply(int o);\n  /// Double.\n  void apply(double o);\n};\n"),
+        ("book.cpp", "void Book::apply(double o) {}\nvoid Book::apply(int o) {}\n"),
     ]);
-    for path in ["book.h", "book.cpp"] {
-        let items = items_of(&idx, path);
-        assert_eq!(
-            items.iter().filter(|i| i["name"] == "apply").count(),
-            2,
-            "{path}"
-        );
-        assert!(items.iter().all(|i| i.get("twin").is_none()), "{path}");
-    }
-    assert!(items_of(&idx, "book.cpp")
-        .iter()
-        .all(|i| i.get("doc").is_none()));
+    let pairs = |path: &str| -> Vec<_> {
+        items_of(&idx, path)
+            .into_iter()
+            .filter(|i| i["name"] == "apply")
+            .map(|i| (i["twin"].clone(), i["doc"].clone()))
+            .collect()
+    };
+    let at = |twin: &str, doc: &str| (serde_json::json!(twin), serde_json::json!(doc));
+    assert_eq!(
+        pairs("book.h"),
+        [at("book.cpp:2-2", "Int."), at("book.cpp:1-1", "Double.")]
+    );
+    assert_eq!(
+        pairs("book.cpp"),
+        [at("book.h:5-6", "Double."), at("book.h:3-4", "Int.")]
+    );
 }
 
 #[test]
@@ -354,7 +358,8 @@ fn a_public_header_pairs_with_definitions_under_src() {
             assert!(it.get("twin").is_none(), "{path}: {it}");
         }
     }
-    // Same-arity overloads stay unpaired across files (Review Focus 1).
+    // Overloads that differ only in `const` have the same parameter types,
+    // so neither key tells them apart and they stay unpaired.
     for path in ["include/lib/api.h", "src/book_find.cc"] {
         let finds = named(&idx, path, "find");
         assert_eq!(finds.len(), 2, "{path}");

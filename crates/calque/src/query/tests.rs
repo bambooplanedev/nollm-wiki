@@ -177,6 +177,7 @@ fn item(kind: CodeItemKind, name: &str, doc: Option<&str>, test: bool) -> CodeIt
         arity: None,
         pair_role: PairRole::Neither,
         namespace: None,
+        params: None,
     }
 }
 

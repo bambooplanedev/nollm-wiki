@@ -105,6 +105,12 @@ pub struct CodeItem {
     /// item, its last segment (`lab::planner` gives `planner`).
     #[serde(skip)]
     pub namespace: Option<String>,
+    /// C/C++ functions only: the parameter types as written, names,
+    /// default values, `struct`-like keywords and whitespace but one space
+    /// between two words dropped (`int,const char*`); `None` when no
+    /// parameter list was found.
+    #[serde(skip)]
+    pub params: Option<String>,
 }
 
 /// C++ only: which side of project-wide pairing an item may take.

@@ -62,7 +62,8 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    declaration, with the one guarded definition (out of line, not `static`,
    not in an anonymous namespace) of a key unique across the project: the
    definition inherits the doc and both items' `twin` name the other's lines;
-   overloads and ambiguous keys stay unpaired. Produces
+   overloads of one parameter count pair by their parameter types, spelled
+   alike and in one namespace, and ambiguous keys stay unpaired. Produces
    `BTreeMap<String, Entity>`.
 4. **Graph + PageRank** (`graph::build_graph`) — builds forward/backward
    links three ways. Mention edges: entity bodies are scanned for other

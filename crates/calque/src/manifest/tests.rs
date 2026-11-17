@@ -201,6 +201,7 @@ fn items_json_keys_each_code_page_by_id_and_skips_pages_without_items() {
             arity: None,
             pair_role: PairRole::Neither,
             namespace: None,
+            params: None,
         },
         CodeItem {
             kind: CodeItemKind::Method,
@@ -221,6 +222,7 @@ fn items_json_keys_each_code_page_by_id_and_skips_pages_without_items() {
             arity: None,
             pair_role: PairRole::Neither,
             namespace: None,
+            params: None,
         },
     ];
     // Each item's keys in declaration order, the `None` ones skipped;

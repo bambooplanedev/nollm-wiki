@@ -59,10 +59,6 @@ pub struct CppFacts {
     /// `static` free functions or inside an anonymous namespace: seen only
     /// where the file is compiled in.
     pub local: BTreeSet<usize>,
-    /// Per C/C++ function item: its parameter types as written, names,
-    /// default values, `struct` and whitespace but one space between two
-    /// words dropped (`int,const char*`).
-    pub params: BTreeMap<usize, String>,
     /// Per C/C++ function item inside a template: the names of the
     /// template parameters in scope, its own and those of the classes
     /// around it.

@@ -221,13 +221,29 @@ per question is noise-level: treat single results as anecdotes.
   specifiers under `#if`.
 - **C++ declaration ↔ definition pairing** crosses files and directories
   when the key `(owner, name, arity)` is unique among all header items and
-  among all implementation items. In both steps (same-stem and
-  project-wide) a header item with a body never pairs, and neither does a
-  `static`, anonymous-namespace or class-body definition in a `.cpp`. Two
-  definitions of one key never pair. A `= delete` or in-class `= default`
-  function counts toward no key, so it never blocks a sibling. Uniqueness can still
-  mislead: namespaces are not compared (a unique-key free function in
-  another named namespace can pair with an unrelated header
+  among all implementation items; overloads that share that key pair when
+  their parameter types, as written, are unique on both sides too and they
+  are in one namespace (a method defined qualified at file scope has none,
+  so a method only must not be known to be in another). A namespace is
+  compared by its last segment, so `a::util::f(int)` pairs with
+  `b::util::f(int)`, and one opened by a macro leaves a colliding free
+  overload unpaired. The types must be spelled alike: `string` beside
+  `std::string` (a name seen through `using`), `unsigned` beside
+  `unsigned int`, `T const*` beside `const T*`, or an attribute on one
+  parameter leaves a colliding overload unpaired (a miss, never a wrong
+  pair), and so do overloads that differ only in `const`. An explicit
+  specialization headed `template<>` pairs only with another. In both
+  steps (same-stem and project-wide) a header item with a body never
+  pairs, and neither does a `static`, anonymous-namespace or class-body
+  definition in a `.cpp`. Two definitions of one key never pair. A
+  `= delete` or in-class `= default` function counts toward no key, so it
+  never blocks a sibling. A same-stem pair made on the parameter count is
+  kept even when another file defines the function with the exact types:
+  the neighbour may spell a type through an alias and the other file may
+  be another program's, so when the types really differ the kept pair is
+  wrong. Uniqueness can still mislead: on
+  `(owner, name, arity)` namespaces are not compared (a unique-key free
+  function in another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file
   (`.c`, `.mm`, `.cu`) is invisible, so a same-key `.cc` function would
   pair instead (none observed). The owner is the last scope only
