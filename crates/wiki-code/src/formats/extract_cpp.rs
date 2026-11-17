@@ -75,8 +75,12 @@ pub use pairs::pair_declarations;
 ///   * an out-of-line nested class (`class Outer::Inner { … }`), whose
 ///     `class_specifier` names itself with a `qualified_identifier`, not the
 ///     `type_identifier` these patterns require;
-///   * template specializations, whose head is a `template_declaration`
-///     wrapping a `class_specifier` named by a `template_type`;
+///   * class template specializations, whose head is a `template_declaration`
+///     wrapping a `class_specifier` named by a `template_type`. A function's
+///     explicit specialization (`template <> int blank<int>()`) is an item:
+///     its declarator names a `template_function`, captured whole, so the
+///     item is named `blank<int>` as written and stays apart from the
+///     primary template `blank`;
 ///   * a conversion operator (`operator bool()`) parses as an `operator_cast`
 ///     declarator under an `abstract_function_declarator`, not an
 ///     `operator_name` under a `function_declarator`, so no pattern here
@@ -87,25 +91,25 @@ pub use pairs::pair_declarations;
 ///     `compound_statement`, which a namespace or file scope is not.
 const QUERY: &str = r"
 (function_definition declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 (field_declaration declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 (declaration declarator: (function_declarator
-  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name)] @name)) @def
+  declarator: [(identifier) (field_identifier) (destructor_name) (operator_name) (template_function)] @name)) @def
 
 (function_definition declarator: (function_declarator declarator: [
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))])) @def
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))])) @def
 
 (function_definition declarator: [
   (pointer_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))
   (reference_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name)] @name))]))]) @def
+    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
+    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
+    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))]) @def
 (field_declaration declarator: [
   (pointer_declarator (function_declarator declarator: (_) @name))
   (reference_declarator (function_declarator declarator: (_) @name))]) @def
@@ -357,8 +361,7 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 ///     `parenthesized_declarator`, which the general `(_)` capture once
 ///     extracted as the garbage name `(*get_fn(void))`. The narrowed
 ///     patterns also miss a pointer-returning definition qualified three or
-///     more levels deep (`Level* a::b::Book::top()`) and a definition named
-///     by a template-id (`void f<int>(int)`);
+///     more levels deep (`Level* a::b::Book::top()`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic

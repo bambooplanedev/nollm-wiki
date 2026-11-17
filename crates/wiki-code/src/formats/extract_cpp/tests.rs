@@ -578,3 +578,32 @@ fn arity_counts_top_level_parameters() {
     );
     assert_eq!(arity("using Cb = int", "Cb"), None);
 }
+
+#[test]
+fn an_explicit_specialization_is_an_item_named_with_its_arguments() {
+    let src = "template <class T> int blank() { return 1; }\ntemplate <>\nint blank<int>() {\n  return 0;\n}\ntemplate <> int blank<long>();\nstruct Lamp { template <class T> int glow(); };\ntemplate <> int Lamp::glow<int>() { return 2; }\n";
+    let e = crate::extract("blank.cpp", src);
+    assert_eq!(
+        item_lines(&e.items),
+        vec![
+            "1-1 fn blank pub",
+            "2-5 fn blank<int> pub",
+            "6-6 fn blank<long> pub",
+            "7-7 type Lamp pub",
+            "7-7 method Lamp::glow pub",
+            "8-8 method Lamp::glow<int> pub",
+        ]
+    );
+    let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+    assert_eq!(
+        sigs,
+        vec![
+            "template <class T> int blank()",
+            "template <> int blank<int>()",
+            "template <> int blank<long>()",
+            "struct Lamp",
+            "template <class T> int glow()",
+            "template <> int Lamp::glow<int>()",
+        ]
+    );
+}
