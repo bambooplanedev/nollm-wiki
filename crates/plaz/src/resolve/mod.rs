@@ -505,9 +505,6 @@ impl<'a> Caller<'_, 'a> {
 
     fn bare(&self, call: &MapCall) -> Evidence {
         let (s, site) = (&self.scope, &call.site);
-        if self.file.family == Family::Shell && site.name.starts_with('$') {
-            return Evidence::Hidden;
-        }
         let external = self.names.external.get(&site.name).copied();
         let imported = self.names.imported.contains(&site.name);
         if imported && !s.fns_here(site).is_empty() {
