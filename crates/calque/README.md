@@ -237,7 +237,8 @@ stderr and exits 0.
   about a third of chat prompts (see `docs/KNOWN_GAPS.md`). A run without `--hook` (`--no-hook` is
   the same) removes a hook an earlier setup wrote, matched exactly as `--remove` matches it, and
   prints `removed <file> …: the prompt hint is off by default now; run setup again with --hook to
-  keep it`. Re-run setup with `--hook` to keep it: setup does not remember the choice. A run
+  keep it`; a file it cannot read is left and named (`left <file> as it is: …`) without failing the
+  run. Re-run setup with `--hook` to keep it: setup does not remember the choice. A run
   limited to some agents (`--agent claude`) leaves the other agents' hook as it is.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's block only when it is
   exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`

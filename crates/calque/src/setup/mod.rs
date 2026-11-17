@@ -724,14 +724,24 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                 });
             }
         } else if !(r.guard_tracked && tracked(root, file)) {
-            // A file it cannot read is skipped, as `--remove` would report it, not the run's end.
+            // A file this run would not otherwise write is left and named without failing the
+            // run, as [`forget`] leaves one with kalka's entries.
             match hook(true) {
                 Ok(Outcome::Done) => r.line(&format!(
                     "removed {what}: the prompt hint is off by default now; run setup again \
                      with --hook to keep it"
                 ))?,
                 Ok(_) => {}
-                Err(e) => r.skip(&what, &e.to_string())?,
+                Err(e) => {
+                    let item = if pi {
+                        "calque hook for pi"
+                    } else {
+                        "calque prompt hook"
+                    };
+                    r.line(&format!(
+                        "left {file} as it is: cannot check it for {item} ({e})"
+                    ))?;
+                }
             }
         }
         // Relies on: inside the pi iteration only pi's own items are written.

@@ -245,7 +245,8 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
   приблизно на третині розмовних запитів (див. `docs/KNOWN_GAPS.md`). Запуск без `--hook`
   (`--no-hook` — те саме) прибирає хук, який записав попередній setup, розпізнаючи його так само
   точно, як `--remove`, і друкує `removed <file> …: the prompt hint is off by default now; run setup
-  again with --hook to keep it`. Щоб лишити хук, запустіть setup з `--hook` знову: setup цей вибір
+  again with --hook to keep it`; файл, який setup не може прочитати, лишається як є з рядком
+  `left <file> as it is: …`, і запуск не падає. Щоб лишити хук, запустіть setup з `--hook` знову: setup цей вибір
   не запамʼятовує. Запуск лише для частини агентів (`--agent claude`) не чіпає хук решти.
 - `--remove` видаляє рівно те, що записав setup, разом із хуками, а блок Codex — лише якщо це
   точнісінько той, що записав setup (разом із ним іде й файл, якщо в ньому більше нічого не

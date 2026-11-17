@@ -677,7 +677,8 @@ fn a_run_without_the_hook_flag_removes_the_hooks_an_earlier_setup_wrote() {
 }
 
 #[test]
-fn a_run_without_the_hook_flag_skips_an_unreadable_settings_file_and_goes_on() {
+fn a_run_without_the_hook_flag_leaves_an_unreadable_settings_file_and_succeeds() {
+    // A file the run would not otherwise write does not fail it, as with kalka's leftovers.
     for unreadable in [false, true] {
         let f = fixture(true, true);
         let r = f.root();
@@ -689,13 +690,10 @@ fn a_run_without_the_hook_flag_skips_an_unreadable_settings_file_and_goes_on() {
         }
         let a = f
             .setup(&["--agent", "claude,pi", "--scope", "repo"])
-            .code(1);
+            .success();
         let o = out(&a);
-        assert!(
-            o.lines()
-                .any(|l| l.starts_with("skipped .claude/settings.json prompt hook: ")),
-            "{o}"
-        );
+        let start = "left .claude/settings.json as it is: cannot check it for calque prompt hook (";
+        assert!(o.lines().any(|l| l.starts_with(start)), "{o}");
         // The rest of the run still happened.
         assert!(r.join(".pi/mcp.json").exists(), "{o}");
         assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
