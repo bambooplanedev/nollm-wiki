@@ -2249,32 +2249,33 @@ fn setup_removes_what_the_module_wrote_under_its_old_name_kalka() {
 
 #[test]
 fn setup_local_removes_the_claude_local_server_kalka_wrote() {
-    let f = fixture(true, true);
-    let t = f.tmp.path().display();
-    // A `claude` that has kalka's local server until it is removed, and calque's once added.
-    f.stub(
-        "claude",
-        &format!(
-            r#"echo "$@" >> {t}/claude.log
+    // Exactly kalka's: removed. With a setting kalka setup did not write: someone's own, left.
+    for (extra, removed) in [("", true), ("  Environment:\\n    A=1\\n", false)] {
+        let f = fixture(true, true);
+        let t = f.tmp.path().display();
+        // A `claude` that has kalka's local server until it is removed, and no calque.
+        f.stub(
+            "claude",
+            &format!(
+                r#"echo "$@" >> {t}/claude.log
 case "$1 $2 $3" in
 "mcp get kalka") [ -f {t}/removed ] && {{ echo "No MCP server named \"kalka\"." >&2; exit 1; }}
-  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✗ Failed to connect\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
+  printf 'kalka:\n  Scope: Local config (private to you in this project)\n  Status: ✗ Failed to connect\n  Type: stdio\n  Command: kalka\n  Args: serve --source .\n{extra}\nTo remove this server, run: claude mcp remove kalka -s local\n' ;;
 "mcp get calque") echo "No MCP server named \"calque\"." >&2; exit 1 ;;
 "mcp remove kalka") echo x > {t}/removed ;;
 esac"#
-        ),
-    );
-    let a = f
-        .setup(&["--agent", "claude", "--scope", "local"])
-        .success();
-    assert!(
-        out(&a)
-            .lines()
-            .any(|l| l == "removed Claude Code local kalka server (calque's old name)"),
-        "{}",
-        out(&a)
-    );
-    assert!(f.claude_log().contains("mcp remove kalka --scope local"));
+            ),
+        );
+        let a = f
+            .setup(&["--agent", "claude", "--scope", "local"])
+            .success();
+        let line = "removed Claude Code local kalka server (calque's old name)";
+        assert_eq!(out(&a).lines().any(|l| l == line), removed, "{}", out(&a));
+        assert_eq!(
+            f.claude_log().contains("mcp remove kalka --scope local"),
+            removed
+        );
+    }
 }
 
 #[test]

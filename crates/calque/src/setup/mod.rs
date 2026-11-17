@@ -320,7 +320,8 @@ fn claude_local_mcp(root: &Path, name: &str, own: &[Value], remove: bool) -> Out
                 .lines()
                 .map(str::trim)
                 .all(|l| l.is_empty() || own_line(l));
-            if other && !remove {
+            // Only calque's own `--remove` takes an entry with such a setting; kalka's is left.
+            if other && (!remove || name != CMD) {
                 return Ok(other_settings(&format!(
                     "claude mcp remove {name} --scope local"
                 )));
