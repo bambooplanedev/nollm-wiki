@@ -1,7 +1,7 @@
 //! The candidate index call sites resolve against, and the named candidate
 //! sets one caller can draw from. Which set wins is the caller's policy.
 
-use crate::model::{CallSite, CallVia, CodeItem, CodeItemKind};
+use crate::model::{CallSite, CallVia, CodeItem, CodeItemKind, PairRole};
 use crate::support::{module_stem, source_rank};
 use crate::CodeUnit;
 use std::collections::{BTreeMap, BTreeSet};
@@ -65,8 +65,9 @@ pub struct Index<'a, U: CodeUnit> {
     modules: BTreeMap<&'a str, BTreeSet<usize>>,
     /// Owner last segments and type item names.
     types: BTreeSet<&'a str>,
-    /// A header declaration's definition: its `twin`, else the one function
-    /// of the same name and owner in a file of the same stem.
+    /// A header function's definition: its `twin`, else, for a body-less
+    /// declaration (`PairRole::Declaration`), the one function of the same
+    /// name and owner in a file of the same stem.
     def_of: BTreeMap<FnRef, FnRef>,
 }
 
@@ -113,8 +114,13 @@ impl<'a, U: CodeUnit> Index<'a, U> {
         let mut def_of = BTreeMap::new();
         for fns in by_name.values() {
             for &h in fns.iter().filter(|&&c| header(c)) {
-                let twin = pages[h.0].items()[h.1].twin.as_ref();
-                let def = twin.and_then(|t| by_span.get(t).copied()).or_else(|| {
+                let it = &pages[h.0].items()[h.1];
+                let def = it.twin.as_ref().and_then(|t| by_span.get(t).copied());
+                // A header item with a body, or that can have none elsewhere, is its own.
+                let def = def.or_else(|| {
+                    if it.pair_role != PairRole::Declaration {
+                        return None;
+                    }
                     let mut defs = fns.iter().filter(|&&c| !header(c) && key(c) == key(h));
                     match (defs.next(), defs.next()) {
                         (Some(&d), None) => Some(d),
