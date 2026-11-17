@@ -677,6 +677,34 @@ fn a_run_without_the_hook_flag_removes_the_hooks_an_earlier_setup_wrote() {
 }
 
 #[test]
+fn a_run_without_the_hook_flag_skips_an_unreadable_settings_file_and_goes_on() {
+    for unreadable in [false, true] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let path = r.join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, b"{\"x\": \"\xff\"}").unwrap();
+        if unreadable {
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let a = f
+            .setup(&["--agent", "claude,pi", "--scope", "repo"])
+            .code(1);
+        let o = out(&a);
+        assert!(
+            o.lines()
+                .any(|l| l.starts_with("skipped .claude/settings.json prompt hook: ")),
+            "{o}"
+        );
+        // The rest of the run still happened.
+        assert!(r.join(".pi/mcp.json").exists(), "{o}");
+        assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"x\": \"\xff\"}");
+    }
+}
+
+#[test]
 fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
     let f = fixture(true, true);
     real_git(&f);

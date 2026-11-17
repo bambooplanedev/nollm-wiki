@@ -723,11 +723,16 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                     format!("/{file}")
                 });
             }
-        } else if !(r.guard_tracked && tracked(root, file)) && hook(true)? == Outcome::Done {
-            r.line(&format!(
-                "removed {what}: the prompt hint is off by default now; run setup again with \
-                 --hook to keep it"
-            ))?;
+        } else if !(r.guard_tracked && tracked(root, file)) {
+            // A file it cannot read is skipped, as `--remove` would report it, not the run's end.
+            match hook(true) {
+                Ok(Outcome::Done) => r.line(&format!(
+                    "removed {what}: the prompt hint is off by default now; run setup again \
+                     with --hook to keep it"
+                ))?,
+                Ok(_) => {}
+                Err(e) => r.skip(&what, &e.to_string())?,
+            }
         }
         // Relies on: inside the pi iteration only pi's own items are written.
         r.wrote_pi |= pi && r.wrote > wrote;
