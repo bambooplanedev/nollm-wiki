@@ -959,6 +959,12 @@ fn an_inline_file_included_in_a_class_body_is_not_read_though_a_header_includes_
         ("src/a.h", "int fill(int v);\n#include \"m.inl\"\n"),
         ("src/g.h", "struct Grid {\n#include \"m.inl\"\n};\n"),
         ("src/m.inl", "int fill(int v) { return v; }\n"),
+        // A linkage block is file scope.
+        (
+            "src/c.h",
+            "int wide(int v);\nextern \"C\" {\n#include \"c.inl\"\n}\n",
+        ),
+        ("src/c.inl", "int wide(int v) { return v; }\n"),
     ];
     let (_d, vault) = common::built(&files);
     assert!(!vault.join("map/src/m_inl.md").exists());
@@ -966,6 +972,11 @@ fn an_inline_file_included_in_a_class_body_is_not_read_though_a_header_includes_
     assert_eq!(
         common::fn_block(&page, "fill"),
         "## fill\n`int fill(int v)` · `src/a.h:1-1`\n\nNo definition in the project.\n"
+    );
+    let page = common::map_page(&vault, "map/src/c_h");
+    assert_eq!(
+        common::fn_block(&page, "wide"),
+        "## wide\n`int wide(int v)` · `src/c.h:1-1`\n\nDefined at [[map/src/c_inl#wide|wide]]\n"
     );
 }
 

@@ -118,7 +118,14 @@ fn nested_include(file: &mut File, n: Node, src: &str) {
     else {
         return;
     };
-    let outer = |p: &Node| p.kind() == "translation_unit" || p.kind().starts_with("preproc_");
+    // A linkage block (`extern "C" {…}`) is file scope.
+    let linkage = |p: &Node| p.kind() == "linkage_specification";
+    let outer = |p: &Node| {
+        p.kind() == "translation_unit"
+            || p.kind().starts_with("preproc_")
+            || linkage(p)
+            || (p.kind() == "declaration_list" && p.parent().is_some_and(|q| linkage(&q)))
+    };
     let around = || std::iter::successors(Some(n), Node::parent);
     let opened = |p: Node| {
         p.is_error()
