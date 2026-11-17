@@ -7,6 +7,8 @@ size — the real decisions of each function.
 
 `plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
 
+The map is for the person who owns the code, to read the business logic and set tasks from it. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
+
 It is a module of the [kulman set](../../README.md), beside [calque](../calque/README.md). It depends on `wiki-code` of this workspace by path and nothing of calque's wiki. Its version is the workspace's.
 
 **Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `kulman install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.

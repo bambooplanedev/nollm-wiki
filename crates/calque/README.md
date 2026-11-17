@@ -882,10 +882,88 @@ with no letter or digit left after folding becomes `page_<hash>`. An id that wou
 
 ## Measured
 
-Read this first: the numbers come from agent runs on one private C++/Rust/Python/TypeScript project
-of about 2,700 pages, with Claude Haiku in Claude Code, two runs per question and configuration.
-They say what that model did on those questions in that project, not what the wiki does in yours,
-and at two runs a difference of half a turn is noise.
+Every block below names its own setup, and its figures hold only there: what a model did on those
+tasks in that tree, not what calque does in yours. The repository README sums them up under
+[What calque saves, and when](../../README.md#what-calque-saves-and-when).
+
+Lookups with no file named, strong models, 2026-11-18. Nine "where is X, and what value does it
+use" questions, written for the test, on a C++ fixture (answer files of 530–645
+lines, and copies padded to 1,500 and 5,000 lines); every prompt names the component in domain words
+("risk engine", "router") and none names a file. The loop is
+[llm-harness-builder](https://github.com/bambooplanedev/llm-harness-builder)'s own, not Claude Code:
+tools to list a directory, read a file and run bash, plus calque 0.8.1's `search`, `page` and
+`callers` over MCP in the calque arm; prompt caching on; Sonnet and Opus with adaptive thinking at
+the API's default effort, Haiku without thinking. 5 runs per task and size, 135 runs per cell, all
+sizes pooled; cost is dollars at list price from the API's own token counts:
+
+| model | arm | correct | cost per run | input tokens per run | turns |
+|---|---|---|---|---|---|
+| Claude Sonnet 5.5 | without calque | 135/135 | $0.0213 | 16,110 | 4.2 |
+| Claude Sonnet 5.5 | calque | 135/135 | $0.0097 | 11,374 | 3.1 |
+| Claude Opus 5.5 | without calque | 135/135 | $0.0454 | 18,078 | 4.3 |
+| Claude Opus 5.5 | calque | 135/135 | $0.0222 | 14,330 | 3.8 |
+| Claude Haiku 5.5 | without calque | 132/135 | $0.0013 | 21,222 | 3.9 |
+| Claude Haiku 5.5 | calque | 135/135 | $0.0006 | 11,983 | 3.1 |
+
+With calque the cost per run fell by 54% (Sonnet) and 51% (Opus), with the 95% interval over the
+nine tasks below zero for both; input tokens fell by 29% and 21%, with intervals that include zero.
+The cost saving grew with file size: −40% / −56% / −63% for Sonnet and −38% / −54% / −59% for Opus
+at the unpadded size, 1,500 and 5,000 lines. It comes from fewer turns, less new context written to
+the cache each turn (Sonnet 5,219 → 1,286 tokens per run, Opus 5,092 → 1,309) and less output,
+thinking included (−24% and −25%); not from fewer lines read. Without calque these models grep
+(2.2 times per run) and then read the hit's range: their whole-file reads (17% and 23% of code
+reads) are almost all of small files, with 8 of 245 and 1 of 254 reads taking a file of more than
+200 lines whole. The relative saving depends on caching: a longer shared preamble, as in a real session,
+makes it smaller.
+
+The same fixture and loop, with weaker models and an earlier version (0.6.7), 2026-11-10, 135 runs
+per cell:
+
+| model | whole-file code reads, without / with calque | input tokens, all sizes | input tokens, unpadded files | correct, without / with |
+|---|---|---|---|---|
+| Claude Haiku 5.5 | 17% / 5% | −29% | −8% | 134 / 133 |
+| deepseek-v4.1-flash | 46% / 10% | −36% | −4% | 122 / 117 |
+| qwen3.8-27b | 58% / 4% | −75% | −23% | 131 / 127 |
+
+They read whole files when they do not know where the answer is, and calque's ranges replace those
+reads; most of the saving comes with the padded files, and no model answered more questions
+correctly.
+
+Real work with the file named, 2026-11-12 to 2026-11-17. Agent traces from one
+C++/Rust/Python/TypeScript project of 894 pages: Claude Opus and Sonnet agents working from briefs
+that an orchestrating agent wrote, with an earlier version (0.6.13) for the first half and calque 0.8.1 after it; about 95% of the
+code lookups were in Python and shell scripts. 7,773 tool calls, 2,125 code reads, 2,170 grep
+commands, 260 calque calls.
+
+- Reliability: 1 error in 260 calls (`page` of a hook script with no extension, which 0.8.2 now
+  indexes), no timeouts, median answer time 10–12 ms. None of the 17 reads that started at a line
+  calque returned found the code gone.
+- The file was known before 90–98% of code reads, named in the brief or in a document it pointed
+  to. Agents found the line with `grep -n` in that file (about 500 characters per grep, against
+  818 for the median `search` answer) and read a window: 2.0% of reads took the whole file, 0.7%
+  more than half of a file over 200 lines and the median read was 31 lines.
+- Of the grep commands, 16% (hand-labelled sample of 330, 95% interval 12.5–20.4%) looked up the
+  definition or outline of a symbol calque indexes; 47% looked for literal text, regular
+  expressions, counts or absence, which stay grep's work. Counting calque calls against shell calls
+  holding a definition grep, 31.6–38.6% of definition lookups went through calque (14.5–21.5%
+  through `search` alone).
+- 30% of code reads were shell code outside any function, for which calque has no range.
+- What calque's ranges could still have saved: 0.9–1.9% of tool-result characters, about
+  0.25–0.5% of input tokens once the time each read stays in context is counted. No saving on real
+  work has been measured: agents that used calque had longer tasks than those that did not, so the
+  two cannot be compared.
+
+The prompt hint, 2026-11-17, offline over 1,514 and 136 prompts from two writers: it fired on 66.8%
+and 48.5% of them. In 77 hints shown during real work it once plausibly led the agent to a file it
+did not already have (95% upper bound about 9% of hints from people); the other files it named were
+already in context or never opened. That is why setup adds it only with `--hook`; the two gates it
+now applies and what still fires are in
+[docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md#agents-and-the-wiki).
+
+Earlier runs. The `callers` block comes from agent runs on one private C++/Rust/Python/TypeScript
+project of about 2,700 pages, with Claude Haiku in Claude Code, two runs per question and
+configuration. It says what that model did on those questions in that project, and at two runs a
+difference of half a turn is noise.
 
 `callers` and the call edges behind it, 2026-10-25. All three configurations have the wiki:
 
