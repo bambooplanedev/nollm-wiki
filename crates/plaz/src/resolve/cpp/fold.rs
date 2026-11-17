@@ -213,8 +213,11 @@ impl<'a> Cpp<'a> {
     /// those a call of it is folded onto (`folded`); with none, those no
     /// declaration is folded onto (`unfolded`), but not the one such
     /// definition another overload's declaration wants too. Never one of
-    /// another class or specialization (`same_class`); only those in a file
-    /// that includes the declaration's or is included by it, when any is.
+    /// another class or specialization (`same_class`). Those of the
+    /// declaration's parameters, qualifiers dropped, when any; then only
+    /// those in a file that includes the declaration's or is included by
+    /// it, when any is, unless one overload matched by arity alone would
+    /// be left.
     pub(in crate::resolve) fn definitions(&self) -> BTreeMap<FnRef, Vec<FnRef>> {
         let declared = (self.pages.iter().enumerate()).flat_map(|(page, (_, f))| {
             let all = f.cpp.declarations.iter();
@@ -238,12 +241,22 @@ impl<'a> Cpp<'a> {
                 wanted.entry(d).or_default().insert(self.key(c));
             }
         }
+        let params = |d: FnRef| self.key(d).map(|k| unqualified(k.2));
         for (&c, defs) in &mut out {
-            // Either file includes the other: a platform twin's is not it.
+            // An overload of the declaration's parameters, qualifiers
+            // dropped, wins over the arity-only rest.
+            let exact =
+                params(c).is_some_and(|p| defs.iter().any(|&d| params(d) == Some(p.clone())));
+            if exact {
+                defs.retain(|&d| params(d) == params(c));
+            }
+            // Either file includes the other: a platform twin's is not it;
+            // of overloads matched by arity alone, never one picked so.
             let tied = |d: &FnRef| {
                 d.0 == c.0 || self.closure(d.0).contains(&c.0) || self.closure(c.0).contains(&d.0)
             };
-            if defs.iter().any(tied) {
+            let kept = defs.iter().filter(|d| tied(d)).count();
+            if kept > 0 && (exact || kept > 1) {
                 defs.retain(tied);
             }
             // The one definition two overloads want may be the other's.

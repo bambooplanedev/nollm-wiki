@@ -150,6 +150,38 @@ fn a_deleted_or_in_class_defaulted_overload_defines_no_other_declaration() {
 }
 
 #[test]
+fn an_overload_of_the_declarations_parameters_wins_over_an_including_files_other_overload() {
+    // `tool.cpp` is another program: it includes nothing.
+    let files = [
+        ("src/h.h", "void log(int v);\n"),
+        ("src/lib.cpp", "#include \"h.h\"\nvoid log(double v) {}\n"),
+        ("src/tool.cpp", "void log(int v) {}\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/h_h");
+    assert_eq!(
+        last_line(&page, "log"),
+        "Defined at [[map/src/tool_cpp#log|log]]"
+    );
+}
+
+#[test]
+fn an_include_does_not_narrow_overloads_spelled_otherwise_to_one() {
+    // No definition writes `u32`: either may be the declaration's.
+    let files = [
+        ("src/h.h", "typedef unsigned int u32;\nvoid log(u32 v);\n"),
+        ("src/lib.cpp", "#include \"h.h\"\nvoid log(double v) {}\n"),
+        ("src/tool.cpp", "void log(unsigned int v) {}\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/h_h");
+    assert_eq!(
+        last_line(&page, "log"),
+        "Defined at one of: [[map/src/lib_cpp#log|log]], [[map/src/tool_cpp#log|log]]"
+    );
+}
+
+#[test]
 fn a_declaration_is_defined_by_a_defaulted_definition() {
     let h = "struct Pot {\n    Pot();\n    ~Pot();\n};\n";
     let cpp = "#include \"pot.h\"\nPot::Pot() = default;\nPot::~Pot() {}\n";
