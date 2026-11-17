@@ -168,10 +168,12 @@ pub fn resolve(mut project: Project) -> Resolved {
                             python = python::Caller(&cx);
                             &python
                         }
-                        Family::Rust | Family::Go | Family::Shell | Family::Ecma => {
+                        Family::Rust => {
                             rust = Rust(&cx);
                             &rust
                         }
+                        // No flow is made for these: no call to look at.
+                        Family::Go | Family::Shell | Family::Ecma => continue,
                     };
                     flow.each_call_mut(&mut |chain, call| {
                         call.target = from_evidence(rules.evidence(chain, call));
