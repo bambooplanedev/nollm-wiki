@@ -249,6 +249,14 @@ pub(super) fn update(ask: bool) -> Result<()> {
     result
 }
 
+/// The installed `manifest.json` reads and lists every module of `state`: one it lacks is a
+/// removal a committed update has not finished.
+fn installed_has(home: &Home, state: &State) -> bool {
+    let manifest = std::fs::read(home.path.join("manifest.json")).ok();
+    let manifest = manifest.and_then(|b| Manifest::parse(&b).ok());
+    manifest.is_some_and(|m| state.modules.iter().all(|n| m.module(n).is_some()))
+}
+
 /// Under the lock: unless already current or newer, stages kulman and every installed module
 /// at the latest version, and only when all are ready commits them (kulman last). With `ask`,
 /// a move to a newer release is asked first.
@@ -276,8 +284,7 @@ fn renew(
             return Ok(());
         }
         std::cmp::Ordering::Equal
-            if listed.clone().all(|n| bin.join(n).is_file())
-                && home.path.join("manifest.json").is_file() =>
+            if listed.clone().all(|n| bin.join(n).is_file()) && installed_has(home, &state) =>
         {
             println!("up to date");
             return Ok(());
@@ -312,15 +319,15 @@ fn renew(
     names.push("kulman".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
     let old_modules = state.modules.clone();
-    let state = State {
+    // Committed still listing the modules that go, so a run cut off before their removal
+    // finishes it; the removal then writes the state without them.
+    let mut listed = modules.clone();
+    listed.extend(gone.iter().cloned());
+    let state = |modules: BTreeSet<String>| State {
         version: latest.clone(),
         modules: modules.into_iter().collect(),
     };
-    store::commit(home, &staged, raw, &state)?;
-    // Only once what replaces them is in place.
-    if !gone.is_empty() {
-        store::remove_modules(home, &gone, &state)?;
-    }
+    store::commit(home, &staged, raw, &state(listed))?;
     for s in &staged {
         // A module the release newly requires was not there before; at the same version, files
         // are only put back.
@@ -331,6 +338,10 @@ fn renew(
         } else {
             println!("updated {} {have} -> {latest}", s.name);
         }
+    }
+    // Only once what replaces them is in place.
+    if !gone.is_empty() {
+        store::remove_modules(home, &gone, &state(modules))?;
     }
     for old in &gone {
         match renamed(old) {

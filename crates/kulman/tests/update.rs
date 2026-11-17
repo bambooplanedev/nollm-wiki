@@ -287,6 +287,55 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
 }
 
 #[test]
+fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
+    let (_t, base, home) = installed();
+    release(
+        &home.with_file_name("release"),
+        "0.9.0",
+        &[("calque", CALQUE_8)],
+    );
+    fs::remove_file(home.join("bin/plaz")).unwrap();
+    fs::create_dir(home.join("bin/plaz")).unwrap();
+    let out = kulman(&home, &base)
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    // Committed: what moved is said, and the state still lists what is not yet removed.
+    assert_eq!(
+        lines(&out),
+        [
+            "updated calque 0.7.0 -> 0.9.0",
+            "updated kulman 0.7.0 -> 0.9.0"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.9.0", "modules": ["calque", "plaz"]})
+    );
+    fs::remove_dir(home.join("bin/plaz")).unwrap();
+    fs::write(home.join("bin/plaz"), PLAZ).unwrap();
+    let out = kulman(&home, &base)
+        .args(["update", "--yes"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        lines(&out),
+        [
+            "repaired calque 0.9.0",
+            "repaired kulman 0.9.0",
+            "removed plaz: not in release 0.9.0"
+        ]
+    );
+    assert_eq!(
+        state(&home),
+        json!({"version": "0.9.0", "modules": ["calque"]})
+    );
+    assert!(!home.join("bin/plaz").exists());
+}
+
+#[test]
 fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     let t = tempfile::tempdir().unwrap();
     let rel = t.path().join("release");
