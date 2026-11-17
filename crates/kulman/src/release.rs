@@ -76,6 +76,24 @@ impl Manifest {
                 check_name(name, "manifest")?;
             }
         }
+        // An old name is of a module the release no longer holds, and has one new name.
+        for (i, module) in m.modules.iter().enumerate() {
+            for old in &module.replaces {
+                if m.module(old).is_some() {
+                    bail!(
+                        "manifest: {} replaces {old}, which the release holds",
+                        module.name
+                    );
+                }
+                if let Some(other) = m.modules[..i].iter().find(|o| o.replaces.contains(old)) {
+                    bail!(
+                        "manifest: both {} and {} replace {old}",
+                        other.name,
+                        module.name
+                    );
+                }
+            }
+        }
         let archives = m.modules.iter().flat_map(|x| x.archives.values());
         for archive in archives.chain(m.kulman.archives.values()) {
             check_file(&archive.file, "manifest")?;
@@ -454,6 +472,38 @@ mod tests {
         .unwrap();
         assert_eq!(m.modules[0].summary, "");
         assert!(m.modules[0].options.is_empty());
+    }
+
+    #[test]
+    fn replaces_names_a_gone_module_only_one_module_claims() {
+        let parse = |modules: &str| {
+            let text = format!(
+                r#"{{"version": "0.1.0", "modules": {modules}, "kulman": {{"archives": {{}}}}}}"#
+            );
+            Manifest::parse(text.as_bytes()).map_err(|e| e.to_string())
+        };
+        let ok = parse(r#"[{"name": "calque", "replaces": ["kalka"]}, {"name": "plaz"}]"#);
+        assert_eq!(ok.unwrap().modules[0].replaces, ["kalka"]);
+        for (modules, why) in [
+            (
+                r#"[{"name": "calque", "replaces": ["../x"]}]"#,
+                "bad name in manifest: ../x",
+            ),
+            (
+                r#"[{"name": "calque", "replaces": ["calque"]}]"#,
+                "manifest: calque replaces calque, which the release holds",
+            ),
+            (
+                r#"[{"name": "calque", "replaces": ["plaz"]}, {"name": "plaz"}]"#,
+                "manifest: calque replaces plaz, which the release holds",
+            ),
+            (
+                r#"[{"name": "a", "replaces": ["old"]}, {"name": "b", "replaces": ["old"]}]"#,
+                "manifest: both a and b replace old",
+            ),
+        ] {
+            assert_eq!(parse(modules).err().as_deref(), Some(why), "{modules}");
+        }
     }
 
     /// The test key pair's public half and what it signed (the secret half was discarded).
