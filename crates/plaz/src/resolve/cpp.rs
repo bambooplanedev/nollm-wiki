@@ -101,60 +101,76 @@ impl<'a> Cpp<'a> {
         // Per page: the pages its includes name.
         let mut includes = vec![Vec::new(); pages.len()];
         for (page, &(path, file)) in cpp() {
-            // `<a/b.h>` may name a project header; `<b.h>` a system one.
-            let quoted = file
-                .code
-                .imports
-                .iter()
-                .filter_map(|i| match i.strip_prefix('<') {
-                    Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
-                    None => Some(i.as_str()),
-                });
-            includes[page] = quoted
-                .flat_map(|i| out.include(&by_file, path, i))
-                .collect();
-            for (i, it) in file.code.items.iter().enumerate() {
-                if it.kind == CodeItemKind::Type {
-                    out.types.insert(&it.name);
-                }
-                let owner = it.owner.as_deref().map(owner_key);
-                let misread = out.misread((page, i));
-                out.types
-                    .extend(owner.filter(|o| !misread && !out.namespaces.contains(o)));
-                if !matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) || it.nested {
-                    continue;
-                }
-                let c = (page, i);
-                // `operator -> ()` is `operator->`: an operator name with a symbol
-                // loses its spaces (`operator new[]` too); `operator new` keeps them.
-                let op = it.name.strip_prefix("operator");
-                let op = op.filter(|o| o.contains(|c: char| c.is_ascii_punctuation()));
-                let name = op.map_or_else(
-                    || it.name.clone(),
-                    |o| format!("operator{}", o.replace(' ', "")),
-                );
-                out.by_name.entry(name).or_default().push(c);
-                let key = out.key(c);
-                if let Some((scope, name, params)) = key {
-                    let at = (scope, name, fold::unqualified(params));
-                    out.spellings.entry(at).or_default().insert(params);
-                }
-                match key {
-                    Some(key) if !it.test && !out.declared(c) => {
-                        if !file.local.contains(&i) {
-                            out.shared.entry(key).or_default().push(c);
-                        }
-                        out.own.entry((page, key)).or_default().push(c);
-                        let named = out.file_defs.entry((page, key.0, key.1));
-                        named.or_default().push(c);
-                    }
-                    Some(_) | None => {}
-                }
-            }
+            includes[page] = out.includes(&by_file, path, file);
+            out.read_items(page, file);
         }
         out.closures = closures(&includes);
         out.read_classes();
         out
+    }
+
+    /// The pages the includes of `file`, at `path`, name.
+    fn includes(
+        &self,
+        by_file: &BTreeMap<&str, Vec<usize>>,
+        path: &str,
+        file: &File,
+    ) -> Vec<usize> {
+        // `<a/b.h>` may name a project header; `<b.h>` a system one.
+        let quoted = file
+            .code
+            .imports
+            .iter()
+            .filter_map(|i| match i.strip_prefix('<') {
+                Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
+                None => Some(i.as_str()),
+            });
+        quoted
+            .flat_map(|i| self.include(by_file, path, i))
+            .collect()
+    }
+
+    /// Reads the items of `file`, at `page`: its types, its functions by
+    /// name and its definitions by key.
+    fn read_items(&mut self, page: usize, file: &'a File) {
+        for (i, it) in file.code.items.iter().enumerate() {
+            if it.kind == CodeItemKind::Type {
+                self.types.insert(&it.name);
+            }
+            let owner = it.owner.as_deref().map(owner_key);
+            let misread = self.misread((page, i));
+            self.types
+                .extend(owner.filter(|o| !misread && !self.namespaces.contains(o)));
+            if !matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) || it.nested {
+                continue;
+            }
+            let c = (page, i);
+            // `operator -> ()` is `operator->`: an operator name with a symbol
+            // loses its spaces (`operator new[]` too); `operator new` keeps them.
+            let op = it.name.strip_prefix("operator");
+            let op = op.filter(|o| o.contains(|c: char| c.is_ascii_punctuation()));
+            let name = op.map_or_else(
+                || it.name.clone(),
+                |o| format!("operator{}", o.replace(' ', "")),
+            );
+            self.by_name.entry(name).or_default().push(c);
+            let key = self.key(c);
+            if let Some((scope, name, params)) = key {
+                let at = (scope, name, fold::unqualified(params));
+                self.spellings.entry(at).or_default().insert(params);
+            }
+            match key {
+                Some(key) if !it.test && !self.declared(c) => {
+                    if !file.local.contains(&i) {
+                        self.shared.entry(key).or_default().push(c);
+                    }
+                    self.own.entry((page, key)).or_default().push(c);
+                    let named = self.file_defs.entry((page, key.0, key.1));
+                    named.or_default().push(c);
+                }
+                Some(_) | None => {}
+            }
+        }
     }
 
     /// The pages `#include "inc"` in the file at `from` names: the file
