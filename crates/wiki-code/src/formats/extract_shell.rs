@@ -103,6 +103,7 @@ pub(crate) fn missed_functions(text: &str, found: &[CodeItem]) -> Vec<CodeItem> 
             arity: None,
             pair_role: PairRole::Neither,
             namespace: None,
+            params: None,
         });
     }
     out
@@ -207,6 +208,7 @@ pub(crate) fn top_level_item(last: usize) -> CodeItem {
         arity: None,
         pair_role: PairRole::Neither,
         namespace: None,
+        params: None,
     }
 }
 

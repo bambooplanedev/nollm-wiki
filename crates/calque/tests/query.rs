@@ -1374,6 +1374,31 @@ fn a_header_declaration_stands_for_its_definition() {
 }
 
 #[test]
+fn a_header_function_with_a_body_or_no_definition_stands_for_itself() {
+    let (_dir, w) = code_fixture(&[
+        (
+            "src/q.h",
+            "struct Q {\n  Q() = default;\n  Q(int n);\n  int take(int hint);\n  int take(int a, int b) = delete;\n  int size() const { return 1; }\n};\n",
+        ),
+        (
+            "src/q.cpp",
+            "#include \"q.h\"\nQ::Q(int n) {}\nint Q::take(int hint) { return hint; }\nint Q::size(int pad) const { return pad; }\n",
+        ),
+        (
+            "src/use.cpp",
+            "#include \"q.h\"\nint make() { Q q = Q(); return q.size(); }\n",
+        ),
+    ]);
+    // `Q()` is the defaulted constructor, and `Q(int)`'s definition, as C++
+    // sets no minimum; `size()` is the header's inline body, not the
+    // same-named `Q::size(int)` defined beside it.
+    assert_eq!(
+        callees(&w, "use", "make"),
+        ["src/q.cpp:2-2", "src/q.h:2-2", "src/q.h:6-6"]
+    );
+}
+
+#[test]
 fn an_index_with_no_updated_key_loads_and_its_hits_have_no_date() {
     let dir = build();
     let path = dir.path().join("out").join("index.json");

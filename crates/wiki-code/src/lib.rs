@@ -51,5 +51,5 @@ mod summary;
 
 pub use analyze::{analyze, Analyzed, Call, Def, Source};
 pub use formats::code::{extract, handles, is_cpp_fragment, CodeFile, CodeUnit};
-pub use formats::extract_cpp::pair_declarations;
+pub use formats::extract_cpp::{declarator, pair_declarations};
 pub use tree_sitter;

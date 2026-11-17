@@ -971,6 +971,12 @@ fn code_item<'t>(
         } else {
             None
         },
+        params: match kind {
+            CodeItemKind::Fn | CodeItemKind::Method if spec.lang_name == "cpp" => {
+                super::extract_cpp::params_of(def, name_text, text)
+            }
+            _ => None,
+        },
     };
     item.doc_text = raw_doc
         .as_deref()
