@@ -1,7 +1,7 @@
 //! Shell scripts through `compile()`: functions, docs, summary, parse-error fallback, page ids.
 
 mod common;
-use common::{compiled, compiled_wiki, entry, index_entries};
+use common::{compiled, compiled_wiki, entry, index_entries, CLAUSE};
 use std::collections::BTreeMap;
 
 /// `(signature, kind, start, end, doc)` of a page's items.
@@ -67,8 +67,10 @@ fn broken_file_keeps_its_functions() {
         .into_iter()
         .map(|(s, _, a, b, _)| (s, a, b))
         .collect();
-    assert!(got.contains(&("nvm()".to_string(), 6, 8)), "{got:?}");
-    assert!(got.iter().any(|g| g.0 == "other()"), "{got:?}");
+    assert_eq!(
+        got,
+        vec![("nvm()".to_string(), 6, 8), ("other()".to_string(), 10, 11)]
+    );
 }
 
 /// Every non-shell page: id -> path.
@@ -197,9 +199,10 @@ fn top_level_chain_stops_at_top_level() {
     let src = "inner() { :; }\nouter() {\n  inner\n}\nouter\n";
     let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
     let text = callers_text(&wiki, "s", "inner", Some(3));
-    assert!(text.contains("outer"), "{text}");
-    assert!(text.contains("<top level>"), "{text}");
-    assert!(text.contains("2 functions"), "{text}");
+    assert_eq!(
+        text,
+        "callers of inner  s.sh:1-1 — 2 functions in 1 files\ns.sh\n  1-5  top_level  <top level>  calls outer at 5\n  2-4  fn  outer  calls inner at 3\n"
+    );
 }
 
 #[test]
@@ -251,16 +254,19 @@ fn script_with_only_top_level_calls_has_no_outline_items() {
         .search("top level", None, 10)
         .iter()
         .all(|h| h.symbols.is_empty()));
-    assert!(callers_text(&wiki, "a", "helper", None).contains("<top level>"));
+    assert_eq!(
+        callers_text(&wiki, "a", "helper", None),
+        "callers of helper  a.sh:1-1 — 1 functions in 1 files\nrun.sh\n  1-1  top_level  <top level>  calls helper at 1\n"
+    );
 }
 
 #[test]
 fn top_level_only_script_is_not_told_to_recompile() {
     let (_d, wiki) = compiled_wiki(&[("run.sh", "set -e\nsource ./a.sh\n")]);
     let text = wiki.outline("run", None).unwrap();
-    assert!(
-        text.contains("no functions") && !text.contains("recompile"),
-        "{text}"
+    assert_eq!(
+        text,
+        "# Run (run)\nrun.sh  code:shell\nimports:\n  ./a.sh\nno functions\n"
     );
 }
 
@@ -269,8 +275,10 @@ fn neighbors_symbol_never_lists_top_level() {
     let src = "leaf() { :; }\nmid() {\n  leaf\n}\nmid\n";
     let (_d, wiki) = compiled_wiki(&[("s.sh", src)]);
     let text = wiki.calls("s", "mid", None, None).unwrap();
-    assert!(text.contains("leaf"), "positive control: {text}");
-    assert!(!text.contains("top level"), "{text}");
+    assert_eq!(
+        text,
+        "calls from mid  s.sh:2-4 — 1 functions in 1 files\ns.sh\n  1-1  fn  leaf\n"
+    );
 }
 
 #[test]
@@ -280,10 +288,16 @@ fn bash_log_does_not_resolve_to_ts() {
         ("y.ts", "export function log(m: string) {}\n"),
     ]);
     let text = callers_text(&wiki, "y", "log", None);
-    assert!(text.contains("0 functions"), "{text}");
+    assert_eq!(
+        text,
+        format!("callers of log  y.ts:1-1 — 0 functions in 0 files{CLAUSE}log)\n")
+    );
     // Positive control: a shell `log` is found by shell.
     let (_d, wiki) = compiled_wiki(&[("x.sh", "log() { :; }\ngo() {\n  log hi\n}\n")]);
-    assert!(callers_text(&wiki, "x", "log", None).contains("go"));
+    assert_eq!(
+        callers_text(&wiki, "x", "log", None),
+        "callers of log  x.sh:1-1 — 1 functions in 1 files\nx.sh\n  2-4  fn  go  calls log at 3\n"
+    );
 }
 
 #[test]

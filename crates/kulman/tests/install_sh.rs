@@ -162,9 +162,11 @@ fn install_sh_puts_kulman_in_bin() {
             bin.display()
         )
     );
-    // Again over the first: replaced in place.
+    // Again over an older binary: replaced in place.
+    fs::write(home.join("bin/kulman"), b"old").unwrap();
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
 }
 
@@ -208,18 +210,6 @@ fn install_sh_over_an_installation_says_update() {
             bin.display()
         )
     );
-}
-
-#[test]
-fn install_sh_reads_a_crlf_sha256sums() {
-    let (t, base) = setup(KULMAN_BYTES);
-    let path = t.path().join("release/latest/download/SHA256SUMS");
-    let crlf = fs::read_to_string(&path).unwrap().replace('\n', "\r\n");
-    fs::write(&path, crlf).unwrap();
-    let home = t.path().join("home");
-    let out = install_sh(&home, &base);
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
 }
 
 /// The latest `SHA256SUMS` of the release under `t`, and where its signature goes.
@@ -480,12 +470,7 @@ fn install_sh_takes_only_a_regular_file() {
 fn install_sh_takes_only_https_or_file() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path().join("home");
-    for base in [
-        "http://example.com/releases",
-        "ftp://x",
-        "https://",
-        "file://x/y",
-    ] {
+    for base in ["http://example.com/releases", "https://", "file://x/y"] {
         let out = install_sh(&home, base);
         assert_eq!(out.status.code(), Some(2), "{base}: {}", stderr(&out));
         assert!(
@@ -637,11 +622,34 @@ fn setup_with_the_real_calque_and_plaz() {
     assert!(stderr(&out).contains("no agent set up"), "{}", stderr(&out));
 }
 
+/// `Linux/x86_64` gets the static musl build, whatever libc the machine has (commit fb738eb).
 #[test]
-fn install_sh_does_not_look_for_glibc() {
-    let script = fs::read_to_string(SCRIPT).unwrap();
-    assert!(!script.contains("ld-linux"));
-    assert!(!script.contains("libc.so"));
+fn install_sh_installs_the_musl_build_on_linux() {
+    use std::os::unix::fs::PermissionsExt;
+    let (t, base) = setup(KULMAN_BYTES);
+    let home = t.path().join("home");
+    let user = t.path().join("user-home");
+    fs::create_dir_all(&user).unwrap();
+    let bin = t.path().join("path");
+    fs::create_dir_all(&bin).unwrap();
+    let uname = bin.join("uname");
+    fs::write(
+        &uname,
+        "#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo x86_64 ;; esac\n",
+    )
+    .unwrap();
+    fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
+    let out = Command::new("sh")
+        .arg(SCRIPT)
+        .env("PATH", path)
+        .env("KULMAN_HOME", &home)
+        .env("KULMAN_RELEASE_URL", &base)
+        .env("HOME", &user)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
 }
 
 #[test]

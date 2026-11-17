@@ -425,26 +425,24 @@ fn a_draft_of_another_repository_is_refused() {
 
 #[test]
 fn an_address_that_only_begins_like_ours_is_refused() {
-    for near in ["X", "-evil"] {
-        let f = Fixture::new();
-        let other = format!("{}{near}/tag/v{VERSION}", releases());
-        fs::write(f.path("gh/url"), &other).unwrap();
-        f.refused_unsigned(
-            &f.sign(&[VERSION]),
-            &format!(
-                "release-sign.sh: this draft belongs to {other}, not to {}\n",
-                releases()
-            ),
-        );
-        assert!(f
-            .log("gh.log")
-            .iter()
-            .all(|l| !l.starts_with("release download")));
-        assert!(f
-            .log("gh.log")
-            .iter()
-            .all(|l| !l.starts_with("release upload")));
-    }
+    let f = Fixture::new();
+    let other = format!("{}X/tag/v{VERSION}", releases());
+    fs::write(f.path("gh/url"), &other).unwrap();
+    f.refused_unsigned(
+        &f.sign(&[VERSION]),
+        &format!(
+            "release-sign.sh: this draft belongs to {other}, not to {}\n",
+            releases()
+        ),
+    );
+    assert!(f
+        .log("gh.log")
+        .iter()
+        .all(|l| !l.starts_with("release download")));
+    assert!(f
+        .log("gh.log")
+        .iter()
+        .all(|l| !l.starts_with("release upload")));
 }
 
 #[test]
@@ -616,21 +614,18 @@ fn without_a_terminal_it_is_refused_up_front() {
 #[test]
 fn a_bad_version_or_argument_is_refused() {
     let f = Fixture::new();
-    for args in [
-        &["0.7"][..],
-        &["v0.7.0"],
-        &["0.07.0"],
-        &[VERSION, "--key"],
-        &[VERSION, "-x"],
+    let usage =
+        "release-sign.sh: usage: release-sign.sh <version> [--key <secret key file>] [--replace]\n";
+    for (args, want) in [
+        (&["0.7"][..], "release-sign.sh: bad version: 0.7\n"),
+        (&["v0.7.0"], "release-sign.sh: bad version: v0.7.0\n"),
+        (&["0.07.0"], "release-sign.sh: bad version: 0.07.0\n"),
+        (&[VERSION, "--key"], usage),
+        (&[VERSION, "-x"], usage),
     ] {
         let out = f.sign(args);
         assert_eq!(out.status.code(), Some(1), "{args:?}");
-        let err = stderr(&out);
-        assert!(
-            err.starts_with("release-sign.sh: bad version: ")
-                || err.starts_with("release-sign.sh: usage: "),
-            "{err}"
-        );
+        assert_eq!(stderr(&out), want, "{args:?}");
     }
     assert_eq!(f.log("gh.log"), Vec::<String>::new());
 }

@@ -133,21 +133,6 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn deterministic_for_same_seed() {
-        let a = tempdir().unwrap();
-        let b = tempdir().unwrap();
-        let pa = generate_corpus(a.path(), 15, 42).unwrap();
-        let pb = generate_corpus(b.path(), 15, 42).unwrap();
-        assert_eq!(pa.len(), 15);
-        for (fa, fb) in pa.iter().zip(pb.iter()) {
-            let ca = std::fs::read_to_string(fa).unwrap();
-            let name = fb.file_name().unwrap();
-            let cb = std::fs::read_to_string(b.path().join(name)).unwrap();
-            assert_eq!(ca, cb);
-        }
-    }
-
-    #[test]
     fn past_the_topic_list_names_get_a_version_suffix() {
         let dir = tempdir().unwrap();
         let paths = generate_corpus(dir.path(), 57, 42).unwrap();

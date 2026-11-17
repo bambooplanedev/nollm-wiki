@@ -400,13 +400,19 @@ mod tests {
         let e = crate::extract("Static.vue", src);
         assert!(e.symbols.is_empty(), "{:?}", e.symbols);
         assert!(e.imports.is_empty(), "{:?}", e.imports);
+        let with_script = format!("{src}<script>\nexport function real() {{}}\n</script>\n");
+        let e = crate::extract("Static.vue", &with_script);
+        assert_eq!(e.symbols, vec!["export function real()"]);
     }
 
     #[test]
     fn custom_blocks_and_comments_are_raw_text() {
-        let src = "<!-- <script>export function InComment() {}</script> -->\n<i18n>\n{ \"a\": \"<script>\" }\n</i18n>\n<script>\nexport function real() {}\n</script>\n";
+        let src = "<!-- <script>export function InComment() {}</script> -->\n<i18n>\n{ \"a\": \"<script>\" }\n</i18n>\n<script>\nexport function real() {}\n</script>\n<script setup>\nexport function second() {}\n</script>\n";
         let e = crate::extract("I18n.vue", src);
-        assert_eq!(e.symbols, vec!["export function real()"]);
+        assert_eq!(
+            e.symbols,
+            vec!["export function real()", "export function second()"]
+        );
     }
 
     #[test]

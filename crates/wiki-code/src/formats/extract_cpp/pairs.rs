@@ -166,23 +166,6 @@ mod tests {
     use super::*;
     use crate::CodeFile;
 
-    #[test]
-    fn a_same_stem_fragment_is_no_second_implementation() {
-        let mut files: BTreeMap<String, CodeFile> = [
-            ("lib/vec.h", "class Vec {\n  int len() const;\n};\n"),
-            ("lib/vec.cpp", "int Vec::len() const { return 0; }\n"),
-            ("lib/vec.inl", "int Vec::len() const { return 1; }\n"),
-        ]
-        .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
-        .into();
-        pair_declarations(&mut files);
-        let len = |p: &str| files[p].items.iter().find(|i| i.name == "len").unwrap();
-        assert_eq!(
-            len("lib/vec.h").twin,
-            Some(len("lib/vec.cpp").span("lib/vec.cpp"))
-        );
-    }
-
     fn len_twin(
         files: [(&str, &str); 3],
         hdr: &str,

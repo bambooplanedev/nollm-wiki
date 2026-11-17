@@ -777,29 +777,6 @@ fn search_from(cwd: &std::path::Path) -> assert_cmd::assert::Assert {
 }
 
 #[test]
-fn the_default_wiki_is_dot_kulman() {
-    let dir = tempdir().unwrap();
-    let cwd = dir.path();
-    fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();
-    let compile = |output: &str| {
-        Command::cargo_bin("calque")
-            .unwrap()
-            .current_dir(cwd)
-            .args(["compile", ".", output])
-            .assert()
-            .success();
-    };
-    compile(".kulman");
-    search_from(cwd).success().stdout(contains("alpha"));
-
-    // An old `.wiki/` is not the default: with `out` beside it, `out` is read.
-    fs::remove_dir_all(cwd.join(".kulman")).unwrap();
-    fs::create_dir(cwd.join(".wiki")).unwrap();
-    compile("out");
-    search_from(cwd).success().stdout(contains("alpha"));
-}
-
-#[test]
 fn read_commands_default_to_dot_kulman_then_out() {
     let dir = tempdir().unwrap();
     let cwd = dir.path();

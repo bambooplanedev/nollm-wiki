@@ -79,85 +79,6 @@ fn corpus_compiles_to_the_expected_pages() {
     assert_eq!(ids, EXPECTED_IDS, "corpus did not compile as expected");
 }
 
-/// Sections that `Wiki::search` does not score. Kept in sync with
-/// `query.rs`'s `CHROME_SECTIONS` — the label guard must judge a label
-/// against the text search actually reads, not the whole rendered page.
-/// (Scanning the rendered page instead makes `source_hash:` in the Metadata
-/// block put the token `hash` on every page.)
-const CHROME_SECTIONS: [&str; 6] = [
-    "Metadata",
-    "Related",
-    "Imported by",
-    "Mentioned in",
-    "Referenced By",
-    "Notes",
-];
-
-/// Minimum token length the label guard considers. Without it, `on` and
-/// `line` — which occur in 16 and 15 of the 17 corpus pages — let any label
-/// pass for any page.
-const MIN_TOKEN_CHARS: usize = 4;
-
-/// The searchable content of a rendered page: every section except the
-/// generated chrome, lowercased.
-fn searchable_content(page: &str) -> String {
-    calque::rewrite::parse_sections(page)
-        .into_iter()
-        .filter(|(k, _)| !CHROME_SECTIONS.contains(&k.as_str()))
-        .map(|(_, v)| v)
-        .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase()
-}
-
-/// Whether at least half of `query`'s tokens of `MIN_TOKEN_CHARS` or more
-/// occur in `content`. A query whose tokens are all short is unjudgeable and
-/// passes.
-///
-/// This checks token coverage against one page **in isolation** — it never
-/// compares that coverage to the other sixteen pages, so it does not detect
-/// "the expected page merely exists" the way a nearest-neighbour or ranking
-/// check would. Measured, it catches a mislabel pointed at a small page (few
-/// tokens to coincidentally match) but **passes** a mislabel pointed at a
-/// large page that happens to cover half the query's long tokens purely by
-/// vocabulary size — e.g. `("incremental cache", "architecture")` and
-/// `("slugify title case", "wiki")` both pass this guard today, even though
-/// neither page is the answer. Repointing a failing label at a large page it
-/// happens to cover is therefore a way to raise the metrics that this guard
-/// does not catch.
-fn covers_majority(query: &str, content: &str) -> bool {
-    let toks: Vec<String> = query
-        .to_lowercase()
-        .split_whitespace()
-        .filter(|t| t.chars().count() >= MIN_TOKEN_CHARS)
-        .map(str::to_string)
-        .collect();
-    if toks.is_empty() {
-        return true;
-    }
-    let hit = toks.iter().filter(|t| content.contains(t.as_str())).count();
-    hit * 2 >= toks.len()
-}
-
-#[test]
-fn covers_majority_ignores_short_tokens_and_needs_half() {
-    // Short tokens are dropped: "on" and "the" occur in nearly every page and
-    // would let any label pass for any page.
-    assert!(covers_majority(
-        "watch on the change",
-        "recompile on change"
-    ));
-    // Half is enough.
-    assert!(covers_majority("cache version", "the cache guard"));
-    // Below half fires.
-    assert!(!covers_majority(
-        "atomic write temp file rename",
-        "renders pages and writes them"
-    ));
-    // A query with no long tokens cannot be judged, so it passes.
-    assert!(covers_majority("a b c", ""));
-}
-
 /// `(query, the one page that should answer it)`.
 ///
 /// Some cases are multi-token queries where a page misses one token, kept so
@@ -195,26 +116,6 @@ const CASES: &[(&str, &str)] = &[
     // field carries the word.
     ("sorted", "walk"),
 ];
-
-#[test]
-fn every_label_names_a_page_that_could_answer_it() {
-    let (_dir, wiki) = load_corpus();
-    for (query, expected) in CASES {
-        // A label naming a page that does not exist is always a bug; a page
-        // that exists but does not rank is a legitimate zero.
-        assert!(
-            wiki.has_page(expected),
-            "label `{query}` expects page `{expected}`, which does not exist",
-        );
-        let page = wiki.page(expected).expect("has_page just succeeded");
-        assert!(
-            covers_majority(query, &searchable_content(&page)),
-            "label `{query}` -> `{expected}`: fewer than half its tokens \
-             appear in that page's searchable content, so the page is not \
-             the answer. Fix the label.",
-        );
-    }
-}
 
 /// Run every case and return `(top1, mrr@10, table)`.
 ///

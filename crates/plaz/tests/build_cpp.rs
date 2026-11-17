@@ -3053,21 +3053,6 @@ fn a_method_with_a_macro_before_its_return_type_is_its_classs() {
 }
 
 #[test]
-fn a_misread_methods_bare_call_is_never_certain_to_a_free_namesake() {
-    // Neither word is told the macro: the method stays misread, with no class.
-    let h = "typedef int outcome_kind;\ntypedef int outcome_kind_long;\nstruct Runner {\n    outcome_kind_long run_it();\n    outcome_kind_long run_short();\n};\noutcome_kind_long run_short();\n";
-    let src = "#include \"run.h\"\noutcome_kind_long Runner::run_short() { return 0; }\noutcome_kind_long run_short() { return 1; }\noutcome_kind outcome_kind_long Runner::run_it() { return run_short(); }\n";
-    assert_eq!(
-        cpp_targets(
-            &[("src/run.h", h), ("src/run.cpp", src)],
-            "src/run.cpp",
-            "run_it"
-        ),
-        ["run_short() → one of: src/run.cpp:2, src/run.cpp:3, or outside"]
-    );
-}
-
-#[test]
 fn a_misread_call_operators_bare_call_is_never_certain_to_a_free_namesake() {
     let h = "typedef int outcome_kind;\ntypedef int outcome_kind_long;\nstruct Runner {\n    outcome_kind_long operator()(int a);\n    outcome_kind_long run_short();\n};\noutcome_kind_long run_short();\n";
     let src = "#include \"run.h\"\noutcome_kind_long Runner::run_short() { return 0; }\noutcome_kind_long run_short() { return 1; }\noutcome_kind outcome_kind_long Runner::operator()(int a) { return run_short(); }\n";

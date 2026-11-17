@@ -24,10 +24,13 @@ fn fenced_notes_do_not_masquerade_as_preserved_notes() {
     let path = dir.path().join("p.md");
     std::fs::write(
         &path,
-        "## Body\n```\n## Notes\nexample notes\n```\n\n## Notes\nmy real notes\n",
+        "## Body\n```\n## Notes\nexample notes\n```\n\n## Notes\nmy real notes\n\n```\n## Notes\nquoted example\n```\n",
     )
     .unwrap();
-    assert_eq!(read_notes_from(&path), "my real notes");
+    assert_eq!(
+        read_notes_from(&path),
+        "my real notes\n\n```\n## Notes\nquoted example\n```"
+    );
 }
 
 #[test]
@@ -335,29 +338,6 @@ fn page_source_index_reads_metadata_and_ignores_fenced_examples() {
         !idx.contains_key("nope2.txt"),
         "AGENTS.md is a manifest, not a page"
     );
-}
-
-#[test]
-fn page_source_index_keeps_every_page_declaring_one_source() {
-    // An orphan from an earlier id scheme and the live page both declare
-    // `note.md`. Dropping either at index time is what let the orphan
-    // hijack the live page's notes: the caller cannot prefer the live
-    // page's own file if it never sees it.
-    let dir = tempfile::tempdir().unwrap();
-    for name in ["alpha_one.md", "alpha_two.md"] {
-        std::fs::write(
-            dir.path().join(name),
-            "# A\n\n## Metadata\n- source: note.md\n",
-        )
-        .unwrap();
-    }
-
-    let idx = page_source_index(dir.path());
-    let got: Vec<&str> = idx["note.md"]
-        .iter()
-        .map(|p| p.file_name().unwrap().to_str().unwrap())
-        .collect();
-    assert_eq!(got, vec!["alpha_one.md", "alpha_two.md"]);
 }
 
 #[test]

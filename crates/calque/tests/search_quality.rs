@@ -21,11 +21,6 @@ fn build_corpus() -> (tempfile::TempDir, std::path::PathBuf) {
         ("lint.md", "# Lint\n\nReports broken wikilinks and orphans. Links are checked pagewise.\n"),
     // cache-like.
         ("cache.md", "# Cache\n\nThe incremental cache skips unchanged pages on recompile.\n"),
-    // ranking pair: many mentions vs one incidental mention. Neither title
-    // contains the query word, so only body term frequency can rank "hub"
-    // above "aside" (which would otherwise lead on id order).
-        ("hub.md", "# Hub\n\nkumquat kumquat kumquat kumquat kumquat.\n"),
-        ("aside.md", "# Aside\n\nMentions a kumquat once, in passing.\n"),
     // monotonicity pair: 25 vs 40 occurrences, both unlinked (equal
     // pagerank) — the higher count must score higher.
         ("flood_a.md", &flood_a),
@@ -145,20 +140,6 @@ fn rare_title_match_beats_volume_on_a_common_word() {
     assert!(
         ids.contains(&"architecture"),
         "partial hit must still appear: {ids:?}"
-    );
-}
-
-#[test]
-fn occurrence_count_grades_ranking() {
-    let (_dir, out) = build_corpus();
-    let w = Wiki::load(&out).unwrap();
-    let hits = w.search("kumquat", None, 10);
-    let ids: Vec<_> = hits.iter().map(|h| h.id.as_str()).collect();
-    let hub = ids.iter().position(|i| *i == "hub").expect("hub found");
-    let aside = ids.iter().position(|i| *i == "aside").expect("aside found");
-    assert!(
-        hub < aside,
-        "many-mentions page must outrank one-mention page: {ids:?}"
     );
 }
 

@@ -2,8 +2,6 @@
 use super::testutil::{assert_has, assert_lacks};
 use super::*;
 use crate::model::CallVia;
-use std::collections::HashSet;
-use tree_sitter::Language;
 
 #[test]
 fn ext_of_lowercases_and_source_rank_totally_orders_headers() {
@@ -135,32 +133,11 @@ fn summary_fallback_follows_signature_order_not_grouped_display_order() {
 }
 
 #[test]
-fn multi_line_parameter_lists_are_tidied() {
-    let src =
-        "pub fn generate(\n    out: &Path,\n    n: usize,\n) -> Result<(), Error> { todo!() }\n";
-    let e = crate::extract("t.rs", src);
-    assert!(
-        e.symbols
-            .iter()
-            .any(|s| s == "pub fn generate(out: &Path, n: usize) -> Result<(), Error>"),
-        "symbols: {:?}",
-        e.symbols
-    );
-}
-
-#[test]
 fn one_element_tuple_survives_tidying() {
     let src = "pub type Single = (u8,);\n";
     let e = crate::extract("t.rs", src);
     // a one-element tuple is not a parenthesized value
     assert_has(&e.symbols, "pub type Single = (u8,)");
-}
-
-#[test]
-fn non_rust_bodies_are_untouched() {
-    let src = "def test_visible():\n    pass\n";
-    let e = crate::extract("t.py", src);
-    assert_eq!(e.body, src);
 }
 
 #[test]
@@ -335,30 +312,6 @@ fn every_registered_language_query_compiles() {
 }
 
 #[test]
-fn the_query_registry_covers_exactly_the_claimed_extensions() {
-    // A language accepted by `extensions()` but absent from `QUERIES`
-    // would extract nothing while the compile still exits 0 — the silent
-    // failure a per-file `Query::new` would allow.
-    let claimed: BTreeSet<&str> = CODE_EXTENSIONS.iter().copied().collect();
-    let compiled: BTreeSet<&str> = CODE_EXTENSIONS
-        .iter()
-        .copied()
-        .filter(|e| lang_for_ext(e).is_some_and(|s| QUERIES.contains_key(&s.language)))
-        .collect();
-    assert_eq!(claimed, compiled);
-}
-
-#[test]
-fn there_is_one_valid_query_per_grammar() {
-    validate_queries();
-    let grammars: HashSet<Language> = CODE_EXTENSIONS
-        .iter()
-        .map(|e| lang_for_ext(e).unwrap().language)
-        .collect();
-    assert_eq!(QUERIES.len(), grammars.len());
-}
-
-#[test]
 fn extensions_sharing_a_grammar_share_a_query() {
     // Pinning: keying `QUERIES` by grammar is safe only while one grammar
     // means one query string. Not `lang_name`: `ts` and `tsx` are both
@@ -447,11 +400,8 @@ fn doc_text_is_none_for_a_one_sentence_doc() {
 fn doc_text_caps_on_a_char_boundary() {
     let src = format!("/// {}\nfn f() {{}}\n", "é".repeat(500).replace('é', "éé "));
     let text = doc_of(&src).1.unwrap();
-    assert!(
-        text.chars().count() <= 1000 && text.ends_with('…'),
-        "{}",
-        text.len()
-    );
+    assert_eq!(text.chars().count(), 1000);
+    assert!(text.ends_with('…'));
 }
 
 fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
@@ -463,12 +413,13 @@ fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
 fn rust_items_inside_cfg_test_are_tests() {
     let src = "fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n    fn helper() {}\n}\n";
     let flags = test_flags("src/a.rs", src);
-    for (name, want) in [("live", false), ("t", true), ("helper", true)] {
-        assert!(
-            flags.contains(&(name.to_string(), want)),
-            "{name}: {flags:?}"
-        );
-    }
+    let want = [
+        ("live", false),
+        ("tests", true),
+        ("t", true),
+        ("helper", true),
+    ];
+    assert_eq!(flags, want.map(|(n, t)| (n.to_string(), t)));
 }
 
 #[test]

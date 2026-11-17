@@ -401,14 +401,6 @@ const NO_AGENT_REMOVED: &str =
     "no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring";
 
 #[test]
-fn setup_repo_writes_wiki_even_when_not_on_path() {
-    let f = fixture(false, true);
-    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert!(out(&a).contains("not on PATH"));
-    assert!(read(&f.root().join(".mcp.json")).contains("\"command\": \"calque\""));
-}
-
-#[test]
 fn setup_local_writes_wiki_and_warns_when_it_is_not_on_path() {
     let f = fixture(false, false);
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();

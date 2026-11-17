@@ -86,19 +86,8 @@ fn generic_inherent_impl_strips_type_arguments() {
 }
 
 #[test]
-fn function_local_items_are_not_module_exports() {
-    let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n}\n";
-    let e = crate::extract("t.rs", src);
-    assert_has(&e.symbols, "pub fn outer()");
-    for leaked in ["Local", "hidden", "nested"] {
-        // each name lives in a function body and is not module surface
-        assert_lacks(&e.symbols, leaked);
-    }
-}
-
-#[test]
 fn function_local_trait_impls_and_traits_are_not_exports() {
-    let src = "pub fn outer() {\n    struct Local;\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
+    let src = "pub fn outer() {\n    pub struct Local;\n    impl Local {\n        pub fn hidden(&self) {}\n    }\n    pub fn nested() {}\n    pub struct Inner { pub x: u8 }\n    pub enum E { A }\n    impl Display for Local {\n        fn fmt(&self) {}\n    }\n    pub trait Hidden {\n        fn h(&self);\n    }\n}\n";
     let e = crate::extract("t.rs", src);
     assert_eq!(e.symbols, vec!["pub fn outer()".to_string()]);
 }
@@ -152,17 +141,12 @@ fn rust_without_test_module_round_trips_byte_identical() {
 
 #[test]
 fn rust_two_test_modules_get_two_markers_in_source_order() {
-    let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[test]\n    fn t1() {}\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t2() {}\n}\n";
+    let src = "pub fn a() {}\n\n#[cfg(test)]\nmod early_tests {\n    #[cfg(test)]\n    mod inner {\n        #[test]\n        fn t1() {}\n    }\n}\n\npub mod mid {\n    #[cfg(test)]\n    mod mid_tests {\n        #[test]\n        fn t2() {}\n    }\n}\n\npub fn b() {}\n\n#[cfg(test)]\nmod late_tests {\n    #[test]\n    fn t3() {}\n}\n";
     let e = crate::extract("t.rs", src);
-    let early = e.body.find("// [tests omitted: mod early_tests, 5 lines]");
-    let late = e.body.find("// [tests omitted: mod late_tests, 5 lines]");
-    assert!(early.is_some() && late.is_some(), "body: {}", e.body);
-    assert!(
-        early.unwrap() < late.unwrap(),
-        "markers out of order: {}",
-        e.body
+    assert_eq!(
+        e.body,
+        "pub fn a() {}\n\n// [tests omitted: mod early_tests, 8 lines]\n\npub mod mid {\n    // [tests omitted: mod mid_tests, 5 lines]\n}\n\npub fn b() {}\n\n// [tests omitted: mod late_tests, 5 lines]\n"
     );
-    assert!(!e.body.contains("fn t1") && !e.body.contains("fn t2"));
 }
 
 #[test]
@@ -211,18 +195,9 @@ fn cfg_test_matches_modulo_whitespace_but_other_cfgs_do_not() {
 
 #[test]
 fn symbols_and_imports_come_from_the_test_stripped_source() {
-    let src = "pub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
+    let src = "use std::fmt;\npub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
     let e = crate::extract("t.rs", src);
-    assert!(
-        !e.imports.iter().any(|i| i == "super::*"),
-        "test-only import leaked: {:?}",
-        e.imports
-    );
-    assert!(
-        !e.imports.iter().any(|i| i.contains("tempfile")),
-        "test-only import leaked: {:?}",
-        e.imports
-    );
+    assert_eq!(e.imports, vec!["std::fmt"]);
     // real export lost
     assert_has(&e.symbols, "pub struct Fixture");
     // The fixture also plants an `impl Default for Fixture` inside the

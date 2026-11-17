@@ -30,7 +30,7 @@ main() {
     done
     case $ki_base in
         *'?'* | *'#'*) ki_https=bad ;;
-        https://?*) ki_https=yes ;;
+        https://*) ki_https=yes ;;
         file:///* | file://localhost/*) ki_https= ;;
         *) ki_https=bad ;;
     esac

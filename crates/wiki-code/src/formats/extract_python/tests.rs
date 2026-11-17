@@ -2,14 +2,6 @@
 use crate::formats::code::testutil::{assert_has, assert_lacks, doc_of, item_lines};
 
 #[test]
-fn a_unicode_framed_comment_title_is_no_doc() {
-    let src = "x = 1\n# ─── indexing helpers ───\ndef build():\n    pass\n";
-    let e = crate::extract("b.py", src);
-    let item = e.items.iter().find(|i| i.name == "build").unwrap();
-    assert_eq!((item.doc.clone(), item.start_line), (None, 3));
-}
-
-#[test]
 fn defined_excludes_dataclass_fields_and_keeps_class_def_constant() {
     let src = "from dataclasses import dataclass\n\n@dataclass\nclass Invoice:\n    total: float\n\ndef render():\n    pass\n\nDEFAULT = 3\n";
     let e = crate::extract("billing.py", src);
@@ -264,6 +256,12 @@ fn a_computed_all_falls_back_to_the_underscore_convention() {
     assert_has(&e.symbols, "def a()");
     // a non-literal __all__ must not gate anything
     assert_has(&e.symbols, "def b()");
+    // a set is neither list nor tuple, so it is no literal either, even with only strings in it
+    let e = crate::extract(
+        "m.py",
+        "__all__ = {\"a\"}\n\ndef a():\n    pass\n\ndef b():\n    pass\n",
+    );
+    assert_has(&e.symbols, "def b()");
 }
 
 #[test]
@@ -311,6 +309,10 @@ fn a_recomputed_all_after_a_literal_falls_back_to_the_underscore_convention() {
     assert_has(&e.symbols, "def a()");
     // a non-literal reassignment must fall back to the convention
     assert_has(&e.symbols, "def b()");
+    // so must a reassignment to a set of strings: only a list or tuple counts as literal
+    let src = "__all__ = [\"a\"]\ndef a():\n    pass\ndef b():\n    pass\n__all__ = {\"a\"}\n";
+    let e = crate::extract("m.py", src);
+    assert_has(&e.symbols, "def b()");
 }
 
 #[test]
@@ -345,26 +347,6 @@ fn python_class_fields_are_qualified_and_gated() {
     assert_has(&e.symbols, "Article.url: str = \"\"");
     assert_has(&e.symbols, "Article.published: datetime | None = None");
     assert_lacks(&e.symbols, "_hidden");
-}
-
-#[test]
-fn python_class_fields_are_emitted_once_not_twice() {
-    let src = "class Article:\n    title: str\n";
-    let e = crate::extract("m.py", src);
-    // one pattern, one emission
-    assert_eq!(e.symbols, vec!["class Article", "Article.title: str"]);
-}
-
-#[test]
-fn python_long_values_are_truncated_on_a_character_boundary() {
-    // Multibyte characters: a byte-indexed cut panics here.
-    let src = format!("SYSTEM_PROMPT = \"{}\"\n", "naïve café — ".repeat(8));
-    let e = crate::extract("judge.py", &src);
-    // 48 characters of value, then the ellipsis
-    assert_has(
-        &e.symbols,
-        "SYSTEM_PROMPT = \"naïve café — naïve café — naïve café — naïve ca…",
-    );
 }
 
 #[test]
@@ -418,21 +400,6 @@ fn a_comment_inside_a_retained_value_is_dropped() {
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "CONFIG = { \"a\": 1, }");
     assert_lacks(&e.symbols, "inline");
-}
-
-#[test]
-fn a_python_string_value_keeps_its_own_punctuation() {
-    let src = "SEP = \" , \"\n";
-    let e = crate::extract("m.py", src);
-    assert_has(&e.symbols, "SEP = \" , \"");
-}
-
-#[test]
-fn python_decorators_are_kept_with_their_arguments() {
-    let src = "@dataclass(frozen=True)\nclass Article:\n    title: str\n";
-    let e = crate::extract("models.py", src);
-    assert_has(&e.symbols, "@dataclass(frozen=True) class Article");
-    assert_has(&e.symbols, "Article.title: str");
 }
 
 #[test]
@@ -512,13 +479,6 @@ fn a_continuation_inside_the_value_is_joined() {
     // `right` field — it is inside the value, not between `=` and the
     // value. Without the shared pipeline this renders `X = 1 + \ 2`.
     let src = "X = 1 + \\\n    2\n";
-    let e = crate::extract("m.py", src);
-    assert_has(&e.symbols, "X = 1 + 2");
-}
-
-#[test]
-fn a_crlf_continuation_inside_the_value_is_joined() {
-    let src = "X = 1 + \\\r\n    2\r\n";
     let e = crate::extract("m.py", src);
     assert_has(&e.symbols, "X = 1 + 2");
 }

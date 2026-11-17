@@ -89,7 +89,20 @@ fn calls_at_gives_literal_text_also_inside_macros() {
         ["c::k()", "crate::port(\"X\", 1)", "g(h(x))", "h(x)"]
     );
     // and they are the sites the item got
-    assert_eq!(a.file.items[0].call_sites.len(), 4);
+    let sites: Vec<_> = a.file.items[0]
+        .call_sites
+        .iter()
+        .map(|c| (c.name.as_str(), c.args))
+        .collect();
+    assert_eq!(
+        sites,
+        [
+            ("port", Some(2)),
+            ("k", Some(0)),
+            ("g", Some(1)),
+            ("h", Some(1))
+        ]
+    );
 }
 
 #[test]

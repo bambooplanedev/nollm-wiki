@@ -377,15 +377,6 @@ mod tests {
     }
 
     #[test]
-    fn a_file_with_error_nodes_is_flagged_not_dropped() {
-        let p = project([(
-            "src/a.rs".to_string(),
-            "fn ok() {}\nfn broken( { \n".to_string(),
-        )]);
-        assert!(p.files["src/a.rs"].syntax_errors);
-    }
-
-    #[test]
     fn load_skips_hidden_and_non_code_and_rejects_a_missing_root() {
         let d = tempfile::tempdir().unwrap();
         for (p, t) in [

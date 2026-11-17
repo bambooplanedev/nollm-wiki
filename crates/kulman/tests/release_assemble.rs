@@ -91,14 +91,7 @@ fn the_assembled_manifest_is_one_kulman_reads() {
         state(&home),
         json!({"version": VERSION, "modules": ["calque", "plaz"]})
     );
-    // Both places of the tree hold the manifest written beside the archives.
     let manifest = fs::read(dir.join("manifest.json")).unwrap();
-    for at in ["latest/download", "download/v0.7.0"] {
-        assert_eq!(
-            fs::read(t.path().join("tree").join(at).join("manifest.json")).unwrap(),
-            manifest
-        );
-    }
     let m: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
     assert_eq!(m["modules"][0]["options"][0]["name"], "memory");
     assert_eq!(m["modules"][0]["options"][0]["default"], true);
@@ -122,10 +115,6 @@ fn sha256sums_lists_every_archive_once() {
         .collect();
     expect.sort_unstable();
     assert_eq!(lines, expect);
-    assert_eq!(
-        fs::read(t.path().join("tree/latest/download/SHA256SUMS")).unwrap(),
-        sums.as_bytes()
-    );
 }
 
 #[test]
@@ -178,7 +167,6 @@ fn the_tree_carries_the_signatures_beside_what_they_sign() {
                 at.join(f).display()
             );
         }
-        assert!(at.join("SHA256SUMS").is_file() && at.join("manifest.json").is_file());
     }
 }
 

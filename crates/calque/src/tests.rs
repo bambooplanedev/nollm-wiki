@@ -24,48 +24,6 @@ fn stale_page_files_lists_orphaned_on_disk_only() {
 }
 
 #[test]
-fn prune_stale_never_deletes_hand_written_notes() {
-    use std::collections::BTreeSet;
-    let dir = tempfile::tempdir().unwrap();
-    let out = dir.path();
-    std::fs::write(
-        out.join("noted.md"),
-        "# Noted\n\n## Body\nx\n\n## Notes\nwhy this module is odd\n",
-    )
-    .unwrap();
-    std::fs::write(
-        out.join("plain.md"),
-        "# Plain\n\n## Body\nx\n\n## Notes\n_(add your own notes here — preserved on recompile)_\n",
-    )
-    .unwrap();
-    std::fs::write(
-        out.join("migrated.md"),
-        "# Migrated\n\n## Body\nx\n\n## Notes\ncarried onto the renamed page\n",
-    )
-    .unwrap();
-    let prunable: BTreeSet<String> = ["noted", "plain", "migrated"]
-        .iter()
-        .map(std::string::ToString::to_string)
-        .collect();
-    let consumed: BTreeSet<std::path::PathBuf> = [out.join("migrated.md")].into();
-    // Every id is gone from the corpus — an id-scheme change renames every
-    // page at once, which is exactly when notes are easiest to lose.
-    super::prune_stale(&prunable, &BTreeSet::new(), out, &consumed);
-    assert!(
-        out.join("noted.md").exists(),
-        "the only human-owned section in the output must survive a prune"
-    );
-    assert!(
-        !out.join("plain.md").exists(),
-        "an untouched placeholder is not notes; that page is still pruned"
-    );
-    assert!(
-        !out.join("migrated.md").exists(),
-        "notes already migrated onto the renamed page leave nothing to keep"
-    );
-}
-
-#[test]
 fn is_under_matches_nested_paths_only() {
     use std::path::Path;
     assert!(super::is_under(

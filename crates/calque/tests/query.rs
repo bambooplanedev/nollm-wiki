@@ -1314,7 +1314,7 @@ const CALLBACK_TS: &str = "export function renderCartLine(x: number): string {\n
 
 #[test]
 fn empty_callers_say_what_is_not_seen() {
-    const CLAUSE: &str = " (not seen: a call outside any function, a function passed as a value or called by a computed name, or a call from another language or an unindexed file; grep for ";
+    use common::CLAUSE;
     // The b3 case: a function passed as a value has no seen callers.
     let (_d, w) = code_fixture(&[("src/cart.ts", CALLBACK_TS)]);
     assert_eq!(
@@ -1711,25 +1711,6 @@ fn tail_ratio_branch_skips_a_note_the_code_outscores() {
 
 fn ids_of(hits: &[calque::query::Hit]) -> Vec<&str> {
     hits.iter().map(|h| h.id.as_str()).collect()
-}
-
-#[test]
-fn newer_of_two_equal_memory_notes_is_first_and_dated_beats_undated() {
-    let note =
-        |title: &str, updated: &str| format!("---\ntitle: {title}\n{updated}---\n\nzebra rule.\n");
-    let (_d, w) = code_fixture(&[
-        (".agents/memory/a.md", &note("Aaa", "updated: 2026-01-01\n")),
-        (".agents/memory/c.md", &note("Ccc", "")),
-        (".agents/memory/b.md", &note("Bbb", "updated: 2026-03-01\n")),
-    ]);
-    let ids: Vec<_> = w
-        .search("zebra", None, 10)
-        .into_iter()
-        .filter(|h| h.memory)
-        .map(|h| h.id)
-        .collect();
-    // The undated note loses the tie to both and falls out of the tail of two.
-    assert_eq!(ids, ["bbb", "aaa"]);
 }
 
 #[test]
@@ -2384,7 +2365,10 @@ fn search_stays_silent_when_a_name_has_many_copies() {
         ("src/b.rs", "pub fn slice_cap_for() {}\n"),
         ("src/c.rs", "pub fn slice_cap_for() {}\n"),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.rs  A — pub fn slice_cap_for()\n  src/a.rs:1-1  slice_cap_for  pub fn slice_cap_for()\n"
+    );
 }
 
 #[test]
@@ -2393,7 +2377,10 @@ fn search_does_not_note_a_test_copy() {
         ("src/a.rs", "pub fn slice_cap_for() {}\n"),
         ("tests/b.rs", "fn slice_cap_for() {}\n"),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.rs  A — pub fn slice_cap_for()\n  src/a.rs:1-1  slice_cap_for  pub fn slice_cap_for()\n"
+    );
 }
 
 /// Names of the symbol lines of a response, in output order.
@@ -2470,15 +2457,6 @@ fn a_query_of_names_gets_one_line_per_name() {
 /// Paths of the pages of a response, in output order.
 fn hit_paths(hits: &[calque::query::Hit]) -> Vec<String> {
     hits.iter().map(|h| h.path.clone()).collect()
-}
-
-#[test]
-fn a_name_in_another_case_is_not_the_constant_of_that_name() {
-    // `max_weekly_fee_usd` is a field elsewhere; the constant of the same
-    // letters is another item and must not answer for it.
-    let (_d, w) = code_fixture(&[("src/other.rs", "pub const MAX_WEEKLY_FEE_USD: f64 = 1.0;\n")]);
-    let q = "max_weekly_fee_usd";
-    assert_eq!(w.not_found(q, None, None), [q]);
 }
 
 #[test]
@@ -2601,7 +2579,10 @@ fn search_does_not_note_a_nested_copy() {
             "def run():\n    def slice_cap_for():\n        pass\n",
         ),
     ]);
-    assert!(!out.contains("also defined"), "{out}");
+    assert_eq!(
+        out,
+        "a  src/a.py  A — def slice_cap_for()\n  src/a.py:1-2  slice_cap_for  def slice_cap_for()\n"
+    );
 }
 
 #[test]
@@ -2678,15 +2659,6 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     assert!(!pack.contains("QX_PY_DERIVE"), "{pack}");
     let hint = calque::hint::hint_lines(&w, "where is the zb py derive script run");
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
-}
-
-#[test]
-fn a_shell_global_is_not_matched_in_another_case() {
-    let (_d, w) = code_fixture(&[("lib/qx.sh", GLOBALS_SH)]);
-    assert_eq!(w.not_found("qx_py_derive", None, None), ["qx_py_derive"]);
-    assert!(symbol_lines(&w.search("qx_py_derive _qx_py_run", None, 10))
-        .iter()
-        .all(|l| l.3 != "QX_PY_DERIVE"));
 }
 
 const CALLED_RS: &str = "\

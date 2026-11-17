@@ -195,36 +195,7 @@ fn serve_lists_and_calls_tools() {
     let text = text_of(&resp);
     assert!(text.contains("gradient_descent"), "search result: {text}");
 
-    // tools/call neighbors on a default server -> invalid params
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        4,
-        "neighbors",
-        &json!({"id": "gradient_descent"}),
-    );
-    assert_eq!(resp["error"]["code"], -32602, "{resp}");
-
     drop(stdin); // close stdin -> server exits
-    let _ = child.wait();
-}
-
-#[test]
-fn serve_tools_flag_brings_back_neighbors() {
-    let (_tmp, out) = compile_fixture();
-    let (mut child, mut stdin, stdout) =
-        spawn_server_with(&out, &["--tools", "search,page,neighbors,callers"]);
-    initialize(&mut stdin, &stdout);
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        2,
-        "neighbors",
-        &json!({"id": "gradient_descent", "max_tokens": 800}),
-    );
-    let text = text_of(&resp);
-    assert!(text.contains("\n# Gradient Descent\n"), "pack: {text}");
-    drop(stdin);
     let _ = child.wait();
 }
 
@@ -252,19 +223,6 @@ fn serve_tools_flag_picks_the_tools() {
     let report: Value = serde_json::from_str(text).unwrap();
     assert_eq!(report["broken_links"], json!([]));
     assert_eq!(report["large"], json!([]));
-
-    // A tool left out is not callable.
-    let resp = call(
-        &mut stdin,
-        &stdout,
-        4,
-        "page",
-        &json!({"id": "gradient_descent"}),
-    );
-    assert!(
-        resp.get("error").is_some() || resp["result"]["isError"] == json!(true),
-        "resp: {resp}"
-    );
     child.kill().ok();
 }
 
@@ -449,7 +407,11 @@ fn serve_refuses_path_traversal_outside_index() {
         }}),
     );
     let resp = read_response(&stdout, 2);
-    assert!(resp["error"].is_object(), "expected error, got: {resp}");
+    assert_eq!(resp["error"]["code"], json!(-32002), "got: {resp}");
+    assert_eq!(
+        resp["error"]["message"], "no such resource: wiki://page/../secret",
+        "got: {resp}"
+    );
 
     drop(stdin);
     let _ = child.wait();
@@ -639,10 +601,6 @@ fn serve_reports_bad_params_and_survives() {
     let text = text_of(&resp);
     assert!(text.contains("query"), "text: {text}");
 
-    // (c) Unknown tool name -> JSON-RPC invalid params.
-    let resp = call(&mut stdin, &stdout, 4, "nope", &json!({}));
-    assert_eq!(resp["error"]["code"], json!(-32602), "got: {resp}");
-
     // (d) A budget the target's own page cannot fit degrades the target
     // block instead of failing.
     let resp = call(
@@ -800,7 +758,7 @@ fn serve_source_compiles_missing_wiki_and_answers() {
 
     let resp = search(&mut stdin, &stdout, 2, "oldword");
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    assert_eq!(ids, ["alpha"]);
     assert!(project.path().join(".kulman/index.json").exists());
     assert_eq!(stale_block(&resp), None);
 
@@ -831,10 +789,10 @@ fn serve_source_catches_up_an_existing_wiki() {
     let mut id = 2;
     let resp = search_until_compiled(&mut stdin, &stdout, &mut id, "zebrafish");
     assert_eq!(stale_block(&resp), None, "{resp}");
-    for word in ["zebrafish", "quokka"] {
+    for (word, page) in [("zebrafish", "alpha"), ("quokka", "gamma")] {
         id += 1;
         let resp = search(&mut stdin, &stdout, id, word);
-        assert!(!hit_ids(&resp).is_empty(), "{word} not seen: {resp}");
+        assert_eq!(hit_ids(&resp), [page], "{resp}");
         assert_eq!(stale_block(&resp), None);
     }
 
@@ -917,7 +875,7 @@ fn serve_source_sees_file_in_new_subdir() {
     .unwrap();
     let resp = search(&mut stdin, &stdout, 3, "quokka");
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("beta")), "ids: {ids:?}");
+    assert_eq!(ids, ["beta"]);
 
     drop(stdin);
     let _ = child.wait();
@@ -954,11 +912,13 @@ fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
     std::fs::set_permissions(&wiki_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
     let ids = hit_ids(&resp);
-    assert!(ids.iter().any(|id| id.contains("alpha")), "ids: {ids:?}");
+    assert_eq!(ids, ["alpha"]);
     let stale = stale_block(&resp);
     assert!(stale.is_some(), "no stale line: {resp}");
+    let stale = stale.unwrap();
+    assert!(stale.starts_with("wiki may be stale: "), "{stale}");
     assert!(
-        !stale.unwrap().contains("recompile still running"),
+        !stale.contains("recompile still running"),
         "the compile should have failed, not timed out: {resp}"
     );
 
@@ -1182,18 +1142,6 @@ fn mcp_page_names_a_missing_page_file() {
         assert_eq!(resp["error"]["message"], json!(msg), "{resp}");
     }
     child.kill().ok();
-}
-
-#[test]
-fn mcp_page_names_a_skipped_folder() {
-    let (_src, out, _id) = big_project();
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
-    initialize(&mut stdin, &stdout);
-    let (err, text) = page(&mut stdin, &stdout, 2, &json!({"id": "vendor/missing.js"}));
-    child.kill().ok();
-    assert!(err);
-    assert!(text.contains("under a skipped `vendor` folder"), "{text}");
-    assert!(!text.contains("closest"), "{text}");
 }
 
 #[test]

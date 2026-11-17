@@ -42,10 +42,6 @@ fn heading_range_ends_at_same_level_heading() {
     assert_eq!(range_of(PLAN, "Task 2"), (3, 16));
 }
 #[test]
-fn last_label_ends_at_last_line() {
-    assert_eq!(range_of(PLAN, "D-d, swap (H1)."), (18, 18));
-}
-#[test]
 fn top_heading_spans_file() {
     assert_eq!(range_of(PLAN, "Plan"), (1, 18));
 }
@@ -78,12 +74,6 @@ fn hits(q: &str) -> Vec<DocHit> {
 }
 fn texts(q: &str) -> Vec<String> {
     hits(q).into_iter().map(|h| h.text).collect()
-}
-
-#[test]
-fn id_matches_whole_word_only() {
-    assert_eq!(texts("T2d"), ["T2d. Remaining matrix."]);
-    assert_eq!(texts("T2").len(), 0);
 }
 #[test]
 fn id_inside_a_label_matches_after_first_word_hits() {

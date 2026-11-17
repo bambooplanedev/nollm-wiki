@@ -56,7 +56,13 @@ fn a_closure_calling_an_outer_parameter_is_hidden_even_when_a_project_function_s
     let src = "pub fn cb() {}\npub fn f(cb: impl Fn()) {\n    let run = || {\n        cb();\n    };\n    run();\n}\n";
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     let calls = common::fn_section(&common::map_page(&vault, "map/src/a_rs"), "f", "Calls");
-    assert!(calls.contains(&"`cb()` L4 → target not visible".to_string()));
+    assert_eq!(
+        calls,
+        [
+            "`cb()` L4 → target not visible",
+            "`run()` L6 → target not visible"
+        ]
+    );
 }
 
 fn cli_build(src: &Path, vault: &Path) -> assert_cmd::assert::Assert {
@@ -1237,20 +1243,28 @@ fn continue_returns_to_its_loop_and_labels_pick_the_loop() {
     let src = LOOPS;
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     let edges = chart_edges(&common::map_page(&vault, "map/src/a_rs"), "g");
-    for e in [
-        "continue 'outer --> 'outer: for x in xs",
-        "break 'outer --> z()",
-        "continue --> for y in xs",
-        "w() --> for y in xs",
-        "for y in xs -done-> 'outer: for x in xs",
-        "'outer: for x in xs -done-> z()",
-        "z() --> end",
-    ] {
-        assert!(edges.contains(&e.to_string()), "{e} not in {edges:#?}");
-    }
-    assert!(
-        !edges.iter().any(|e| e.starts_with("return ")),
-        "{edges:#?}"
+    assert_eq!(
+        edges,
+        [
+            "g --> 'outer: for x in xs",
+            "'outer: for x in xs -loop-> for y in xs",
+            "for y in xs -loop-> y #gt; x",
+            "y #gt; x -yes-> continue 'outer",
+            "continue 'outer --> 'outer: for x in xs",
+            "y #gt; x -no-> y == x",
+            "y == x -yes-> break 'outer",
+            "y == x -no-> *y == 0",
+            "*y == 0 -yes-> continue",
+            "continue --> for y in xs",
+            "*y == 0 -no-> *y == 9",
+            "*y == 9 -yes-> return",
+            "*y == 9 -no-> w()",
+            "w() --> for y in xs",
+            "for y in xs -done-> 'outer: for x in xs",
+            "break 'outer --> z()",
+            "'outer: for x in xs -done-> z()",
+            "z() --> end",
+        ]
     );
 }
 
@@ -2566,6 +2580,7 @@ fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
         .stdout("map: 1 written, 0 unchanged, 0 removed\n");
 }
 
+// Pins the 512 MiB build stack: the flow walker recurses once per tree level.
 #[test]
 fn a_function_with_a_20000_term_expression_chain_builds() {
     let d = tempfile::tempdir().unwrap();
