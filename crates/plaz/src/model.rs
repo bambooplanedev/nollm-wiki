@@ -107,7 +107,7 @@ pub struct File {
     /// (*say)(const char*);`): a call of one is no function's.
     pub variables: BTreeSet<String>,
     /// The function templates a C/C++ file explicitly specializes, whose
-    /// specializations have no item: each by its path, the enclosing
+    /// specializations no call is matched to: each by its path, the enclosing
     /// named namespaces then the name as written, template arguments
     /// dropped (`a::pk::pack` of `template <> int pk::pack<Wide>(Wide)` in
     /// `namespace a`).

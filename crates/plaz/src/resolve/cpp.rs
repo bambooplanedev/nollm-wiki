@@ -300,8 +300,8 @@ impl Caller<'_, '_> {
             CallVia::Member(x) => self.cpp_member(chain, call, x.as_deref()),
         };
         // A `using std::f;` of the file may bring in another `f`; a
-        // function template's explicit specialization, which has no item,
-        // may be the one called.
+        // function template's explicit specialization, which is no
+        // candidate, may be the one called.
         let foreign = *via == CallVia::Bare && self.foreign_using(&call.site.name);
         let specialized = |f: &FnId| {
             let page = self.index.page_of(&f.path);
