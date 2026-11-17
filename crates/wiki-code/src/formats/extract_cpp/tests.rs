@@ -633,3 +633,12 @@ fn a_conversion_operator_is_a_method_named_as_written() {
         ]
     );
 }
+
+#[test]
+fn a_conversion_to_a_function_pointer_type_is_no_item() {
+    let e = crate::extract(
+        "gate.cpp",
+        "struct Gate {\n  operator int(*)(int)() const;\n};\n",
+    );
+    assert_eq!(item_lines(&e.items), vec!["1-3 type Gate pub"]);
+}

@@ -784,7 +784,10 @@ fn last_row(node: Node) -> usize {
 /// for its name alone: its `@name` is the whole `operator_cast`
 /// (`operator Kind*() const`), and the name is what precedes the function
 /// declarator nested in it (`operator Kind*`). `None` for a cast with no
-/// function declarator, which names nothing.
+/// function declarator, which names nothing, and for one whose function
+/// declarator wraps another declarator (`operator int(*)(int)()`): the type
+/// runs past the cut, and the part before it would pass for another
+/// operator's name.
 fn name_text<'a>(name: Node, text: &'a str) -> Option<&'a str> {
     if name.kind() != "operator_cast" {
         return text.get(name.byte_range());
@@ -792,7 +795,8 @@ fn name_text<'a>(name: Node, text: &'a str) -> Option<&'a str> {
     let params = std::iter::successors(name.child_by_field_name("declarator"), |d| {
         d.named_child(u32::try_from(d.named_child_count()).ok()?.checked_sub(1)?)
     })
-    .find(|d| d.kind() == "abstract_function_declarator")?;
+    .find(|d| d.kind() == "abstract_function_declarator")
+    .filter(|d| d.child_by_field_name("declarator").is_none())?;
     text.get(name.start_byte()..params.start_byte())
         .map(str::trim_end)
 }
