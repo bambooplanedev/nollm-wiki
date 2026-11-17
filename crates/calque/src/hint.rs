@@ -183,14 +183,33 @@ fn rests_on_function_words(wiki: &Wiki, text: &str) -> bool {
     hits.is_empty() || best < HINT_MIN_SHARE * available
 }
 
+/// How Claude Code's own notes open when it hands them to a
+/// `UserPromptSubmit` hook as a prompt: a message from another session or a
+/// subagent's hand-back, a skill re-invocation, an image's size note, the
+/// usage-limit and safety-classifier notes. Its hook input has no field
+/// that tells them from the person's turns. Measured 2026-11-17: these
+/// openings carry all 134 hints fired on 3,988 such notes (bench and Mac)
+/// and open none of 3,320 Mac or 136 bench human prompts.
+const HARNESS_OPENINGS: [&str; 7] = [
+    "Another Claude session sent a message:",
+    "(Re-invocation of /",
+    "[Image: original ",
+    "Your claude.ai usage limit has reset.",
+    "[Usage limit reached;",
+    "[Earlier usage-limit notes no longer apply.",
+    "Your response above was stopped by a safety classifier",
+];
+
 /// Whether the harness wrote `text`, not the person: Claude Code hands a
-/// `UserPromptSubmit` hook its own turns too (`<task-notification>`, a
-/// subagent's hand-back, `<command-name>`, `<bash-stdout>`), each opening
-/// with a tag. A hint on them is noise, and the hand-backs run to a
-/// thousand words.
+/// `UserPromptSubmit` hook its own turns too. Most open with a tag
+/// (`<task-notification>`, `<command-name>`, `<bash-stdout>`), the rest with
+/// one of `HARNESS_OPENINGS` or as `Skill /name is already loaded above`. A
+/// hint on them is noise, and the hand-backs run to a thousand words.
 fn is_harness_prompt(text: &str) -> bool {
     let t = text.trim_start();
-    t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic())
+    (t.starts_with('<') && t[1..].starts_with(|c: char| c.is_ascii_alphabetic()))
+        || HARNESS_OPENINGS.iter().any(|o| t.starts_with(o))
+        || (t.starts_with("Skill /") && t.contains(" is already loaded above"))
 }
 
 /// Append `line` whitespace-collapsed and cut to `LINE_CHARS`.

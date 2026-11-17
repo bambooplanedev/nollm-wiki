@@ -88,6 +88,15 @@ fn hint_is_silent_on_a_harness_turn() {
 }
 
 #[test]
+fn hint_is_silent_on_a_message_from_another_session() {
+    let tmp = project();
+    let text = format!(
+        "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] {TASK}\n</agent-message>"
+    );
+    assert_eq!(hint_in(&tmp, &text), "");
+}
+
+#[test]
 fn hint_is_silent_on_a_one_word_reply() {
     let tmp = project();
     assert_eq!(hint_in(&tmp, "creds"), "");
