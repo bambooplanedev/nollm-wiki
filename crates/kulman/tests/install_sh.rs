@@ -162,9 +162,11 @@ fn install_sh_puts_kulman_in_bin() {
             bin.display()
         )
     );
-    // Again over the first: replaced in place.
+    // Again over an older binary: replaced in place.
+    fs::write(home.join("bin/kulman"), b"old").unwrap();
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
+    assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
 }
 
