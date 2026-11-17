@@ -91,6 +91,9 @@ pub struct CppFacts {
     /// The other `usings`, but those in a class body (they bring members,
     /// such as inherited constructors).
     pub inner_usings: BTreeSet<String>,
+    /// Per class, by path as in `classes`: the `usings` its body writes
+    /// (`Base<T>::Node` of `using typename Base<T>::Node;`).
+    pub class_usings: BTreeMap<String, BTreeSet<String>>,
     /// Per C/C++ method item, by index into `code.items`: its class as a
     /// path (`n::Outer::Inner`), template arguments and whitespace dropped
     /// (`untemplated`), an anonymous namespace a segment of its own per

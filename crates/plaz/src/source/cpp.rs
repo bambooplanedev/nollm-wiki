@@ -86,7 +86,7 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             specialization(file, n, s.text());
             variables(file, n, s.text());
             if n.kind() == "using_declaration" {
-                using(file, n, s.text());
+                using(file, n, s.text(), &anon);
             }
             nested_include(file, n, s.text());
             stack.extend(n.named_children(&mut n.walk()));
@@ -316,9 +316,10 @@ fn class_head(file: &mut File, n: Node, src: &str, anonymous: &str) {
 }
 
 /// Records what the `using` declaration or directive `n` names in
-/// `CppFacts::usings`, and by where it stands in `file_usings` or
-/// `inner_usings`.
-fn using(file: &mut File, n: Node, src: &str) {
+/// `CppFacts::usings`, and by where it stands in `file_usings`,
+/// `inner_usings` or, `anonymous` naming the file's anonymous namespaces,
+/// `class_usings`.
+fn using(file: &mut File, n: Node, src: &str, anonymous: &str) {
     let named = n.named_children(&mut n.walk()).last();
     // `using typename B<T>::K;` names `B<T>::K`.
     let written = |u: Node| {
@@ -338,7 +339,11 @@ fn using(file: &mut File, n: Node, src: &str) {
     });
     match scope.map(|p| p.kind()) {
         None => file.cpp.file_usings.insert(named.clone()),
-        Some("field_declaration_list") => false,
+        Some("field_declaration_list") => {
+            let class = untemplated(&enclosing(n, src, Some(anonymous), false).join("::"));
+            let of = file.cpp.class_usings.entry(class).or_default();
+            of.insert(named.clone())
+        }
         Some(_) => file.cpp.inner_usings.insert(named.clone()),
     };
     file.cpp.usings.insert(named);

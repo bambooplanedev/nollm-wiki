@@ -1611,6 +1611,12 @@ fn a_type_name_in_a_class_template_is_not_looked_up_in_a_dependent_base() {
         cpp_targets(&[("src/t.cpp", ctor)], "src/t.cpp", "tall"),
         ["Rack::count() → src/t.cpp:3"]
     );
+    // A `using` in one class is not another class's.
+    let apart = "struct Slot {\n    void go() {}\n};\ntemplate <class T> struct Rack {\n    struct Slot {\n        void go() {}\n    };\n};\ntemplate <class T> struct Named : Rack<T> {\n    using typename Rack<T>::Slot;\n};\ntemplate <class T> struct Lent : Rack<T> {\n    using typename T::Slot;\n};\ntemplate <class T> struct Bare : Rack<T> {\n    void bare() { Slot s; s.go(); }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/p.cpp", apart)], "src/p.cpp", "bare"),
+        ["s.go() → src/p.cpp:2"]
+    );
     // `Wrap<int>` is no dependent base: what it derives from is searched.
     assert_eq!(
         cpp_targets(&files, "src/a.cpp", "mid"),

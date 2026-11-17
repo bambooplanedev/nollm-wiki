@@ -179,33 +179,20 @@ impl<'a> Cpp<'a> {
             }
             // `using typename Base<T>::t;` in the class names a
             // dependent base's member.
-            let heads = self.classes.heads.get(scope).into_iter().flatten();
-            // The usings written in a class body of the head's file.
-            let usings: Vec<String> = heads
-                .map(|h| &self.pages[*h.0].1.cpp)
-                .flat_map(|f| {
-                    let at_class =
-                        |u: &&String| !(f.file_usings.contains(*u) || f.inner_usings.contains(*u));
-                    f.usings.iter().filter(at_class)
-                })
-                .map(|u| untemplated(u))
-                .collect();
+            let usings = self.class_usings(scope, t);
             let named = |b: &str| {
                 let member = format!("{}::{t}", owner_key(b));
                 let ends = |u: &String| *u == member || u.ends_with(&format!("::{member}"));
                 usings.iter().any(ends)
             };
-            let nested = |b: &str| at(&[format!("{}::{t}", bare(b))]);
+            // What a base's own `using` names is not followed: unplaced.
+            let nested = |b: &str| match at(&[format!("{}::{t}", bare(b))]) {
+                Step::Nothing if !self.class_usings(b, t).is_empty() => Step::Unplaced,
+                step @ (Step::Found(_) | Step::Unplaced | Step::Nothing) => step,
+            };
             match self.in_bases(scope, &nested, &named, sight) {
-                // `using typename T::t;`: what it names, which no head
-                // shows; `using t::t;` brings constructors, no type.
-                Step::Nothing
-                    if usings.iter().any(|u| {
-                        u.ends_with(&format!("::{t}")) && !u.ends_with(&format!("{t}::{t}"))
-                    }) =>
-                {
-                    return Step::Unplaced;
-                }
+                // `using typename T::t;`: what it names, which no head shows.
+                Step::Nothing if !usings.is_empty() => return Step::Unplaced,
                 Step::Nothing => {}
                 found @ (Step::Found(_) | Step::Unplaced) => return found,
             }
@@ -228,6 +215,17 @@ impl<'a> Cpp<'a> {
             (Some(c), None) => Step::Found(c.0),
             (Some(_), Some(_)) => Step::Unplaced,
         }
+    }
+
+    /// The usings the body of `class` writes that name a type `t`, template
+    /// arguments dropped (`Base::t` of `using typename Base<T>::t;`); not
+    /// `using t::t;`, which brings constructors.
+    fn class_usings(&self, class: &str, t: &str) -> Vec<String> {
+        let heads = self.classes.heads.get(class).into_iter().flatten();
+        let written = heads.filter_map(|h| self.pages[*h.0].1.cpp.class_usings.get(class));
+        let all = written.flatten().map(|u| untemplated(u));
+        all.filter(|u| u.ends_with(&format!("::{t}")) && !u.ends_with(&format!("{t}::{t}")))
+            .collect()
     }
 
     /// What `nested(base)` gives for the nearest project bases of the
