@@ -139,11 +139,21 @@ impl<'a> Cpp<'a> {
     /// std::string;` beside `my::string`); or `long` adds only the name
     /// of the class `short` starts with (`Box::Box::Lid` is `Box::Lid`);
     /// or the nearest alias `short` in a namespace around `x` names `long`.
+    /// Never when `short` is a template parameter of `x`.
     fn means(&self, x: FnRef, short: &str, long: &str, y: FnRef) -> bool {
         let facts = &self.pages[x.0].1.cpp;
         let Some(added) = long.strip_suffix(short).and_then(|p| p.strip_suffix("::")) else {
             return false;
         };
+        // `short` is `x`'s own template parameter: no type around it.
+        let head = self.item(x).signature.split('(').next().unwrap_or("");
+        let mut words = head.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+        let mut words = words.by_ref().filter(|w| !w.is_empty()).peekable();
+        while let Some(w) = words.next() {
+            if matches!(w, "class" | "typename") && words.peek() == Some(&short) {
+                return false;
+            }
+        }
         if short.split("::").next() == Some(added) && !self.namespaces.contains(added) {
             return true;
         }

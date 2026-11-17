@@ -426,6 +426,20 @@ fn a_using_inside_a_body_or_another_namespace_is_no_evidence_for_a_fold() {
 }
 
 #[test]
+fn a_template_parameter_named_like_a_type_is_no_evidence_for_a_fold() {
+    // `Kind` is the function's own template parameter, not `core::Kind`.
+    let h = "namespace core {\nstruct Kind {};\ntemplate <class Kind> void pour(Kind k);\n}\n";
+    let def =
+        "#include \"t.h\"\nnamespace core {\ntemplate <class T> void pour(core::Kind k) {}\n}\n";
+    let main = "#include \"t.h\"\nvoid run() { core::pour(1); }\n";
+    let files = [("src/t.h", h), ("src/t.cpp", def), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["core::pour(1) → src/t.h:3"]
+    );
+}
+
+#[test]
 fn a_declaration_folds_across_an_alias_of_its_namespace_or_its_classs_own_name() {
     // `path` is the alias around `shift`, naming what `fs::path` names;
     // `Crate::Crate::Lid` is `Crate::Lid`.
