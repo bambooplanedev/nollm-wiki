@@ -76,24 +76,93 @@ fn a_prototype_links_its_definition_in_the_same_file() {
 }
 
 #[test]
-fn same_arity_overloads_the_index_cannot_pair_are_one_of_their_definitions() {
-    let h = "class Pan {\npublic:\n    void heat(int t);\n    void heat(double t);\n};\n";
+fn a_declared_overload_is_defined_by_its_own_overloads_definition_only() {
+    let h = "class Pan {\npublic:\n    void heat(int t);\n    void heat(double t);\n    void heat(char t);\n};\n";
     let cpp = "#include \"pan.h\"\nvoid Pan::heat(int t) { warm(t); }\nvoid Pan::heat(double t) { warm(t); }\n";
     let (_d, vault) = common::built(&[("src/pan.h", h), ("src/pan.cpp", cpp)]);
     let header = common::map_page(&vault, "map/src/pan_h");
-    let one_of = "Defined at one of: [[map/src/pan_cpp#pan_heat|Pan::heat]], [[map/src/pan_cpp#pan_heat_2|Pan::heat]]";
-    for (anchor, sig, line) in [
-        ("pan_heat", "void heat(int t)", 3),
-        ("pan_heat_2", "void heat(double t)", 4),
+    for (anchor, sig, line, defined) in [
+        (
+            "pan_heat",
+            "void heat(int t)",
+            3,
+            "Defined at [[map/src/pan_cpp#pan_heat|Pan::heat]]",
+        ),
+        (
+            "pan_heat_2",
+            "void heat(double t)",
+            4,
+            "Defined at [[map/src/pan_cpp#pan_heat_2|Pan::heat]]",
+        ),
+        (
+            "pan_heat_3",
+            "void heat(char t)",
+            5,
+            "No definition in the project.",
+        ),
     ] {
         assert_eq!(
             common::fn_block(&header, anchor).trim_end(),
-            format!("## {anchor}\n`{sig}` · `src/pan.h:{line}-{line}`\n\n{one_of}")
+            format!("## {anchor}\n`{sig}` · `src/pan.h:{line}-{line}`\n\n{defined}")
         );
     }
     assert_eq!(
         headings(&common::map_page(&vault, "map/src/pan_cpp")),
         ["pan_heat", "pan_heat_2"]
+    );
+}
+
+#[test]
+fn a_declaration_spelled_otherwise_is_defined_by_the_one_definition_no_other_overload_wants() {
+    let h = "typedef unsigned int u32;\ntypedef unsigned short u16;\nint bend(u32 n);\nint fold(u32 n);\nint fold(u16 n);\n";
+    let cpp = "#include \"a.h\"\nint bend(unsigned int n) { return 1; }\nint fold(unsigned int n) { return 2; }\n";
+    let (_d, vault) = common::built(&[("src/a.h", h), ("src/a.cpp", cpp)]);
+    let page = common::map_page(&vault, "map/src/a_h");
+    let line = |anchor: &str| {
+        common::fn_block(&page, anchor)
+            .trim_end()
+            .lines()
+            .last()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(line("bend"), "Defined at [[map/src/a_cpp#bend|bend]]");
+    // Either `fold` may be the one `fold(unsigned int)` defines.
+    assert_eq!(line("fold"), "No definition in the project.");
+    assert_eq!(line("fold_2"), "No definition in the project.");
+}
+
+#[test]
+fn a_declaration_is_defined_by_a_defaulted_definition() {
+    let h = "struct Pot {\n    Pot();\n    ~Pot();\n};\n";
+    let cpp = "#include \"pot.h\"\nPot::Pot() = default;\nPot::~Pot() {}\n";
+    let (_d, vault) = common::built(&[("src/pot.h", h), ("src/pot.cpp", cpp)]);
+    let page = common::map_page(&vault, "map/src/pot_h");
+    assert_eq!(
+        common::fn_block(&page, "pot_pot").trim_end().lines().last(),
+        Some("Defined at [[map/src/pot_cpp#pot_pot|Pot::Pot]]")
+    );
+}
+
+#[test]
+fn a_declaration_is_defined_by_the_platform_twin_that_includes_it() {
+    let files = [
+        ("src/unix/nap.h", "void nap(int ms);\n"),
+        ("src/win/nap.h", "void nap(int ms);\n"),
+        (
+            "src/unix/nap.cpp",
+            "#include \"nap.h\"\nvoid nap(int ms) { sleep_ms(ms); }\n",
+        ),
+        (
+            "src/win/nap.cpp",
+            "#include \"nap.h\"\nvoid nap(int ms) { Sleep(ms); }\n",
+        ),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/unix/nap_h");
+    assert_eq!(
+        common::fn_block(&page, "nap").trim_end().lines().last(),
+        Some("Defined at [[map/src/unix/nap_cpp#nap|nap]]")
     );
 }
 
@@ -1164,7 +1233,9 @@ fn a_plain_namespace_of_another_library_at_an_inline_ones_path_does_not_take_its
     let page = common::map_page(&vault, "map/src/n_h");
     assert_eq!(
         common::fn_block(&page, "h"),
-        "## h\n`int h(int v)` · `src/n.h:1-1`\n\nDefined at one of: [[map/lib2/o_cpp#h|h]], [[map/src/n_cpp#a_h|a::h]]\n"
+        // `lib2/o.cpp` includes nothing: the definition in the file that
+        // includes the header is the one.
+        "## h\n`int h(int v)` · `src/n.h:1-1`\n\nDefined at [[map/src/n_cpp#a_h|a::h]]\n"
     );
 }
 

@@ -8,25 +8,25 @@ use crate::flow::FlowScope;
 use crate::model::{File, FnId, MapCall, Project, Target};
 use crate::uses::{defines, in_scope, in_trait, is_trait, own_crate, standard, InScope};
 use cpp::Cpp;
-pub(crate) use cpp::{fold_scope, namespace_owners, outer_scope};
 use python::Python;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::imports::Imports;
 use wiki_code::index::{owner_key, sees, Family, FnRef, Index, Scope};
 use wiki_code::model::{CallVia, CodeItem, CodeItemKind};
 
-/// A project whose call targets have been resolved, with the path of the
-/// class a head places each C/C++ method in (`Cpp::class_of`).
-pub struct Resolved(Project, BTreeMap<FnId, String>);
+/// A project whose call targets have been resolved, with the definitions
+/// of each C/C++ declaration.
+pub struct Resolved(Project, BTreeMap<FnId, Vec<FnId>>);
 
 impl Resolved {
     pub fn project(&self) -> &Project {
         &self.0
     }
 
-    /// The path of the class a head places the C/C++ method `f` in.
-    pub fn class(&self, f: &FnId) -> Option<&str> {
-        self.1.get(f).map(String::as_str)
+    /// The definitions of the C/C++ declaration `f` (`Cpp::definitions`),
+    /// in source order.
+    pub fn definitions(&self, f: &FnId) -> &[FnId] {
+        self.1.get(f).map_or(&[], Vec::as_slice)
     }
 }
 
@@ -81,7 +81,7 @@ fn from_evidence(e: Evidence) -> Target {
 }
 
 pub fn resolve(mut project: Project) -> Resolved {
-    let mut classes = BTreeMap::new();
+    let mut definitions = BTreeMap::new();
     let resolved: Vec<(String, BTreeMap<usize, crate::model::Flow>)> = {
         let index = Index::new(&project.files);
         let imports = Imports::new(&project.files);
@@ -99,6 +99,13 @@ pub fn resolve(mut project: Project) -> Resolved {
         let mut types: BTreeMap<&str, (usize, bool)> = BTreeMap::new();
         let py = Python::new(&project.files);
         let cpp = Cpp::new(&project.files, &project.twins);
+        for ((p, item), defs) in cpp.definitions() {
+            let id = |(p, item): FnRef| FnId {
+                path: index.key(p).to_string(),
+                item,
+            };
+            definitions.insert(id((p, item)), defs.into_iter().map(id).collect());
+        }
         for f in project.files.values() {
             for it in f
                 .code
@@ -115,15 +122,6 @@ pub fn resolve(mut project: Project) -> Resolved {
             .iter()
             .enumerate()
             .map(|(page, (path, file))| {
-                for &item in file.cpp.classes.keys() {
-                    if let Some(class) = cpp.placed((page, item)) {
-                        let f = FnId {
-                            path: path.clone(),
-                            item,
-                        };
-                        classes.insert(f, class.to_string());
-                    }
-                }
                 let sees = sees(page, pages_of);
                 let in_scope = in_scope(path, file, &imports, &index, &py.roots, &project.crates);
                 let mut flows = file.flows.clone();
@@ -175,7 +173,7 @@ pub fn resolve(mut project: Project) -> Resolved {
     for (path, flows) in resolved {
         project.files.get_mut(&path).expect("own key").flows = flows;
     }
-    Resolved(project, classes)
+    Resolved(project, definitions)
 }
 
 /// One language family's call rules.

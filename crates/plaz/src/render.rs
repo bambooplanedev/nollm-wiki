@@ -5,11 +5,9 @@ use crate::chart::{chart, coverage, relative};
 use crate::flow::hooks;
 use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
-use crate::resolve::{fold_scope, namespace_owners, outer_scope, Resolved};
+use crate::resolve::Resolved;
 use crate::write::Links;
-use std::collections::BTreeSet;
-use wiki_code::index::{owner_key, Family, Index};
-use wiki_code::model::{CallSite, CallVia};
+use wiki_code::index::{owner_key, Family};
 
 pub use crate::chart::mermaid_label;
 
@@ -67,8 +65,6 @@ pub struct Page {
 
 pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
     let p = r.project();
-    let index = Index::new(&p.files);
-    let owners = namespace_owners(p.files.values());
     p.files
         .iter()
         .map(|(path, file)| {
@@ -96,9 +92,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     out.push_str(&match file.cpp.declarations.get(&item) {
                         Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
                         Some(Bodiless::Deleted) => "Deleted.\n".to_string(),
-                        Some(Bodiless::Declared) | None => {
-                            defined_at(&index, r, names, &owners, &me)
-                        }
+                        Some(Bodiless::Declared) | None => defined_at(r, names, &me),
                     });
                     continue;
                 };
@@ -237,94 +231,11 @@ fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
     format!("\n**Calls**\n{}", calls.concat())
 }
 
-/// The line of the declaration `me`'s section: the definition the index
-/// pairs it with; else the charted functions of the same language, scope
-/// (`fold_scope` or `outer_scope`, `owners` as `namespace_owners` gives) and name, only
-/// those of its own file when it has any, in source order; never one
-/// another file keeps to itself, nor a method of another class when heads
-/// place both (`Resolved::class`).
-fn defined_at(
-    index: &Index<File>,
-    resolved: &Resolved,
-    names: &Names,
-    owners: &BTreeSet<&str>,
-    me: &FnId,
-) -> String {
-    let p = resolved.project();
-    let file = &p.files[&me.path];
-    let it = &file.code.items[me.item];
-    let site = CallSite {
-        name: it.name.clone(),
-        via: CallVia::Bare,
-        args: None,
-        line: it.start_line,
-    };
-    let key = |d: &FnId| {
-        let f = &p.files[&d.path];
-        (fold_scope(f, d.item, owners), &f.code.items[d.item].name)
-    };
-    // One declared in an inline namespace may be defined in its parent,
-    // unless another declaration is that one's: one written there, or one
-    // of another inline namespace.
-    let rival = |outer: &str| {
-        let declared = p.files.values().flat_map(|f| {
-            let all = f.cpp.declarations.iter();
-            all.filter(|d| *d.1 == Bodiless::Declared)
-                .map(move |d| (f, *d.0))
-        });
-        declared
-            .filter(|&(f, i)| f.code.items[i].name == it.name)
-            .map(|(f, i)| (f, i, fold_scope(f, i, owners)))
-            .any(|(f, i, at)| {
-                at != key(me).0 && (at == outer || outer_scope(f, i, at) == Some(outer))
-            })
-    };
-    let outer = outer_scope(file, me.item, key(me).0)
-        .filter(|o| !rival(o))
-        .map(|s| (s, &it.name));
-    // A `static` or anonymous-namespace function of another file is not it.
-    let charted = |d: &FnId| {
-        let f = &p.files[&d.path];
-        d != me
-            && f.flows.contains_key(&d.item)
-            && (d.path == me.path || !f.cpp.local.contains(&d.item))
-            && (key(d) == key(me) || Some(key(d)) == outer)
-            && match (resolved.class(d), resolved.class(me)) {
-                (Some(a), Some(b)) => a == b,
-                _ => true,
-            }
-    };
-    let paired = (index.page_of(&me.path).into_iter())
-        .flat_map(|page| index.pick(page, &site, |c| c == (page, me.item)))
-        .map(|(pg, item)| FnId {
-            path: index.key(pg).to_string(),
-            item,
-        })
-        .find(charted);
-    // The index pairs by name: it cannot tell the parent's definition from
-    // one at the inline namespace's own path.
-    let defs = if let Some(d) = paired.filter(|_| outer.is_none()) {
-        vec![d]
-    } else {
-        let mut all = Vec::new();
-        for (path, f) in p.files.iter().filter(|(_, f)| f.family == file.family) {
-            for &item in f.flows.keys() {
-                let id = FnId {
-                    path: path.clone(),
-                    item,
-                };
-                if charted(&id) {
-                    all.push((path.as_str(), f.code.items[item].start_line, id));
-                }
-            }
-        }
-        all.sort();
-        if all.iter().any(|d| d.0 == me.path) {
-            all.retain(|d| d.0 == me.path);
-        }
-        all.into_iter().map(|d| d.2).collect()
-    };
-    let all: Vec<String> = defs.iter().map(|d| link(p, names, d)).collect();
+/// The line of the declaration `me`'s section: its definitions
+/// (`Resolved::definitions`).
+fn defined_at(resolved: &Resolved, names: &Names, me: &FnId) -> String {
+    let link = |d: &FnId| link(resolved.project(), names, d);
+    let all: Vec<String> = resolved.definitions(me).iter().map(link).collect();
     match all.as_slice() {
         [] => "No definition in the project.\n".to_string(),
         [one] => format!("Defined at {one}\n"),

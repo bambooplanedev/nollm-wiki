@@ -13,7 +13,7 @@ use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, FnId, MapCall};
 use crate::source::{included, project_include, untemplated};
 use classes::{Classes, Missing, Sight};
-pub(crate) use fold::{fold_scope, namespace_owners, outer_scope};
+use fold::{fold_scope, namespace_owners, outer_scope};
 use fold::{Key, Loose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};

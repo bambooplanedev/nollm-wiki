@@ -46,7 +46,10 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             file.cpp.template_params.insert(i, names);
         }
         let f = declarator(node, &it.name, src.text());
-        if let Some(p) = f.and_then(|f| params(f, src.text())) {
+        // A conversion operator's declarator is no function's: it takes
+        // no parameters.
+        let cast = || it.name.starts_with("operator ").then(String::new);
+        if let Some(p) = f.and_then(|f| params(f, src.text())).or_else(cast) {
             file.cpp.params.insert(i, p);
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.

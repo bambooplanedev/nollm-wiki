@@ -1,7 +1,7 @@
 //! Declarations folded onto their definitions.
 
 use super::Cpp;
-use crate::model::File;
+use crate::model::{Bodiless, File};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::CodeItemKind;
@@ -207,6 +207,99 @@ impl<'a> Cpp<'a> {
             other == Some(outer) || other.and_then(|k| at(d, k)) == Some(outer)
         });
         (!rival).then_some(outer)
+    }
+
+    /// Per declaration of the project, its definitions with a section:
+    /// those a call of it is folded onto (`folded`); with none, those no
+    /// declaration is folded onto (`unfolded`), but not the one such
+    /// definition another overload's declaration wants too. Never one of
+    /// another class or specialization (`same_class`); only those in a file
+    /// that includes the declaration's or is included by it, when any is.
+    pub(in crate::resolve) fn definitions(&self) -> BTreeMap<FnRef, Vec<FnRef>> {
+        let declared = (self.pages.iter().enumerate()).flat_map(|(page, (_, f))| {
+            let all = f.cpp.declarations.iter();
+            all.filter(|d| *d.1 == Bodiless::Declared)
+                .map(move |d| (page, *d.0))
+        });
+        let mut out: BTreeMap<FnRef, Vec<FnRef>> = declared
+            .map(|c| {
+                let defs = self.folded(vec![c]).0.into_iter();
+                let defs = defs.filter(|&d| d != c && self.sectioned(d) && self.same_class(c, d));
+                (c, defs.collect())
+            })
+            .collect();
+        let claimed: BTreeSet<FnRef> = out.values().flatten().copied().collect();
+        // Per definition no fold reaches: the keys of the declarations
+        // that may be spelled otherwise.
+        let mut wanted: BTreeMap<FnRef, BTreeSet<Option<Key>>> = BTreeMap::new();
+        for (&c, defs) in out.iter_mut().filter(|o| o.1.is_empty()) {
+            defs.extend(self.unfolded(c, &claimed));
+            for &d in defs.iter() {
+                wanted.entry(d).or_default().insert(self.key(c));
+            }
+        }
+        for (&c, defs) in &mut out {
+            // Either file includes the other: a platform twin's is not it.
+            let tied = |d: &FnRef| {
+                d.0 == c.0 || self.closure(d.0).contains(&c.0) || self.closure(c.0).contains(&d.0)
+            };
+            if defs.iter().any(tied) {
+                defs.retain(tied);
+            }
+            // The one definition two overloads want may be the other's.
+            if let [d] = defs[..] {
+                if wanted.get(&d).is_some_and(|k| k.len() > 1) {
+                    defs.clear();
+                }
+            }
+        }
+        out
+    }
+
+    /// The definitions with a section of the declaration `c`'s scope, name
+    /// and arity, of its class, that are not `claimed`: a type spelled
+    /// otherwise (`fs::path` and `std::filesystem::path`) keeps them from a
+    /// fold.
+    fn unfolded(&self, c: FnRef, claimed: &BTreeSet<FnRef>) -> Vec<FnRef> {
+        let (it, owners) = (self.item(c), &self.owners);
+        let scope = |d: FnRef| fold_scope(self.pages[d.0].1, d.1, owners);
+        let named = self.by_name.get(&it.name).into_iter().flatten().copied();
+        named
+            .filter(|&d| {
+                !self.declared(d)
+                    && self.sectioned(d)
+                    && !claimed.contains(&d)
+                    && (d.0 == c.0 || !self.local(d))
+                    && scope(d) == scope(c)
+                    && self.item(d).arity == it.arity
+                    && self.same_class(c, d)
+            })
+            .collect()
+    }
+
+    /// Has `d` a section to link to: charted, defaulted or deleted?
+    fn sectioned(&self, d: FnRef) -> bool {
+        let f = self.pages[d.0].1;
+        f.flows.contains_key(&d.1) || f.cpp.declarations.contains_key(&d.1)
+    }
+
+    /// May `c` and `d` be methods of one class: placed in the same, else
+    /// one path (`class_of`) ending the other, and their owners the same
+    /// specialization when both are written with template arguments?
+    fn same_class(&self, c: FnRef, d: FnRef) -> bool {
+        let ends = |a: &str, b: &str| a == b || a.ends_with(&format!("::{b}"));
+        let class = |x: FnRef| self.class_of(x.0, x.1);
+        let owner = |x: FnRef| {
+            let o = self.item(x).owner.as_deref().unwrap_or("");
+            o.contains('<').then(|| o.replace(char::is_whitespace, ""))
+        };
+        let same = match (self.placed(c), self.placed(d)) {
+            (Some(a), Some(b)) => a == b,
+            _ => class(c)
+                .zip(class(d))
+                .is_none_or(|(a, b)| ends(a, b) || ends(b, a)),
+        };
+        same && owner(c).zip(owner(d)).is_none_or(|(a, b)| a == b)
     }
 
     pub(super) fn key(&self, c: FnRef) -> Option<Key<'a>> {
