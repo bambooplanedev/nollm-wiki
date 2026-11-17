@@ -106,7 +106,8 @@ kulman link)`), а `kulman remove` видаляє лише власні поси
 коли решта вже на місці: якщо модуль релізу називає його в `replaces` (перейменування), натомість
 встановлюється той модуль, а рядок — `removed <old>: renamed <new> in <version>; run "kulman setup
 --scope repo" (or local) again in each project set up with <old>`; інакше —
-`removed <name>: not in release <version>`.
+`removed <name>: not in release <version>`. У терміналі про будь-яке видалення спершу питають, і на
+встановленій версії теж, а питання закінчується на `; removes <names>?`.
 
     kulman remove [--modules <MODULES>] [--yes]
 

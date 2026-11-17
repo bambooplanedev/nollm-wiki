@@ -249,6 +249,16 @@ pub(super) fn update(ask: bool) -> Result<()> {
     result
 }
 
+/// The question before an update to `latest`, naming each module it removes.
+fn update_question(count: usize, latest: &str, gone: &[String]) -> String {
+    let removes = if gone.is_empty() {
+        String::new()
+    } else {
+        format!("; removes {}", gone.join(", "))
+    };
+    format!("Update {count} module(s) to {latest}{removes}?")
+}
+
 /// The installed `manifest.json` reads and lists every module of `state`: one it lacks is a
 /// removal a committed update has not finished.
 fn installed_has(home: &Home, state: &State) -> bool {
@@ -259,7 +269,7 @@ fn installed_has(home: &Home, state: &State) -> bool {
 
 /// Under the lock: unless already current or newer, stages kulman and every installed module
 /// at the latest version, and only when all are ready commits them (kulman last). With `ask`,
-/// a move to a newer release is asked first.
+/// a move to a newer release, or any removal, is asked first.
 fn renew(
     home: &Home,
     base: &str,
@@ -308,9 +318,9 @@ fn renew(
         manifest.archive(name, target)?;
     }
     let modules = choose(manifest, Some(wanted))?;
-    if ask && release::version_key(latest) > release::version_key(have) {
-        let question = format!("Update {} module(s) to {latest}?", modules.len());
-        if !ask_yes(&question, true)? {
+    // A move to a newer release, or any removal, is asked first.
+    if ask && (release::version_key(latest) > release::version_key(have) || !gone.is_empty()) {
+        if !ask_yes(&update_question(modules.len(), latest, &gone), true)? {
             println!("nothing changed");
             return Ok(());
         }
@@ -356,4 +366,22 @@ fn renew(
         println!("restart running agent sessions; they keep the old binaries until then");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_question;
+
+    #[test]
+    fn the_update_question_names_what_it_removes() {
+        assert_eq!(
+            update_question(2, "0.8.0", &[]),
+            "Update 2 module(s) to 0.8.0?"
+        );
+        let gone = ["kalka".to_string(), "old".to_string()];
+        assert_eq!(
+            update_question(1, "0.8.0", &gone),
+            "Update 1 module(s) to 0.8.0; removes kalka, old?"
+        );
+    }
 }

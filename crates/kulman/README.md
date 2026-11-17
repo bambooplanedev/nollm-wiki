@@ -102,7 +102,9 @@ put back are named `repaired <name> <version>`, with no restart line. An install
 release no longer holds is removed, with its binary and link, once the rest is in place: when a
 module of the release lists it in `replaces` (a rename), that module is installed instead and the
 line is `removed <old>: renamed <new> in <version>; run "kulman setup --scope repo" (or local) again
-in each project set up with <old>`; otherwise `removed <name>: not in release <version>`.
+in each project set up with <old>`; otherwise `removed <name>: not in release <version>`. At a
+terminal any removal is asked first, at the installed version too, and the question ends
+`; removes <names>?`.
 
     kulman remove [--modules <MODULES>] [--yes]
 
