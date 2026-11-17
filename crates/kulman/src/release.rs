@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[test]
-    fn anything_else_does_not_verify() {
+    fn a_legacy_signature_does_not_verify() {
         let legacy = include_str!("../tests/data/signing/file.txt.legacy.minisig");
         assert!(verify(TEST_KEY, FILE, legacy).is_err());
     }
