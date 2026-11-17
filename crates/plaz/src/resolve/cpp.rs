@@ -38,6 +38,8 @@ pub(super) struct Cpp<'a> {
     /// (`fold::unqualified`): each parameter text of a function so keyed.
     spellings: BTreeMap<(&'a str, &'a str, String), BTreeSet<&'a str>>,
     namespaces: BTreeSet<&'a str>,
+    /// `File::inline_namespaces`, of every file.
+    inline: BTreeSet<String>,
     /// `namespace_owners`.
     owners: BTreeSet<&'a str>,
     macros: BTreeSet<&'a str>,
@@ -75,6 +77,9 @@ impl<'a> Cpp<'a> {
             namespaces: cpp()
                 .flat_map(|(_, (_, f))| &f.namespaces)
                 .map(String::as_str)
+                .collect(),
+            inline: cpp()
+                .flat_map(|(_, (_, f))| f.inline_namespaces.iter().cloned())
                 .collect(),
             owners: namespace_owners(files.values()),
             macros: cpp()

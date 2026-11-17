@@ -62,6 +62,16 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         files.insert(path, f);
     }
     pair_declarations(&mut files);
+    // `v1` of `int v1::h()` is an inline namespace, transparent to scopes.
+    let inline: BTreeSet<String> = (files.values().flat_map(|f| &f.inline_namespaces))
+        .cloned()
+        .collect();
+    for f in files.values_mut() {
+        f.scopes
+            .values_mut()
+            .for_each(|s| *s = uninlined(s, &inline));
+        f.scopes.retain(|_, s| !s.is_empty());
+    }
     hidden_jumps(&mut files);
     unreadable.sort();
     twins.sort();
@@ -71,6 +81,19 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         crates,
         twins,
     }
+}
+
+/// The namespace path `path` (`a::v1::b`) with each segment dropped that
+/// names one of the `inline` namespace paths there (`a::b`).
+pub(crate) fn uninlined(path: &str, inline: &BTreeSet<String>) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for seg in path.split("::") {
+        out.push(seg);
+        if inline.contains(&out.join("::")) {
+            out.pop();
+        }
+    }
+    out.join("::")
 }
 
 /// The file at `path` of the text `text`, analysed as `a`.
@@ -106,6 +129,7 @@ fn file(path: &str, text: &str, a: &Analyzed) -> File {
         local: BTreeSet::new(),
         params: BTreeMap::new(),
         namespaces: BTreeSet::new(),
+        inline_namespaces: BTreeSet::new(),
         namespace_aliases: BTreeMap::new(),
         scopes: BTreeMap::new(),
         usings: BTreeSet::new(),

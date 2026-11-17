@@ -1,6 +1,7 @@
 //! The free functions a call may name: by tier, in view of the caller.
 
 use super::{fits, fold_scope, Caller, Evidence};
+use crate::source::uninlined;
 use wiki_code::index::FnRef;
 use wiki_code::model::{CallSite, CodeItem, CodeItemKind};
 use wiki_code::support::source_rank;
@@ -15,14 +16,16 @@ impl Caller<'_, '_> {
     /// is open. None by argument count: the same over the variadic ones.
     pub(super) fn free(&self, site: &CallSite, ns: Option<&str>) -> Option<Evidence> {
         let cpp = self.cpp;
-        // `k::b` under `namespace k = a;` is `a::b`.
+        // `k::b` under `namespace k = a;` is `a::b`; `a::v1::b` with `v1`
+        // inline is `a::b`.
         let ns = ns.map(|w| {
             let (root, rest) = w.split_once("::").map_or((w, None), |(r, t)| (r, Some(t)));
-            match (self.aliased(root), rest) {
+            let w = match (self.aliased(root), rest) {
                 (Some(a), Some(rest)) => format!("{a}::{rest}"),
                 (Some(a), None) => a.to_string(),
                 (None, _) => w.to_string(),
-            }
+            };
+            uninlined(&w, &cpp.inline)
         });
         let ns = ns.as_deref();
         let in_ns = |c: FnRef| match ns {
