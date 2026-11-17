@@ -705,6 +705,24 @@ fn a_run_without_the_hook_flag_skips_an_unreadable_settings_file_and_goes_on() {
 }
 
 #[test]
+fn removing_the_hook_takes_every_copy_of_it() {
+    for remove in [false, true] {
+        let f = fixture(true, true);
+        let r = f.root();
+        let path = r.join(".claude/settings.json");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let two = serde_json::json!({"hooks": {"UserPromptSubmit": [hook_item(), hook_item()]}});
+        fs::write(&path, two.to_string()).unwrap();
+        let mut args = vec!["--agent", "claude", "--scope", "repo"];
+        if remove {
+            args.push("--remove");
+        }
+        f.setup(&args).success();
+        assert!(!path.exists(), "remove {remove}: {}", read(&path));
+    }
+}
+
+#[test]
 fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
     let f = fixture(true, true);
     real_git(&f);
