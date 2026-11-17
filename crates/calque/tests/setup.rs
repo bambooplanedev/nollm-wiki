@@ -2328,3 +2328,13 @@ fn setup_goes_on_past_a_file_it_cannot_check_for_kalka() {
     )
     .unwrap();
 }
+
+#[test]
+fn setup_repo_makes_no_claude_call_at_all() {
+    // `claude_log` drops the look for kalka's local server; the raw log shows it is not made here.
+    let f = fixture(true, true);
+    let args = ["--agent", "claude", "--scope", "repo"];
+    f.setup(&args).success();
+    f.setup(&[&["--remove"], &args[..]].concat()).success();
+    assert!(!f.tmp.path().join("claude.log").exists());
+}
