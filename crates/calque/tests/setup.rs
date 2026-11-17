@@ -2295,3 +2295,35 @@ fn setup_local_leaves_kalka_entries_in_files_git_tracks_even_on_remove() {
         assert_eq!(read(&r.join(".mcp.json")), mcp);
     }
 }
+
+#[test]
+fn setup_goes_on_past_a_file_it_cannot_check_for_kalka() {
+    let f = fixture(true, true);
+    let r = f.root();
+    fs::create_dir_all(r.join(".cursor")).unwrap();
+    fs::write(r.join(".cursor/mcp.json"), "{}").unwrap();
+    fs::set_permissions(
+        r.join(".cursor/mcp.json"),
+        fs::Permissions::from_mode(0o000),
+    )
+    .unwrap();
+    fs::write(r.join("AGENTS.md"), b"\xff\xfe not UTF-8\n").unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).success();
+    let said = out(&a);
+    for file in [".cursor/mcp.json", "AGENTS.md"] {
+        let start = format!("left {file} as it is: cannot check it for kalka ");
+        assert!(
+            said.lines().any(|l| l.starts_with(&start)),
+            "{start} not in:\n{said}"
+        );
+    }
+    assert_eq!(
+        fs::read(r.join("AGENTS.md")).unwrap(),
+        b"\xff\xfe not UTF-8\n"
+    );
+    fs::set_permissions(
+        r.join(".cursor/mcp.json"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+}

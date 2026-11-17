@@ -401,7 +401,8 @@ fn forget_kalka(root: &Path, r: &mut Report, local: bool, claude: bool) -> Resul
     })
 }
 
-/// One item of [`forget_kalka`]: said only when it was there and is now removed.
+/// One item of [`forget_kalka`]: said only when it was there and is now removed, or when the file
+/// cannot be read or written, which leaves it as it is without failing the run.
 fn forget(
     r: &mut Report,
     root: &Path,
@@ -413,10 +414,13 @@ fn forget(
     if local && tracked(root, file) {
         return Ok(());
     }
-    if remove(&root.join(file))? == Outcome::Done {
-        r.line(&format!("removed {file} {what} (calque's old name)"))?;
+    match remove(&root.join(file)) {
+        Ok(Outcome::Done) => r.line(&format!("removed {file} {what} (calque's old name)")),
+        Ok(_) => Ok(()),
+        Err(e) => r.line(&format!(
+            "left {file} as it is: cannot check it for {what} ({e})"
+        )),
     }
-    Ok(())
 }
 
 /// The agents found in `root`.
