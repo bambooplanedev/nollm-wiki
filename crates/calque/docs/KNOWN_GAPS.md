@@ -196,6 +196,10 @@ per question is noise-level: treat single results as anecdotes.
   another file, and a namespace opened by a macro (`FMT_BEGIN_NAMESPACE`) or
   lost to a parse error. On a C++ trading system and fmt the first three cost no
   call site; the last costs fmt about 60 `fmt::` and `detail::` calls.
+- **A C++ call to an explicit specialization is credited to the primary
+  template.** `blank<int>()` reaches `blank`; the specialization item
+  `blank<int>` shows no callers. The same holds for a conversion operator
+  (`Gate::operator bool`): an implicit conversion is no call site.
 - **No calls across languages.** A Python binding calling C++, or FFI, is
   not an edge, by design.
 - **Unresolved names are dropped silently.** Builtins and std calls
@@ -245,7 +249,7 @@ per question is noise-level: treat single results as anecdotes.
   `(owner, name, arity)` namespaces are not compared (a unique-key free
   function in another named namespace can pair with an unrelated header
   declaration; none observed), and a definition in an unindexed file
-  (`.c`, `.mm`, `.cu`) is invisible, so a same-key `.cc` function would
+  (`.mm`, `.cu`) is invisible, so a same-key `.cc` function would
   pair instead (none observed). The owner is the last scope only
   (`MapBaseObj::iterator::operator++` → `iterator`), so enclosing classes
   are not compared either. Adding a file that defines a same-key function
@@ -260,6 +264,10 @@ per question is noise-level: treat single results as anecdotes.
   second call edge next to its declaration. A leading macro can put the return type into the owner
   (`handle api<Derived>`), and a free function with a template-id return
   type can get that type as owner (`UniquePtr<TEST_INT>`).
+- **Included fragments (`.inl`, `.ipp`, `.tcc`) are not read.** The fragment
+  gets no page, the calls made inside its function bodies are missing from
+  `callers`, `calls` and `neighbors`, and the header declarations of those
+  functions stay unpaired.
 - **Shell (`.sh`, `.bash`) lists only function definitions.** Top-level
   UPPERCASE assignments are found by `search` only by their exact name; other
   variables (lowercase, inside a function or an `if`) are not indexed.
