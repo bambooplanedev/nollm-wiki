@@ -49,6 +49,8 @@ pub struct SetupOptions {
     /// Empty: no agent, only what is not agent-specific.
     pub agents: Vec<Agent>,
     pub scope: Scope,
+    /// The prompt hook (`calque hint` on each prompt) for Claude Code and pi. Off, a run
+    /// removes one an earlier setup wrote.
     pub hook: bool,
     pub remove: bool,
     /// Agent memory: the `.agents/memory` folder, the skill's Memory section and the server's
@@ -69,9 +71,12 @@ fn entry(cmd: &str, memory: bool) -> Value {
     json!({"command": "sh", "args": ["-c", format!("exec {cmd} {}", a.join(" "))]})
 }
 
-/// pi's extension starting `cmd`.
-fn pi_hook(cmd: &str) -> String {
-    let text = PI_HOOK.replace("<out>", OUT_DIR);
+/// pi's extension starting `cmd`; `old`: as setup wrote it while the hook was on by default.
+fn pi_hook(cmd: &str, old: bool) -> String {
+    let mut text = PI_HOOK.replace("<out>", OUT_DIR);
+    if old {
+        text = text.replace("setup --hook)", "setup unless --no-hook)");
+    }
     if cmd == CMD {
         return text.replace("<cmd>", CMD);
     }
@@ -367,7 +372,8 @@ fn forget_kalka(root: &Path, r: &mut Report, local: bool, claude: bool) -> Resul
     let hooks = [json!({"hooks": [{"type": "command", "command": "kalka hint --claude-hook"}]})];
     let skills = [true, false].map(|m| old(&skill_text(m)));
     let skills = skills.each_ref().map(String::as_str);
-    let pi_hook = old(&pi_hook(CMD));
+    // kalka setup wrote the extension as it was while the hook was on by default.
+    let pi_hook = old(&pi_hook(CMD, true));
     let nav = old(&format!("{NAV_BEGIN}\n{NAV_RULES}{NAV_END}\n"));
     if local && claude && claude_local_mcp(root, OLD, &entries, true) == Outcome::Done {
         r.line("removed Claude Code local kalka server (calque's old name)")?;
@@ -680,44 +686,61 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             }
         }
 
-        // Hook (`--remove` always looks, so it undoes a hook installed earlier)
+        // Hook: only with `--hook`. `--remove`, and a run without `--hook`, take out one an
+        // earlier setup wrote (the hook was on by default up to 0.8).
+        let file = match (pi, local) {
+            (true, _) => PI_HOOK_FILE,
+            (false, true) => ".claude/settings.local.json",
+            (false, false) => ".claude/settings.json",
+        };
+        let path = root.join(file);
+        let pi_own: Vec<String> = [false, true]
+            .iter()
+            .flat_map(|&old| cmds.iter().map(move |c| pi_hook(c, old)))
+            .collect();
+        let pi_own: Vec<&str> = pi_own.iter().map(String::as_str).collect();
+        let own: Vec<Value> = cmds
+            .iter()
+            .map(|c| json!({"hooks": [{"type": "command", "command": format!("{c} hint --claude-hook")}]}))
+            .collect();
+        let parents = ["hooks", "UserPromptSubmit"];
+        let hook = |remove: bool| match (pi, remove) {
+            (true, true) => edit::remove_file(root, &path, &pi_own),
+            (true, false) => edit::write_file(&path, &pi_own),
+            (false, true) => edit::remove_item(root, &path, &parents, &own),
+            (false, false) => edit::append_item(&path, &parents, &own),
+        };
+        let what = if pi {
+            format!("{file} hook for pi")
+        } else {
+            format!("{file} prompt hook")
+        };
         if opts.hook || opts.remove {
-            if pi {
-                let own: Vec<String> = cmds.iter().map(|c| pi_hook(c)).collect();
-                let own: Vec<&str> = own.iter().map(String::as_str).collect();
-                let path = root.join(PI_HOOK_FILE);
-                let res = || {
-                    if opts.remove {
-                        edit::remove_file(root, &path, &own)
-                    } else {
-                        edit::write_file(&path, &own)
-                    }
-                };
-                let what = format!("{PI_HOOK_FILE} hook for pi");
-                if r.file_item(root, PI_HOOK_FILE, &what, res)? {
-                    ignore.push("/.pi/extensions/calque-hint/".into());
-                }
-            } else {
-                let file = if local {
-                    ".claude/settings.local.json"
+            if r.file_item(root, file, &what, || hook(opts.remove))? && (pi || local) {
+                ignore.push(if pi {
+                    "/.pi/extensions/calque-hint/".into()
                 } else {
-                    ".claude/settings.json"
-                };
-                let own: Vec<Value> = cmds
-                    .iter()
-                    .map(|c| json!({"hooks": [{"type": "command", "command": format!("{c} hint --claude-hook")}]}))
-                    .collect();
-                let path = root.join(file);
-                let parents = ["hooks", "UserPromptSubmit"];
-                let res = || {
-                    if opts.remove {
-                        edit::remove_item(root, &path, &parents, &own)
+                    format!("/{file}")
+                });
+            }
+        } else if !(r.guard_tracked && tracked(root, file)) {
+            // A file this run would not otherwise write is left and named without failing the
+            // run, as [`forget`] leaves one with kalka's entries.
+            match hook(true) {
+                Ok(Outcome::Done) => r.line(&format!(
+                    "removed {what}: the prompt hint is off by default now; run setup again \
+                     with --hook to keep it"
+                ))?,
+                Ok(_) => {}
+                Err(e) => {
+                    let item = if pi {
+                        "calque hook for pi"
                     } else {
-                        edit::append_item(&path, &parents, &own)
-                    }
-                };
-                if r.file_item(root, file, &format!("{file} prompt hook"), res)? && local {
-                    ignore.push(format!("/{file}"));
+                        "calque prompt hook"
+                    };
+                    r.line(&format!(
+                        "left {file} as it is: cannot check it for {item} ({e})"
+                    ))?;
                 }
             }
         }

@@ -88,11 +88,98 @@ fn hint_is_silent_on_a_harness_turn() {
 }
 
 #[test]
+fn hint_is_silent_on_a_message_from_another_session() {
+    let tmp = project();
+    let text = format!(
+        "Another Claude session sent a message:\n<agent-message from=\"a1\">\n[Subagent hand-back] {TASK}\n</agent-message>"
+    );
+    assert_eq!(hint_in(&tmp, &text), "");
+}
+
+#[test]
 fn hint_is_silent_on_a_one_word_reply() {
     let tmp = project();
     assert_eq!(hint_in(&tmp, "creds"), "");
     assert_eq!(hint_in(&tmp, "y creds"), "");
     assert!(hint_in(&tmp, "member creds").contains("load_member_creds"));
+}
+
+#[test]
+fn hint_needs_two_prompt_words_the_project_has() {
+    let tmp = project();
+    // Two words, but only `member` is in the project.
+    assert_eq!(hint_in(&tmp, "member zzqxw"), "");
+    assert!(hint_in(&tmp, "member creds zzqxw").contains("load_member_creds"));
+}
+
+#[test]
+fn hint_is_silent_when_only_function_words_name_the_code() {
+    let tmp = project_of(&[
+        ("src/lib.rs", "pub fn load_member_creds() {}\n"),
+        (
+            "src/route.rs",
+            "/// Route it to where it is from.\npub fn route_to_from() {}\n",
+        ),
+    ]);
+    assert_eq!(hint_in(&tmp, "where is it from"), "");
+    assert_eq!(hint_in(&tmp, "from where to zzqxw"), "");
+    // Content words that still name the page keep the hint, the same as without the gate.
+    assert!(hint_in(&tmp, "where is route_to_from routed").contains("route_to_from"));
+}
+
+/// A project whose functions have identifier names, for one-identifier questions.
+fn identifiers() -> TempDir {
+    project_of(&[
+        (
+            "src/hint.rs",
+            "/// The hint's lines.\npub fn hint_lines() {}\n\n/// Reads the hook input.\npub fn prompt_from_hook_json() {}\n",
+        ),
+        ("src/parse.rs", "/// Parses an order.\npub fn parser() {}\n"),
+        (
+            "src/limits.rs",
+            "/// Steps 1-3 of Q-1 cap it at 46 and v2.\npub fn cap() {}\n",
+        ),
+    ])
+}
+
+#[test]
+fn hint_answers_a_question_that_names_one_identifier() {
+    let tmp = identifiers();
+    for (prompt, name) in [
+        ("where is hint_lines", "hint_lines"),
+        (
+            "what does prompt_from_hook_json do",
+            "prompt_from_hook_json",
+        ),
+        ("де prompt_from_hook_json", "prompt_from_hook_json"),
+        ("where is hint_lines defined", "hint_lines"),
+        (
+            "what does prompt_from_hook_json return",
+            "prompt_from_hook_json",
+        ),
+        (
+            "де визначено prompt_from_hook_json",
+            "prompt_from_hook_json",
+        ),
+    ] {
+        let out = hint_in(&tmp, prompt);
+        assert!(
+            out.contains("src/hint.rs:") && out.contains(name),
+            "{prompt}: {out}"
+        );
+    }
+}
+
+#[test]
+fn hint_stays_silent_on_one_plain_word_or_an_identifier_the_project_lacks() {
+    let tmp = identifiers();
+    assert_eq!(hint_in(&tmp, "where is the parser"), "");
+    assert_eq!(hint_in(&tmp, "where is load_creds"), "");
+    assert_eq!(hint_in(&tmp, "where is parser zzqxw"), "");
+    // A number is not written as code.
+    for reply in ["глянь 46", "1-3 так", "що там з Q-1", "де v2"] {
+        assert_eq!(hint_in(&tmp, reply), "", "{reply}");
+    }
 }
 
 #[test]
@@ -450,8 +537,9 @@ fn hint_is_silent_when_no_page_holds_the_prompts_words() {
     let tmp = common_and_rare(&common, &pages);
     let out = hint_in(&tmp, &format!("{} {}", common.join(" "), rare.join(" ")));
     assert_eq!(out, "");
-    // A prompt that names one of those functions still gets its line.
-    let out = hint_in(&tmp, "where is rare07 defined");
+    // A prompt that names one of those functions still gets its line (with a
+    // second word the project has: one alone is too few).
+    let out = hint_in(&tmp, "where is the rare07 fn defined");
     assert!(out.contains("src/rare07.rs:1-1"), "{out}");
 }
 
@@ -461,7 +549,7 @@ fn hint_names_a_page_with_no_matching_symbol() {
         "scripts/run.sh",
         "#!/bin/sh\n# Launch the engine.\nexec engine --sky-secret \"$KEY\"\n",
     )]);
-    let out = hint_in(&tmp, "sky-secret flag");
+    let out = hint_in(&tmp, "sky-secret engine flag");
     assert!(
         out.lines().any(|l| l.starts_with("scripts/run.sh ")),
         "{out}"
@@ -532,7 +620,7 @@ fn hint_keeps_its_answer_when_the_prompt_names_many_files() {
     ]);
     let out = hint_in(
         &tmp,
-        "a.rs b.rs c.rs d.rs e.rs f.rs all call parse_order_book",
+        "a.rs b.rs c.rs d.rs e.rs f.rs all call parse_order_book on the order book",
     );
     assert!(out.contains("target.rs:1-1"), "{out}");
 }
