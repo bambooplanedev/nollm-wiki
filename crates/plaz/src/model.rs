@@ -258,6 +258,9 @@ pub struct Flow {
     /// A C++ method of a class declared in a function body, drawn inside
     /// that function: its members are the local class's.
     pub local_class: bool,
+    /// The C/C++ locals bound only in an inner block or a handler (an
+    /// `if`'s, a loop's, a `catch`'s): they hide a data member there only.
+    pub inner: BTreeSet<String>,
     pub syntax_errors: bool,
     /// The names written as whole statements (`GIVE_UP;`), nested flows'
     /// included: one a project macro with a jump is counted as one.

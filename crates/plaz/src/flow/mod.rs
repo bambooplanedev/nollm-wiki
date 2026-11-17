@@ -84,6 +84,8 @@ pub(crate) struct Bindings {
     pub rebound: BTreeSet<String>,
     /// See `Flow::local_class`.
     pub local_class: bool,
+    /// See `Flow::inner`.
+    pub inner: BTreeSet<String>,
 }
 
 impl Bindings {
@@ -108,6 +110,7 @@ impl Bindings {
             names: seen.into_keys().collect(),
             rebound: BTreeSet::new(),
             local_class: false,
+            inner: BTreeSet::new(),
         }
     }
 }
@@ -276,6 +279,7 @@ impl<'s> Walker<'s> {
             types: b.types,
             rebound: b.rebound,
             local_class: b.local_class,
+            inner: b.inner,
             syntax_errors: root.has_error(),
             ..Flow::default()
         };

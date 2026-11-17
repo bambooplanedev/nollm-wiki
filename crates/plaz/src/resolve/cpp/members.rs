@@ -73,7 +73,9 @@ impl Caller<'_, '_, '_> {
             },
             Some(f) => match f.types.get(x) {
                 Some(t) => {
-                    self.on_typed(call, after, t, self.class.unwrap_or(self.ns), self.sight())
+                    let from = self.class.unwrap_or(self.ns);
+                    let local = self.on_typed(call, after, t, from, self.sight());
+                    self.or_field(chain, f, call, x, Some(after), local)
                 }
                 None => self.any_method(call),
             },
@@ -94,6 +96,25 @@ impl Caller<'_, '_, '_> {
             .member_of(chain)
             .and_then(|c| self.cpp.field(c, x, self.sight()));
         self.on_member(call, field, after)
+    }
+
+    /// `local`, a call on or of (no `after`) the local `x` the flow `f`
+    /// binds: of either it or the data member `x` when `f` binds `x` only
+    /// in an inner block, where alone it hides the member.
+    pub(super) fn or_field(
+        &self,
+        chain: &[FlowScope],
+        f: &FlowScope,
+        call: &MapCall,
+        x: &str,
+        after: Option<&str>,
+        local: Evidence,
+    ) -> Evidence {
+        let class = self.member_of(chain).filter(|_| f.inner.contains(x));
+        match class.and_then(|c| self.cpp.field(c, x, self.sight())) {
+            Some(field) => either(local, self.on_member(call, Some(field), after)),
+            None => local,
+        }
     }
 
     /// A call on the data member `field` (`after` the text after it), or

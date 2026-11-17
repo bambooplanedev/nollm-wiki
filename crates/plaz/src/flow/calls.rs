@@ -10,6 +10,7 @@ pub struct FlowScope {
     pub types: BTreeMap<String, String>,
     pub rebound: BTreeSet<String>,
     pub local_class: bool,
+    pub inner: BTreeSet<String>,
 }
 
 impl Flow {
@@ -105,6 +106,7 @@ impl Flow {
                 types: flow.types.clone(),
                 rebound: flow.rebound.clone(),
                 local_class: flow.local_class,
+                inner: flow.inner.clone(),
             });
             walk(&mut flow.steps, chain, f);
             chain.pop();

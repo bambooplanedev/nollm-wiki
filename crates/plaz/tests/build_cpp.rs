@@ -2293,6 +2293,33 @@ fn a_local_named_like_a_field_is_the_local() {
 }
 
 #[test]
+fn a_local_of_an_inner_block_named_like_a_field_may_be_either() {
+    // Past the block, `book_` is the field again; the flow does not say
+    // where a call stands, so neither call is certain.
+    let src = "struct Book {\n    void apply(int v) {}\n};\nstruct Ink {\n    void apply(int v) {}\n};\nstruct Shelf {\n    Book book_;\n    void run(bool k) {\n        if (k) {\n            Ink book_;\n            book_.apply(1);\n        }\n        book_.apply(2);\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "book_.apply(1) → one of: src/a.cpp:2, src/a.cpp:5",
+            "book_.apply(2) → one of: src/a.cpp:2, src/a.cpp:5"
+        ]
+    );
+}
+
+#[test]
+fn a_local_of_an_inner_block_named_like_a_called_field_may_be_either() {
+    let src = "struct Book {\n    void operator()(int v) {}\n};\nstruct Ink {\n    void operator()(int v) {}\n};\nstruct Shelf {\n    Book book_;\n    void run(bool k) {\n        for (Ink book_ : inks()) {\n            book_(1);\n        }\n        book_(2);\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        [
+            "inks() → outside",
+            "book_(1) → one of: src/a.cpp:2, src/a.cpp:5",
+            "book_(2) → one of: src/a.cpp:2, src/a.cpp:5"
+        ]
+    );
+}
+
+#[test]
 fn a_field_type_is_placed_from_the_class_not_from_the_callers_file() {
     let h = "struct Cfg {\n    void load() {}\n};\nstruct Shelf {\n    Cfg cfg_;\n    void run();\n};\n";
     let b = "namespace b {\nstruct Cfg {\n    void load() {}\n};\n}\n";

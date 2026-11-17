@@ -14,9 +14,13 @@ use wiki_code::tree_sitter::Node;
 /// `make_unique<T>`/`make_shared<T>` (as the smart pointer). Lambdas and
 /// functions under `root` bind for their own flows. `rebound` holds the
 /// template parameters around `root` and the types the body declares; a
-/// binding of one of them has no type.
+/// binding of one of them has no type. `inner` holds the names bound
+/// only below the body's own statements.
 pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds = Vec::new();
+    // The indices in `binds` of the bindings below the body's statements.
+    let mut nested = BTreeSet::new();
+    let body = root.child_by_field_name("body");
     let mut rebound = template_params(root, src);
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -28,11 +32,16 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
                     "catch_clause" => field("parameters"),
                     _ => field("declarator").and_then(parameters),
                 };
+                let from = binds.len();
                 for l in list.into_iter().chain(field("captures")) {
                     params(l, src, &mut binds);
                 }
+                if n.kind() == "catch_clause" {
+                    nested.extend(from..binds.len());
+                }
             }
             "declaration" | "for_range_loop" => {
+                let from = binds.len();
                 let ty = field("type");
                 for d in n.children_by_field_name("declarator", &mut n.walk()) {
                     // `T f();` declares a function, not a local.
@@ -48,6 +57,10 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
                         _ => written(t, src),
                     });
                     bind(d, ty, src, &mut binds);
+                }
+                // A range `for` binds for its loop.
+                if n.kind() == "for_range_loop" || n.parent() != body {
+                    nested.extend(from..binds.len());
                 }
             }
             "alias_declaration" => rebound.extend(field("name").map(|i| text(i, src).to_string())),
@@ -65,6 +78,14 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         }
         stack.extend(n.named_children(&mut n.walk()));
     }
+    let top: BTreeSet<&str> = (binds.iter().enumerate())
+        .filter(|(i, _)| !nested.contains(i))
+        .map(|(_, b)| b.0.as_str())
+        .collect();
+    let inner: BTreeSet<String> = (nested.iter().map(|&i| &binds[i].0))
+        .filter(|n| !top.contains(n.as_str()))
+        .cloned()
+        .collect();
     let keep = |t: &String| !rebound.contains(class_root(t));
     // A missing name of a damaged declaration is empty.
     let binds = (binds.into_iter())
@@ -81,6 +102,7 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     Bindings {
         rebound,
         local_class: in_class && around.any(|n| n.kind() == "compound_statement"),
+        inner,
         ..joined
     }
 }

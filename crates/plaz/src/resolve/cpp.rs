@@ -460,7 +460,10 @@ impl Caller<'_, '_, '_> {
         let local = chain.iter().rev().find(|f| f.locals.contains(name));
         if let Some(f) = local.filter(|_| !global) {
             return match f.types.get(name) {
-                Some(t) => self.called(call, t, self.class.unwrap_or(self.ns), self.sight()),
+                Some(t) => {
+                    let local = self.called(call, t, self.class.unwrap_or(self.ns), self.sight());
+                    self.or_field(chain, f, call, name, None, local)
+                }
                 None => Evidence::Hidden,
             };
         }
