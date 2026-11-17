@@ -1949,6 +1949,24 @@ fn a_type_name_no_file_in_view_defines_is_outside() {
 }
 
 #[test]
+fn a_class_an_includer_of_a_source_file_provides_is_that_class() {
+    // `all.cpp` includes `knob.h`, then `run.cpp`, which names `Knob`
+    // through a library header.
+    let h = "struct Knob {\n    int turns() { return 1; }\n};\n";
+    let run = "#include <ext/knob.h>\nint run(Knob& k) { return k.turns(); }\n";
+    let all = "#include \"ui/knob.h\"\n#include \"cli/run.cpp\"\n";
+    let files = [
+        ("src/ui/knob.h", h),
+        ("src/cli/run.cpp", run),
+        ("src/all.cpp", all),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/cli/run.cpp", "run"),
+        ["k.turns() → src/ui/knob.h:2"]
+    );
+}
+
+#[test]
 fn a_class_of_a_header_a_source_file_neither_includes_nor_is_included_with_is_not_certain() {
     // `run.cpp` names `Knob` through a library header; no includer of it
     // can bring in `src/ui/knob.h`.
@@ -2409,6 +2427,15 @@ fn a_local_named_like_a_field_is_the_local() {
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
         ["book_.apply() → src/a.cpp:5"]
+    );
+}
+
+#[test]
+fn a_local_of_the_functions_own_block_named_like_a_field_is_the_local() {
+    let src = "struct Book {\n    void apply(int v) {}\n};\nstruct Ink {\n    void apply(int v) {}\n};\nstruct Shelf {\n    Book book_;\n    void run() {\n        Ink book_;\n        book_.apply(1);\n    }\n};\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
+        ["book_.apply(1) → src/a.cpp:5"]
     );
 }
 
