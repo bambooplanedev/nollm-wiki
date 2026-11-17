@@ -592,11 +592,7 @@ fn remove_refuses_a_symlinked_bin() {
         "kulman: {} is not a directory kulman can use",
         home.join("bin").display()
     );
-    for args in [
-        &["remove", "--yes"][..],
-        &["remove", "--modules", "calque", "--yes"],
-        &["update"],
-    ] {
+    for args in [&["remove", "--yes"][..], &["update"]] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));

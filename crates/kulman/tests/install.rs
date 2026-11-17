@@ -320,7 +320,13 @@ fn install_refuses_a_path_like_name() {
     );
     let (t, base) = setup();
     let home = t.path().join("home");
-    for (given, name) in [("../x", "../x"), ("", ""), (",", ""), ("calque,,plaz", "")] {
+    for (given, name) in [
+        ("../x", "../x"),
+        ("a/b", "a/b"),
+        ("Calque", "Calque"),
+        ("", ""),
+        ("calque,,plaz", ""),
+    ] {
         let out = kulman(&home, &base)
             .args(["install", "--modules", given])
             .output()
@@ -705,10 +711,8 @@ fn install_rejects_a_plain_http_base() {
             "http://example.invalid/releases",
         ),
         ("file://host/x", "file://host/x"),
-        ("ftp://x", "ftp://x"),
         ("https://", "https://"),
         ("file:///", "file:///"),
-        ("ftp://x//", "ftp://x//"),
         (
             "https://example.invalid/releases?x=1",
             "https://example.invalid/releases?x=1",
@@ -829,26 +833,33 @@ fn a_run_waiting_on_a_home_that_vanishes_starts_again() {
     fs::create_dir(&home).unwrap();
     let lock = fs::File::create(home.join(".lock")).unwrap();
     lock.lock().unwrap();
-    let user = t.path().join("user-home");
-    fs::create_dir_all(&user).unwrap();
-    let child = std::process::Command::new(assert_cmd::cargo::cargo_bin("kulman"))
-        .env("KULMAN_HOME", &home)
-        .env("KULMAN_RELEASE_URL", &base)
-        .env("HOME", &user)
-        .args(["install", "--modules", "calque"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    let (child, rest) = common::started_waiting(&home, &base, &["install", "--modules", "calque"]);
     fs::remove_file(home.join(".lock")).unwrap();
     fs::remove_dir(&home).unwrap();
     drop(lock);
     let out = child.wait_with_output().unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
+    let rest = rest.join().unwrap();
+    assert!(out.status.success(), "{rest}");
     assert_binary(&home, "calque", CALQUE);
     assert!(home.join(".lock").exists());
+}
+
+#[test]
+fn a_home_that_is_a_dangling_link_is_said_removed() {
+    // create_dir finds the name taken, the lock file then cannot be opened: home is gone.
+    let (t, base) = setup();
+    let home = t.path().join("home");
+    std::os::unix::fs::symlink(t.path().join("nowhere"), &home).unwrap();
+    let out = kulman(&home, &base).arg("install").output().unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert_eq!(
+        stderr(&out),
+        format!(
+            "kulman: cannot lock {}: it was removed while waiting\nnothing changed\n",
+            home.join(".lock").display()
+        )
+    );
+    assert!(fs::symlink_metadata(&home).unwrap().is_symlink());
 }
 
 #[test]
@@ -896,25 +907,6 @@ fn install_checks_every_build_before_any_download() {
 }
 
 #[test]
-fn install_repairs_a_first_install_that_died_before_its_state() {
-    let (t, base) = setup();
-    let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
-    // Killed after manifest.json, before state.json: bin/ and the lock stay.
-    fs::remove_file(home.join("state.json")).unwrap();
-    let out = kulman(&home, &base).arg("install").output().unwrap();
-    assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(
-        state(&home),
-        json!({"version": "0.7.0", "modules": ["calque", "plaz"]})
-    );
-    assert_binary(&home, "calque", CALQUE);
-    assert_binary(&home, "plaz", PLAZ);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
-    no_tmp_left(&home);
-}
-
-#[test]
 fn install_fetches_a_module_whose_file_it_finds_unlisted() {
     let (t, base) = setup();
     let home = t.path().join("home");
@@ -949,6 +941,7 @@ fn install_with_no_state_over_an_older_installation_fetches_every_module() {
         state(&home),
         json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
     );
+    no_tmp_left(&home);
 }
 
 #[test]

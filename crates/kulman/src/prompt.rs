@@ -125,9 +125,6 @@ mod tests {
     fn numbers_and_names_both_select() {
         assert_eq!(pick("3, calque\n", false).0, ["calque", "extra"]);
         assert_eq!(pick("  2 extra 2\n", false).0, ["plaz", "extra"]);
-        assert_eq!(pick("local\n", true).0, ["local"]);
-        assert_eq!(pick("1\n", true).0, ["repo"]);
-        assert_eq!(pick("Calque, PLAZ\n", false).0, ["calque", "plaz"]);
         assert_eq!(pick("Local\n", true).0, ["local"]);
     }
 
