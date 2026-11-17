@@ -363,16 +363,16 @@ impl Caller<'_, '_> {
     /// `q::f()`.
     fn cpp_path(&self, chain: &[FlowScope], call: &MapCall, q: &str) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
-        // `a::b` of `::a::b::f<T>(…)`.
+        // `::a::b` of `::a::b::f<T>(…)`: a leading `::` names the global
+        // namespace only, wherever the qualifier is looked up.
         let callee = untemplated(call.text.split('(').next().unwrap_or(""));
-        let written = callee
-            .rsplit_once("::")
-            .map_or(q, |w| w.0.trim_start_matches("::"));
+        let written = callee.rsplit_once("::").map_or(q, |w| w.0);
         // `Box<int>` of `Box<int>::f()` is the type `Box`; `a` of `::a::f()`.
         let root = match call.root.as_deref() {
-            Some("") => written.split("::").next().unwrap_or(""),
-            r => r.map_or(q, owner_key),
+            Some("") => written.trim_start_matches("::").split("::").next(),
+            r => r.map(owner_key),
         };
+        let root = root.unwrap_or(q);
         // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
         // `filesystem`) starts at `std`.
         let root = self.unaliased(root);
@@ -386,9 +386,7 @@ impl Caller<'_, '_> {
         } else if cpp.types.contains(q) {
             self.on_qualifier(call, q, written)
         } else if cpp.namespaces.contains(q) {
-            // `::a::b` of `::a::b::f()` keeps its colons.
-            let rooted = callee.rsplit_once("::").map_or(q, |w| w.0);
-            self.free(site, Some(rooted)).unwrap_or(Evidence::Hidden)
+            self.free(site, Some(written)).unwrap_or(Evidence::Hidden)
         } else {
             Evidence::Hidden
         }
@@ -399,8 +397,11 @@ impl Caller<'_, '_> {
     fn cpp_bare(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
         let site = &call.site;
         let name = site.name.as_str();
+        // `::f()` names no local or member.
+        let global = call.text.starts_with("::");
         // A local called is its own call operator.
-        if let Some(f) = chain.iter().rev().find(|f| f.locals.contains(name)) {
+        let local = chain.iter().rev().find(|f| f.locals.contains(name));
+        if let Some(f) = local.filter(|_| !global) {
             return match f.types.get(name) {
                 Some(t) => self.called(call, t, self.class.unwrap_or(self.ns), self.sight()),
                 None => Evidence::Hidden,
@@ -411,11 +412,10 @@ impl Caller<'_, '_> {
         }
         // A method whose qualified name the grammar misread has no known
         // class: as one no head shows.
-        if self.class.is_none() && self.misread && !call.text.starts_with("::") {
+        if self.class.is_none() && self.misread && !global {
             return self.or_free(site, self.made(name, self.any_method(call)));
         }
-        // `::f()` names no member.
-        if let Some(class) = self.class.filter(|_| !call.text.starts_with("::")) {
+        if let Some(class) = self.class.filter(|_| !global) {
             // In a local class's method the enclosing class's members are
             // in reach, but the local class's own may hide them.
             let local = self.member_of(chain).is_none();
@@ -455,8 +455,7 @@ impl Caller<'_, '_> {
                 Err(Missing::Outside | Missing::Unseen | Missing::Nowhere) => {}
             }
         }
-        let global = call.text.starts_with("::").then_some("::");
-        if let Some(found) = self.free(site, global) {
+        if let Some(found) = self.free(site, global.then_some("::")) {
             return found;
         }
         self.made(name, Evidence::Outside)

@@ -565,10 +565,10 @@ fn a_call_qualified_from_the_global_namespace_reaches_its_free_function() {
 
 #[test]
 fn a_call_written_from_the_global_namespace_skips_the_callers_namespaces() {
-    let h = "namespace net { namespace port { int open(int fd); } }\nint open(int fd);\nnamespace io { int open(int fd); }\nnamespace detail { int helper(int v); }\nnamespace b { namespace detail { int helper(int v); } }\n";
-    let main = "#include \"x.h\"\nnamespace net { int a() { return ::port::open(1); } }\nnamespace io { int c() { return ::open(2); } }\nnamespace b { int d() { return ::detail::helper(3); } }\n";
+    let h = "namespace net { namespace port { int open(int fd); } }\nint open(int fd);\nnamespace io { int open(int fd); }\nnamespace detail { int helper(int v); }\nnamespace b { namespace detail { int helper(int v); } }\nstruct Gate { static int make(); };\nnamespace rig { struct Gate { static int make(); }; struct Lone { static int make(); }; }\n";
+    let main = "#include \"x.h\"\nnamespace net { int a() { return ::port::open(1); } }\nnamespace io { int c() { return ::open(2); } }\nnamespace b { int d() { return ::detail::helper(3); } }\nnamespace rig { int g() { return ::Gate::make() + ::Lone::make(); } }\nint e() { auto open = [](int v) { return v; }; return ::open(4); }\n";
     let files = [("src/x.h", h), ("src/main.cpp", main)];
-    let calls: Vec<String> = ["a", "c", "d"]
+    let calls: Vec<String> = ["a", "c", "d", "g", "e"]
         .iter()
         .flat_map(|f| cpp_targets(&files, "src/main.cpp", f))
         .collect();
@@ -577,7 +577,10 @@ fn a_call_written_from_the_global_namespace_skips_the_callers_namespaces() {
         [
             "::port::open(1) → hidden",
             "::open(2) → src/x.h:2",
-            "::detail::helper(3) → src/x.h:4"
+            "::detail::helper(3) → src/x.h:4",
+            "::Gate::make() → src/x.h:6",
+            "::Lone::make() → one of: src/x.h:7, or outside",
+            "::open(4) → src/x.h:2"
         ]
     );
 }

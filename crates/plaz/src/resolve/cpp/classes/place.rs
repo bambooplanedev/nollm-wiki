@@ -27,7 +27,8 @@ impl<'a> Cpp<'a> {
     /// scope), the class itself by its own name, then the aliases and
     /// classes nested in its nearest project bases (a base outside the
     /// project hides none; one no head places stops the lookup); last, the
-    /// one class whose path ends in `t`. Run twice: over the classes an
+    /// one class whose path ends in `t`, unless `t` starts with `::`, which
+    /// names the global namespace only. Run twice: over the classes an
     /// includer may provide too (every header's, outside its anonymous
     /// namespaces) besides those in files `sight` sees, and over those in
     /// files `sight` sees only; a class at one path counts once. Both find
@@ -41,15 +42,20 @@ impl<'a> Cpp<'a> {
         sight: Sight,
     ) -> Placed<'a> {
         let t = untemplated(t);
-        let t = t.trim_start_matches("::");
+        // `::K` is looked up from the global namespace only.
+        let rooted = t.starts_with("::");
+        let (t, from) = match t.strip_prefix("::") {
+            Some(t) => (t, ""),
+            None => (t.as_str(), from),
+        };
         if t.starts_with("std::") {
             return Placed::Nothing;
         }
         let seen = |page: usize, _: &str| sight.sees(page);
         let reachable = |page: usize, path: &str| self.reaches(sight, page, path);
         let place = |usings: &[&str]| {
-            let all = self.lookup_name(t, from, sight, &reachable, usings);
-            let mine = self.lookup_name(t, from, sight, &seen, usings);
+            let all = self.lookup_name(t, from, sight, &reachable, usings, rooted);
+            let mine = self.lookup_name(t, from, sight, &seen, usings, rooted);
             match (all, mine) {
                 (Step::Unplaced, _) | (_, Step::Unplaced) => Placed::Unplaced,
                 (Step::Found(a), Step::Found(m)) if a != m => Placed::Either(a, m),
@@ -107,6 +113,7 @@ impl<'a> Cpp<'a> {
         sight: Sight,
         keep: &dyn Fn(usize, &str) -> bool,
         usings: &[&str],
+        rooted: bool,
     ) -> Step<'a> {
         let key = owner_key(t);
         let heads = self.classes.by_key.get(key).into_iter().flatten();
@@ -176,6 +183,10 @@ impl<'a> Cpp<'a> {
                 break;
             }
             scope = scope.rsplit_once("::").map_or("", |s| s.0);
+        }
+        // `::K` is no class whose path only ends in `K`.
+        if rooted {
+            return Step::Nothing;
         }
         let ends = format!("::{t}");
         if aliases.iter().any(|a| a == t || a.ends_with(&ends)) {
