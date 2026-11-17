@@ -92,6 +92,16 @@ fn setup_passes_the_choices_to_each_module() {
         f.logged()[2..],
         ["calque setup --scope local --no-hook --memory"]
     );
+    let out = f.setup(&["--modules", "calque", "--scope", "repo", "--hook"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        f.logged()[3..],
+        ["calque setup --scope repo --hook --memory"]
+    );
+    usage(
+        &f.setup(&["--scope", "repo", "--hook", "--no-hook"]),
+        "cannot be used with",
+    );
 }
 
 #[test]
@@ -269,7 +279,7 @@ fn setup_with_a_missing_binary_says_update() {
 #[test]
 fn setup_memory_without_calque_is_usage() {
     let f = installed(LOGS, "calque,plaz");
-    for flag in ["--memory", "--no-memory", "--no-hook"] {
+    for flag in ["--memory", "--no-memory", "--hook", "--no-hook"] {
         let out = f.setup(&["--modules", "plaz", "--scope", "repo", flag]);
         usage(
             &out,
