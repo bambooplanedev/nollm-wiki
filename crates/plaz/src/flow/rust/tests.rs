@@ -63,9 +63,22 @@ fn rust_flow_draws_let_else_as_a_decision() {
 fn rust_flow_counts_unwrap_or_and_expression_closures_and_nests_block_closures() {
     let src = "fn f(v: Vec<u8>) -> u8 {\n    let a = v.first().copied().unwrap_or(0);\n    let b: Vec<u8> = v.iter().map(|y| y + a).collect();\n    let run = |z: u8| {\n        if z > a { log(z); }\n    };\n    run(a);\n    a\n}\n";
     let lines = flow_lines("src/a.rs", src, "f");
-    assert!(lines.contains(&"nested run @4".to_string()));
-    assert!(lines.contains(&"  branch @5".to_string()));
-    assert!(lines.contains(&"call run(a) @7".to_string()));
+    assert_eq!(
+        lines,
+        [
+            "call v.first() @2",
+            "call v.first().copied() @2",
+            "call v.first().copied().unwrap_or(0) @2",
+            "call v.iter() @3",
+            "call v.iter().map(|y| y + a) @3",
+            "call v.iter().map(|y| y + a).collect() @3",
+            "nested run @4",
+            "  branch @5",
+            "    arm z > a @5",
+            "      call log(z) @5",
+            "call run(a) @7",
+        ]
+    );
     assert_eq!(
         not_drawn("src/a.rs", src, "f"),
         [("closure".to_string(), 1), ("unwrap_or".to_string(), 1)]
@@ -82,8 +95,8 @@ fn tests_and_broken_functions_are_handled_not_guessed() {
     // a damaged function that tree-sitter still recognises carries the flag
     let g = file("src/b.rs", "fn ok() {}\nfn g() { if a() { b(; } }\n");
     assert!(g.syntax_errors);
-    let i = g.code.items.iter().position(|it| it.name == "g");
-    assert!(i.is_none_or(|i| g.flows.get(&i).is_none_or(|fl| fl.syntax_errors)));
+    let i = g.code.items.iter().position(|it| it.name == "g").unwrap();
+    assert!(g.flows[&i].syntax_errors);
     assert!(g.flows.values().any(|fl| !fl.syntax_errors)); // `ok` is still charted and clean
 }
 
