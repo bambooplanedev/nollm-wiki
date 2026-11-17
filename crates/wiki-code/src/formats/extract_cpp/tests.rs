@@ -635,6 +635,34 @@ fn a_conversion_operator_is_a_method_named_as_written() {
 }
 
 #[test]
+fn a_conversion_operator_read_as_a_function_of_the_type_operator_is_its_classs_method() {
+    // After `inline` the grammar reads `Vent::operator` as the return type
+    // and the converted-to type as the function's name.
+    let src = "struct Vent {\n  operator bool() const;\n};\ninline Vent::operator bool() const { return true; }\ninline rig::Vent::operator lib::Text() const { return t; }\nconstexpr Tank<T>::operator Kind() const { return k; }\n";
+    let e = crate::extract("vent.h", src);
+    assert_eq!(
+        item_lines(&e.items),
+        vec![
+            "1-3 type Vent pub",
+            "2-2 method Vent::operator bool pub",
+            "4-4 method Vent::operator bool pub",
+            "5-5 method Vent::operator lib::Text pub",
+            "6-6 method Tank<T>::operator Kind pub",
+        ]
+    );
+    assert_eq!(
+        e.symbols,
+        vec![
+            "constexpr Tank<T>::operator Kind() const",
+            "struct Vent",
+            "Vent::operator bool() const",
+            "inline Vent::operator bool() const",
+            "inline rig::Vent::operator lib::Text() const",
+        ]
+    );
+}
+
+#[test]
 fn a_conversion_to_a_function_pointer_type_is_no_item() {
     let e = crate::extract(
         "gate.cpp",

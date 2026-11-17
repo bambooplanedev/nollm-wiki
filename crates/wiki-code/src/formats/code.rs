@@ -638,8 +638,13 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                     // Resolved once, after `placement` has accepted the item, and
                     // then used for both the signature and the classification, so
                     // the node's kind is derived once.
-                    let sig =
-                        build_signature(text, def, parts.name, owner.as_deref(), &spec, &shape);
+                    // A misread conversion operator already reads `K::operator
+                    // bool` in the source: nothing for the owner to replace.
+                    let misread = parts
+                        .name
+                        .is_some_and(|n| super::extract_cpp::misread_cast(n, text).is_some());
+                    let spliced = owner.as_deref().filter(|_| !misread);
+                    let sig = build_signature(text, def, parts.name, spliced, &spec, &shape);
                     if !sig.is_empty() {
                         let kind = classify(parts.name, owner.as_deref(), shape.rank);
                         let group = group_key(owner.as_deref(), name_text, def, text, &spec);
@@ -789,6 +794,11 @@ fn last_row(node: Node) -> usize {
 /// runs past the cut, and the part before it would pass for another
 /// operator's name.
 fn name_text<'a>(name: Node, text: &'a str) -> Option<&'a str> {
+    // A misread one's name runs from its `operator` to the type it names.
+    if let Some(operator) = super::extract_cpp::misread_cast(name, text) {
+        let end = outermost(name, |k| k == "qualified_identifier").end_byte();
+        return text.get(operator.start_byte()..end);
+    }
     if name.kind() != "operator_cast" {
         return text.get(name.byte_range());
     }

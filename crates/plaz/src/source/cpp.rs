@@ -46,9 +46,10 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         }
         // The enclosing named namespaces, then the qualifier of `a::B::f`.
         let declared = f.and_then(|f| f.child_by_field_name("declarator"));
-        let qualifier = declared
-            .and_then(|d| text(d).rsplit_once("::"))
-            .map(|q| q.0);
+        // A conversion operator's class is its qualifier, read first: the
+        // type it names may be qualified too (`K::operator lib::T()`).
+        let cast = decl.and_then(|d| cast_scope(d, src.text()));
+        let qualifier = cast.or_else(|| Some(declared.and_then(|d| text(d).rsplit_once("::"))?.0));
         let segs = || qualifier.into_iter().flat_map(|q| q.split("::"));
         let scope = |inline: bool| {
             let mut path = enclosing(node, src.text(), None, inline);
@@ -71,14 +72,8 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
         if !in_class {
             class.extend(segs().map(|s| s.trim().to_string()));
         }
-        let class =
-            (in_class || it.owner.as_ref().is_some_and(names_owner)).then(|| class.join("::"));
-        if let Some(c) = class.filter(|_| it.kind == CodeItemKind::Method) {
-            file.cpp.classes.insert(i, untemplated(&c));
-        }
-        if let Some(scope) = decl.and_then(|d| cast_scope(d, src.text())) {
-            let mut class = enclosing(node, src.text(), Some(&anon), false);
-            class.extend(scope.split("::").map(|s| s.trim().to_string()));
+        let named = in_class || cast.is_some() || it.owner.as_ref().is_some_and(names_owner);
+        if named && it.kind == CodeItemKind::Method {
             file.cpp.classes.insert(i, untemplated(&class.join("::")));
         }
     }
@@ -101,8 +96,8 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
 /// The class of the conversion operator `K::operator bool()` defined by
 /// `d`: the qualifier before its `operator_cast` (`a::K` of
 /// `a::K::operator int()`); or, when the grammar reads the definition
-/// (after `inline`) as a function `bool` of the type `K::operator`, which
-/// no type is named, `K`.
+/// (after `inline`) as a function `bool` of the type `a::K::operator`,
+/// which no type is named, `a::K`.
 fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
     let mut name = d.child_by_field_name("declarator");
     let start = name.map_or(0, |n| n.start_byte());
@@ -119,11 +114,8 @@ fn cast_scope<'s>(d: Node, src: &'s str) -> Option<&'s str> {
     let ty = d
         .child_by_field_name("type")
         .filter(|t| t.kind() == "qualified_identifier")?;
-    let name = ty.child_by_field_name("name")?;
-    let scope = ty
-        .child_by_field_name("scope")
-        .filter(|_| &src[name.byte_range()] == "operator")?;
-    Some(&src[scope.byte_range()])
+    let scope = src[ty.byte_range()].strip_suffix("operator")?.trim_end();
+    scope.strip_suffix("::")
 }
 
 /// Records the names of the namespace or namespace alias `n` defines in

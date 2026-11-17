@@ -67,6 +67,14 @@ pub use pairs::pair_declarations;
 /// data declarator would classify both alike), pre-existing and rare:
 /// documented, not fixed.
 ///
+/// A conversion operator has two shapes. Parsed correctly, it is an
+/// `operator_cast` declarator with no `function_declarator` around it, which
+/// the `operator_cast` pattern below captures whole. After `inline` or
+/// `constexpr`, `K::operator bool()` parses as a function `bool` returning
+/// the type `K::operator`, which the plain patterns capture: `misread_cast`
+/// tells it, and it is the method `K::operator bool`, its signature as
+/// written. `code::name_text` cuts either one's name to `operator bool`.
+///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
 ///   * declarator nesting beyond ONE wrapper — the wrapper patterns reach
 ///     exactly one deep, and `int** f()` is
@@ -81,12 +89,6 @@ pub use pairs::pair_declarations;
 ///     its declarator names a `template_function`, captured whole, so the
 ///     item is named `blank<int>` as written and stays apart from the
 ///     primary template `blank`;
-///   * a conversion operator the grammar misreads: `inline K::operator
-///     bool()` parses as a function `bool` returning the type `K::operator`,
-///     so it is an item named `bool` with no owner. A correctly parsed one is
-///     an `operator_cast` declarator with no `function_declarator` around it,
-///     which the `operator_cast` pattern below captures whole;
-///     `code::name_text` cuts its name to `operator bool` as written;
 ///   * a file-scope most-vexing parse (`Level* p(q);` at namespace scope)
 ///     matches the pointer-declarator wrapper pattern and is exported as a
 ///     function: `cpp_placement`'s rejection only fires inside a
@@ -301,6 +303,22 @@ fn cpp_owner_anchor(name: Node) -> Node {
     outermost(name, |k| k == "qualified_identifier")
 }
 
+/// The `operator` of a conversion operator the grammar misread, `name` the
+/// name it gave the function: after `inline` or `constexpr`, `K::operator
+/// bool()` parses as a function `bool` returning the type `K::operator`.
+/// `operator` is a keyword, so a type so named is always this misreading.
+/// The node is that type's last name; the scope before it is the class.
+pub(crate) fn misread_cast<'t>(name: Node<'t>, text: &str) -> Option<Node<'t>> {
+    let written = outermost(name, |k| k == "qualified_identifier");
+    let function = written.parent()?;
+    let mut ty = (function.parent()?.child_by_field_name("type"))
+        .filter(|_| function.kind() == "function_declarator")?;
+    while ty.kind() == "qualified_identifier" {
+        ty = ty.child_by_field_name("name")?;
+    }
+    (text.get(ty.byte_range()) == Some("operator")).then_some(ty)
+}
+
 /// Reject first, then resolve the owner. The order matters: `int x;` inside a
 /// `struct Tmp` declared inside a method has a `field_declaration_list`
 /// ancestor, so an owner-first rule would export `int Tmp::x` from a function
@@ -394,6 +412,11 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
     } else {
         declarator.child_by_field_name("declarator")?
     };
+    // `K` of a misread `K::operator bool()`, whatever qualifies `bool`.
+    if let Some(operator) = misread_cast(inner, text) {
+        let class = operator.parent()?.child_by_field_name("scope")?;
+        return text.get(class.byte_range()).map(str::to_string);
+    }
     if inner.kind() != "qualified_identifier" {
         return None;
     }

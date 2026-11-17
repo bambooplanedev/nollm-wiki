@@ -2512,15 +2512,37 @@ fn a_misread_call_operators_bare_call_is_never_certain_to_a_free_namesake() {
 }
 
 #[test]
-fn an_inline_conversion_operator_read_as_a_function_named_its_type_keeps_its_class() {
+fn an_inline_conversion_operator_the_grammar_misreads_is_its_classs_and_defines_its_declaration() {
     // `inline K::operator bool()` parses as a function `bool` of the type
-    // `K::operator`; its calls are still its class's.
-    let h = "struct Ent {\n    explicit operator bool() const;\n    int stat() const;\n};\ninline Ent::operator bool() const\n{\n    stat();\n    return true;\n}\n";
-    let src = "#include \"ent.h\"\nint Ent::stat() const { return 1; }\nint stat() { return 0; }\n";
+    // `K::operator`.
+    let h = "namespace rig {\nstruct Ent {\n    explicit operator bool() const;\n    int stat() const;\n};\ninline Ent::operator bool() const\n{\n    stat();\n    return true;\n}\nstruct Deck {\n    struct Ent {\n        operator int() const;\n        int stat() const { return 2; }\n    };\n};\ninline Deck::Ent::operator int() const { return stat(); }\n}\n";
+    let src =
+        "#include \"ent.h\"\nint rig::Ent::stat() const { return 1; }\nint stat() { return 0; }\n";
     let files = [("src/ent.h", h), ("src/ent.cpp", src)];
     assert_eq!(
-        cpp_targets(&files, "src/ent.h", "bool"),
+        cpp_targets(&files, "src/ent.h", "operator bool"),
         ["stat() → src/ent.cpp:2"]
+    );
+    assert_eq!(
+        cpp_targets(&files, "src/ent.h", "operator int"),
+        ["stat() → src/ent.h:14"]
+    );
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/ent_h");
+    assert_eq!(
+        headings(&page),
+        [
+            "ent_operator_bool",
+            "ent_stat",
+            "ent_operator_bool_2",
+            "deck_ent_operator_int",
+            "deck_ent_stat",
+            "ent_operator_int"
+        ]
+    );
+    assert_eq!(
+        common::fn_block(&page, "ent_operator_bool"),
+        "## ent_operator_bool\n`explicit operator bool() const` · `src/ent.h:3-3`\n\nDefined at [[map/src/ent_h#ent_operator_bool_2|Ent::operator bool]]\n\n"
     );
 }
 
