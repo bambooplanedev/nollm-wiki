@@ -348,18 +348,21 @@ impl Caller<'_, '_> {
     /// `q::f()`.
     fn cpp_path(&self, chain: &[FlowScope], call: &MapCall, q: &str) -> Evidence {
         let (cpp, site) = (self.cpp, &call.site);
-        // `Box<int>` of `Box<int>::f()` is the type `Box`.
-        let root = call.root.as_deref().map_or(q, owner_key);
-        // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
-        // `filesystem`) starts at `std`.
-        let root = self.unaliased(root);
-        let project =
-            cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
         // `a::b` of `::a::b::f<T>(…)`.
         let callee = untemplated(call.text.split('(').next().unwrap_or(""));
         let written = callee
             .rsplit_once("::")
             .map_or(q, |w| w.0.trim_start_matches("::"));
+        // `Box<int>` of `Box<int>::f()` is the type `Box`; `a` of `::a::f()`.
+        let root = match call.root.as_deref() {
+            Some("") => written.split("::").next().unwrap_or(""),
+            r => r.map_or(q, owner_key),
+        };
+        // `fs::f()` under `namespace fs = std::filesystem;` (`q` is then
+        // `filesystem`) starts at `std`.
+        let root = self.unaliased(root);
+        let project =
+            cpp.types.contains(root) || cpp.namespaces.contains(root) || self.index.is_module(root);
         if (chain.iter()).any(|f| f.rebound.contains(root)) {
             // A template parameter or a local type: any type's method.
             self.any_method(call)

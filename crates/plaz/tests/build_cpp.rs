@@ -517,6 +517,18 @@ fn a_call_qualified_by_a_project_namespace_reaches_its_free_function() {
 }
 
 #[test]
+fn a_call_qualified_from_the_global_namespace_reaches_its_free_function() {
+    let h = "namespace io {\nint open(int fd);\n}\n";
+    let def = "#include \"io.h\"\nint io::open(int fd) { return fd; }\n";
+    let main = "#include \"io.h\"\nint start() { return ::io::open(1) + ::std::abs(2); }\n";
+    let files = [("src/io.h", h), ("src/io.cpp", def), ("src/main.cpp", main)];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "start"),
+        ["::io::open(1) → src/io.cpp:2", "::std::abs(2) → outside"]
+    );
+}
+
+#[test]
 fn a_declaration_does_not_fold_onto_a_namesake_in_another_outer_namespace() {
     let h = "namespace snow { namespace util {\nint melt(int v);\n} }\n";
     let def = "#include \"snow.h\"\nnamespace rain { namespace util {\nint melt(int v) { return v; }\n} }\n";
