@@ -189,6 +189,45 @@ fn overloads_qualified_otherwise_than_declared_are_each_defined_by_their_own() {
 }
 
 #[test]
+fn an_including_files_overload_of_another_namespaces_type_does_not_drop_the_exact_one() {
+    // `tool.cpp` includes nothing; `lib.cpp`'s `f` takes `b::Kind`.
+    let h =
+        "namespace a { struct Kind {}; }\nnamespace b { struct Kind {}; }\nvoid f(a::Kind k);\n";
+    let files = [
+        ("src/h.h", h),
+        ("src/lib.cpp", "#include \"h.h\"\nvoid f(b::Kind k) {}\n"),
+        (
+            "src/tool.cpp",
+            "namespace a { struct Kind {}; }\nvoid f(a::Kind k) {}\n",
+        ),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/h_h");
+    assert_eq!(
+        last_line(&page, "f"),
+        "Defined at one of: [[map/src/lib_cpp#f|f]], [[map/src/tool_cpp#f|f]]"
+    );
+}
+
+#[test]
+fn an_include_keeping_several_overloads_keeps_the_exact_one_too() {
+    let files = [
+        ("src/h.h", "void log(int v);\n"),
+        (
+            "src/lib.cpp",
+            "#include \"h.h\"\nvoid log(double v) {}\nvoid log(char v) {}\n",
+        ),
+        ("src/tool.cpp", "void log(int v) {}\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, "map/src/h_h");
+    assert_eq!(
+        last_line(&page, "log"),
+        "Defined at one of: [[map/src/lib_cpp#log|log]], [[map/src/lib_cpp#log_2|log]], [[map/src/tool_cpp#log|log]]"
+    );
+}
+
+#[test]
 fn an_include_does_not_narrow_overloads_spelled_otherwise_to_one() {
     // No definition writes `u32`: either may be the declaration's.
     let files = [
