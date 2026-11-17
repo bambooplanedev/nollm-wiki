@@ -82,7 +82,8 @@ impl<'a> Cpp<'a> {
     /// and name that reads the same with qualifiers dropped, each name of
     /// one ending the other's (`core::Kind` and `Kind`); none when a third
     /// spelling reads the same too, or when a name the two spell apart is
-    /// that of two project types (`a::Kind` and `b::Kind`).
+    /// that of two project types (`a::Kind` and `b::Kind`, or a nested
+    /// `Box::Kind`).
     fn requalified(&self, key: Key<'a>) -> Option<Key<'a>> {
         let all = self.spellings.get(&(key.0, key.1, unqualified(key.2)))?;
         let mut other = all.iter().filter(|&&p| p != key.2);
@@ -94,7 +95,14 @@ impl<'a> Cpp<'a> {
                 .filter(|w| !w.is_empty())
         };
         let ends = |a: &str, b: &str| a == b || a.ends_with(&format!("::{b}"));
-        let one = |a: &str| self.type_items.get(owner_key(a)).is_none_or(|&n| n < 2);
+        // A type item, or a class head, nested ones included.
+        let one = |a: &str| {
+            let (items, heads) = (
+                self.type_items.get(owner_key(a)),
+                self.classes.by_key.get(owner_key(a)),
+            );
+            items.is_none_or(|&n| n < 2) && heads.is_none_or(|h| h.len() < 2)
+        };
         let same = (names(key.2).zip(names(p)))
             .all(|(a, b)| a == b || ((ends(a, b) || ends(b, a)) && one(a)));
         same.then_some((key.0, key.1, p))

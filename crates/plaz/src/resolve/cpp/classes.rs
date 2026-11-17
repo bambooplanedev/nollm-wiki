@@ -77,7 +77,7 @@ pub(super) struct Classes<'a> {
     /// an alias of that name leads to: the classes naming such a base.
     unseen: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per class name (`owner_key`): the paths of the classes it names.
-    by_key: BTreeMap<&'a str, BTreeSet<&'a str>>,
+    pub(super) by_key: BTreeMap<&'a str, BTreeSet<&'a str>>,
     /// Per alias name (`owner_key`): the page and path of each project
     /// alias of that name (`File::aliases`).
     aliases: BTreeMap<&'a str, Vec<(usize, &'a str)>>,

@@ -378,6 +378,22 @@ fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
 }
 
 #[test]
+fn a_declaration_does_not_fold_across_a_nested_class_of_the_same_name() {
+    let h = "namespace a { struct Kind {}; }\nstruct Box {\n    struct Kind {};\n    void f(Kind k);\n    void f(a::Kind k);\n};\n";
+    let def = "#include \"box.h\"\nvoid Box::f(a::Kind k) {}\n";
+    let main = "#include \"box.h\"\nvoid run(Box& b, Box::Kind k) { b.f(k); }\n";
+    let files = [
+        ("src/box.h", h),
+        ("src/box.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        ["b.f(k) → one of: src/box.cpp:2, src/box.h:4"]
+    );
+}
+
+#[test]
 fn a_function_in_the_include_closure_is_certain_when_one_and_one_of_when_several() {
     let top = "#include \"../lib/mid.h\"\n";
     let mid = "#include \"deep.h\"\nint pair_of(int a);\n";
