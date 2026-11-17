@@ -627,7 +627,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 Placement::Nested => (Vec::new(), true),
                 Placement::Rejected => continue,
             };
-            let name_text = parts.name.and_then(|n| text.get(n.byte_range()));
+            let name_text = parts.name.and_then(|n| name_text(n, text));
             let shape = (spec.shape)(def);
             let owner = (!chain.is_empty()).then(|| chain.join(spec.owner_sep));
             let public = if nested {
@@ -780,6 +780,27 @@ fn last_row(node: Node) -> usize {
     }
 }
 
+/// The text an `@name` node names. A C++ conversion operator has no node
+/// for its name alone: its `@name` is the whole `operator_cast`
+/// (`operator Kind*() const`), and the name is what precedes the function
+/// declarator nested in it (`operator Kind*`). `None` for a cast with no
+/// function declarator, which names nothing, and for one whose function
+/// declarator wraps another declarator (`operator int(*)(int)()`): the type
+/// runs past the cut, and the part before it would pass for another
+/// operator's name.
+fn name_text<'a>(name: Node, text: &'a str) -> Option<&'a str> {
+    if name.kind() != "operator_cast" {
+        return text.get(name.byte_range());
+    }
+    let params = std::iter::successors(name.child_by_field_name("declarator"), |d| {
+        d.named_child(u32::try_from(d.named_child_count()).ok()?.checked_sub(1)?)
+    })
+    .find(|d| d.kind() == "abstract_function_declarator")
+    .filter(|d| d.child_by_field_name("declarator").is_none())?;
+    text.get(name.start_byte()..params.start_byte())
+        .map(str::trim_end)
+}
+
 /// Whether nothing but whitespace precedes `node` on its first line. A
 /// comment trailing code (`int n; ///< Count.`, `var n = 5 // the limit`)
 /// belongs to that code, so the lead walk must not read it as the next
@@ -834,7 +855,7 @@ fn code_item<'t>(
         return None;
     }
 
-    let name_text = text.get(name.byte_range())?;
+    let name_text = name_text(name, text)?;
     let top = (spec.sig_start)(def);
     // `first` is where the range starts unless the plain block becomes the
     // doc; `cursor` is how far the walk has climbed, over that block too.

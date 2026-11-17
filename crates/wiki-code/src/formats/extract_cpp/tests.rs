@@ -578,3 +578,67 @@ fn arity_counts_top_level_parameters() {
     );
     assert_eq!(arity("using Cb = int", "Cb"), None);
 }
+
+#[test]
+fn an_explicit_specialization_is_an_item_named_with_its_arguments() {
+    let src = "template <class T> int blank() { return 1; }\ntemplate <>\nint blank<int>() {\n  return 0;\n}\ntemplate <> int blank<long>();\nstruct Lamp { template <class T> int glow(); };\ntemplate <> int Lamp::glow<int>() { return 2; }\n";
+    let e = crate::extract("blank.cpp", src);
+    assert_eq!(
+        item_lines(&e.items),
+        vec![
+            "1-1 fn blank pub",
+            "2-5 fn blank<int> pub",
+            "6-6 fn blank<long> pub",
+            "7-7 type Lamp pub",
+            "7-7 method Lamp::glow pub",
+            "8-8 method Lamp::glow<int> pub",
+        ]
+    );
+    let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+    assert_eq!(
+        sigs,
+        vec![
+            "template <class T> int blank()",
+            "template <> int blank<int>()",
+            "template <> int blank<long>()",
+            "struct Lamp",
+            "template <class T> int glow()",
+            "template <> int Lamp::glow<int>()",
+        ]
+    );
+}
+
+#[test]
+fn a_conversion_operator_is_a_method_named_as_written() {
+    let src = "struct Gate {\n  operator bool() const {\n    return valid(charge);\n  }\n  explicit operator Kind*() const;\n  operator Kind&();\n};\nGate::operator int() const { return 1; }\n";
+    let e = crate::extract("gate.cpp", src);
+    assert_eq!(
+        item_lines(&e.items),
+        vec![
+            "1-7 type Gate pub",
+            "2-4 method Gate::operator bool pub",
+            "5-5 method Gate::operator Kind* pub",
+            "6-6 method Gate::operator Kind& pub",
+            "8-8 method Gate::operator int pub",
+        ]
+    );
+    assert_eq!(
+        e.symbols,
+        vec![
+            "struct Gate",
+            "Gate::operator Kind&()",
+            "explicit Gate::operator Kind*() const",
+            "Gate::operator bool() const",
+            "Gate::operator int() const",
+        ]
+    );
+}
+
+#[test]
+fn a_conversion_to_a_function_pointer_type_is_no_item() {
+    let e = crate::extract(
+        "gate.cpp",
+        "struct Gate {\n  operator int(*)(int)() const;\n};\n",
+    );
+    assert_eq!(item_lines(&e.items), vec!["1-3 type Gate pub"]);
+}
