@@ -195,18 +195,9 @@ fn cfg_test_matches_modulo_whitespace_but_other_cfgs_do_not() {
 
 #[test]
 fn symbols_and_imports_come_from_the_test_stripped_source() {
-    let src = "pub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
+    let src = "use std::fmt;\npub struct Fixture;\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n    use tempfile::tempdir;\n\n    impl Default for Fixture {\n        fn default() -> Self { Fixture }\n    }\n\n    #[test]\n    fn t() {\n        let _ = tempdir();\n    }\n}\n";
     let e = crate::extract("t.rs", src);
-    assert!(
-        !e.imports.iter().any(|i| i == "super::*"),
-        "test-only import leaked: {:?}",
-        e.imports
-    );
-    assert!(
-        !e.imports.iter().any(|i| i.contains("tempfile")),
-        "test-only import leaked: {:?}",
-        e.imports
-    );
+    assert_eq!(e.imports, vec!["std::fmt"]);
     // real export lost
     assert_has(&e.symbols, "pub struct Fixture");
     // The fixture also plants an `impl Default for Fixture` inside the

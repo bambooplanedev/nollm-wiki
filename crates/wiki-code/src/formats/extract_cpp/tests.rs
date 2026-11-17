@@ -452,7 +452,7 @@ fn group_label_sharing_a_name_word_is_a_doc() {
 
 #[test]
 fn blank_line_or_trailing_comment_is_not_a_doc() {
-    let src = "int a;\n// about f\n\nvoid f();\nint n; // count\nvoid g();\n";
+    let src = "int a;\n// Frobs the widget.\n\nvoid f();\nint n; // Counts the rows.\nvoid g();\n";
     assert_eq!(doc_of("f.h", src, "f"), (None, 4));
     assert_eq!(doc_of("f.h", src, "g"), (None, 6));
 }

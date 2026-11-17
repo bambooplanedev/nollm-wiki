@@ -400,11 +400,8 @@ fn doc_text_is_none_for_a_one_sentence_doc() {
 fn doc_text_caps_on_a_char_boundary() {
     let src = format!("/// {}\nfn f() {{}}\n", "é".repeat(500).replace('é', "éé "));
     let text = doc_of(&src).1.unwrap();
-    assert!(
-        text.chars().count() <= 1000 && text.ends_with('…'),
-        "{}",
-        text.len()
-    );
+    assert_eq!(text.chars().count(), 1000);
+    assert!(text.ends_with('…'));
 }
 
 fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
@@ -416,12 +413,13 @@ fn test_flags(path: &str, src: &str) -> Vec<(String, bool)> {
 fn rust_items_inside_cfg_test_are_tests() {
     let src = "fn live() {}\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {}\n    fn helper() {}\n}\n";
     let flags = test_flags("src/a.rs", src);
-    for (name, want) in [("live", false), ("t", true), ("helper", true)] {
-        assert!(
-            flags.contains(&(name.to_string(), want)),
-            "{name}: {flags:?}"
-        );
-    }
+    let want = [
+        ("live", false),
+        ("tests", true),
+        ("t", true),
+        ("helper", true),
+    ];
+    assert_eq!(flags, want.map(|(n, t)| (n.to_string(), t)));
 }
 
 #[test]

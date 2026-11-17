@@ -60,11 +60,14 @@ mod tests {
     }
 
     #[test]
-    fn svelte_5_module_attribute_and_tsx_free_scripts() {
-        let src = "<script module>\nexport class Store {}\n</script>\n<script>\nlet { name } = $props();\n</script>\n<h1>{name}</h1>\n";
+    fn a_bare_module_script_is_read_like_any_other() {
+        let src = "<script module>\nexport class Store {}\n</script>\n<script>\nexport function load() {}\n</script>\n<h1>{name}</h1>\n";
         let e = crate::extract("Store.svelte", src);
-        assert_eq!(e.symbols, vec!["export class Store"]);
-        assert_eq!(e.defined, vec!["Store"]);
+        assert_eq!(
+            e.symbols,
+            vec!["export class Store", "export function load()"]
+        );
+        assert_eq!(e.defined, vec!["Store", "load"]);
     }
 
     #[test]
@@ -72,5 +75,8 @@ mod tests {
         let src = "<script lang=\"coffee\">\nexport function looksLikeJs() {}\n</script>\n";
         let e = crate::extract("Legacy.svelte", src);
         assert!(e.symbols.is_empty(), "{:?}", e.symbols);
+        let ts = src.replace("coffee", "ts");
+        let e = crate::extract("Legacy.svelte", &ts);
+        assert_eq!(e.symbols, vec!["export function looksLikeJs()"]);
     }
 }
