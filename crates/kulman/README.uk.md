@@ -215,7 +215,7 @@ errors: <modules>` і виходить з кодом першого модуля
 
 ```json
 {
-  "version": "0.8.1",
+  "version": "0.8.2",
   "modules": [
     {
       "name": "calque",
@@ -225,13 +225,13 @@ errors: <modules>` і виходить з кодом першого модуля
       "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }

@@ -209,7 +209,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.8.1",
+  "version": "0.8.2",
   "modules": [
     {
       "name": "calque",
@@ -219,13 +219,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "kulman": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "kulman-v0.8.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "kulman-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
