@@ -81,10 +81,12 @@ pub use pairs::pair_declarations;
 ///     its declarator names a `template_function`, captured whole, so the
 ///     item is named `blank<int>` as written and stays apart from the
 ///     primary template `blank`;
-///   * a conversion operator (`operator bool()`) parses as an `operator_cast`
-///     declarator under an `abstract_function_declarator`, not an
-///     `operator_name` under a `function_declarator`, so no pattern here
-///     reaches it;
+///   * a conversion operator the grammar misreads: `inline K::operator
+///     bool()` parses as a function `bool` returning the type `K::operator`,
+///     so it is an item named `bool` with no owner. A correctly parsed one is
+///     an `operator_cast` declarator with no `function_declarator` around it,
+///     which the `operator_cast` pattern below captures whole;
+///     `code::name_text` cuts its name to `operator bool` as written;
 ///   * a file-scope most-vexing parse (`Level* p(q);` at namespace scope)
 ///     matches the pointer-declarator wrapper pattern and is exported as a
 ///     function: `cpp_placement`'s rejection only fires inside a
@@ -116,6 +118,12 @@ const QUERY: &str = r"
 (declaration declarator: [
   (pointer_declarator (function_declarator declarator: (_) @name))
   (reference_declarator (function_declarator declarator: (_) @name))]) @def
+
+(function_definition declarator: [
+  (operator_cast) @name
+  (qualified_identifier name: (operator_cast) @name)
+  (qualified_identifier name: (qualified_identifier name: (operator_cast) @name))]) @def
+(declaration declarator: (operator_cast) @name) @def
 
 (class_specifier   name: (type_identifier) @name) @def
 (struct_specifier  name: (type_identifier) @name) @def
@@ -379,7 +387,13 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
             .named_children(&mut declarator.walk())
             .find(|c| c.kind() == "function_declarator")?;
     }
-    let inner = declarator.child_by_field_name("declarator")?;
+    // A conversion operator's `operator_cast` sits under the qualifier
+    // itself, with no `function_declarator` around it.
+    let inner = if declarator.kind() == "qualified_identifier" {
+        declarator
+    } else {
+        declarator.child_by_field_name("declarator")?
+    };
     if inner.kind() != "qualified_identifier" {
         return None;
     }
@@ -445,8 +459,9 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
     }
 }
 
-/// True when `d` declares a FUNCTION: a `function_declarator`, or one wrapped
-/// in a single pointer/reference wrapper.
+/// True when `d` declares a FUNCTION: a `function_declarator`, a conversion
+/// operator's `operator_cast`, or a `function_declarator` wrapped in a single
+/// pointer/reference wrapper.
 ///
 /// `extract_code`'s `is_function` gate reads the `declarator` field of a
 /// `field_declaration`/`declaration` to tell a C++ header's method
@@ -463,7 +478,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
 /// that no pattern extracts.
 pub(crate) fn is_function_declarator(d: Node) -> bool {
-    if d.kind() == "function_declarator" {
+    if matches!(d.kind(), "function_declarator" | "operator_cast") {
         return true;
     }
     if !matches!(d.kind(), "pointer_declarator" | "reference_declarator") {
