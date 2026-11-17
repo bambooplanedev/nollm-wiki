@@ -61,25 +61,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         let f = a.map_or(read, |a| file(&path, &text, &a));
         files.insert(path, f);
     }
-    // A file made to be included (`.inl`, `.ipp`, `.tcc`) is read only
-    // when it stands on its own: a file of the project includes it, and
-    // none does inside a namespace, class or function body, of which it
-    // would be a piece read without that body.
-    let name = |path: &str| {
-        let path = path.trim_matches(['<', '>', '"']);
-        path.rsplit('/').next().unwrap_or(path).to_string()
-    };
-    let included: BTreeSet<String> = (files.values())
-        .flat_map(|f| f.code.imports.iter().map(|i| name(i)))
-        .collect();
-    let nested: BTreeSet<String> = (files.values())
-        .flat_map(|f| f.cpp.nested_includes.iter().cloned())
-        .collect();
-    files.retain(|path, _| {
-        let ext = path.rsplit_once('.').map(|p| p.1.to_ascii_lowercase());
-        let piece = ext.is_some_and(|e| matches!(e.as_str(), "inl" | "ipp" | "tcc"));
-        !piece || (included.contains(&name(path)) && !nested.contains(&name(path)))
-    });
+    drop_pieces(&mut files);
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();
@@ -90,6 +72,80 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         crates,
         twins,
     }
+}
+
+/// The path an `#include` written `import` (`CodeFile::imports`) may name
+/// in the project: a quoted one, or an angle one naming a directory
+/// (`<a/b.h>` may be a project header; `<b.h>` is a system one).
+pub(crate) fn project_include(import: &str) -> Option<&str> {
+    match import.strip_prefix('<') {
+        Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
+        None => Some(import),
+    }
+}
+
+/// Which of `named`, the files whose name is `inc`'s last segment, each
+/// with its path, `#include "inc"` in the file at `from` names: the file
+/// at that path relative to `from`'s directory, else every file whose
+/// path ends in it (`..` segments dropped).
+pub(crate) fn included<T: Copy>(named: &[(T, &str)], from: &str, inc: &str) -> Vec<T> {
+    let mut dir: Vec<&str> = from.split('/').collect();
+    dir.pop();
+    let mut inside = true;
+    for seg in inc.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => inside &= dir.pop().is_some(),
+            s => dir.push(s),
+        }
+    }
+    let want = dir.join("/");
+    if let Some(p) = named.iter().find(|p| inside && p.1 == want) {
+        return vec![p.0];
+    }
+    let segs = inc.split('/').skip_while(|s| matches!(*s, "" | "." | ".."));
+    let tail = segs.collect::<Vec<_>>().join("/");
+    let ends = |p: &str| p == tail || p.ends_with(&format!("/{tail}"));
+    let all = named.iter().filter(|p| ends(p.1));
+    all.map(|p| p.0).collect()
+}
+
+/// Drops the files made to be included (`.inl`, `.ipp`, `.tcc`) that do
+/// not stand on their own. Such a file is read only when an include of a
+/// file that is read names it, it alone, and none does inside a
+/// namespace, class or function body, of which it would be a piece read
+/// without that body.
+fn drop_pieces(files: &mut BTreeMap<String, File>) {
+    let piece = |path: &str| {
+        let ext = path.rsplit_once('.').map(|p| p.1.to_ascii_lowercase());
+        ext.is_some_and(|e| matches!(e.as_str(), "inl" | "ipp" | "tcc"))
+    };
+    let mut by_name: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+    for path in files.keys() {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        by_name.entry(name).or_default().push((path, path));
+    }
+    // Per include: the file writing it, the files it names, is it in a body.
+    let mut includes = Vec::new();
+    for (from, f) in files.iter() {
+        for inc in f.code.imports.iter().filter_map(|i| project_include(i)) {
+            let named = by_name.get(inc.rsplit('/').next().unwrap_or(inc));
+            let named = included(named.map_or(&[][..], Vec::as_slice), from, inc);
+            let nested = f.cpp.nested_includes.contains(inc);
+            includes.push((from.as_str(), named, nested));
+        }
+    }
+    // A piece of a body, or one of several an include may name.
+    let unsure = |i: &&(&str, Vec<&str>, bool)| i.2 || i.1.len() > 1;
+    let bad: BTreeSet<&str> = (includes.iter().filter(unsure))
+        .flat_map(|i| i.1.iter().copied())
+        .collect();
+    let read: BTreeSet<String> = (includes.iter())
+        .flat_map(|i| i.1.iter().copied())
+        .filter(|p| !bad.contains(p))
+        .map(str::to_string)
+        .collect();
+    files.retain(|path, _| !piece(path) || read.contains(path));
 }
 
 /// The file at `path` of the text `text`, analysed as `a`.

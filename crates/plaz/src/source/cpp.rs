@@ -97,7 +97,6 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             });
             if let Some(p) = path {
                 let name = s.text()[p.byte_range()].trim_matches(['<', '>', '"']);
-                let name = name.rsplit('/').next().unwrap_or(name);
                 file.cpp.nested_includes.insert(name.to_string());
             }
             stack.extend(n.named_children(&mut n.walk()));

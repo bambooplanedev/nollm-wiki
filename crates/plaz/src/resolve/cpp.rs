@@ -11,7 +11,7 @@ mod members;
 use super::{Evidence, Rules};
 use crate::flow::FlowScope;
 use crate::model::{Bodiless, File, Flow, FnId, MapCall};
-use crate::source::untemplated;
+use crate::source::{included, project_include, untemplated};
 use classes::{Classes, Missing, Sight};
 pub(crate) use fold::{fold_scope, namespace_owners, outer_scope};
 use fold::{Key, Loose};
@@ -120,18 +120,13 @@ impl<'a> Cpp<'a> {
         path: &str,
         file: &File,
     ) -> Vec<usize> {
-        // `<a/b.h>` may name a project header; `<b.h>` a system one.
-        let quoted = file
-            .code
-            .imports
-            .iter()
-            .filter_map(|i| match i.strip_prefix('<') {
-                Some(a) => a.strip_suffix('>').filter(|a| a.contains('/')),
-                None => Some(i.as_str()),
-            });
-        quoted
-            .flat_map(|i| self.include(by_file, path, i))
-            .collect()
+        let quoted = file.code.imports.iter().filter_map(|i| project_include(i));
+        let named = |inc: &str| {
+            let named = by_file.get(inc.rsplit('/').next().unwrap_or(inc));
+            let named = named.into_iter().flatten().map(|&p| (p, self.pages[p].0));
+            included(&named.collect::<Vec<_>>(), path, inc)
+        };
+        quoted.flat_map(named).collect()
     }
 
     /// Reads the items of `file`, at `page`: its types, its functions by
@@ -188,36 +183,6 @@ impl<'a> Cpp<'a> {
                 Some(_) | None => {}
             }
         }
-    }
-
-    /// The pages `#include "inc"` in the file at `from` names: the file
-    /// at that path relative to `from`'s directory, else every file whose
-    /// path ends in it (`..` segments dropped).
-    fn include(&self, by_file: &BTreeMap<&str, Vec<usize>>, from: &str, inc: &str) -> Vec<usize> {
-        let mut dir: Vec<&str> = from.split('/').collect();
-        dir.pop();
-        let mut inside = true;
-        for seg in inc.split('/') {
-            match seg {
-                "" | "." => {}
-                ".." => inside &= dir.pop().is_some(),
-                s => dir.push(s),
-            }
-        }
-        let want = dir.join("/");
-        let named = by_file.get(inc.rsplit('/').next().unwrap_or(inc));
-        let named = named.map_or(&[][..], Vec::as_slice);
-        if let Some(&p) = named.iter().find(|&&p| inside && self.pages[p].0 == want) {
-            return vec![p];
-        }
-        let segs = inc.split('/').skip_while(|s| matches!(*s, "" | "." | ".."));
-        let tail = segs.collect::<Vec<_>>().join("/");
-        let ends = |p: &str| p == tail || p.ends_with(&format!("/{tail}"));
-        named
-            .iter()
-            .copied()
-            .filter(|&p| ends(self.pages[p].0))
-            .collect()
     }
 
     /// The pages the file of `page` includes, directly or through another.

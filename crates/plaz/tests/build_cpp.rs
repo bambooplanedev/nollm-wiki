@@ -940,6 +940,32 @@ fn an_inline_file_included_at_file_scope_is_read_and_one_included_in_a_body_is_n
 }
 
 #[test]
+fn an_inline_file_is_read_by_the_path_an_include_names_not_by_its_name() {
+    // `b/vec.inl` is a piece of `Box`, included through a macro; only
+    // `a/vec.inl` is included by its path.
+    let files = [
+        (
+            "a/vec.h",
+            "struct Vec { int size() const; };\n#include \"vec.inl\"\n",
+        ),
+        ("a/vec.inl", "inline int Vec::size() const { return 1; }\n"),
+        (
+            "b/box.h",
+            "#define BODY \"vec.inl\"\nstruct Box {\n#include BODY\n};\nint size();\n",
+        ),
+        ("b/vec.inl", "int size() { return 2; }\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    assert!(vault.join("map/a/vec_inl.md").exists());
+    assert!(!vault.join("map/b/vec_inl.md").exists());
+    let page = common::map_page(&vault, "map/b/box_h");
+    assert_eq!(
+        common::fn_block(&page, "size"),
+        "## size\n`int size()` · `b/box.h:5-5`\n\nNo definition in the project.\n"
+    );
+}
+
+#[test]
 fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
     let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
     // C++: the definition of the same arity, not the overload; it may
