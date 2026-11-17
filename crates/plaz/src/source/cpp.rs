@@ -88,19 +88,34 @@ pub(super) fn cpp_facts(file: &mut File, a: &Analyzed, path: &str) {
             if n.kind() == "using_declaration" {
                 using(file, n, s.text());
             }
-            let outer =
-                |p: &Node| p.kind() == "translation_unit" || p.kind().starts_with("preproc_");
-            let path = n.child_by_field_name("path");
-            let path = path.filter(|_| {
-                n.kind() == "preproc_include"
-                    && !std::iter::successors(n.parent(), Node::parent).all(|p| outer(&p))
-            });
-            if let Some(p) = path {
-                let name = s.text()[p.byte_range()].trim_matches(['<', '>', '"']);
-                file.cpp.nested_includes.insert(name.to_string());
-            }
+            nested_include(file, n, s.text());
             stack.extend(n.named_children(&mut n.walk()));
         }
+    }
+}
+
+/// Records in `CppFacts::nested_includes` the path of the `#include` `n`
+/// when it may stand in a body: inside a namespace, class, function or
+/// initializer, or at file scope after a statement no file scope holds (a
+/// macro written alone, `KIT_BEGIN`) or a declaration read with an error
+/// (a macro before it), either of which may have opened one.
+fn nested_include(file: &mut File, n: Node, src: &str) {
+    let Some(path) = (n.child_by_field_name("path")).filter(|_| n.kind() == "preproc_include")
+    else {
+        return;
+    };
+    let outer = |p: &Node| p.kind() == "translation_unit" || p.kind().starts_with("preproc_");
+    let around = || std::iter::successors(Some(n), Node::parent);
+    let opened = |p: Node| {
+        p.is_error()
+            || matches!(p.kind(), "expression_statement")
+            || (p.has_error() && p.kind() == "declaration")
+    };
+    let after =
+        around().any(|x| std::iter::successors(x.prev_sibling(), Node::prev_sibling).any(opened));
+    if after || !around().skip(1).all(|p| outer(&p)) {
+        let name = src[path.byte_range()].trim_matches(['<', '>', '"']);
+        file.cpp.nested_includes.insert(name.to_string());
     }
 }
 

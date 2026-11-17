@@ -996,6 +996,30 @@ fn an_inline_file_reached_only_through_one_that_is_not_read_is_not_read() {
 }
 
 #[test]
+fn an_inline_file_included_after_a_macro_written_as_a_statement_is_not_read() {
+    // `KIT_BEGIN` opens a namespace the grammar does not see: it reads as
+    // a part of the declaration after it, or as a statement of its own.
+    let kit = "#define KIT_BEGIN namespace kit {\n#define KIT_END }\nKIT_BEGIN\nint fill(int v);\n#include \"kit.inl\"\nKIT_END\n";
+    let edge = "OPEN_EDGE(edge)\nint trim(int v);\n#include \"edge.inl\"\nCLOSE_EDGE\n";
+    let files = [
+        ("src/kit.h", kit),
+        ("src/kit.inl", "int fill(int v) { return v; }\n"),
+        ("src/edge.h", edge),
+        ("src/edge.inl", "int trim(int v) { return v; }\n"),
+        ("src/top.h", "int fill(int v);\nint trim(int v);\n"),
+        ("src/c.cpp", "#include \"kit.h\"\n#include \"edge.h\"\n#include \"top.h\"\nint run() { return fill(1) + trim(2); }\n"),
+    ];
+    let (_d, vault) = common::built(&files);
+    assert!(!vault.join("map/src/kit_inl.md").exists());
+    assert!(!vault.join("map/src/edge_inl.md").exists());
+    let page = common::map_page(&vault, "map/src/top_h");
+    assert_eq!(
+        common::fn_block(&page, "fill"),
+        "## fill\n`int fill(int v)` · `src/top.h:1-1`\n\nNo definition in the project.\n\n"
+    );
+}
+
+#[test]
 fn a_forward_declaration_spelled_otherwise_folds_onto_the_files_one_definition() {
     let c = "static int count(char *argv[]);\nint run(char **v) { return count(v); }\nstatic int count(char **argv) { return argv != 0; }\n";
     // C++: the definition of the same arity, not the overload; it may
