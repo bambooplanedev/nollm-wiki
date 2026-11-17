@@ -319,11 +319,11 @@ fn renew(
     }
     let modules = choose(manifest, Some(wanted))?;
     // A move to a newer release, or any removal, is asked first.
-    if ask && (release::version_key(latest) > release::version_key(have) || !gone.is_empty()) {
-        if !ask_yes(&update_question(modules.len(), latest, &gone), true)? {
-            println!("nothing changed");
-            return Ok(());
-        }
+    let asked =
+        ask && (release::version_key(latest) > release::version_key(have) || !gone.is_empty());
+    if asked && !ask_yes(&update_question(modules.len(), latest, &gone), true)? {
+        println!("nothing changed");
+        return Ok(());
     }
     let mut names: Vec<String> = modules.iter().cloned().collect();
     names.push("kulman".to_string());
