@@ -499,7 +499,8 @@ fn declarator<'t>(node: Node<'t>, name: &str, src: &str) -> Option<Node<'t>> {
 
 /// The parameter types of the function declarator `f`: each parameter's
 /// text with its name, default value, whitespace, `struct`-like keywords
-/// and a by-value parameter's `const` dropped, joined by `,`; `(void)` is
+/// and a by-value parameter's `const` (a pointer's own too) dropped,
+/// joined by `,`; `(void)` is
 /// `()`.
 fn params(f: Node, src: &str) -> Option<String> {
     let list = f.child_by_field_name("parameters")?;
@@ -534,7 +535,11 @@ fn params(f: Node, src: &str) -> Option<String> {
                 word.push(c);
                 continue;
             }
+            // Two words keep a space between them (`const core::K`).
             if !dropped(&word) {
+                if !word.is_empty() && typed.ends_with(|c: char| c.is_alphanumeric() || c == '_') {
+                    typed.push(' ');
+                }
                 typed.push_str(&word);
             }
             word.clear();
@@ -542,7 +547,12 @@ fn params(f: Node, src: &str) -> Option<String> {
                 typed.push(c);
             }
         }
-        out.push(typed.trim_end_matches('=').to_string());
+        // `T* const` and `T*` are one type passed by value.
+        let typed = typed.trim_end_matches('=');
+        let typed = (typed.strip_suffix("const"))
+            .filter(|t| t.ends_with('*'))
+            .unwrap_or(typed);
+        out.push(typed.to_string());
     }
     let all = out.join(",");
     Some(if all == "void" { String::new() } else { all })

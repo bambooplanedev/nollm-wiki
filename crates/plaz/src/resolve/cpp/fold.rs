@@ -66,7 +66,39 @@ pub(crate) fn fold_scope<'f>(file: &'f File, i: usize, owners: &BTreeSet<&str>) 
     }
 }
 
+/// `s` with every qualifier dropped (`vector<Kind>` of
+/// `std::vector<core::Kind>`).
+pub(super) fn unqualified(s: &str) -> String {
+    let mut segs: Vec<&str> = s.split("::").collect();
+    let last = segs.pop().unwrap_or("");
+    let heads = segs
+        .iter()
+        .map(|g| g.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_'));
+    heads.chain([last]).collect()
+}
+
 impl<'a> Cpp<'a> {
+    /// `key` with the parameter text of the one other spelling of its scope
+    /// and name that reads the same with qualifiers dropped, each name of
+    /// one ending the other's (`core::Kind` and `Kind`); none when a third
+    /// spelling reads the same too.
+    fn requalified(&self, key: Key<'a>) -> Option<Key<'a>> {
+        let all = self.spellings.get(&(key.0, key.1, unqualified(key.2)))?;
+        let mut other = all.iter().filter(|&&p| p != key.2);
+        let (Some(&p), None, 2) = (other.next(), other.next(), all.len()) else {
+            return None;
+        };
+        let names = |s: &'a str| {
+            s.split(|c: char| !(c.is_alphanumeric() || c == '_' || c == ':'))
+                .filter(|w| !w.is_empty())
+        };
+        let ends = |a: &str, b: &str| a == b || a.ends_with(&format!("::{b}"));
+        let same = names(key.2)
+            .zip(names(p))
+            .all(|(a, b)| ends(a, b) || ends(b, a));
+        same.then_some((key.0, key.1, p))
+    }
+
     pub(super) fn key(&self, c: FnRef) -> Option<Key<'a>> {
         let file = self.pages[c.0].1;
         let params = file.params.get(&c.1)?;
@@ -100,10 +132,11 @@ impl<'a> Cpp<'a> {
             let stem = path.rsplit('/').next().and_then(|f| f.rsplit_once('.'));
             twin |= source_rank(path) < 2 && stem.is_some_and(|s| self.unread.contains(s.0));
             let page = self.local(c).then_some(c.0);
-            let defs = match page {
+            let defs = |key| match page {
                 Some(p) => self.own.get(&(p, key)),
                 None => self.shared.get(&key),
             };
+            let defs = defs(key).or_else(|| defs(self.requalified(key)?));
             if let Some(defs) = defs {
                 out.extend(defs);
                 if page.is_none() && self.item(c).kind == CodeItemKind::Fn {

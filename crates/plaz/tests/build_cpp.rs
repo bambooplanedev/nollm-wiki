@@ -295,10 +295,33 @@ fn a_header_declaration_folds_onto_its_definition_with_names_and_defaults_droppe
 }
 
 #[test]
+fn a_declaration_folds_onto_a_definition_spelled_with_top_level_const_or_another_qualifier() {
+    let h = "namespace core {\nenum class Kind { A };\nstruct Tally {\n    void add(core::Kind k, int n = 1);\n    void mark(int* const at);\n    void tag(const core::Kind& k);\n};\nvoid loose(Kind k, int n = 1);\n}\n";
+    let def = "#include \"tally.h\"\nusing core::Kind;\nnamespace core {\nvoid Tally::add(const Kind k, const int n) {}\nvoid Tally::mark(int* at) {}\nvoid Tally::tag(const Kind& k) {}\n}\nvoid core::loose(const core::Kind k, int n) {}\n";
+    let main = "#include \"tally.h\"\nvoid run(core::Tally& t, core::Kind k) { t.add(k); t.mark(nullptr); t.tag(k); core::loose(k); }\n";
+    let files = [
+        ("src/tally.h", h),
+        ("src/tally.cpp", def),
+        ("src/main.cpp", main),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/main.cpp", "run"),
+        [
+            "t.add(k) → src/tally.cpp:4",
+            "t.mark(nullptr) → src/tally.cpp:5",
+            "t.tag(k) → src/tally.cpp:6",
+            "core::loose(k) → src/tally.cpp:8"
+        ]
+    );
+}
+
+#[test]
 fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
-    let h = "void put(int n);\n";
-    let def = "void put(double d) {}\n";
-    let main = "#include \"put.h\"\nvoid run() { put(1); }\n";
+    // `w` reads `Pad` unqualified in two definitions: either may be it.
+    let h = "namespace one { struct Pad {}; }\nnamespace two { struct Pad {}; }\nstruct Pad {};\nvoid put(int n);\nvoid f(const char* s);\nvoid g(const Pad& p);\nvoid q(one::Pad p);\nvoid w(Pad p);\n";
+    let def = "#include \"put.h\"\nvoid put(double d) {}\nvoid f(char* s) {}\nvoid g(Pad& p) {}\nvoid q(two::Pad p) {}\nvoid w(one::Pad p) {}\nvoid w(two::Pad p) {}\n";
+    let main =
+        "#include \"put.h\"\nvoid run(Pad p, one::Pad o) { put(1); f(\"x\"); g(p); q(o); w(p); }\n";
     assert_eq!(
         cpp_targets(
             &[
@@ -309,7 +332,13 @@ fn a_declaration_does_not_fold_onto_a_definition_of_other_parameter_types() {
             "src/main.cpp",
             "run"
         ),
-        ["put(1) → src/put.h:1"]
+        [
+            "put(1) → src/put.h:4",
+            "f(\"x\") → src/put.h:5",
+            "g(p) → src/put.h:6",
+            "q(o) → src/put.h:7",
+            "w(p) → src/put.h:8"
+        ]
     );
 }
 

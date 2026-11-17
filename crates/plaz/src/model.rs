@@ -52,7 +52,8 @@ pub struct File {
     /// where the file is compiled in.
     pub local: BTreeSet<usize>,
     /// Per C/C++ function item: its parameter types as written, names,
-    /// default values, whitespace and `struct` dropped (`int,constchar*`).
+    /// default values, `struct` and whitespace but one space between two
+    /// words dropped (`int,const char*`).
     pub params: BTreeMap<usize, String>,
     /// Every segment of a C/C++ file's named namespaces and every namespace
     /// alias it defines.

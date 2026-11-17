@@ -34,6 +34,9 @@ pub(super) struct Cpp<'a> {
     own: BTreeMap<(usize, Key<'a>), Vec<FnRef>>,
     /// Every definition, by page, scope and name.
     file_defs: BTreeMap<(usize, &'a str, &'a str), Vec<FnRef>>,
+    /// Per scope, name and parameter text with every qualifier dropped
+    /// (`fold::unqualified`): each parameter text of a function so keyed.
+    spellings: BTreeMap<(&'a str, &'a str, String), BTreeSet<&'a str>>,
     namespaces: BTreeSet<&'a str>,
     /// `namespace_owners`.
     owners: BTreeSet<&'a str>,
@@ -68,6 +71,7 @@ impl<'a> Cpp<'a> {
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
             file_defs: BTreeMap::new(),
+            spellings: BTreeMap::new(),
             namespaces: cpp()
                 .flat_map(|(_, (_, f))| &f.namespaces)
                 .map(String::as_str)
@@ -125,7 +129,12 @@ impl<'a> Cpp<'a> {
                     |o| format!("operator{}", o.replace(' ', "")),
                 );
                 out.by_name.entry(name).or_default().push(c);
-                match out.key(c) {
+                let key = out.key(c);
+                if let Some((scope, name, params)) = key {
+                    let at = (scope, name, fold::unqualified(params));
+                    out.spellings.entry(at).or_default().insert(params);
+                }
+                match key {
                     Some(key) if !it.test && !out.declared(c) => {
                         if !file.local.contains(&i) {
                             out.shared.entry(key).or_default().push(c);
