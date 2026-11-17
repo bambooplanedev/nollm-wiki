@@ -734,6 +734,20 @@ fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
 }
 
 #[test]
+fn a_member_chain_longer_than_the_calls_shown_text_is_read_whole() {
+    // The outer `twig` is called on what the inner one returns, a `Knot`,
+    // whatever the shown text, clipped inside the inner call, ends with.
+    let src = "struct Knot {\n    Knot& twig(const char* k) { return *this; }\n};\nstruct Bush {\n    Knot& twig(const char* k) { return root; }\n    Knot root;\n};\nvoid climb(Bush& b) {\n    b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_end_of_its_shown_text\").twig(\"x\");\n}\n";
+    assert_eq!(
+        cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "climb"),
+        [
+            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → src/a.cpp:5",
+            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → one of: src/a.cpp:2, src/a.cpp:5, or outside"
+        ]
+    );
+}
+
+#[test]
 fn a_declaration_does_not_fold_onto_a_namesake_in_another_outer_namespace() {
     let h = "namespace snow { namespace util {\nint melt(int v);\n} }\n";
     let def = "#include \"snow.h\"\nnamespace rain { namespace util {\nint melt(int v) { return v; }\n} }\n";

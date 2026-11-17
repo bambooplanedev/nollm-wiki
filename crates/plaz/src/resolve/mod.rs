@@ -388,7 +388,7 @@ impl<'a> Caller<'_, 'a> {
             };
         }
         let root = call
-            .path
+            .callee
             .as_deref()
             .map_or(q, |p| p.split("::").next().unwrap_or("").trim());
         if standard(self.file, root) {

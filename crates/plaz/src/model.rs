@@ -363,8 +363,10 @@ pub struct Comment {
 pub struct MapCall {
     pub text: String,
     pub site: CallSite,
-    /// A path call's callee as written, to its arguments: `text` is clipped.
-    pub path: Option<String>,
+    /// A path call's or a member call's callee (`a::f`, `x.g(1).f`) as
+    /// written, to its arguments: `text` is clipped. None on a receiver
+    /// that is one name (`x.f()`).
+    pub callee: Option<String>,
     pub target: Target,
 }
 

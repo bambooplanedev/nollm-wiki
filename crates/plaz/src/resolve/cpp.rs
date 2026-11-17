@@ -406,7 +406,7 @@ impl Caller<'_, '_, '_> {
         let (cpp, site) = (self.cpp, &call.site);
         // `::a::b` of `::a::b::f<T>(…)`: a leading `::` names the global
         // namespace only, wherever the qualifier is looked up.
-        let callee = untemplated(call.path.as_deref().unwrap_or(""));
+        let callee = untemplated(call.callee.as_deref().unwrap_or(""));
         let written = callee.rsplit_once("::").map_or(q, |w| w.0);
         // `Box` of `Box<int>::f()`; `a` of `::a::f()`.
         let root = written.trim_start_matches("::").split("::").next();

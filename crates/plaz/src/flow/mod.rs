@@ -517,18 +517,23 @@ impl<'s> Walker<'s> {
             // template arguments (`K<decltype(f())>::g()`).
             let whole = |x: &Node| x.byte_range() == (c.start_byte..c.end_byte);
             let inner = n.descendant_for_byte_range(c.start_byte, c.end_byte);
-            let callee = std::iter::successors(inner, Node::parent)
+            let node = std::iter::successors(inner, Node::parent)
                 .take_while(whole)
-                .find_map(|x| x.child_by_field_name("function"));
-            let callee = callee.map_or_else(
-                || lit.split('(').next().unwrap_or(""),
-                |f| &text[f.byte_range()],
-            );
-            let path = matches!(c.site.via, CallVia::Path(_)).then(|| callee.to_string());
+                .find_map(|x| x.child_by_field_name("function"))
+                .map(|f| &text[f.byte_range()]);
+            // A chain's first `(` opens its receiver's call: a member call's
+            // callee is its node's only.
+            let callee = match c.site.via {
+                CallVia::Path(_) => {
+                    Some(node.unwrap_or_else(|| lit.split('(').next().unwrap_or("")))
+                }
+                CallVia::Member(None) => node,
+                CallVia::Bare | CallVia::SelfRecv | CallVia::Member(Some(_)) => None,
+            };
             out.push(Step::Call(MapCall {
                 text: clip(lit, 80),
                 site: c.site,
-                path,
+                callee: callee.map(str::to_string),
                 target: Target::Hidden,
             }));
         }

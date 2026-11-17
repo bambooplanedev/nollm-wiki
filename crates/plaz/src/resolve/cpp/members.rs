@@ -34,36 +34,19 @@ fn member_step(after: &str) -> Option<(&str, &str)> {
     (!a.is_empty() && on).then_some((a, tail))
 }
 
-/// The first name `x` and the text after it, of a call of `f` written as
-/// a path of names (`x.f()`, `x->a.f()`, `this->a.f()`) whose own
-/// arguments end the text, or run past its clipped end.
-fn member_path<'t>(text: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
-    let end = text.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
-    let (x, after) = text.split_at(end);
+/// The first name `x` and the text after it, of a callee that is a path
+/// of names ending in `f` (`x.f`, `x->a.f`, `this->a.f<T>`).
+fn member_path<'t>(callee: &'t str, f: &str) -> Option<(&'t str, &'t str)> {
+    let end = callee.find(|c: char| !(c.is_alphanumeric() || c == '_'))?;
+    let (x, after) = callee.split_at(end);
     let mut rest = after;
     while let Some((_, tail)) = member_step(rest) {
         rest = tail;
     }
     let op = rest.trim_start();
-    let called = op.strip_prefix("->").or_else(|| op.strip_prefix('.'))?;
-    let called = called.trim_start().strip_prefix(f)?.trim_start();
-    // `f<T>(…)`: the arguments, to the parenthesis closing them.
-    let args = called
-        .find('(')
-        .filter(|_| called.starts_with(['(', '<']))?;
-    let mut depth = 0usize;
-    for (i, c) in called[args..].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
-            _ => continue,
-        }
-        if depth == 0 {
-            let past = called[args + i + 1..].trim();
-            return (!x.is_empty() && past.is_empty()).then_some((x, after));
-        }
-    }
-    (!x.is_empty() && text.ends_with('…')).then_some((x, after))
+    let name = op.strip_prefix("->").or_else(|| op.strip_prefix('.'))?;
+    let past = name.trim_start().strip_prefix(f)?.trim_start();
+    (!x.is_empty() && (past.is_empty() || past.starts_with('<'))).then_some((x, after))
 }
 
 impl Caller<'_, '_, '_> {
@@ -78,7 +61,7 @@ impl Caller<'_, '_, '_> {
     ) -> Evidence {
         let path = match x {
             Some(x) => Some((x, call.text.strip_prefix(x).unwrap_or(""))),
-            None => member_path(&call.text, &call.site.name),
+            None => member_path(call.callee.as_deref().unwrap_or(""), &call.site.name),
         };
         let Some((x, after)) = path else {
             return self.any_method(call);
