@@ -30,11 +30,40 @@ const HINT_MIN_REL: f64 = 0.5;
 const HINT_MIN_SHARE: f64 = 0.5;
 /// Fewest prompt tokens of two or more characters a hint needs: a reply
 /// such as `yes`, `ok`, `так` or `1-2` is not a task, and on the bench each
-/// found a test fixture or a note.
+/// found a test fixture or a note. The code lines need as many tokens the
+/// project has (document frequency above 0): measured 2026-11-17, that
+/// silences 19 pp of the fires on 1,514 Mac prompts and 13 pp on 136 bench
+/// prompts, with no keyed eval line lost.
 const HINT_MIN_TOKENS: usize = 2;
 /// Lines per page, so a fifth page still shows (on the bench the 8 lines
 /// ran out on three pages and the answer's file was the fifth).
 const HINT_PAGE_LINES: usize = 2;
+
+/// Prepositions, conjunctions, particles and pronouns (Ukrainian and
+/// English) and English auxiliaries, separated by whitespace. A hint whose
+/// pages only these words find is noise: on a code tree whose one Cyrillic
+/// string is in one file, `до` (inside `повідомлень`) or `на` sent 11 of 49
+/// real Ukrainian chat prompts there (measured 2026-11-12, none used), while
+/// no keyed hint rests on them. Dropping such hints silenced 26 pp of the
+/// fires on 1,514 Mac prompts and 19 pp on 136 bench prompts (2026-11-17),
+/// with no keyed eval line lost.
+const FUNCTION_WORDS: &str = "\
+    в у на до з із зі зо від од за по про для без при під над між через після перед біля коло \
+    крізь серед поміж щодо навколо проти замість окрім крім понад попри задля вздовж і й та а \
+    але або чи ні ані що щоб як якщо коли бо тому тож проте однак зате хоча хоч ніж наче ніби \
+    мов немов поки доки аби не ж же б би ще вже лише лиш тільки навіть ось от ну хай нехай аж \
+    теж також саме хіба невже так адже я ти він вона воно ми ви вони мене тебе його її нього \
+    неї нас вас їх них мені тобі йому їй нам вам їм ним нею ними мною тобою собі себе собою мій \
+    моя моє мої мого моєї моїх твій твоя твоє твої наш наша наше наші ваш ваша ваше ваші свій \
+    своя своє свої свого своєї своїх цей ця це ці цього цієї цих цим цією той те ті того тієї \
+    тих тим тією який яка яке які якого якої яких яким хто кого кому чого чому чим весь вся все \
+    всі усе усі всього всіх сам сама самі щось хтось нічого ніхто де куди звідки тут там тоді a \
+    an the and or but if then else of to in on at by for from with into onto about as via per \
+    than over under up out off is are was were be been am do does did has have had will would \
+    can could should shall may might must i me my we us our you your he him his she her it its \
+    they them their this that these those what which who whom whose there here where when why \
+    how not no so too very just only also all any some each both because while although though \
+    until unless since whether nor yet";
 
 const HEADER: &str = "Code locations from the project wiki (path:start-end  name  signature); read only these lines, and read them before you run grep:\n";
 /// Opens the memory line: a note is someone's past claim, not an order.
@@ -61,7 +90,9 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
     let (hits, available, terms) =
         wiki.search_prompt(text, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
     let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
-    let named = best >= HINT_MIN_SHARE * available;
+    let named = best >= HINT_MIN_SHARE * available
+        && terms.len() >= HINT_MIN_TOKENS
+        && !rests_on_function_words(wiki, text);
     let mut seen = HashSet::new();
     let mut rows: Vec<Row> = Vec::new();
     let mut left = HINT_LINES;
@@ -125,6 +156,31 @@ pub fn hint_lines(wiki: &Wiki, text: &str) -> String {
         );
     }
     out
+}
+
+/// Whether `text` names code only through its `FUNCTION_WORDS`: without them
+/// it has too few tokens, no hit, or a best page under `HINT_MIN_SHARE`.
+fn rests_on_function_words(wiki: &Wiki, text: &str) -> bool {
+    let words = text.split_whitespace();
+    let rest: Vec<&str> = words
+        .clone()
+        .filter(|w| {
+            let w = w.to_lowercase();
+            let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+            !FUNCTION_WORDS.split_whitespace().any(|f| f == w)
+        })
+        .collect();
+    if rest.len() == words.count() {
+        return false;
+    }
+    let rest = rest.join(" ");
+    if Wiki::prompt_tokens(&rest).len() < HINT_MIN_TOKENS {
+        return true;
+    }
+    let (hits, available, _) =
+        wiki.search_prompt(&rest, HINT_PAGES, HINT_TERMS, MemoryScope::Without);
+    let best = hits.iter().map(|h| h.score).fold(0.0, f64::max);
+    hits.is_empty() || best < HINT_MIN_SHARE * available
 }
 
 /// Whether the harness wrote `text`, not the person: Claude Code hands a

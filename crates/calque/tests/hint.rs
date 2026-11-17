@@ -96,6 +96,29 @@ fn hint_is_silent_on_a_one_word_reply() {
 }
 
 #[test]
+fn hint_needs_two_prompt_words_the_project_has() {
+    let tmp = project();
+    // Two words, but only `member` is in the project.
+    assert_eq!(hint_in(&tmp, "member zzqxw"), "");
+    assert!(hint_in(&tmp, "member creds zzqxw").contains("load_member_creds"));
+}
+
+#[test]
+fn hint_is_silent_when_only_function_words_name_the_code() {
+    let tmp = project_of(&[
+        ("src/lib.rs", "pub fn load_member_creds() {}\n"),
+        (
+            "src/route.rs",
+            "/// Route it to where it is from.\npub fn route_to_from() {}\n",
+        ),
+    ]);
+    assert_eq!(hint_in(&tmp, "where is it from"), "");
+    assert_eq!(hint_in(&tmp, "from where to zzqxw"), "");
+    // Content words that still name the page keep the hint, the same as without the gate.
+    assert!(hint_in(&tmp, "where is route_to_from routed").contains("route_to_from"));
+}
+
+#[test]
 fn hint_drops_one_letter_words() {
     let tmp = project_of(&[
         (
@@ -450,8 +473,9 @@ fn hint_is_silent_when_no_page_holds_the_prompts_words() {
     let tmp = common_and_rare(&common, &pages);
     let out = hint_in(&tmp, &format!("{} {}", common.join(" "), rare.join(" ")));
     assert_eq!(out, "");
-    // A prompt that names one of those functions still gets its line.
-    let out = hint_in(&tmp, "where is rare07 defined");
+    // A prompt that names one of those functions still gets its line (with a
+    // second word the project has: one alone is too few).
+    let out = hint_in(&tmp, "where is the rare07 fn defined");
     assert!(out.contains("src/rare07.rs:1-1"), "{out}");
 }
 
@@ -461,7 +485,7 @@ fn hint_names_a_page_with_no_matching_symbol() {
         "scripts/run.sh",
         "#!/bin/sh\n# Launch the engine.\nexec engine --sky-secret \"$KEY\"\n",
     )]);
-    let out = hint_in(&tmp, "sky-secret flag");
+    let out = hint_in(&tmp, "sky-secret engine flag");
     assert!(
         out.lines().any(|l| l.starts_with("scripts/run.sh ")),
         "{out}"
@@ -532,7 +556,7 @@ fn hint_keeps_its_answer_when_the_prompt_names_many_files() {
     ]);
     let out = hint_in(
         &tmp,
-        "a.rs b.rs c.rs d.rs e.rs f.rs all call parse_order_book",
+        "a.rs b.rs c.rs d.rs e.rs f.rs all call parse_order_book on the order book",
     );
     assert!(out.contains("target.rs:1-1"), "{out}");
 }
