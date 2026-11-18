@@ -965,8 +965,40 @@ edit runs (95% interval 87–100% each); every run succeeded. The same lookup ta
 harness (Claude Code's bare mode, 2026-11-11, an earlier build) gave 52 of 52. The difference between
 the two shapes is 0 points (95% interval −13 to +13). No run delegated, and none called a skill.
 Definition greps appeared in 3 of 26 lookup runs and 15 of 26 edit runs; none replaced a calque
-lookup, and in the edit runs nearly all came after the edit, to check the comments. These runs
-measure use only; no saving was measured in them.
+lookup, and in the edit runs nearly all came after the edit, to check the comments.
+
+Cost in full Claude Code, 2026-11-18. The runs above, compared with a control of 26 runs per task
+shape that has no calque: no MCP server, no "code lookup" paragraph in the project instructions (nor
+the parenthesis naming `calque page` in the scripts folder's), and no calque line in the edit brief.
+Same model, tools, login, plugin and tree, a fresh copy per run; cost is dollars at list price from
+the runs' own token counts, which reproduce the reported cost exactly. The with-calque runs were made
+earlier the same day, not interleaved with the control. 95% intervals are bootstrapped within each
+set of names:
+
+| task | calque | correct | cost per successful run | turns | wall clock |
+|---|---|---|---|---|---|
+| lookup by name | without | 24/26 | $0.087 | 4.4 | 12.9 s |
+| lookup by name | with | 26/26 | $0.064 | 2.4 | 5.1 s |
+| small edit, file named | without | 26/26 | $0.128 | 9.3 | 26.1 s |
+| small edit, file named | with | 26/26 | $0.147 | 12.8 | 27.1 s |
+
+With calque the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
+on the edit task (+10% to +19%). Of the two wrong lookups without calque, one answered the ranges
+without paths and one gave a range of 34 lines for a function of 11. calque's tool definitions and
+instructions add 1,744 tokens to every request (1,799 in the edit task, whose brief also carries a
+calque line); with a one-hour cache that is written once per run and read every turn, about $0.007
+per lookup run and $0.010 per edit run, 12% and 6% of the run's cost, and already in the figures.
+On lookups the saving is fewer turns (−2.0), less cached context read again (−36,000 tokens) and
+less output (−730 tokens); one search with all the names replaced about two greps and a sed. On the
+edit task about half of the +15% is that overhead; the rest is how the agent edited: with calque all
+26 runs read each returned range and made one edit per helper, without it 14 of 26 inserted all the
+comments with one scripted edit after one grep (6.9 turns, $0.123) and 12 of 26 edited one by one
+($0.133, 12.2 turns). The brief's calque line also tells the agent to read only the returned line
+ranges, and the control removes it with the tool, so the two are not separated. No group read a whole
+file, with or without calque. Limits: targets were a ready list of exact names in Python files of
+about 1,900 and 5,200 lines that the index covers; one code tree and one model; hand-written briefs;
+short runs, in which the fixed write is a large share, where a long session pays it once. These are
+controlled tasks, not real work.
 
 Use in live work, 2026-11-10 to 2026-11-17. The same project's traces as above, from 2026-11-10 on, in
 sessions where a lead agent briefs child agents. calque was the
