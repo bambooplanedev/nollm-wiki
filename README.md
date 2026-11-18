@@ -38,15 +38,19 @@ practice and the authors' own tooling: its briefs name the file to work in and i
 read narrowly. Little is left there for calque to save, and it is not a typical project.
 
 - **Lookups with no file named** (isolated harness, strong models): about half the cost per lookup,
-  −54% on Claude Sonnet 5.5 and −51% on Claude Opus 5.5; weaker models read fewer whole files.
-- **Full Claude Code, Sonnet 5.5:** lookups by name −26% per successful run; a small edit in a named
-  file +9% to +15%.
-- **Use:** agents used calque first in 52 of 52 controlled runs, and in 13% to 35% of agents in the
-  live work; the cause of the gap is not known.
-- **It helps** when the lookup is the job: no file named, large files, weaker models, a list of
-  names to find. **It helps little, and can cost a little,** when the lookup is a small part of an
-  edit in a file already named. It does nothing for literal text, regular expressions or counts:
-  that stays grep's job.
+  −54% on Claude Sonnet 5.5 and −51% on Claude Opus 5.5 (−38% to −40% at the files' real size, more
+  on files padded to 1,500 and 5,000 lines); weaker models read fewer whole files, with no more
+  correct answers.
+- **Full Claude Code, Sonnet 5.5, file named in both tasks:** lookups by name −20% per run, −26% per
+  successful run (the control had 24 of 26 correct); a small edit +9% to +17% across three groups
+  of 26.
+- **Use:** agents used calque first in 52 of 52 controlled full-Claude-Code runs (26 + 26), and in
+  13% (Sonnet children) to 35% (Opus leads) of agents in the live work; the cause of the gap is not
+  known.
+- **It helps** when the lookup is the job: files too large to read whole, weaker models, a list of
+  names to find. On a small edit in a named file it did not help and cost 9% to 17% more, in the
+  one task measured. It does nothing for literal text, regular expressions or counts: that stays
+  grep's job.
 
 No saving on real work has been shown. Setups, intervals and limits for every figure:
 [calque's Measured section](crates/calque/README.md#measured). Results from other projects and
@@ -88,9 +92,9 @@ written outside that folder. Then, in each project:
     kulman setup --scope repo
 
 This runs `calque setup` and `plaz setup` there. They write into the project's `.kulman/` folder,
-add the agent configs for the agents they find (the prompt hook only with `--hook`), create
+add the agent configs for the agents they find (Claude Code, pi, Cursor, Codex; the prompt hook only with `--hook`), create
 `.agents/memory/` and add `.kulman/` to `.gitignore`. `--scope repo` writes committed files for the
-whole team; `--scope local` keeps them to this checkout (what each scope writes, and for which
+whole team; `--scope local` writes them for this checkout only and lists them in `.git/info/exclude` (what each scope writes, and for which
 agent: [calque's setup](crates/calque/README.md#calque-setup)).
 
 Later, `kulman update` brings everything to the latest release, `kulman setup --scope repo --remove`

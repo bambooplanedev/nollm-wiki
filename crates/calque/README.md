@@ -963,8 +963,8 @@ normal login, user and project instructions, skills and the superpowers plugin l
 preamble about seven times larger than in the isolated harness (49,479 against 6,689 input tokens
 per lookup run). Tools: Bash, Read, Edit, Agent, Skill and calque's `search`, `page` and `callers`.
 The tree is a C++/Rust/Python/TypeScript project snapshot. The same 13 sets of helper names in two
-shapes, 2 runs per set, 26 runs per shape: a lookup ("find where each of these is defined") and a
-brief that names the file, carries the project's line about using calque first and asks for one
+shapes, 2 runs per set, 26 runs per shape: a lookup ("I am working in <file>. Find where each of these helpers is defined") and a
+brief that names the file too, carries the project's line about using calque first and asks for one
 comment above each named helper. calque was the first lookup in 26 of 26 lookup runs and 26 of 26
 edit runs (95% interval 87–100% each); every run succeeded. The same lookup task set in the isolated
 harness (Claude Code's bare mode, 2026-11-11, an earlier build) gave 52 of 52. The difference between
@@ -992,30 +992,30 @@ task it does not, because tool calls are issued in parallel: 5.6 requests with c
 without, one fewer.
 
 With calque the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
-on the edit task (+10% to +19%). Of the two wrong lookups without calque, one answered the ranges
+on the edit task (+10% to +19%); per run, counting the two wrong lookups, lookups fell 20%. Of the two wrong lookups without calque, one answered the ranges
 without paths and one gave a range of 34 lines for a function of 11. calque's tool definitions and
 instructions add 1,744 tokens to every request (1,799 in the edit task, whose brief also carries a
 calque line). Of the 1,744, 1,449 are the tool definitions, which sit in a cache shared across runs
-(the first request reads 7,195 cached tokens with calque and 5,746 without, in every pair); about
+(the first request reads 7,195 cached tokens with calque and 5,746 without, in 25 of 26 pairs; one run was a cold start); about
 295 are written once per run. At the rates the runs imply that is about $0.0016 per lookup run and
 $0.0024 per edit run, 2.4% and 1.6% of the run's cost, already in the figures. The first run in an
 hour also writes the definitions to the cache, about $0.006 once.
 On lookups the saving is fewer turns (−2.0), less cached context read again (−36,000 tokens) and
 less output (−730 tokens); one search with all the names replaced about two greps and a sed. On the
-edit task that overhead is about 13% of the $0.019 gap. Most of the rest is the first answer, an
+edit task that overhead is about 13% of the $0.019 gap. Most of the rest goes with the first answer, an
 observational split (the agent chose its first call): across 78 with-calque edit runs (the 26 above,
 a second run of them and the 26 below), the 37 that opened with a `page` of the whole file cost
 $0.161 against $0.127 for the same task without calque, +27% (interval +23% to +32%); the 41 that
 opened with a `search` cost $0.131 against $0.129, +1.6% (−2% to +6%). The editing also differed: with calque all
 26 runs read each returned range and made one edit per helper; without it about half the runs did
 one grep and one scripted edit. A second run of the with-calque edit group, made later, cost $0.140, 4.6% less, which would make
-the gap +9% (about +3% to +16%, descriptive only); the edit cost is better read as +9% to +15%.
+the gap +9% (+5% to +13%, set-stratified, descriptive only); the edit cost is better read as +9% to +17% across the three groups of 26.
 The brief's calque line also tells the agent to read only the returned line
 ranges, and the control removes it with the tool; a further group of 26 runs that kept calque and
-dropped that line cost $0.149, not less. No group read a whole
+dropped that line cost $0.149, +17% over the same control (+13% to +21%), not less. No group read a whole
 file, with or without calque. Limits: targets were a ready list of exact names in Python files of
 about 1,900 and 5,200 lines that the index covers; one code tree and one model; hand-written briefs;
-short runs, in which the fixed write is a large share, where a long session pays it once. These are
+short runs, where a long session would pay the per-run write once (about 2% of run cost here). These are
 controlled tasks, not real work.
 
 Use in live work, 2026-11-10 to 2026-11-17. The same project's traces as above, from 2026-11-10 on, in
@@ -1024,8 +1024,7 @@ first lookup (against a grep, find or ls in a shell call) for 29 of 83 Opus lead
 children and 20 of 150 Sonnet children; the figures are per agent, and the tasks of Sonnet children
 differ from those of Opus children. The tools were not deferred behind a tool search and the server's
 instructions were present in those sessions, so a missing tool does not explain the gap with the
-controlled runs. What is ruled out as the cause: loaded tools and
-instructions, the larger Claude Code context, and a brief that names the file and asks for an edit.
+controlled runs. The tools and the server's instructions were loaded. Two candidate causes were not reproduced in the controlled runs: Claude Code's larger context (a descriptive comparison, confounded with build, date and tool set) and a brief that names the file and asks for an edit (0 points, −13 to +13, at this size, with a ready list of names).
 What is not known: the cause. Not yet tested: lookups done by child agents a lead spawned (none of
 the 52 controlled runs delegated, while in the live work nearly all lookups were made by leads and
 children), long sessions, and targets that do not arrive as a list of names. One code tree, one
