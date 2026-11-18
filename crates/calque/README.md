@@ -969,7 +969,7 @@ lookup, and in the edit runs nearly all came after the edit, to check the commen
 measure use only; no saving was measured in them.
 
 Use in live work, 2026-11-10 to 2026-11-17. The same project's traces as above, from 2026-11-10 on, in
-sessions where a lead agent briefs child agents. calque, or the wiki before it, was the
+sessions where a lead agent briefs child agents. calque was the
 first lookup (against a grep, find or ls in a shell call) for 29 of 83 Opus leads, 44 of 142 Opus
 children and 20 of 150 Sonnet children; the figures are per agent, and the tasks of Sonnet children
 differ from those of Opus children. The tools were not deferred behind a tool search and the server's
