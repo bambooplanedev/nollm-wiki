@@ -32,10 +32,9 @@ for the person. What was measured: [What calque saves, and when](#what-calque-sa
 
 ## What calque saves, and when
 
-The Claude measurements are synthetic: controlled tasks written for the measurement, not real work.
-The one real project where live agent work was observed is already heavily set up, with good
-practice and the authors' own tooling: its briefs name the file to work in and its agents already
-read narrowly. Little is left there for calque to save, and it is not a typical project.
+The controlled measurements are synthetic: tasks written for the measurement, not real work. In the
+one live project observed, briefs name the file before 90–98% of reads, and strong models read
+narrowly anyway. Whether that project is typical has not been measured.
 
 - **Lookups with no file named** (isolated harness, strong models): about half the cost per lookup,
   −54% on Claude Sonnet 5.5 and −51% on Claude Opus 5.5 (−38% to −40% at the files' real size, more
@@ -47,14 +46,15 @@ read narrowly. Little is left there for calque to save, and it is not a typical 
 - **Use:** agents used calque first in 52 of 52 controlled full-Claude-Code runs (26 + 26), and in
   13% (Sonnet children) to 35% (Opus leads) of agents in the live work; the cause of the gap is not
   known.
-- **It helps** when the lookup is the job: files too large to read whole, weaker models, a list of
+- **It helps** when the lookup is the job: files too large to read whole, weaker models (in tokens read, not in correct answers), a list of
   names to find. On a small edit in a named file it did not help and cost 9% to 17% more, in the
   one task measured. It does nothing for literal text, regular expressions or counts: that stays
   grep's job.
 
 No saving on real work has been shown. Setups, intervals and limits for every figure:
 [calque's Measured section](crates/calque/README.md#measured). Results from other projects and
-models will be added as they are measured.
+models will be added as they are measured, and you are welcome to [measure your own and open an
+issue](https://github.com/bambooplanedev/kulman/issues).
 
 ## The names
 

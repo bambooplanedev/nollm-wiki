@@ -882,10 +882,15 @@ with no letter or digit left after folding becomes `page_<hash>`. An id that wou
 
 ## Measured
 
-The Claude measurements are synthetic: controlled tasks written for the measurement, not real work.
-The one real project where live agent work was observed is already heavily set up, with good
-practice and the authors' own tooling: its briefs name the file to work in and its agents already
-read narrowly. Little is left there for calque to save, and it is not a typical project.
+The controlled measurements are synthetic: tasks written for the measurement, not real work. In the
+one live project observed, briefs name the file before 90–98% of reads, and strong models read
+narrowly anyway. Whether that project is typical has not been measured.
+
+The 52 of 52 below was measured while the project instructions and the brief told the agent to use
+calque first, so it shows that agents follow that instruction, not that they would choose calque
+unprompted. These are the authors' measurements of their own tool, on tasks and a code tree they
+chose. You are welcome to join the measuring: run calque on your own project and
+[open an issue](https://github.com/bambooplanedev/kulman/issues) with what you see, numbers good or bad.
 
 Every block below names its own setup, and its figures hold only there: what a model did on those
 tasks in that tree, not what calque does in yours. The repository README sums them up under
