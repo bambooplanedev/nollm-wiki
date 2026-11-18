@@ -886,9 +886,7 @@ The controlled measurements are synthetic: tasks written for the measurement, no
 one live project observed, briefs name the file before 90–98% of reads, and strong models read
 narrowly anyway. Whether that project is typical has not been measured.
 
-The 52 of 52 below was measured while the project instructions and the brief told the agent to use
-calque first, so it shows that agents follow that instruction, not that they would choose calque
-unprompted. These are the authors' measurements of their own tool, on tasks and a code tree they
+The 52 of 52 below was measured with the server's own instructions, which tell the agent to use calque before grep (what `calque setup` leaves for Claude Code), and with a paragraph in the project's `CLAUDE.md` saying to use it first, which `calque setup` does not write. The lookup prompt said nothing about tools; the edit brief repeated the instruction. These are the authors' measurements of their own tool, on tasks and a code tree they
 chose. You are welcome to join the measuring: run calque on your own project and
 [open an issue](https://github.com/bambooplanedev/kulman/issues) with what you see, numbers good or bad.
 
