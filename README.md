@@ -89,18 +89,25 @@ that do not arrive as a list of names.
 Claude Code headless), compared with a control that has no calque: no server, and no calque lines in
 the project instructions or the brief; 26 runs per group and task shape, on a ready list of exact
 names in one code tree. For lookups by name, cost per successful run fell 26% (95% interval −37% to
-−16%; $0.064 against $0.087), with about two turns fewer and about 8 seconds less (5.1 s against
+−16%; $0.064 against $0.087), with about two turns (and API requests) fewer and about 8 seconds less (5.1 s against
 12.9 s); 26 of 26 answers were correct with calque, 24 of 26 without. For a brief that names the file
 and asks for a small edit, cost per successful run rose 15% (interval +10% to +19%; $0.147 against
-$0.128), with about 3.4 turns more; 26 of 26 were correct both ways. About half of the extra cost is
-calque's fixed overhead (its tool definitions and instructions add 1,744 tokens to every request,
-about $0.007 per lookup run and $0.010 per edit run with caching, already in these figures); the rest
-is how the agent edited: with calque it read each returned range and made one edit per item, without
-it the agent often did one grep and one scripted edit. No group read a whole file, with or without
+$0.128), with 12.8 turns against 9.3 (Claude Code's turn count; the API requests were fewer with
+calque, 5.6 against 6.6, because tool calls are issued in parallel); 26 of 26 were correct both ways.
+A second run of the with-calque edit group, made later, came out 4.6% cheaper ($0.140), which would
+make the gap +9% (about +3% to +16%), so the edit cost is better read as between +9% and +15%.
+calque's fixed overhead is a small part of it: its tool definitions are read from a cache shared
+across runs and its instructions are written once per run, about $0.0016 per lookup run and $0.0024
+per edit run, around 13% of the edit gap (the first run in an hour also writes the definitions to
+the cache, about $0.006 once). Most of the gap is in the first answer, observationally (the agent
+chose its first call): the 37 with-calque edit runs that opened with a `page` of the whole file
+cost 27% more than the same task without calque, the 41 that opened with a `search` 1.6% more, an
+interval that includes zero. No group read a whole file, with or without
 calque, so the saving on lookups comes from fewer turns, less cached context read again and less
-output, not from avoided reads. The with-calque runs were made earlier the same day, not interleaved
-with the control, and in the edit task removing calque also removed the brief's line about reading
-only the returned line ranges, so the tool and that instruction are not separated.
+output, not from avoided reads. The first with-calque runs were made earlier the same day, not
+interleaved with the control, and in the edit task removing calque also removed the brief's line
+about reading only the returned line ranges; a separate group of 26 runs that kept calque but
+dropped that line did not cost less ($0.149).
 
 **The prompt hint.** On ordinary prompts from two writers (1,514 and 136 prompts) the hint fired on
 67% and 49% of them, and in 77 hints shown during real work it once plausibly led the agent to a
@@ -112,7 +119,7 @@ and 27%; chat-like prompts still get a hint about a third of the time (37% and 2
 - It helps when the lookup is the job: no file named, large files, weaker models, or a list of names
   to find (−26% per lookup task in full Claude Code). Strong models save turns rather than lines read.
 - It helps little, and can cost a little, when the lookup is a small part of an edit in a file
-  already named (+15% on the edit task above).
+  already named (+9% to +15% on the edit task above).
 - It does nothing for literal text, regular expressions, every occurrence of a string, or counts:
   that stays grep's job.
 - It does not cover shell code outside functions, or scripts without an extension for interpreters

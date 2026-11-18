@@ -982,19 +982,33 @@ set of names:
 | small edit, file named | without | 26/26 | $0.128 | 9.3 | 26.1 s |
 | small edit, file named | with | 26/26 | $0.147 | 12.8 | 27.1 s |
 
+Turns are Claude Code's own count. On lookups it equals the API requests (2.4 and 4.4); on the edit
+task it does not, because tool calls are issued in parallel: 5.6 requests with calque against 6.6
+without, one fewer.
+
 With calque the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
 on the edit task (+10% to +19%). Of the two wrong lookups without calque, one answered the ranges
 without paths and one gave a range of 34 lines for a function of 11. calque's tool definitions and
 instructions add 1,744 tokens to every request (1,799 in the edit task, whose brief also carries a
-calque line); with a one-hour cache that is written once per run and read every turn, about $0.007
-per lookup run and $0.010 per edit run, 12% and 6% of the run's cost, and already in the figures.
+calque line). Of the 1,744, 1,449 are the tool definitions, which sit in a cache shared across runs
+(the first request reads 7,195 cached tokens with calque and 5,746 without, in every pair); about
+295 are written once per run. At the rates the runs imply that is about $0.0016 per lookup run and
+$0.0024 per edit run, 2.4% and 1.6% of the run's cost, already in the figures. The first run in an
+hour also writes the definitions to the cache, about $0.006 once.
 On lookups the saving is fewer turns (−2.0), less cached context read again (−36,000 tokens) and
 less output (−730 tokens); one search with all the names replaced about two greps and a sed. On the
-edit task about half of the +15% is that overhead; the rest is how the agent edited: with calque all
+edit task that overhead is about 13% of the $0.019 gap. Most of the rest is the first answer, an
+observational split (the agent chose its first call): across 78 with-calque edit runs (the 26 above,
+a second run of them and the 26 below), the 37 that opened with a `page` of the whole file cost
+$0.161 against $0.127 for the same task without calque, +27% (interval +23% to +32%); the 41 that
+opened with a `search` cost $0.131 against $0.129, +1.6% (−2% to +6%). The editing also differed: with calque all
 26 runs read each returned range and made one edit per helper, without it 14 of 26 inserted all the
 comments with one scripted edit after one grep (6.9 turns, $0.123) and 12 of 26 edited one by one
-($0.133, 12.2 turns). The brief's calque line also tells the agent to read only the returned line
-ranges, and the control removes it with the tool, so the two are not separated. No group read a whole
+($0.133, 12.2 turns). A second run of the with-calque edit group, made later, cost $0.140, 4.6% less, which would make
+the gap +9% (about +3% to +16%, descriptive only); the edit cost is better read as +9% to +15%.
+The brief's calque line also tells the agent to read only the returned line
+ranges, and the control removes it with the tool; a further group of 26 runs that kept calque and
+dropped that line cost $0.149, not less. No group read a whole
 file, with or without calque. Limits: targets were a ready list of exact names in Python files of
 about 1,900 and 5,200 lines that the index covers; one code tree and one model; hand-written briefs;
 short runs, in which the fixed write is a large share, where a long session pays it once. These are
