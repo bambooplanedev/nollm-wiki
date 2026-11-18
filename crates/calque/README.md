@@ -882,6 +882,11 @@ with no letter or digit left after folding becomes `page_<hash>`. An id that wou
 
 ## Measured
 
+The Claude measurements are synthetic: controlled tasks written for the measurement, not real work.
+The one real project where live agent work was observed is already heavily set up, with good
+practice and the authors' own tooling: its briefs name the file to work in and its agents already
+read narrowly. Little is left there for calque to save, and it is not a typical project.
+
 Every block below names its own setup, and its figures hold only there: what a model did on those
 tasks in that tree, not what calque does in yours. The repository README sums them up under
 [What calque saves, and when](../../README.md#what-calque-saves-and-when).
@@ -1002,9 +1007,8 @@ observational split (the agent chose its first call): across 78 with-calque edit
 a second run of them and the 26 below), the 37 that opened with a `page` of the whole file cost
 $0.161 against $0.127 for the same task without calque, +27% (interval +23% to +32%); the 41 that
 opened with a `search` cost $0.131 against $0.129, +1.6% (−2% to +6%). The editing also differed: with calque all
-26 runs read each returned range and made one edit per helper, without it 14 of 26 inserted all the
-comments with one scripted edit after one grep (6.9 turns, $0.123) and 12 of 26 edited one by one
-($0.133, 12.2 turns). A second run of the with-calque edit group, made later, cost $0.140, 4.6% less, which would make
+26 runs read each returned range and made one edit per helper; without it about half the runs did
+one grep and one scripted edit. A second run of the with-calque edit group, made later, cost $0.140, 4.6% less, which would make
 the gap +9% (about +3% to +16%, descriptive only); the edit cost is better read as +9% to +15%.
 The brief's calque line also tells the agent to read only the returned line
 ranges, and the control removes it with the tool; a further group of 26 runs that kept calque and
@@ -1031,8 +1035,8 @@ needed before saying how often agents use calque in real work.
 The prompt hint, 2026-11-17, offline over 1,514 and 136 prompts from two writers: it fired on 66.8%
 and 48.5% of them. In 77 hints shown during real work it once plausibly led the agent to a file it
 did not already have (95% upper bound about 9% of hints from people); the other files it named were
-already in context or never opened. That is why setup adds it only with `--hook`; the two gates it
-now applies and what still fires are in
+already in context or never opened. That is why setup adds it only with `--hook`. The two gates now cut firing to 36% and 27%;
+chat-like prompts still get a hint about a third of the time (37% and 27%). The gates and what still fires are in
 [docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md#agents-and-the-wiki).
 
 Earlier runs. The `callers` block comes from agent runs on one private C++/Rust/Python/TypeScript
