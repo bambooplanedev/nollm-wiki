@@ -72,6 +72,19 @@ No saving on real work has been measured. Reliability on the same traces: 1 erro
 median answer time of 10–12 ms, and none of the 17 reads that started at a returned line found the
 code gone.
 
+**Whether agents use calque.** This is use, not saving. In controlled runs in full Claude Code
+(headless, with user and project instructions, skills and plugins loaded; Claude Sonnet 5.5, calque
+0.8.1; 26 runs on lookups by name and 26 on a brief that names the file and asks for a small edit),
+calque was the agent's first lookup in 26 of 26 and 26 of 26 runs, and every task succeeded; the same
+task set in the isolated harness gave 52 of 52. A preamble about seven times larger did not lower use.
+In live work on one project (a lead agent briefing child agents, 2026-11-10 to 2026-11-17) it was the
+first lookup for 29 of 83 Opus leads, 44 of 142 Opus children and 20 of 150 Sonnet children. In those
+sessions the tools and the server's instructions were loaded, and neither Claude Code's larger context
+nor a brief that names the file and asks for an edit accounts for the difference (0 points, 95%
+interval −13 to +13, 26 runs per group). The cause is not known. Not yet tested: lookups made by
+child agents a lead spawned (none of the 52 controlled runs delegated), long sessions, and targets
+that do not arrive as a list of names.
+
 **The prompt hint.** On ordinary prompts from two writers (1,514 and 136 prompts) the hint fired on
 67% and 49% of them, and in 77 hints shown during real work it once plausibly led the agent to a
 file it did not already have. So setup adds it only with `--hook`. Two gates now cut firing to 36%
@@ -88,8 +101,11 @@ and 27%; chat-like prompts still get a hint about a third of the time (37% and 2
   other than `sh` and `bash`.
 
 **Limits of the evidence.** The lookup set is self-written and synthetic, with padded files and
-prompts that name the component, and it ran in a test harness, not in Claude Code. The real-work
-traces come from one project. No saving on real work has been shown.
+prompts that name the component, and its saving figures come from an isolated harness, not from
+Claude Code; what was measured in full Claude Code is whether agents use calque. The controlled runs
+and the live traces come from one code tree, the live work from one team, the controlled runs from
+one model. A larger sample from independent projects is needed before saying how often agents use
+calque in real work. No saving on real work has been shown.
 
 ## The names
 

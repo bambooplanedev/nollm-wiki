@@ -953,6 +953,35 @@ commands, 260 calque calls.
   work has been measured: agents that used calque had longer tasks than those that did not, so the
   two cannot be compared.
 
+Use in full Claude Code, 2026-11-18. Claude Sonnet 5.5, calque 0.8.1, `claude -p` headless with the
+normal login, user and project instructions, skills and the superpowers plugin loaded, and a
+preamble about seven times larger than in the isolated harness (49,479 against 6,689 input tokens
+per lookup run). Tools: Bash, Read, Edit, Agent, Skill and calque's `search`, `page` and `callers`.
+The tree is a C++/Rust/Python/TypeScript project snapshot. The same 13 sets of helper names in two
+shapes, 2 runs per set, 26 runs per shape: a lookup ("find where each of these is defined") and a
+brief that names the file, carries the project's line about using calque first and asks for one
+comment above each named helper. calque was the first lookup in 26 of 26 lookup runs and 26 of 26
+edit runs (95% interval 87–100% each); every run succeeded. The same lookup task set in the isolated
+harness (Claude Code's bare mode, 2026-11-11, an earlier build) gave 52 of 52. The difference between
+the two shapes is 0 points (95% interval −13 to +13). No run delegated, and none called a skill.
+Definition greps appeared in 3 of 26 lookup runs and 15 of 26 edit runs; none replaced a calque
+lookup, and in the edit runs nearly all came after the edit, to check the comments. These runs
+measure use only; no saving was measured in them.
+
+Use in live work, 2026-11-10 to 2026-11-17. The same project's traces as above, from 2026-11-10 on, in
+sessions where a lead agent briefs child agents. calque, or the wiki before it, was the
+first lookup (against a grep, find or ls in a shell call) for 29 of 83 Opus leads, 44 of 142 Opus
+children and 20 of 150 Sonnet children; the figures are per agent, and the tasks of Sonnet children
+differ from those of Opus children. The tools were not deferred behind a tool search and the server's
+instructions were present in those sessions, so a missing tool does not explain the gap with the
+controlled runs. What is ruled out as the cause: loaded tools and
+instructions, the larger Claude Code context, and a brief that names the file and asks for an edit.
+What is not known: the cause. Not yet tested: lookups done by child agents a lead spawned (none of
+the 52 controlled runs delegated, while in the live work nearly all lookups were made by leads and
+children), long sessions, and targets that do not arrive as a list of names. One code tree, one
+team's live work, one model in the controlled runs: a larger sample from independent projects is
+needed before saying how often agents use calque in real work.
+
 The prompt hint, 2026-11-17, offline over 1,514 and 136 prompts from two writers: it fired on 66.8%
 and 48.5% of them. In 77 hints shown during real work it once plausibly led the agent to a file it
 did not already have (95% upper bound about 9% of hints from people); the other files it named were
