@@ -17,6 +17,114 @@ the real decisions of each function for people to read. Neither calls a model: t
 byte-identical output, and `kulman` installs both and sets them up in a project with one command
 each.
 
+## Why
+
+So that a person and an agent work from the same picture of the project. The person needs it to
+understand the business logic, meaning what happens and under which conditions, and to give the
+agent precise tasks. The agent needs it to find what it is looking for without spending tokens on
+reading it does not need. `calque` and `plaz` build that picture from the code, without a language
+model, to the same precision: down to the line and the condition.
+
+`plaz` draws a decision chart for each function, with the conditions copied from the code, and
+shows where each call leads. The branches are on the page, not in the reader's head. It is for the
+person: its setup registers nothing for agents.
+
+`calque` gives the agent search across the project: where things are and who calls a function.
+When the agent has to find the code itself, it cut the cost of a lookup by about half for strong
+models in a lab test; when the task already names the file, it saves little
+([what was measured](#what-calque-saves-and-when)).
+
+`kulman` installs and updates both with one command and verifies the release signature.
+
+## What calque saves, and when
+
+Each figure holds only under the conditions given with it; the method and more figures are in
+[calque's README](crates/calque/README.md#measured).
+
+**Lookups with no file named.** Nine "where is X, and what value does it use" questions on a C++
+fixture written for the test, with answer files of 530–645 lines and copies padded to 1,500 and
+5,000 lines. The prompts name the component ("risk engine") but no file. 135 runs per model and arm,
+with and without calque, in a test harness rather than in Claude Code; cost is at list price with
+prompt caching:
+
+| model | cost per lookup | input tokens | correct, without / with calque |
+|---|---|---|---|
+| Claude Sonnet 5.5 | −54% | −29%, not separated from zero | 135 / 135 |
+| Claude Opus 5.5 | −51% | −21%, not separated from zero | 135 / 135 |
+
+The saving grew with file size: −38% to −40% on the unpadded files, −59% to −63% at 5,000 lines.
+Without calque these models already grep and then read a range; what it saves them is turns and the
+new context each turn adds, not lines read. Weaker models read whole files when they do not know
+where to look: without calque 17% (Claude Haiku 5.5), 46% (deepseek-v4.1-flash) and 58%
+(qwen3.8-27b) of their code reads were whole files, with it 4–10%. Their input tokens fell by 29%,
+36% and 75% over the three sizes (by 4–23% on the unpadded files), and they answered no more
+questions correctly.
+
+**Real work, with the file named.** Five days of agent traces from one project: Claude Opus and
+Sonnet agents working from briefs that an orchestrating agent wrote, most of the code they read
+Python and shell scripts. The brief, or a document it pointed to, named the file before 90–98% of
+the 2,125 code reads; the agents found the line with `grep -n` in that file and read a window: 2.0%
+of the reads were whole files, the median read 31 lines. About a third of definition lookups
+(31.6–38.6%) went through calque. What its ranges could still have saved is about 0.25–0.5% of
+input tokens. So in this mode calque saves little: the file is already known, a grep in it costs no more than a
+calque answer, and 30% of the reads were shell code outside functions, where calque gives no range.
+No saving on real work has been measured. Reliability on the same traces: 1 error in 260 calls, a
+median answer time of 10–12 ms, and none of the 17 reads that started at a returned line found the
+code gone.
+
+**Whether agents use calque.** This block is about use; cost is in the next one. In controlled runs in full Claude Code
+(headless, with user and project instructions, skills and plugins loaded; Claude Sonnet 5.5, calque
+0.8.1; 26 runs on lookups by name and 26 on a brief that names the file and asks for a small edit),
+calque was the agent's first lookup in 26 of 26 and 26 of 26 runs, and every task succeeded; the same
+task set in the isolated harness gave 52 of 52. A preamble about seven times larger did not lower use.
+In live work on one project (a lead agent briefing child agents, 2026-11-10 to 2026-11-17) it was the
+first lookup for 29 of 83 Opus leads, 44 of 142 Opus children and 20 of 150 Sonnet children. In those
+sessions the tools and the server's instructions were loaded, and neither Claude Code's larger context
+nor a brief that names the file and asks for an edit accounts for the difference (0 points, 95%
+interval −13 to +13, 26 runs per group). The cause is not known. Not yet tested: lookups made by
+child agents a lead spawned (none of the 52 controlled runs delegated), long sessions, and targets
+that do not arrive as a list of names.
+
+**Cost in full Claude Code, on controlled tasks.** The same Sonnet 5.5 runs (calque 0.8.1, full
+Claude Code headless), compared with a control that has no calque: no server, and no calque lines in
+the project instructions or the brief; 26 runs per group and task shape, on a ready list of exact
+names in one code tree. For lookups by name, cost per successful run fell 26% (95% interval −37% to
+−16%; $0.064 against $0.087), with about two turns fewer and about 8 seconds less (5.1 s against
+12.9 s); 26 of 26 answers were correct with calque, 24 of 26 without. For a brief that names the file
+and asks for a small edit, cost per successful run rose 15% (interval +10% to +19%; $0.147 against
+$0.128), with about 3.4 turns more; 26 of 26 were correct both ways. About half of the extra cost is
+calque's fixed overhead (its tool definitions and instructions add 1,744 tokens to every request,
+about $0.007 per lookup run and $0.010 per edit run with caching, already in these figures); the rest
+is how the agent edited: with calque it read each returned range and made one edit per item, without
+it the agent often did one grep and one scripted edit. No group read a whole file, with or without
+calque, so the saving on lookups comes from fewer turns, less cached context read again and less
+output, not from avoided reads. The with-calque runs were made earlier the same day, not interleaved
+with the control, and in the edit task removing calque also removed the brief's line about reading
+only the returned line ranges, so the tool and that instruction are not separated.
+
+**The prompt hint.** On ordinary prompts from two writers (1,514 and 136 prompts) the hint fired on
+67% and 49% of them, and in 77 hints shown during real work it once plausibly led the agent to a
+file it did not already have. So setup adds it only with `--hook`. Two gates now cut firing to 36%
+and 27%; chat-like prompts still get a hint about a third of the time (37% and 27%).
+
+**When it helps:**
+
+- It helps when the lookup is the job: no file named, large files, weaker models, or a list of names
+  to find (−26% per lookup task in full Claude Code). Strong models save turns rather than lines read.
+- It helps little, and can cost a little, when the lookup is a small part of an edit in a file
+  already named (+15% on the edit task above).
+- It does nothing for literal text, regular expressions, every occurrence of a string, or counts:
+  that stays grep's job.
+- It does not cover shell code outside functions, or scripts without an extension for interpreters
+  other than `sh` and `bash`.
+
+**Limits of the evidence.** The lookup set is self-written and synthetic, with padded files and
+prompts that name the component; the −54% and −51% figures come from an isolated harness. In full
+Claude Code, both use and cost were measured on Sonnet, on controlled tasks whose targets were a
+ready list of exact names. The controlled runs and the live traces come from one code tree, the live
+work from one team, the controlled runs from one model. A larger sample from independent projects is needed before saying how often agents use
+calque in real work. No saving on real work has been shown.
+
 ## The names
 
 | Name | Say it | The word |
@@ -98,7 +206,8 @@ output format and the measurements.
 
 **[plaz](crates/plaz/README.md)** writes, for every function, a Markdown page with a decision
 flowchart: the literal condition of each branch, who calls the function and what each call reaches.
-Rust and Python are charted; other languages get a "not covered yet" note.
+Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. The map is for
+people: `plaz setup` tells agents nothing about it.
 
 **[techlog](crates/techlog/README.md)** is a library: where agent memory lives — the project's
 `.agents/memory/` and the folders agents keep outside it — and who last changed each committed note.
