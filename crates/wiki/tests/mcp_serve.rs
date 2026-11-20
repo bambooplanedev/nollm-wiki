@@ -1715,3 +1715,38 @@ fn mcp_lint_reports_a_broken_link_and_callers_names_its_caller() {
     drop(stdin);
     let _ = child.wait();
 }
+
+/// A cancel naming no call in flight (unknown, finished, `initialize`, or
+/// none at all) changes nothing: a later request with that id is answered.
+#[test]
+fn a_cancel_for_no_call_in_flight_is_ignored() {
+    let (_tmp, out) = compile_fixture();
+    let (mut child, mut stdin, stdout) = spawn_server(&out);
+    initialize(&mut stdin, &stdout);
+    for params in [
+        json!({"requestId": 1}),
+        json!({"requestId": 7}),
+        json!({"requestId": "7"}),
+        json!({}),
+    ] {
+        send(
+            &mut stdin,
+            &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params}),
+        );
+    }
+    let resp = call(
+        &mut stdin,
+        &stdout,
+        7,
+        "search",
+        &json!({"query": "gradient"}),
+    );
+    assert!(text_of(&resp).contains("gradient_descent"), "{resp}");
+    send(
+        &mut stdin,
+        &json!({"jsonrpc": "2.0", "id": 8, "method": "ping"}),
+    );
+    assert_eq!(read_response(&stdout, 8)["result"], json!({}));
+    drop(stdin);
+    let _ = child.wait();
+}
