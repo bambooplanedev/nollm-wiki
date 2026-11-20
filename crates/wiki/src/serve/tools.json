@@ -1,0 +1,235 @@
+[
+  {
+    "name": "callers",
+    "description": "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name; use it, not grep, to find who calls a function. Calls are matched by name and argument count, not by type. `depth` goes up more levels.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "id",
+        "symbol"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Page id, title, or source path.",
+          "type": "string"
+        },
+        "symbol": {
+          "description": "A function on the page, e.g. `canOpenPosition` or\n`RiskManager::canOpenPosition`.",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Caller levels (default 1: the direct callers).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "Token budget (default 4000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  {
+    "name": "lint",
+    "description": "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  {
+    "name": "neighbors",
+    "description": "Show a page with the pages linked to it, within a token budget: a module's outline, the outlines of the modules it imports or is imported by (admitted first), and one-line summaries of the rest, the most central last. Use it to see what a module connects to, not grep; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "id"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Page id, title, or source path.",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Link hops from the page (default 1); with `symbol`, calls deep\n(default no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "description": "Token budget (default 4000).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "max_nodes": {
+          "description": "Maximum pages in the pack (default no limit).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "full": {
+          "description": "Whole linked pages (outlines for code) instead of one-line summaries.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "kind": {
+          "description": "Only linked pages of this kind: `code`, `docs`, or one kind such as\n`code:rust` or `markdown`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "symbol": {
+          "description": "A function on the page, e.g. `canOpenPosition` or\n`RiskManager::canOpenPosition`: list every function it calls, through\nall levels, instead of linked pages.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  {
+    "name": "page",
+    "description": "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "id"
+      ],
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Page id, title, or source path.",
+          "type": "string"
+        },
+        "full": {
+          "description": "The whole page instead of the outline.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "max_tokens": {
+          "description": "Token budget (default 4000 for the outline, none with `full`).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  },
+  {
+    "name": "search",
+    "description": "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. A query of identifiers alone (`_ack`, `OrderBook`) lists each one's definition, or `not found: <name>`. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words; several labels in one query each come back); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "required": [
+        "query"
+      ],
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Words or a symbol name, e.g. `order reject` or `onOrderReject`.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`code`, `docs`, or one kind such as `code:rust` or `markdown`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tag": {
+          "description": "Only pages with this tag (`a` also matches `a/b`); an empty query lists them.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "description": "Maximum pages (default 5; with `docs` default 10, and an empty query lists the first 200 labels).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "format": {
+          "description": "Output format: `lines` (default) or `json`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "docs": {
+          "description": "Markdown files to search instead of the code: the plan, spec or ledger\nyou were handed. Returns each path on its own line, then `  start-end  label` for\nmatching headings and bold step labels (`-` and spaces match alike); an empty query lists the first 200 (pass `limit` for more).\nPass the plan, spec and ledger together: an ID is often a label in only one of\nthem. When no label matches, table rows holding the query (`| W21 | D12 |`) answer.\nOther body text is not searched; use grep for it.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "annotations": {
+      "readOnlyHint": true
+    },
+    "_meta": {
+      "anthropic/alwaysLoad": true
+    }
+  }
+]

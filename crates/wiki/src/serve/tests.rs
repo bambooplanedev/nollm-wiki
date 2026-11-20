@@ -15,10 +15,7 @@ fn fixture(files: usize) -> (tempfile::TempDir, PathBuf) {
 
 /// Page count of the snapshot `state` answers from now.
 fn pages(state: &Arc<WikiState>) -> usize {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    rt.block_on(state.snapshot()).0.list_pages().len()
+    state.snapshot().0.list_pages().len()
 }
 
 #[test]
@@ -141,11 +138,8 @@ fn a_timed_out_snapshot_says_recompile_still_running() {
     let (tmp, out) = fixture(3);
     let state = WikiState::load(&out).unwrap();
     let (release, cli) = hold(&tmp, &out);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let t = Instant::now();
-    let (wiki, reason) = rt.block_on(state.snapshot());
+    let (wiki, reason) = state.snapshot();
     assert!(
         t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
         "{:?}",
@@ -155,7 +149,7 @@ fn a_timed_out_snapshot_says_recompile_still_running() {
     assert_eq!(reason.as_deref(), Some(crate::live::RUNNING));
     release.send(()).unwrap();
     cli.join().unwrap();
-    let (wiki, reason) = rt.block_on(state.snapshot());
+    let (wiki, reason) = state.snapshot();
     assert_eq!(wiki.list_pages().len(), 5);
     assert_eq!(reason, None);
 }
@@ -193,11 +187,8 @@ fn lint_answers_from_the_snapshot_while_a_compile_holds_the_lock() {
     let state = WikiState::load(&out).unwrap();
     let server = WikiServer::new(Arc::clone(&state), out.clone(), &["lint"]);
     let (release, cli) = hold(&tmp, &out);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let t = Instant::now();
-    let r = rt.block_on(server.lint()).unwrap();
+    let r = server.lint().unwrap();
     // One wait, not two.
     assert!(
         t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
@@ -206,10 +197,11 @@ fn lint_answers_from_the_snapshot_while_a_compile_holds_the_lock() {
     );
     release.send(()).unwrap();
     cli.join().unwrap();
-    let texts: Vec<&str> = r
-        .content
+    let texts: Vec<&str> = r["content"]
+        .as_array()
+        .unwrap()
         .iter()
-        .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+        .filter_map(|c| c["text"].as_str())
         .collect();
     let report: serde_json::Value = serde_json::from_str(texts[0]).unwrap();
     assert_eq!(report["total_pages"], 3);

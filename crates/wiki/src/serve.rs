@@ -8,19 +8,9 @@ use crate::model::KindFilter;
 use crate::query::PackBudget;
 use crate::query::Wiki;
 use crate::{CompileOptions, WikiError};
-use rmcp::handler::server::router::tool::ToolRouter;
-use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{
-    CallToolResult, ContentBlock, Implementation, ListResourcesResult, MetaObject,
-    PaginatedRequestParams, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult,
-    Resource, ResourceContents, ServerCapabilities, ServerConfig,
-};
-use rmcp::service::RequestContext;
-use rmcp::transport::stdio;
-use rmcp::{
-    tool, tool_handler, tool_router, ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
-};
 use serde::Deserialize;
+use serde_json::{json, Value};
+use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::{LazyLock, Mutex, OnceLock};
@@ -137,42 +127,33 @@ impl WikiState {
         &self.dir
     }
 
-    /// The wiki to answer from, and why it may be stale. A live wait runs off
-    /// the MCP runtime thread, so pings and cancels keep working meanwhile.
-    pub async fn snapshot(self: &Arc<Self>) -> (Arc<Wiki>, Option<String>) {
+    /// The wiki to answer from, and why it may be stale. A live wait blocks
+    /// only the request's own thread, so pings and other calls keep working.
+    pub fn snapshot(&self) -> (Arc<Wiki>, Option<String>) {
         let deadline = Instant::now() + WAIT;
         let outdated = EXE.replaced().then(|| OUTDATED.to_string());
         match &self.freshness {
-            Freshness::Fingerprint(_) => self.reload_blocking(deadline, outdated).await,
-            Freshness::Live(live, frozen) if outdated.is_some() => {
+            Freshness::Live(live, _) if outdated.is_none() => live.fresh(),
+            Freshness::Live(live, frozen) => {
                 frozen.get_or_init(|| {
                     Mutex::new(Loaded {
                         wiki: live.wiki(),
                         fingerprint: None,
                     })
                 });
-                self.reload_blocking(deadline, outdated).await
+                self.reload_or_running(deadline, outdated)
             }
-            Freshness::Live(live, _) => {
-                let live = Arc::clone(live);
-                tokio::task::spawn_blocking(move || live.fresh())
-                    .await
-                    .expect("freshness wait panicked")
-            }
+            Freshness::Fingerprint(_) => self.reload_or_running(deadline, outdated),
         }
     }
 
-    /// `reload` waits until `deadline` for a compile's file lock: off the
-    /// runtime thread. Past it, `stale` falls back to `RUNNING`.
-    async fn reload_blocking(
-        self: &Arc<Self>,
+    /// [`Self::reload`]; past `deadline`, `stale` falls back to `RUNNING`.
+    fn reload_or_running(
+        &self,
         deadline: Instant,
         stale: Option<String>,
     ) -> (Arc<Wiki>, Option<String>) {
-        let this = Arc::clone(self);
-        let (wiki, done) = tokio::task::spawn_blocking(move || this.reload(deadline))
-            .await
-            .expect("reload panicked");
+        let (wiki, done) = self.reload(deadline);
         (wiki, stale.or((!done).then(|| RUNNING.to_string())))
     }
 
@@ -208,158 +189,188 @@ fn stale_line(reason: &str) -> String {
     format!("wiki may be stale: {reason}")
 }
 
-/// A text result: success for `Ok`, an error result for `Err`.
-fn text_result(r: Result<String, String>) -> CallToolResult {
-    match r {
-        Ok(text) => CallToolResult::success(vec![ContentBlock::text(text)]),
-        Err(text) => CallToolResult::error(vec![ContentBlock::text(text)]),
-    }
+/// A JSON-RPC error: code and message.
+pub(crate) type RpcError = (i64, String);
+const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
+const INTERNAL_ERROR: i64 = -32603;
+const RESOURCE_NOT_FOUND: i64 = -32002;
+
+/// Versions `initialize` agrees to, oldest first: the client's own if
+/// listed, else the newest (what rmcp 3.10 answered).
+const PROTOCOL_VERSIONS: [&str; 4] = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+
+/// Every tool's `tools/list` entry, sorted by name. `_meta.anthropic/alwaysLoad`:
+/// Claude Code otherwise defers MCP tools behind a `ToolSearch` call, one
+/// more turn before the first search (46 of 48 field runs).
+const TOOLS_JSON: &str = include_str!("serve/tools.json");
+
+fn invalid_params(message: impl Into<String>) -> RpcError {
+    (INVALID_PARAMS, message.into())
 }
 
-/// Append the stale line, if any, as a text block after a tool's own result.
-fn with_stale(mut result: CallToolResult, stale: Option<&str>) -> CallToolResult {
+/// A `tools/call` result: the text (an error result for `Err`), then the
+/// stale line, if any, as a second text block.
+fn tool_result(r: Result<String, String>, stale: Option<&str>) -> Value {
+    let (text, is_error) = match r {
+        Ok(text) => (text, false),
+        Err(text) => (text, true),
+    };
+    let mut content = vec![json!({"type": "text", "text": text})];
     if let Some(reason) = stale {
-        result.content.push(ContentBlock::text(stale_line(reason)));
+        content.push(json!({"type": "text", "text": stale_line(reason)}));
     }
-    result
+    json!({"content": content, "isError": is_error})
 }
 
-#[derive(Deserialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+/// Tool arguments; one that does not fit is a tool error result, not a
+/// JSON-RPC error, so the model sees which field is wrong.
+fn parse<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, Value> {
+    serde_json::from_value(args)
+        .map_err(|e| tool_result(Err(format!("failed to deserialize parameters: {e}")), None))
+}
+
+// Field docs are the schemas in `serve/tools.json`.
+#[derive(Deserialize)]
 pub(crate) struct SearchParams {
-    /// Words or a symbol name, e.g. `order reject` or `onOrderReject`.
     pub query: String,
-    /// `code`, `docs`, or one kind such as `code:rust` or `markdown`.
     pub kind: Option<String>,
-    /// Only pages with this tag (`a` also matches `a/b`); an empty query lists them.
     pub tag: Option<String>,
-    /// Maximum pages (default 5; with `docs` default 10, and an empty query lists the first 200 labels).
     pub limit: Option<usize>,
-    /// Output format: `lines` (default) or `json`.
     pub format: Option<String>,
-    /// Markdown files to search instead of the code: the plan, spec or ledger
-    /// you were handed. Returns each path on its own line, then `  start-end  label` for
-    /// matching headings and bold step labels (`-` and spaces match alike); an empty query lists the first 200 (pass `limit` for more).
-    /// Pass the plan, spec and ledger together: an ID is often a label in only one of
-    /// them. When no label matches, table rows holding the query (`| W21 | D12 |`) answer.
-    /// Other body text is not searched; use grep for it.
     pub docs: Option<Vec<String>>,
 }
 
-#[derive(Deserialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize)]
 pub(crate) struct NeighborsParams {
-    /// Page id, title, or source path.
     pub id: String,
-    /// Link hops from the page (default 1); with `symbol`, calls deep
-    /// (default no limit).
     pub depth: Option<usize>,
-    /// Token budget (default 4000).
     pub max_tokens: Option<usize>,
-    /// Maximum pages in the pack (default no limit).
     pub max_nodes: Option<usize>,
-    /// Whole linked pages (outlines for code) instead of one-line summaries.
     pub full: Option<bool>,
-    /// Only linked pages of this kind: `code`, `docs`, or one kind such as
-    /// `code:rust` or `markdown`.
     pub kind: Option<String>,
-    /// A function on the page, e.g. `canOpenPosition` or
-    /// `RiskManager::canOpenPosition`: list every function it calls, through
-    /// all levels, instead of linked pages.
     pub symbol: Option<String>,
 }
 
-#[derive(Deserialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize)]
 pub(crate) struct CallersParams {
-    /// Page id, title, or source path.
     pub id: String,
-    /// A function on the page, e.g. `canOpenPosition` or
-    /// `RiskManager::canOpenPosition`.
     pub symbol: String,
-    /// Caller levels (default 1: the direct callers).
     pub depth: Option<usize>,
-    /// Token budget (default 4000).
     pub max_tokens: Option<usize>,
 }
 
-#[derive(Deserialize, rmcp::schemars::JsonSchema)]
-#[schemars(crate = "rmcp::schemars")]
+#[derive(Deserialize)]
 pub(crate) struct PageParams {
-    /// Page id, title, or source path.
     pub id: String,
-    /// The whole page instead of the outline.
     pub full: Option<bool>,
-    /// Token budget (default 4000 for the outline, none with `full`).
     pub max_tokens: Option<usize>,
 }
 
-#[derive(Clone)]
 pub(crate) struct WikiServer {
     state: Arc<WikiState>,
     /// Where `docs` paths are resolved: the `--source` dir, else the cwd.
     root: PathBuf,
-    tool_router: ToolRouter<Self>,
+    /// The `tools/list` entries of the exposed tools.
+    tools: Vec<Value>,
 }
 
-#[tool_router]
 impl WikiServer {
     /// A server exposing only `tools` (names from [`TOOLS`]).
     pub fn new(state: Arc<WikiState>, root: PathBuf, tools: &[&str]) -> Self {
-        let mut tool_router = Self::tool_router();
-        for name in TOOLS.iter().filter(|t| !tools.contains(t)) {
-            tool_router.remove_route(name);
-        }
-        // Claude Code otherwise defers MCP tools behind a `ToolSearch`
-        // call: one more turn before the first search (46 of 48 field runs).
-        for route in tool_router.map.values_mut() {
-            let mut meta = MetaObject::new();
-            meta.0.insert("anthropic/alwaysLoad".into(), true.into());
-            route.attr.meta = Some(meta);
-        }
-        Self {
-            state,
-            root,
-            tool_router,
-        }
+        let all: Vec<Value> = serde_json::from_str(TOOLS_JSON).expect("tools.json");
+        let tools = all
+            .into_iter()
+            .filter(|t| tools.iter().any(|name| t["name"] == *name))
+            .collect();
+        Self { state, root, tools }
     }
 
-    #[tool(
-        annotations(read_only_hint = true),
-        description = "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. A query of identifiers alone (`_ack`, `OrderBook`) lists each one's definition, or `not found: <name>`. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words; several labels in one query each come back); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc."
-    )]
-    async fn search(
-        &self,
-        Parameters(p): Parameters<SearchParams>,
-    ) -> Result<CallToolResult, McpError> {
+    /// The reply to one message from the client: `None` for a notification
+    /// or a response.
+    fn handle(&self, line: &str) -> Option<Value> {
+        let Ok(msg) = serde_json::from_str::<Value>(line) else {
+            return Some(reply(None, Err((-32700, "Parse error".into()))));
+        };
+        if msg["jsonrpc"] != "2.0" {
+            return Some(reply(None, Err((-32600, "Invalid request".into()))));
+        }
+        let (Some(id), Some(method)) = (msg.get("id"), msg["method"].as_str()) else {
+            return None;
+        };
+        let params = &msg["params"];
+        let r = match method {
+            "initialize" => {
+                let asked = params["protocolVersion"].as_str();
+                let version = asked
+                    .filter(|v| PROTOCOL_VERSIONS.contains(v))
+                    .unwrap_or(PROTOCOL_VERSIONS[3]);
+                Ok(json!({
+                    "protocolVersion": version,
+                    "capabilities": {"resources": {}, "tools": {}},
+                    "serverInfo": {"name": "wiki", "version": env!("CARGO_PKG_VERSION")},
+                    "instructions": INSTRUCTIONS,
+                }))
+            }
+            "ping" => Ok(json!({})),
+            "tools/list" => Ok(json!({"tools": self.tools})),
+            "tools/call" => self.call_tool(params),
+            "resources/list" => Ok(self.list_resources()),
+            // Clients with the resources capability may ask; rmcp answered.
+            "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
+            "resources/read" => match params["uri"].as_str() {
+                Some(uri) => self.read_resource(uri),
+                None => Err(invalid_params("missing uri")),
+            },
+            _ => Err((METHOD_NOT_FOUND, method.to_string())),
+        };
+        Some(reply(Some(id), r))
+    }
+
+    fn call_tool(&self, params: &Value) -> Result<Value, RpcError> {
+        let name = params["name"]
+            .as_str()
+            .filter(|name| self.tools.iter().any(|t| t["name"] == *name))
+            .ok_or_else(|| invalid_params("tool not found"))?;
+        let args = match &params["arguments"] {
+            Value::Null => json!({}),
+            args => args.clone(),
+        };
+        let r = match name {
+            "search" => parse(args).map(|p| self.search(&p)),
+            "neighbors" => parse(args).map(|p| self.neighbors(&p)),
+            "callers" => parse(args).map(|p| Ok(self.callers(&p))),
+            "page" => parse(args).map(|p| Ok(self.page(&p))),
+            _ => Ok(self.lint()),
+        };
+        r.unwrap_or_else(Ok)
+    }
+
+    fn search(&self, p: &SearchParams) -> Result<Value, RpcError> {
         let kind = p
             .kind
             .as_deref()
             .map(KindFilter::parse_arg)
             .transpose()
-            .map_err(|m| McpError::invalid_params(m, None))?;
+            .map_err(invalid_params)?;
         let tag = p
             .tag
             .as_deref()
             .map(crate::query::tag_arg)
             .transpose()
-            .map_err(|m| McpError::invalid_params(m, None))?;
+            .map_err(invalid_params)?;
         let json = match p.format.as_deref() {
             None | Some("lines") => false,
             Some("json") => true,
             Some(f) => {
-                return Err(McpError::invalid_params(
-                    format!("unknown format {f:?}; expected lines or json"),
-                    None,
-                ))
+                return Err(invalid_params(format!(
+                    "unknown format {f:?}; expected lines or json"
+                )))
             }
         };
         if let Some(docs) = p.docs.as_ref().filter(|d| !d.is_empty()) {
             if kind.is_some() || tag.is_some() {
-                return Err(McpError::invalid_params(
-                    "`docs` cannot be combined with kind or tag",
-                    None,
-                ));
+                return Err(invalid_params("`docs` cannot be combined with kind or tag"));
             }
             let (hits, errors, more, fallback) =
                 crate::labels::doc_search(&self.root, docs, &p.query, p.limit);
@@ -368,9 +379,9 @@ impl WikiServer {
             } else {
                 crate::labels::doc_lines(&hits, &errors, more, fallback.as_deref())
             };
-            return Ok(text_result(Ok(text)));
+            return Ok(tool_result(Ok(text), None));
         }
-        let (wiki, stale) = self.state.snapshot().await;
+        let (wiki, stale) = self.state.snapshot();
         // A tag-only listing (no query words) stays unbounded by default.
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
@@ -382,179 +393,127 @@ impl WikiServer {
             let missing = wiki.not_found(&p.query, kind.as_ref(), tag.as_deref());
             search_lines_missing(&hits, &missing)
         };
-        Ok(with_stale(text_result(Ok(text)), stale.as_deref()))
+        Ok(tool_result(Ok(text), stale.as_deref()))
     }
 
-    #[tool(
-        annotations(read_only_hint = true),
-        description = "Show a page with the pages linked to it, within a token budget: a module's outline, the outlines of the modules it imports or is imported by (admitted first), and one-line summaries of the rest, the most central last. Use it to see what a module connects to, not grep; `kind: \"code\"` keeps it to code. With `symbol`, it lists every function that function calls, through all levels, as `start-end` lines grouped by file."
-    )]
-    async fn neighbors(
-        &self,
-        Parameters(p): Parameters<NeighborsParams>,
-    ) -> Result<CallToolResult, McpError> {
+    fn neighbors(&self, p: &NeighborsParams) -> Result<Value, RpcError> {
         let kind = p
             .kind
             .as_deref()
             .map(KindFilter::parse_arg)
             .transpose()
-            .map_err(|m| McpError::invalid_params(m, None))?;
+            .map_err(invalid_params)?;
         let budget = PackBudget {
             max_tokens: Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             max_nodes: p.max_nodes,
             full_neighbors: p.full.unwrap_or(false),
             kind,
         };
-        let (wiki, stale) = self.state.snapshot().await;
-        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
-            match &p.symbol {
-                Some(symbol) => wiki.calls(&id, symbol, p.depth, budget.max_tokens),
-                None => wiki
-                    .neighbors(&id, p.depth.unwrap_or(1), &budget)
-                    .map(|pack| pack.text)
-                    .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
-            }
-        }));
-        Ok(with_stale(result, stale.as_deref()))
+        let (wiki, stale) = self.state.snapshot();
+        let r = wiki.resolve(&p.id).and_then(|id| match &p.symbol {
+            Some(symbol) => wiki.calls(&id, symbol, p.depth, budget.max_tokens),
+            None => wiki
+                .neighbors(&id, p.depth.unwrap_or(1), &budget)
+                .map(|pack| pack.text)
+                .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
+        });
+        Ok(tool_result(r, stale.as_deref()))
     }
 
-    #[tool(
-        annotations(read_only_hint = true),
-        description = "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name; use it, not grep, to find who calls a function. Calls are matched by name and argument count, not by type. `depth` goes up more levels."
-    )]
-    async fn callers(
-        &self,
-        Parameters(p): Parameters<CallersParams>,
-    ) -> Result<CallToolResult, McpError> {
-        let (wiki, stale) = self.state.snapshot().await;
-        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+    fn callers(&self, p: &CallersParams) -> Value {
+        let (wiki, stale) = self.state.snapshot();
+        let r = wiki.resolve(&p.id).and_then(|id| {
             wiki.callers(
                 &id,
                 &p.symbol,
                 Some(p.depth.unwrap_or(1)),
                 Some(p.max_tokens.unwrap_or(DEFAULT_NEIGHBORS_MAX_TOKENS)),
             )
-        }));
-        Ok(with_stale(result, stale.as_deref()))
+        });
+        tool_result(r, stale.as_deref())
     }
 
-    #[tool(
-        annotations(read_only_hint = true),
-        description = "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large."
-    )]
-    async fn page(&self, Parameters(p): Parameters<PageParams>) -> CallToolResult {
+    fn page(&self, p: &PageParams) -> Value {
         let full = p.full.unwrap_or(false);
-        let (wiki, stale) = self.state.snapshot().await;
-        let result = text_result(wiki.resolve(&p.id).and_then(|id| {
+        let (wiki, stale) = self.state.snapshot();
+        let r = wiki.resolve(&p.id).and_then(|id| {
             let max_tokens = p
                 .max_tokens
                 .or((!full).then_some(DEFAULT_NEIGHBORS_MAX_TOKENS));
             wiki.page_text(&id, full, max_tokens)
                 .ok_or_else(|| wiki.page_error(&id, &p.id))
-        }));
-        with_stale(result, stale.as_deref())
+        });
+        tool_result(r, stale.as_deref())
     }
 
-    #[tool(
-        annotations(read_only_hint = true),
-        description = "Check the wiki for broken links, orphan pages and pages too large for a neighbors pack. Returns JSON {total_pages, broken_links: [[page_id, link_text]], orphans: [page_id], large: [[page_id, tokens]]}."
-    )]
-    async fn lint(&self) -> Result<CallToolResult, McpError> {
+    fn lint(&self) -> Result<Value, RpcError> {
         let deadline = Instant::now() + WAIT;
-        let (wiki, stale) = self.state.snapshot().await;
-        let ws = Arc::clone(&self.state);
-        let pages = tokio::task::spawn_blocking(move || {
-            crate::dirlock::shared_until(ws.dir(), deadline, || load_compiled_pages(ws.dir()))
-        })
-        .await
-        .expect("lint read panicked")
-        .transpose()
-        .map_err(|e| McpError::internal_error(format!("read wiki dir: {e}"), None))?;
+        let (wiki, stale) = self.state.snapshot();
+        let dir = self.state.dir();
+        let pages = crate::dirlock::shared_until(dir, deadline, || load_compiled_pages(dir))
+            .transpose()
+            .map_err(|e| (INTERNAL_ERROR, format!("read wiki dir: {e}")))?;
         // A compile holding the lock past the call: lint the snapshot.
         let (r, stale) = match pages {
             Some(pages) => (lint(&pages), stale),
             None => (lint(wiki.bodies()), stale.or(Some(RUNNING.to_string()))),
         };
-        let report = serde_json::json!({
+        let report = json!({
             "total_pages": r.total_pages,
             "broken_links": r.broken_links,
             "orphans": r.orphans,
             "large": r.large,
         });
-        Ok(with_stale(
-            text_result(Ok(report.to_string())),
-            stale.as_deref(),
-        ))
-    }
-}
-
-#[tool_handler(router = self.tool_router.clone())]
-impl ServerHandler for WikiServer {
-    fn get_info(&self) -> ServerConfig {
-        let capabilities = ServerCapabilities::builder()
-            .enable_tools()
-            .enable_resources()
-            .build();
-        ServerConfig::new(capabilities)
-            .with_server_info(Implementation::new("wiki", env!("CARGO_PKG_VERSION")))
-            .with_instructions(INSTRUCTIONS)
+        Ok(tool_result(Ok(report.to_string()), stale.as_deref()))
     }
 
-    async fn list_resources(
-        &self,
-        _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListResourcesResult, McpError> {
+    fn list_resources(&self) -> Value {
+        let resource = |uri: String, name: &str, mime: &str| json!({"uri": uri, "name": name, "mimeType": mime});
         let mut resources = vec![
-            Resource::new("wiki://index", "index.json (machine catalog)")
-                .with_mime_type("application/json"),
-            Resource::new("wiki://llms.txt", "llms.txt (compact LLM index)")
-                .with_mime_type("text/plain"),
+            resource(
+                "wiki://index".into(),
+                "index.json (machine catalog)",
+                "application/json",
+            ),
+            resource(
+                "wiki://llms.txt".into(),
+                "llms.txt (compact LLM index)",
+                "text/plain",
+            ),
         ];
-        let (wiki, _) = self.state.snapshot().await;
+        let (wiki, _) = self.state.snapshot();
         for (id, title) in wiki.list_pages() {
-            resources.push(
-                Resource::new(format!("wiki://page/{id}"), title).with_mime_type("text/markdown"),
-            );
+            resources.push(resource(
+                format!("wiki://page/{id}"),
+                &title,
+                "text/markdown",
+            ));
         }
-        Ok(ListResourcesResult::with_all_items(resources))
+        json!({"resources": resources})
     }
 
-    async fn read_resource(
-        &self,
-        request: ReadResourceRequestParams,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ReadResourceResponse, McpError> {
-        let uri = request.uri.as_str();
+    fn read_resource(&self, uri: &str) -> Result<Value, RpcError> {
         let deadline = Instant::now() + WAIT;
-        let (wiki, stale) = self.state.snapshot().await;
-        let not_found = || McpError::resource_not_found(format!("no such resource: {uri}"), None);
+        let (wiki, stale) = self.state.snapshot();
+        let not_found = || (RESOURCE_NOT_FOUND, format!("no such resource: {uri}"));
         // Only a missing file is "no such resource"; a permission or read
         // error on a file that exists is the server's problem, not the
         // client's.
-        let read_file = |name: &'static str| {
-            let ws = Arc::clone(&self.state);
-            async move {
-                tokio::task::spawn_blocking(move || {
-                    crate::dirlock::shared_until(ws.dir(), deadline, || {
-                        std::fs::read_to_string(ws.dir().join(name))
-                    })
-                })
-                .await
-                .expect("read panicked")
-                .ok_or_else(|| McpError::internal_error(format!("read {name}: {RUNNING}"), None))?
+        let read_file = |name: &str| {
+            let dir = self.state.dir();
+            crate::dirlock::shared_until(dir, deadline, || std::fs::read_to_string(dir.join(name)))
+                .ok_or_else(|| (INTERNAL_ERROR, format!("read {name}: {RUNNING}")))?
                 .map_err(|e| {
                     if e.kind() == std::io::ErrorKind::NotFound {
                         not_found()
                     } else {
-                        McpError::internal_error(format!("read {name}: {e}"), None)
+                        (INTERNAL_ERROR, format!("read {name}: {e}"))
                     }
                 })
-            }
         };
         let (text, mime_type) = match uri {
-            "wiki://index" => (read_file("index.json").await?, "application/json"),
-            "wiki://llms.txt" => (read_file("llms.txt").await?, "text/plain"),
+            "wiki://index" => (read_file("index.json")?, "application/json"),
+            "wiki://llms.txt" => (read_file("llms.txt")?, "text/plain"),
             _ => {
                 let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
                 // Served from memory, keyed by the index's own ids: an id
@@ -562,21 +521,33 @@ impl ServerHandler for WikiServer {
                 let page = match wiki.page(id) {
                     Some(page) => page,
                     None if wiki.has_page(id) => {
-                        return Err(McpError::resource_not_found(wiki.page_error(id, id), None))
+                        return Err((RESOURCE_NOT_FOUND, wiki.page_error(id, id)))
                     }
                     None => return Err(not_found()),
                 };
                 (page, "text/markdown")
             }
         };
-        let mut contents = vec![ResourceContents::text(text, uri).with_mime_type(mime_type)];
+        let mut contents = vec![json!({"uri": uri, "mimeType": mime_type, "text": text})];
         if let Some(reason) = stale {
-            contents.push(
-                ResourceContents::text(stale_line(&reason), uri).with_mime_type("text/plain"),
-            );
+            contents
+                .push(json!({"uri": uri, "mimeType": "text/plain", "text": stale_line(&reason)}));
         }
-        Ok(ReadResourceResult::new(contents).into())
+        Ok(json!({"contents": contents}))
     }
+}
+
+/// A JSON-RPC response; `id` is `None` when the message had none to echo.
+fn reply(id: Option<&Value>, r: Result<Value, RpcError>) -> Value {
+    let mut msg = json!({"jsonrpc": "2.0"});
+    if let Some(id) = id {
+        msg["id"] = id.clone();
+    }
+    match r {
+        Ok(result) => msg["result"] = result,
+        Err((code, message)) => msg["error"] = json!({"code": code, "message": message}),
+    }
+    msg
 }
 
 /// Start the MCP server over stdio and block until the client disconnects.
@@ -640,20 +611,33 @@ pub fn run(
         None => std::env::current_dir()?,
     };
     let server = WikiServer::new(state, root, &tools);
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(async move {
-            let service = server
-                .serve(stdio())
-                .await
-                .map_err(|e| WikiError::Serve(e.to_string()))?;
-            service
-                .waiting()
-                .await
-                .map_err(|e| WikiError::Serve(e.to_string()))?;
-            Ok(())
-        })
+    // Newline-delimited JSON-RPC, one thread per message: a call waiting
+    // on a compile holds up nothing else. Closing stdin waits for the
+    // calls in flight, then returns.
+    let read_any = std::thread::scope(|s| -> std::io::Result<bool> {
+        let mut read_any = false;
+        for line in std::io::stdin().lock().lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            read_any = true;
+            let server = &server;
+            s.spawn(move || {
+                if let Some(reply) = server.handle(&line) {
+                    // A locked write keeps each reply on its own line.
+                    let _ = writeln!(std::io::stdout().lock(), "{reply}");
+                }
+            });
+        }
+        Ok(read_any)
+    })?;
+    if !read_any {
+        return Err(WikiError::Serve(
+            "connection closed: initialize request".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
