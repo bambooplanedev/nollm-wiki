@@ -72,12 +72,9 @@ fn entry(cmd: &str, memory: bool) -> Value {
     json!({"command": "sh", "args": ["-c", format!("exec {cmd} {}", a.join(" "))]})
 }
 
-/// pi's extension starting `cmd`; `old`: as setup wrote it while the hook was on by default.
-fn pi_hook(cmd: &str, old: bool) -> String {
-    let mut text = PI_HOOK.replace("<out>", OUT_DIR);
-    if old {
-        text = text.replace("setup --hook)", "setup unless --no-hook)");
-    }
+/// pi's extension starting `cmd`.
+fn pi_hook(cmd: &str) -> String {
+    let text = PI_HOOK.replace("<out>", OUT_DIR);
     if cmd == CMD {
         return text.replace("<cmd>", CMD);
     }
@@ -607,17 +604,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
 
         // Hook: only with `--hook`. `--remove`, and a run without `--hook`, take out one an
-        // earlier setup wrote (the hook was on by default up to 0.8).
+        // earlier setup wrote.
         let file = match (pi, local) {
             (true, _) => PI_HOOK_FILE,
             (false, true) => ".claude/settings.local.json",
             (false, false) => ".claude/settings.json",
         };
         let path = root.join(file);
-        let pi_own: Vec<String> = [false, true]
-            .iter()
-            .flat_map(|&old| cmds.iter().map(move |c| pi_hook(c, old)))
-            .collect();
+        let pi_own: Vec<String> = cmds.iter().map(|c| pi_hook(c)).collect();
         let pi_own: Vec<&str> = pi_own.iter().map(String::as_str).collect();
         let own: Vec<Value> = cmds
             .iter()

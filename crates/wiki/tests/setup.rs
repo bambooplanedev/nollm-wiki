@@ -760,21 +760,15 @@ fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
 }
 
 #[test]
-fn a_run_without_the_hook_flag_removes_an_older_pi_hook_and_leaves_an_edited_one() {
+fn a_run_without_the_hook_flag_removes_its_own_pi_hook_and_leaves_an_edited_one() {
     let f = fixture(true, true);
     let r = f.root();
     let args = ["--agent", "pi", "--scope", "repo"];
     let path = r.join(PI_EXT);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    // As wiki 0.8 wrote it, when the hook was on by default.
     let old = include_str!("../src/setup/wiki-hint.ts")
         .replace("<out>", ".kulman")
-        .replace("<cmd>", "wiki")
-        .replace(
-            "(installed by wiki setup --hook)",
-            "(installed by wiki setup unless --no-hook)",
-        );
-    assert!(old.contains("unless --no-hook"));
+        .replace("<cmd>", "wiki");
     fs::write(&path, &old).unwrap();
     let a = f.setup(&args).success();
     assert!(!r.join(".pi/extensions").exists());
