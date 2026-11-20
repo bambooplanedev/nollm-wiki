@@ -39,7 +39,7 @@ pub struct Module {
     pub archives: BTreeMap<String, Archive>,
 }
 
-/// A choice a module's own `setup` offers, such as calque's `memory`; its summary is not read.
+/// A choice a module's own `setup` offers, such as wiki's `memory`; its summary is not read.
 #[derive(Deserialize)]
 pub struct ModuleOption {
     pub name: String,
@@ -466,7 +466,7 @@ mod tests {
     #[test]
     fn a_manifest_without_summary_or_options_parses() {
         let m = Manifest::parse(
-            br#"{"version": "0.1.0", "modules": [{"name": "calque"}],
+            br#"{"version": "0.1.0", "modules": [{"name": "wiki"}],
             "kulman": {"archives": {}}, "later": 1}"#,
         )
         .unwrap();
@@ -482,20 +482,20 @@ mod tests {
             );
             Manifest::parse(text.as_bytes()).map_err(|e| e.to_string())
         };
-        let ok = parse(r#"[{"name": "calque", "replaces": ["kalka"]}, {"name": "plaz"}]"#);
-        assert_eq!(ok.unwrap().modules[0].replaces, ["kalka"]);
+        let ok = parse(r#"[{"name": "wiki", "replaces": ["oldmod"]}, {"name": "plaz"}]"#);
+        assert_eq!(ok.unwrap().modules[0].replaces, ["oldmod"]);
         for (modules, why) in [
             (
-                r#"[{"name": "calque", "replaces": ["../x"]}]"#,
+                r#"[{"name": "wiki", "replaces": ["../x"]}]"#,
                 "bad name in manifest: ../x",
             ),
             (
-                r#"[{"name": "calque", "replaces": ["calque"]}]"#,
-                "manifest: calque replaces calque, which the release holds",
+                r#"[{"name": "wiki", "replaces": ["wiki"]}]"#,
+                "manifest: wiki replaces wiki, which the release holds",
             ),
             (
-                r#"[{"name": "calque", "replaces": ["plaz"]}, {"name": "plaz"}]"#,
-                "manifest: calque replaces plaz, which the release holds",
+                r#"[{"name": "wiki", "replaces": ["plaz"]}, {"name": "plaz"}]"#,
+                "manifest: wiki replaces plaz, which the release holds",
             ),
             (
                 r#"[{"name": "a", "replaces": ["old"]}, {"name": "b", "replaces": ["old"]}]"#,

@@ -15,11 +15,11 @@ plaz shows what the code really does, so that:
 
 The map never judges whether a "because" is right. It shows it; the human judges. It shows changes; it does not enforce acknowledgement.
 
-## A separate tool from calque
+## A separate tool from `wiki`
 
-calque is for agents: its measure is whether an agent finds exact `path:start-end` context fast. plaz is for people: its measure is whether a person understands the logic correctly. Mixing them would let map changes move calque's measured agent behaviour, and one README would promise two products.
+`wiki` is for agents: its measure is whether an agent finds exact `path:start-end` context fast. plaz is for people: its measure is whether a person understands the logic correctly. Mixing them would let map changes move `wiki`'s measured agent behaviour, and one README would promise two products.
 
-plaz depends on `wiki-code` only: a crate in this workspace, used by path, that holds the code model (file walking, parsing, the item model, call sites, the candidate index used to find call targets, comment text). calque's pages, search and MCP tools live in the `calque` crate, which plaz does not use, and calque knows nothing about the map. One set of tree-sitter grammar versions, pinned exactly in `wiki-code`, serves both. A compiled wiki is optional: the map is built from sources alone. When a compiled wiki vault is present, references to code become wikilinks to its code pages; without it they are plain `path:start-end`. Navigation between charts uses the map's own pages and never needs the wiki.
+plaz depends on `wiki-code` only: a crate in this workspace, used by path, that holds the code model (file walking, parsing, the item model, call sites, the candidate index used to find call targets, comment text). `wiki`'s pages, search and MCP tools live in the `wiki` crate, which plaz does not use, and `wiki` knows nothing about the map. One set of tree-sitter grammar versions, pinned exactly in `wiki-code`, serves both. A compiled wiki is optional: the map is built from sources alone. When a compiled wiki vault is present, references to code become wikilinks to its code pages; without it they are plain `path:start-end`. Navigation between charts uses the map's own pages and never needs the wiki.
 
 ## What it shows
 
@@ -54,7 +54,7 @@ Against any commit, default HEAD (uncommitted work vs last commit). plaz would e
 
 ## Output
 
-Markdown pages with Mermaid, written by default into `<source>/.kulman/map/`, beside calque's pages, or into a vault given with `--vault`, with references to code as wikilinks to the wiki's code pages when that vault has them and as plain `path:start-end` otherwise. Quartz builds them into a browser site (the main human view); Obsidian opens them as a vault; agents read the same pages or call the CLI. plaz emits Quartz-compatible content; it does not ship or run Quartz. One vault holds the map of one source tree: a build that finds no code file warns and leaves the vault as it is.
+Markdown pages with Mermaid, written by default into `<source>/.kulman/map/`, beside `wiki`'s pages, or into a vault given with `--vault`, with references to code as wikilinks to the wiki's code pages when that vault has them and as plain `path:start-end` otherwise. Quartz builds them into a browser site (the main human view); Obsidian opens them as a vault; agents read the same pages or call the CLI. plaz emits Quartz-compatible content; it does not ship or run Quartz. One vault holds the map of one source tree: a build that finds no code file warns and leaves the vault as it is.
 
 ## Non-goals
 
@@ -65,7 +65,7 @@ Markdown pages with Mermaid, written by default into `<source>/.kulman/map/`, be
 - No project specs as a source: the map must work on any repo.
 - No precise name resolution of our own (Sourcetrail and GitHub stack-graphs both died on per-language upkeep).
 - No cross-language links.
-- No changes to calque's behaviour, search, hints or MCP tools.
+- No changes to `wiki`'s behaviour, search, hints or MCP tools.
 
 ## Anti-goal
 
@@ -80,7 +80,7 @@ Decided by the owner:
 - State diagrams in the simple shape; sequence diagrams deferred.
 - Browser main view (Quartz); Obsidian and agent access too.
 - No stored history; compare with commits on demand.
-- A tool of its own, depending on calque's code layer (`wiki-code`) as a library; it began in a repository of its own and is now a crate of this workspace, depending on it by path.
+- A tool of its own, depending on `wiki`'s code layer (`wiki-code`) as a library; it began in a repository of its own and is now a crate of this workspace, depending on it by path.
 
 Made during design (open to change):
 - Change baseline HEAD by default.

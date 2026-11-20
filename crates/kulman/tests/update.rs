@@ -10,30 +10,30 @@ use common::{
 };
 use serde_json::json;
 
-const CALQUE: &[u8] = b"#!/bin/sh\necho calque\n";
+const WIKI: &[u8] = b"#!/bin/sh\necho wiki\n";
 const PLAZ: &[u8] = b"#!/bin/sh\necho plaz\n";
-const CALQUE_8: &[u8] = b"#!/bin/sh\necho calque 0.8\n";
+const WIKI_8: &[u8] = b"#!/bin/sh\necho wiki 0.8\n";
 const PLAZ_8: &[u8] = b"#!/bin/sh\necho plaz 0.8\n";
 
-/// A temp root with `release/` at 0.7.0 (calque and plaz) and `home` holding both.
+/// A temp root with `release/` at 0.7.0 (wiki and plaz) and `home` holding both.
 fn installed() -> (tempfile::TempDir, String, std::path::PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
+        &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
     (t, base, home)
 }
 
-/// Publishes 0.8.0 (calque and plaz, new bytes) as the latest in the same release dir.
+/// Publishes 0.8.0 (wiki and plaz, new bytes) as the latest in the same release dir.
 fn publish_0_8(t: &Path) {
     release(
         &t.join("release"),
         "0.8.0",
-        &[("calque", CALQUE_8), ("plaz", PLAZ_8)],
+        &[("wiki", WIKI_8), ("plaz", PLAZ_8)],
     );
 }
 
@@ -47,7 +47,7 @@ fn status_lists_what_is_installed() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
+        &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     let out = kulman(&home, &base).output().unwrap();
@@ -72,8 +72,8 @@ fn status_lists_what_is_installed() {
         lines(&out),
         [
             first.as_str(),
-            "calque",
             "plaz",
+            "wiki",
             hint.as_str(),
             export.as_str(),
             "up to date"
@@ -117,12 +117,12 @@ fn status_takes_binaries_linked_into_path_as_on_path() {
         let _ = fs::remove_dir_all(&links);
         stdout(&out)
     };
-    assert!(!say(&["kulman", "calque", "plaz"]).contains("on PATH"));
+    assert!(!say(&["kulman", "wiki", "plaz"]).contains("on PATH"));
     // One module not linked, or kulman not linked: still said.
-    assert!(say(&["kulman", "calque"]).contains("is not on PATH"));
-    assert!(say(&["calque", "plaz"]).contains("is not on PATH"));
+    assert!(say(&["kulman", "wiki"]).contains("is not on PATH"));
+    assert!(say(&["wiki", "plaz"]).contains("is not on PATH"));
     // The first `plaz` on PATH is another program: still said.
-    let path = path_linking(&links, &bin, &["kulman", "calque"]);
+    let path = path_linking(&links, &bin, &["kulman", "wiki"]);
     fs::write(links.join("plaz"), "#!/bin/sh\n").unwrap();
     let out = kulman(&home, &base).env("PATH", path).output().unwrap();
     assert!(stdout(&out).contains("is not on PATH"), "{}", stdout(&out));
@@ -136,7 +136,7 @@ fn status_marks_a_listed_binary_that_is_missing() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out)[1..3],
-        ["calque", "plaz  (missing: run kulman update)"]
+        ["plaz  (missing: run kulman update)", "wiki"]
     );
 }
 
@@ -144,7 +144,7 @@ fn status_marks_a_listed_binary_that_is_missing() {
 fn status_announces_a_newer_release() {
     let (t, base, home) = installed();
     // 0.10.0 is newer than 0.7.0 only when the three parts are compared as integers.
-    release(&t.path().join("release"), "0.10.0", &[("calque", CALQUE)]);
+    release(&t.path().join("release"), "0.10.0", &[("wiki", WIKI)]);
     let out = kulman(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
@@ -216,17 +216,17 @@ fn update_moves_every_module() {
     assert_eq!(
         lines(&out),
         [
-            "updated calque 0.7.0 -> 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
+            "updated wiki 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["plaz", "wiki"]})
     );
-    assert_binary(&home, "calque", CALQUE_8);
+    assert_binary(&home, "wiki", WIKI_8);
     assert_binary(&home, "plaz", PLAZ_8);
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(
@@ -260,7 +260,7 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
     release(
         &home.with_file_name("release"),
         "0.9.0",
-        &[("calque", CALQUE_8)],
+        &[("wiki", WIKI_8)],
     );
     let out = kulman(&home, &base)
         .env("PATH", path_first(&dir))
@@ -271,7 +271,7 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
     assert_eq!(
         lines(&out),
         [
-            "updated calque 0.7.0 -> 0.9.0",
+            "updated wiki 0.7.0 -> 0.9.0",
             "updated kulman 0.7.0 -> 0.9.0",
             "removed plaz: not in release 0.9.0",
             "restart running agent sessions; they keep the old binaries until then"
@@ -279,7 +279,7 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.9.0", "modules": ["calque"]})
+        json!({"version": "0.9.0", "modules": ["wiki"]})
     );
     assert!(!home.join("bin/plaz").exists());
     assert!(fs::symlink_metadata(dir.join("plaz")).is_err());
@@ -292,7 +292,7 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
     release(
         &home.with_file_name("release"),
         "0.9.0",
-        &[("calque", CALQUE_8)],
+        &[("wiki", WIKI_8)],
     );
     fs::remove_file(home.join("bin/plaz")).unwrap();
     fs::create_dir(home.join("bin/plaz")).unwrap();
@@ -305,13 +305,13 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
     assert_eq!(
         lines(&out),
         [
-            "updated calque 0.7.0 -> 0.9.0",
+            "updated wiki 0.7.0 -> 0.9.0",
             "updated kulman 0.7.0 -> 0.9.0"
         ]
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.9.0", "modules": ["calque", "plaz"]})
+        json!({"version": "0.9.0", "modules": ["plaz", "wiki"]})
     );
     fs::remove_dir(home.join("bin/plaz")).unwrap();
     fs::write(home.join("bin/plaz"), PLAZ).unwrap();
@@ -323,14 +323,14 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
     assert_eq!(
         lines(&out),
         [
-            "repaired calque 0.9.0",
+            "repaired wiki 0.9.0",
             "repaired kulman 0.9.0",
             "removed plaz: not in release 0.9.0"
         ]
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.9.0", "modules": ["calque"]})
+        json!({"version": "0.9.0", "modules": ["wiki"]})
     );
     assert!(!home.join("bin/plaz").exists());
 }
@@ -339,18 +339,18 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
 fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     let t = tempfile::tempdir().unwrap();
     let rel = t.path().join("release");
-    let base = release(&rel, "0.7.0", &[("kalka", CALQUE), ("plaz", PLAZ)]);
+    let base = release(&rel, "0.7.0", &[("oldmod", WIKI), ("plaz", PLAZ)]);
     let home = t.path().join("home");
     let dir = local_bin(&home);
     fs::create_dir_all(&dir).unwrap();
     kulman(&home, &base)
         .env("PATH", path_first(&dir))
-        .args(["install", "--modules", "kalka,plaz"])
+        .args(["install", "--modules", "oldmod,plaz"])
         .assert()
         .success();
     publish_0_8(t.path());
     common::edit_manifest(&rel, "0.8.0", |m| {
-        m["modules"][0]["replaces"] = json!(["kalka"]);
+        m["modules"][0]["replaces"] = json!(["oldmod"]);
     });
     let out = kulman(&home, &base)
         .env("PATH", path_first(&dir))
@@ -361,24 +361,24 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     assert_eq!(
         lines(&out),
         [
-            "installed calque 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
+            "installed wiki 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
-            "removed kalka: renamed calque; run \"kulman setup --scope repo\" (or local) \
-             again in each project set up with kalka",
+            "removed oldmod: renamed wiki; run \"kulman setup --scope repo\" (or local) \
+             again in each project set up with oldmod",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["plaz", "wiki"]})
     );
-    assert_binary(&home, "calque", CALQUE_8);
-    assert!(!home.join("bin/kalka").exists());
-    assert!(fs::symlink_metadata(dir.join("kalka")).is_err());
+    assert_binary(&home, "wiki", WIKI_8);
+    assert!(!home.join("bin/oldmod").exists());
+    assert!(fs::symlink_metadata(dir.join("oldmod")).is_err());
     assert_eq!(
-        fs::read_link(dir.join("calque")).unwrap(),
-        home.join("bin/calque")
+        fs::read_link(dir.join("wiki")).unwrap(),
+        home.join("bin/wiki")
     );
     no_tmp_left(&home);
 }
@@ -402,8 +402,8 @@ fn update_when_current_says_up_to_date() {
     assert_eq!(
         lines(&out),
         [
-            "repaired calque 0.7.0",
             "repaired plaz 0.7.0",
+            "repaired wiki 0.7.0",
             "repaired kulman 0.7.0"
         ]
     );
@@ -416,8 +416,8 @@ fn update_when_current_says_up_to_date() {
     assert_eq!(
         lines(&out),
         [
-            "repaired calque 0.7.0",
             "repaired plaz 0.7.0",
+            "repaired wiki 0.7.0",
             "repaired kulman 0.7.0"
         ]
     );
@@ -428,8 +428,8 @@ fn update_when_current_says_up_to_date() {
 #[test]
 fn update_does_not_downgrade() {
     let t = tempfile::tempdir().unwrap();
-    let newer = release(&t.path().join("newer"), "0.10.0", &[("calque", CALQUE)]);
-    let older = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let newer = release(&t.path().join("newer"), "0.10.0", &[("wiki", WIKI)]);
+    let older = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     kulman(&home, &newer).arg("install").assert().success();
     let before = snapshot(t.path());
@@ -446,7 +446,7 @@ fn update_does_not_downgrade() {
 #[test]
 fn update_with_nothing_installed_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     let out = kulman(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
@@ -468,11 +468,11 @@ fn remove_modules_drops_only_those() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out), ["removed plaz"]);
     assert!(!home.join("bin/plaz").exists());
-    assert_binary(&home, "calque", CALQUE);
+    assert_binary(&home, "wiki", WIKI);
     assert_binary(&home, "kulman", KULMAN_BYTES);
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["calque"]})
+        json!({"version": "0.7.0", "modules": ["wiki"]})
     );
     no_tmp_left(&home);
 
@@ -486,9 +486,9 @@ fn remove_modules_drops_only_those() {
     assert_eq!(snapshot(t.path()), before);
 
     // A listed binary already missing counts as removed.
-    fs::remove_file(home.join("bin/calque")).unwrap();
+    fs::remove_file(home.join("bin/wiki")).unwrap();
     kulman(&home, &base)
-        .args(["remove", "--modules", "calque", "--yes"])
+        .args(["remove", "--modules", "wiki", "--yes"])
         .assert()
         .success();
     assert_eq!(state(&home), json!({"version": "0.7.0", "modules": []}));
@@ -508,10 +508,10 @@ fn remove_everything_leaves_foreign_files() {
     assert_eq!(
         lines(&out),
         [
-            "removed calque",
             "removed plaz",
+            "removed wiki",
             "removed kulman",
-            "projects set up with kulman still name \"calque\" in their agent configs: run \"kulman \
+            "projects set up with kulman still name \"wiki\" in their agent configs: run \"kulman \
              setup --scope repo --remove\" (or local) in each first"
         ]
     );
@@ -528,10 +528,10 @@ fn remove_everything_leaves_foreign_files() {
 }
 
 #[test]
-fn remove_without_calque_says_nothing_of_projects() {
+fn remove_without_wiki_says_nothing_of_projects() {
     let (_t, base, home) = installed();
     kulman(&home, &base)
-        .args(["remove", "--modules", "calque", "--yes"])
+        .args(["remove", "--modules", "wiki", "--yes"])
         .assert()
         .success();
     let out = kulman(&home, &base)
@@ -567,7 +567,7 @@ fn remove_everything_removes_an_empty_home() {
     // A remove killed after state.json, before `.lock`: the next one finishes the job.
     kulman(&home, &base).arg("install").assert().success();
     for name in [
-        "bin/calque",
+        "bin/wiki",
         "bin/plaz",
         "bin/kulman",
         "manifest.json",
@@ -584,13 +584,13 @@ fn remove_everything_removes_an_empty_home() {
     assert!(!home.exists());
 }
 
-/// A home at 0.7.0 whose manifest says plaz requires calque.
+/// A home at 0.7.0 whose manifest says plaz requires wiki.
 fn installed_with_requires() -> (tempfile::TempDir, String, std::path::PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("release");
-    let base = release(&dir, "0.7.0", &[("calque", CALQUE), ("plaz", PLAZ)]);
+    let base = release(&dir, "0.7.0", &[("wiki", WIKI), ("plaz", PLAZ)]);
     common::edit_manifest(&dir, "0.7.0", |m| {
-        m["modules"][1]["requires"] = json!(["calque"]);
+        m["modules"][1]["requires"] = json!(["wiki"]);
     });
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
@@ -602,11 +602,11 @@ fn remove_refuses_a_module_another_installed_one_requires() {
     let (t, base, home) = installed_with_requires();
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "calque", "--yes"])
+        .args(["remove", "--modules", "wiki", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(stderr(&out).contains("kulman: cannot remove calque: plaz requires it\n"));
+    assert!(stderr(&out).contains("kulman: cannot remove wiki: plaz requires it\n"));
     assert_eq!(snapshot(t.path()), before);
 }
 
@@ -614,7 +614,7 @@ fn remove_refuses_a_module_another_installed_one_requires() {
 fn remove_a_module_together_with_the_one_that_requires_it() {
     let (_t, base, home) = installed_with_requires();
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "calque,plaz", "--yes"])
+        .args(["remove", "--modules", "wiki,plaz", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -626,7 +626,7 @@ fn remove_kulman_by_name_is_usage() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
     let out = kulman(&home, &base)
-        .args(["remove", "--modules", "calque,kulman", "--yes"])
+        .args(["remove", "--modules", "wiki,kulman", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
@@ -651,7 +651,7 @@ fn remove_kulman_by_name_is_usage() {
         .success();
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["calque"]})
+        json!({"version": "0.7.0", "modules": ["wiki"]})
     );
 }
 
@@ -661,7 +661,7 @@ fn two_installs_at_once_keep_both_modules() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
+        &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     let user = t.path().join("user-home");
@@ -678,16 +678,16 @@ fn two_installs_at_once_keep_both_modules() {
             .spawn()
             .unwrap()
     };
-    let children = [start("calque"), start("plaz")];
+    let children = [start("wiki"), start("plaz")];
     for child in children {
         let out = child.wait_with_output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
     }
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["calque", "plaz"]})
+        json!({"version": "0.7.0", "modules": ["plaz", "wiki"]})
     );
-    assert_binary(&home, "calque", CALQUE);
+    assert_binary(&home, "wiki", WIKI);
     assert_binary(&home, "plaz", PLAZ);
     assert_binary(&home, "kulman", KULMAN_BYTES);
 }
@@ -727,7 +727,7 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
     let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "calque,plaz", "--yes"],
+        &["remove", "--modules", "wiki,plaz", "--yes"],
     ] {
         let out = kulman(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
@@ -757,8 +757,8 @@ fn remove_refuses_a_manifest_that_is_not_a_file_before_deleting_any_binary() {
 #[test]
 fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
     for bad in [
-        r#"{"version":"0.7.0","modules":["calque","kulman"]}"#,
-        r#"{"version":"0.7.0","modules":["calque","plaz","calque"]}"#,
+        r#"{"version":"0.7.0","modules":["wiki","kulman"]}"#,
+        r#"{"version":"0.7.0","modules":["wiki","plaz","wiki"]}"#,
         r#"{"version":"0.7.0","modules":["../../victim"]}"#,
         r#"{"version":"#,
     ] {
@@ -787,11 +787,11 @@ fn update_adds_what_an_installed_module_now_requires() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
+        &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     kulman(&home, &base)
-        .args(["install", "--modules", "calque"])
+        .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     publish_0_8(t.path());
@@ -805,17 +805,17 @@ fn update_adds_what_an_installed_module_now_requires() {
     assert_eq!(
         lines(&out),
         [
-            "updated calque 0.7.0 -> 0.8.0",
             "installed plaz 0.8.0",
+            "updated wiki 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
     assert_eq!(
         state(&home),
-        json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
+        json!({"version": "0.8.0", "modules": ["plaz", "wiki"]})
     );
-    assert_binary(&home, "calque", CALQUE_8);
+    assert_binary(&home, "wiki", WIKI_8);
     assert_binary(&home, "plaz", PLAZ_8);
 }
 
@@ -823,12 +823,12 @@ fn update_adds_what_an_installed_module_now_requires() {
 fn remove_on_a_home_with_no_state_deletes_no_file() {
     for args in [
         &["remove", "--yes"][..],
-        &["remove", "--modules", "calque", "--yes"],
+        &["remove", "--modules", "wiki", "--yes"],
     ] {
         let (t, base, home) = installed();
         // Not kulman's by any record: no state.json.
         fs::remove_file(home.join("state.json")).unwrap();
-        fs::remove_file(home.join("bin/calque")).unwrap();
+        fs::remove_file(home.join("bin/wiki")).unwrap();
         fs::remove_file(home.join("bin/plaz")).unwrap();
         fs::write(home.join("notes.txt"), "mine").unwrap();
         let mut before = snapshot(&home);
@@ -884,7 +884,7 @@ fn update_when_current_does_not_need_every_module_in_the_release() {
 #[test]
 fn remove_without_state_keeps_stale_temp_entries() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     fs::create_dir_all(home.join(".tmp-x")).unwrap();
     fs::write(home.join(".lock"), "").unwrap();
@@ -923,7 +923,7 @@ fn remove_without_a_terminal_needs_yes() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["calque"]})
+        json!({"version": "0.7.0", "modules": ["wiki"]})
     );
     assert!(!home.join("bin/plaz").exists());
 }
@@ -931,7 +931,7 @@ fn remove_without_a_terminal_needs_yes() {
 #[test]
 fn remove_without_a_terminal_on_a_missing_home_is_usage_and_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     let mut cmd = kulman(&home, &base);
     // All but the user's home, where an emulator (Rosetta) may keep a cache of its own.
@@ -993,7 +993,7 @@ fn an_unreadable_state_is_named_with_its_cause_by_every_command() {
 #[test]
 fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
@@ -1039,14 +1039,14 @@ fn status_finds_bin_on_path_through_a_symlink() {
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
 }
 
-/// A temp root with `release/` at 0.7.0 and `home` holding calque and plaz, linked from
+/// A temp root with `release/` at 0.7.0 and `home` holding wiki and plaz, linked from
 /// `$HOME/.local/bin` (returned last) except where `foreign` names a file put there first.
 fn installed_linked(foreign: &[&str]) -> (tempfile::TempDir, String, PathBuf, PathBuf) {
     let t = tempfile::tempdir().unwrap();
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", CALQUE), ("plaz", PLAZ)],
+        &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
     let dir = local_bin(&home);
@@ -1074,7 +1074,7 @@ fn remove_modules_deletes_only_their_links() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
     assert!(fs::symlink_metadata(dir.join("plaz")).is_err());
-    for name in ["calque", "kulman"] {
+    for name in ["wiki", "kulman"] {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)
@@ -1084,7 +1084,7 @@ fn remove_modules_deletes_only_their_links() {
 
 #[test]
 fn remove_everything_deletes_every_link_of_its_own() {
-    let (_t, base, home, dir) = installed_linked(&["calque"]);
+    let (_t, base, home, dir) = installed_linked(&["wiki"]);
     let out = kulman(&home, &base)
         .args(["remove", "--yes"])
         .output()
@@ -1092,8 +1092,8 @@ fn remove_everything_deletes_every_link_of_its_own() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
     let left: Vec<_> = snapshot(&dir).into_keys().collect();
-    assert_eq!(left, [Path::new("calque")]);
-    assert_eq!(fs::read(dir.join("calque")).unwrap(), b"mine");
+    assert_eq!(left, [Path::new("wiki")]);
+    assert_eq!(fs::read(dir.join("wiki")).unwrap(), b"mine");
 }
 
 #[test]
@@ -1101,7 +1101,7 @@ fn update_names_only_the_link_it_made() {
     let (_t, base, home, dir) = installed_linked(&[]);
     fs::remove_file(dir.join("plaz")).unwrap();
     // A listed binary missing: the update repairs it, so it commits.
-    fs::remove_file(home.join("bin/calque")).unwrap();
+    fs::remove_file(home.join("bin/wiki")).unwrap();
     let out = kulman(&home, &base)
         .env("PATH", path_first(&dir))
         .args(["update", "--yes"])
@@ -1110,7 +1110,7 @@ fn update_names_only_the_link_it_made() {
     assert!(out.status.success(), "{}", stderr(&out));
     let linked = format!("kulman: linked plaz into {}", dir.display());
     assert_eq!(stderr(&out).lines().last(), Some(linked.as_str()));
-    for name in ["calque", "plaz", "kulman"] {
+    for name in ["wiki", "plaz", "kulman"] {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)

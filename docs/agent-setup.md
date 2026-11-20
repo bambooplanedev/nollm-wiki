@@ -12,7 +12,7 @@ Run `kulman --version`. If the shell cannot find it, try `~/.kulman-home/bin/kul
 **Missing.** Tell the user you will run the release installer: it downloads the release, checks
 its SHA-256 and, when `minisign` is installed, its signature, and installs the `kulman` installer
 into `~/.kulman-home` in their home folder, with no sudo. Then `kulman install --yes` installs the
-modules `calque` (project wiki, search, MCP server) and `plaz` (decision charts). After they
+modules `wiki` (project wiki, search, MCP server) and `plaz` (decision charts). After they
 agree, run:
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
@@ -23,7 +23,7 @@ not, it prints `install.sh: signature not checked (minisign not found); kulman c
 install and update` (or `... not checked: local release tree`); tell the user that. Set `Installed:` to the version `kulman --version` now prints.
 
 **Installed.** Run `kulman` (no arguments). If it prints `nothing installed in <home>; run kulman
-install`, kulman is there but no modules are: say you will install `calque` and `plaz`, and after
+install`, kulman is there but no modules are: say you will install `wiki` and `plaz`, and after
 the user agrees run `kulman install --yes`. Otherwise the first line is `kulman <installed> in
 <home>`. The last line is `newer release: <newest> (kulman update)`, `up to date`, or `could not
 check for a newer release (...)`; in that case show the line to the user and do not update. If a
@@ -43,7 +43,7 @@ navigation block in `AGENTS.md` for Codex, `.pi/` and `.agents/skills/` for pi; 
 keep `.kulman/` out of git. Two scopes: `repo` writes the files for the whole team to commit and
 puts the ignore line in `.gitignore`; `local` is for this checkout only, with the ignore lines in
 `.git/info/exclude` (for Claude Code the server goes in Claude's own local config). The prompt hook
-(`.claude/settings.local.json` or `.claude/settings.json`, `.pi/extensions/calque-hint/`) is written
+(`.claude/settings.local.json` or `.claude/settings.json`, `.pi/extensions/wiki-hint/`) is written
 only with `--hook`, and a run without it removes one an earlier setup wrote.
 
 After they answer, in the project root run:
@@ -60,7 +60,7 @@ Show the user every hint the commands printed and apply each only after they say
 
 - `<bin> is not on PATH; to type kulman in a terminal, add it:` followed by an indented
   `export PATH=...` line: optional, a convenience for typing `kulman` and the modules in a
-  terminal. The agents find calque without PATH. If the user wants it, they add the line to their
+  terminal. The agents find `wiki` without PATH. If the user wants it, they add the line to their
   shell profile themselves; show it, do not edit the profile. It is not a "Next step for me"
   item unless the user asks for it.
 - `kulman: linked <names> into <dir>`: nothing to do.
@@ -68,12 +68,12 @@ Show the user every hint the commands printed and apply each only after they say
   file.
 - `warning: <file> is ignored by git; teammates will not get it`: tell the user; do not change
   their ignore rules unless they say yes.
-- `warning: the agents find calque through KULMAN_HOME; set it in their environment`: tell the
+- `warning: the agents find wiki through KULMAN_HOME; set it in their environment`: tell the
   user; nothing is edited for them.
-- `skipped AGENTS.md calque navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md from
+- `skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md from
   pi; ...`: the rename it names, if the user wants it.
 - `Codex loads the server only in a project it trusts: ...`: the trust it names.
-- `Cursor: ... cursor-agent mcp enable calque`: run it.
+- `Cursor: ... cursor-agent mcp enable wiki`: run it.
 
 ## 4. Report, then restart
 
@@ -87,7 +87,7 @@ One line each:
     Installed: <version, or "already there">
     Updated: <old -> new, or "no">
     Agents: <the agents set up>
-    Verified: pending — after the restart ask me to search the project with calque
+    Verified: pending — after the restart ask me to search the project with wiki
     Signature: <the installer's own line, `install.sh: signature checked` or its "not checked"
       line; "no installer run" if it did not run; never inferred>
     Next step for me: <restart the agent; plus any hint above the user asked to act on>
@@ -96,7 +96,7 @@ If a step fails, stop and show the exact output.
 
 ## 5. Check, if the user asks after the restart
 
-Call the `search` tool of the `calque` server (in Claude Code `mcp__calque__search`) with any word
+Call the `search` tool of the `wiki` server (in Claude Code `mcp__wiki__search`) with any word
 from the project. If the tool is not there, say so.
 
 ## Do not

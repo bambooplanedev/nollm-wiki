@@ -15,19 +15,19 @@ const LOGS_THEN_FAILS: &[u8] =
 /// An empty log: no module ran.
 const NONE: [&str; 0] = [];
 
-/// A temp root with `release/` (calque and plaz), `home` holding `modules`, and `project/`.
+/// A temp root with `release/` (wiki and plaz), `home` holding `modules`, and `project/`.
 struct Fixture {
     t: tempfile::TempDir,
     base: String,
     home: PathBuf,
 }
 
-fn installed(calque: &[u8], modules: &str) -> Fixture {
+fn installed(wiki: &[u8], modules: &str) -> Fixture {
     let t = tempfile::tempdir().unwrap();
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", calque), ("plaz", LOGS)],
+        &[("wiki", wiki), ("plaz", LOGS)],
     );
     let home = t.path().join("home");
     kulman(&home, &base)
@@ -69,19 +69,19 @@ fn usage(out: &std::process::Output, expect: &str) {
 
 #[test]
 fn setup_passes_the_choices_to_each_module() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let out = f.setup(&["--agent", "claude", "--scope", "repo", "--no-memory"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         f.logged(),
         [
-            "calque setup --agent claude --scope repo --no-memory",
+            "wiki setup --agent claude --scope repo --no-memory",
             "plaz setup --scope repo"
         ]
     );
     let out = f.setup(&[
         "--modules",
-        "calque",
+        "wiki",
         "--scope",
         "local",
         "--no-hook",
@@ -90,14 +90,11 @@ fn setup_passes_the_choices_to_each_module() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         f.logged()[2..],
-        ["calque setup --scope local --no-hook --memory"]
+        ["wiki setup --scope local --no-hook --memory"]
     );
-    let out = f.setup(&["--modules", "calque", "--scope", "repo", "--hook"]);
+    let out = f.setup(&["--modules", "wiki", "--scope", "repo", "--hook"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(
-        f.logged()[3..],
-        ["calque setup --scope repo --hook --memory"]
-    );
+    assert_eq!(f.logged()[3..], ["wiki setup --scope repo --hook --memory"]);
     usage(
         &f.setup(&["--scope", "repo", "--hook", "--no-hook"]),
         "cannot be used with",
@@ -106,13 +103,13 @@ fn setup_passes_the_choices_to_each_module() {
 
 #[test]
 fn setup_defaults_to_every_installed_module_with_memory() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let out = f.setup(&["--scope", "local"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         f.logged(),
         [
-            "calque setup --scope local --memory",
+            "wiki setup --scope local --memory",
             "plaz setup --scope local"
         ]
     );
@@ -125,28 +122,28 @@ fn setup_defaults_to_every_installed_module_with_memory() {
 
 #[test]
 fn setup_takes_the_memory_default_from_the_manifest() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let path = f.home.join("manifest.json");
     let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     manifest["modules"][0]["options"] =
         json!([{"name": "memory", "summary": "agent memory", "default": false}]);
     fs::write(&path, manifest.to_string()).unwrap();
-    let out = f.setup(&["--modules", "calque", "--scope", "repo"]);
+    let out = f.setup(&["--modules", "wiki", "--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
-    let out = f.setup(&["--modules", "calque", "--scope", "repo", "--memory"]);
+    let out = f.setup(&["--modules", "wiki", "--scope", "repo", "--memory"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         f.logged(),
         [
-            "calque setup --scope repo --no-memory",
-            "calque setup --scope repo --memory"
+            "wiki setup --scope repo --no-memory",
+            "wiki setup --scope repo --memory"
         ]
     );
 }
 
 #[test]
 fn setup_without_scope_is_usage() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     for args in [&[][..], &["--yes"], &["--modules", "plaz"]] {
         usage(
             &f.setup(args),
@@ -157,9 +154,9 @@ fn setup_without_scope_is_usage() {
 }
 
 #[test]
-fn setup_remove_without_scope_is_usage_when_calque_is_chosen() {
-    let f = installed(LOGS, "calque,plaz");
-    for args in [&["--remove"][..], &["--remove", "--modules", "calque"]] {
+fn setup_remove_without_scope_is_usage_when_wiki_is_chosen() {
+    let f = installed(LOGS, "wiki,plaz");
+    for args in [&["--remove"][..], &["--remove", "--modules", "wiki"]] {
         usage(
             &f.setup(args),
             "kulman: --scope is required (repo or local)",
@@ -170,7 +167,7 @@ fn setup_remove_without_scope_is_usage_when_calque_is_chosen() {
 
 #[test]
 fn setup_remove_of_plaz_alone_needs_no_scope() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let out = f.setup(&["--remove", "--modules", "plaz"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(f.logged(), ["plaz setup --remove"]);
@@ -178,13 +175,13 @@ fn setup_remove_of_plaz_alone_needs_no_scope() {
 
 #[test]
 fn setup_remove_reaches_every_module() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let out = f.setup(&["--remove", "--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         f.logged(),
         [
-            "calque setup --scope repo --memory --remove",
+            "wiki setup --scope repo --memory --remove",
             "plaz setup --scope repo --remove"
         ]
     );
@@ -193,9 +190,9 @@ fn setup_remove_reaches_every_module() {
 #[test]
 fn setup_of_a_module_not_installed_says_how() {
     let f = installed(LOGS, "plaz");
-    let out = f.setup(&["--modules", "calque", "--scope", "repo"]);
+    let out = f.setup(&["--modules", "wiki", "--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = "kulman: calque is not installed; run kulman install --modules calque";
+    let expect = "kulman: wiki is not installed; run kulman install --modules wiki";
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
     usage(
         &f.setup(&["--modules", "kulman", "--scope", "repo"]),
@@ -205,7 +202,7 @@ fn setup_of_a_module_not_installed_says_how() {
     let out = f.setup(&["--modules", "nope", "--scope", "repo"]);
     usage(
         &out,
-        "kulman: --modules: unknown module \"nope\" (known: calque, plaz)",
+        "kulman: --modules: unknown module \"nope\" (known: wiki, plaz)",
     );
     assert!(!stderr(&out).contains("install"), "{}", stderr(&out));
     usage(
@@ -246,7 +243,7 @@ fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
 #[test]
 fn setup_with_nothing_installed_says_so() {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", LOGS)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", LOGS)]);
     let home = t.path().join("home");
     let out = kulman(&home, &base)
         .args(["setup", "--scope", "repo"])
@@ -263,7 +260,7 @@ fn setup_with_nothing_installed_says_so() {
 
 #[test]
 fn setup_with_a_missing_binary_says_update() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let plaz = f.home.join("bin/plaz");
     fs::remove_file(&plaz).unwrap();
     let out = f.setup(&["--scope", "repo"]);
@@ -277,13 +274,13 @@ fn setup_with_a_missing_binary_says_update() {
 }
 
 #[test]
-fn setup_memory_without_calque_is_usage() {
-    let f = installed(LOGS, "calque,plaz");
+fn setup_memory_without_wiki_is_usage() {
+    let f = installed(LOGS, "wiki,plaz");
     for flag in ["--memory", "--no-memory", "--hook", "--no-hook"] {
         let out = f.setup(&["--modules", "plaz", "--scope", "repo", flag]);
         usage(
             &out,
-            &format!("kulman: {flag} applies to calque, which is not chosen"),
+            &format!("kulman: {flag} applies to wiki, which is not chosen"),
         );
     }
     usage(
@@ -293,11 +290,11 @@ fn setup_memory_without_calque_is_usage() {
     assert_eq!(f.logged(), NONE);
 }
 
-/// calque, started from the kulman home, starts itself from there in the agent configs; the
+/// wiki, started from the kulman home, starts itself from there in the agent configs; the
 /// terminal's `PATH` is no matter of setup's.
 #[test]
 fn setup_says_nothing_about_path_when_bin_is_not_on_it() {
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
@@ -307,7 +304,7 @@ fn setup_says_nothing_about_path_when_bin_is_not_on_it() {
 #[test]
 fn setup_gives_the_modules_bin_on_their_path() {
     let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$KULMAN_TEST_LOG\"\n";
-    let f = installed(logs_path, "calque");
+    let f = installed(logs_path, "wiki");
     let out = f.setup(&["--scope", "repo"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let own = std::env::var_os("PATH").unwrap_or_default();
@@ -320,10 +317,10 @@ fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
     // `bin/` cannot be put on a PATH (`:` separates its entries): the modules get the PATH as it is.
     let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$KULMAN_TEST_LOG\"\n";
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", logs_path)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", logs_path)]);
     let home = t.path().join("kulman:home");
     kulman(&home, &base)
-        .args(["install", "--modules", "calque"])
+        .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     let project = t.path().join("project");
@@ -346,7 +343,7 @@ fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
 #[test]
 fn setup_without_asking_gives_the_modules_no_input() {
     let reads: &[u8] = b"#!/bin/sh\nread -r line; echo \"read [$line]\" >> \"$KULMAN_TEST_LOG\"\n";
-    let f = installed(reads, "calque");
+    let f = installed(reads, "wiki");
     let out = kulman(&f.home, &f.base)
         .args(["setup", "--scope", "repo", "--yes"])
         .current_dir(f.t.path().join("project"))
@@ -359,13 +356,10 @@ fn setup_without_asking_gives_the_modules_no_input() {
 }
 
 #[test]
-fn setup_agent_without_calque_is_usage() {
+fn setup_agent_without_wiki_is_usage() {
     let f = installed(LOGS, "plaz");
     let out = f.setup(&["--scope", "repo", "--agent", "claude"]);
-    usage(
-        &out,
-        "kulman: --agent applies to calque, which is not chosen",
-    );
+    usage(&out, "kulman: --agent applies to wiki, which is not chosen");
     assert_eq!(f.logged(), NONE);
 }
 
@@ -384,34 +378,34 @@ fn failed(out: &std::process::Output, failures: &[(&str, &str)]) {
 
 #[test]
 fn setup_runs_every_module_even_when_one_fails() {
-    let f = installed(LOGS_THEN_FAILS, "calque,plaz");
+    let f = installed(LOGS_THEN_FAILS, "wiki,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     assert_eq!(
         f.logged(),
         [
-            "calque setup --scope repo --memory",
+            "wiki setup --scope repo --memory",
             "plaz setup --scope repo"
         ]
     );
-    failed(&out, &[("calque", "exit 3")]);
+    failed(&out, &[("wiki", "exit 3")]);
 }
 
 #[test]
 fn setup_remove_runs_every_module_even_when_one_fails() {
-    let f = installed(LOGS_THEN_FAILS, "calque,plaz");
+    let f = installed(LOGS_THEN_FAILS, "wiki,plaz");
     // plaz fails too: the status is the first failure's.
     fs::write(f.home.join("bin/plaz"), b"#!/bin/sh\nexit 4\n").unwrap();
     let out = f.setup(&["--remove", "--scope", "repo"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
-    assert_eq!(f.logged(), ["calque setup --scope repo --memory --remove"]);
-    failed(&out, &[("calque", "exit 3"), ("plaz", "exit 4")]);
+    assert_eq!(f.logged(), ["wiki setup --scope repo --memory --remove"]);
+    failed(&out, &[("wiki", "exit 3"), ("plaz", "exit 4")]);
 }
 
 #[test]
 fn setup_runs_no_module_when_one_is_not_executable() {
     use std::os::unix::fs::PermissionsExt;
-    let f = installed(LOGS, "calque,plaz");
+    let f = installed(LOGS, "wiki,plaz");
     let plaz = f.home.join("bin/plaz");
     fs::set_permissions(&plaz, fs::Permissions::from_mode(0o644)).unwrap();
     let out = f.setup(&["--scope", "repo"]);
@@ -437,9 +431,9 @@ fn setup_with_no_module_installed_says_so() {
 #[test]
 fn setup_of_a_module_killed_by_a_signal_exits_1() {
     let killed: &[u8] = b"#!/bin/sh\nkill -9 $$\n";
-    let f = installed(killed, "calque,plaz");
+    let f = installed(killed, "wiki,plaz");
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    failed(&out, &[("calque", "signal 9")]);
+    failed(&out, &[("wiki", "signal 9")]);
     assert_eq!(f.logged(), ["plaz setup --scope repo"]);
 }

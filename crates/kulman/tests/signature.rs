@@ -7,7 +7,7 @@ use std::path::Path;
 
 use common::{kulman, release, snapshot, stderr, stdout, version_dir};
 
-const CALQUE: &[u8] = b"#!/bin/sh\necho calque\n";
+const WIKI: &[u8] = b"#!/bin/sh\necho wiki\n";
 const UNCHECKED: &str = "signature not checked: local release tree";
 const REFUSED: &str = "kulman: manifest.json: signature does not verify\nnothing changed\n";
 
@@ -32,7 +32,7 @@ fn sign(dir: &Path, version: &str, sig: &[u8]) {
 
 fn tree() -> (tempfile::TempDir, String) {
     let t = tempfile::tempdir().unwrap();
-    let base = release(&t.path().join("release"), "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     (t, base)
 }
 
@@ -49,7 +49,7 @@ fn an_unsigned_local_tree_installs_and_says_so_once() {
     assert_eq!(stderr(&out), format!("{UNCHECKED}\n"));
     assert_eq!(count(&stdout(&out)), 0, "{}", stdout(&out));
     // Installed: the latest is checked, then the installed version's manifest is read.
-    release(&t.path().join("release"), "0.8.0", &[("calque", CALQUE)]);
+    release(&t.path().join("release"), "0.8.0", &[("wiki", WIKI)]);
     let out = kulman(&home, &base).arg("install").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(count(&stderr(&out)), 1, "{}", stderr(&out));
@@ -79,7 +79,7 @@ fn a_bad_signature_of_the_installed_version_refuses_install() {
     kulman(&home, &base).arg("install").assert().success();
     let dir = t.path().join("release");
     // The latest (0.8.0) is unsigned and newer; the installed 0.7.0's manifest is badly signed.
-    release(&dir, "0.8.0", &[("calque", CALQUE)]);
+    release(&dir, "0.8.0", &[("wiki", WIKI)]);
     fs::write(
         version_dir(&dir, "0.7.0").join("manifest.json.minisig"),
         TEST_SIGNED,
@@ -106,7 +106,7 @@ fn a_bad_latest_signature_is_only_said_by_an_install_that_has_a_version() {
     assert_eq!(
         stdout(&out),
         format!(
-            "already installed: calque (0.7.0)\n\
+            "already installed: wiki (0.7.0)\n\
              could not check for a newer release ({base}: manifest.json: signature does not verify)\n"
         )
     );
@@ -118,7 +118,7 @@ fn a_bad_signature_refuses_update_and_changes_nothing() {
     let home = t.path().join("home");
     kulman(&home, &base).arg("install").assert().success();
     let dir = t.path().join("release");
-    release(&dir, "0.8.0", &[("calque", CALQUE)]);
+    release(&dir, "0.8.0", &[("wiki", WIKI)]);
     sign(&dir, "0.8.0", TEST_SIGNED);
     let before = snapshot(t.path());
     let out = kulman(&home, &base).arg("update").output().unwrap();

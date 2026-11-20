@@ -13,7 +13,7 @@ const SCRIPT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../scripts/release-assemble.sh"
 );
-const BINARIES: [&str; 3] = ["calque", "plaz", "kulman"];
+const BINARIES: [&str; 3] = ["wiki", "plaz", "kulman"];
 const VERSION: &str = "0.7.0";
 
 /// This machine's target, as `kulman` and `install.sh` pick it.
@@ -89,7 +89,7 @@ fn the_assembled_manifest_is_one_kulman_reads() {
     }
     assert_eq!(
         state(&home),
-        json!({"version": VERSION, "modules": ["calque", "plaz"]})
+        json!({"version": VERSION, "modules": ["plaz", "wiki"]})
     );
     let manifest = fs::read(dir.join("manifest.json")).unwrap();
     let m: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
@@ -234,13 +234,13 @@ fn a_missing_archive_fails_the_assembly() {
 
 #[test]
 fn an_archive_with_the_wrong_member_fails_the_assembly() {
-    let members: [&[&str]; 3] = [&["bin/calque"], &["calque", "other"], &["./calque"]];
+    let members: [&[&str]; 3] = [&["bin/wiki"], &["wiki", "other"], &["./wiki"]];
     for members in members {
         let (t, dir) = assets();
-        pack_one(&dir, "calque", HERE, members);
+        pack_one(&dir, "wiki", HERE, members);
         let tree = t.path().join("tree");
         let out = assemble(&[Path::new(VERSION), &dir, Path::new("--tree"), &tree]);
-        fails(&out, &file("calque", HERE));
+        fails(&out, &file("wiki", HERE));
         assert!(!dir.join("manifest.json").exists(), "{members:?}");
         assert!(!tree.exists(), "{members:?}");
     }

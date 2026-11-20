@@ -17,7 +17,7 @@ pub const KULMAN_BYTES: &[u8] = b"#!/bin/sh\necho kulman\n";
 
 /// Lays out `latest/download/manifest.json` and `download/v<version>/` (manifest, one
 /// `.tar.gz` per module and for kulman, `SHA256SUMS`) under `dir`; returns the `file://` base.
-/// calque and plaz are `default: true`, any other module `default: false`.
+/// wiki and plaz are `default: true`, any other module `default: false`.
 pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
     let vdir = version_dir(dir, version);
     fs::create_dir_all(&vdir).unwrap();
@@ -42,7 +42,7 @@ pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
             json!({
                 "name": name,
                 "summary": format!("the {name} module"),
-                "default": *name == "calque" || *name == "plaz",
+                "default": *name == "wiki" || *name == "plaz",
                 "requires": [],
                 "options": [],
                 "archives": entry(name, bytes),

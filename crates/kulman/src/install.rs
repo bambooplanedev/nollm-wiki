@@ -378,10 +378,10 @@ mod tests {
             update_question(2, "0.8.0", &[]),
             "Update 2 module(s) to 0.8.0?"
         );
-        let gone = ["kalka".to_string(), "old".to_string()];
+        let gone = ["oldmod".to_string(), "old".to_string()];
         assert_eq!(
             update_question(1, "0.8.0", &gone),
-            "Update 1 module(s) to 0.8.0; removes kalka, old?"
+            "Update 1 module(s) to 0.8.0; removes oldmod, old?"
         );
     }
 }

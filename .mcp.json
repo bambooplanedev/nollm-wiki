@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "calque": {
-      "command": "./target/release/calque",
+    "wiki": {
+      "command": "./target/release/wiki",
       "args": ["serve", "--source", "."]
     }
   }

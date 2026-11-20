@@ -1,0 +1,543 @@
+# Known gaps
+
+Places where the wiki is known to fall short: wrong or missing results,
+behaviour that surprises, and what agents actually do with it. Deliberate
+scope cuts (no embeddings, no LLM, three formats, query-only MCP) are in the
+README under [Limitations](../README.md#limitations); the
+compiler's internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Numbers below come from field runs on a 2,746-page C++/Rust/Python project
+with a 12B model (66K context) in pi, unless a line says otherwise. Two runs
+per question is noise-level: treat single results as anecdotes.
+
+## Agents and the wiki
+
+- **Small models skip or misread the skill.** pi lists the skill with its
+  correct location, but the model often reads
+  `~/.pi/agent/skills/<name>/SKILL.md` by analogy with the user's other
+  skills, gets ENOENT, and falls back to `find`/`grep`. It also picks a
+  competing skill (`systematic-debugging`) for a "where is" question.
+  Anything the model must know only from the skill is at risk.
+- **Whole-file reads after a hit (pi, 12B).** `search` returns `path:start-end`, yet
+  the model reads the whole file (about 51 KB per read, 3–6 reads a run)
+  and re-derives end lines with `grep`. This, not the wiki call, is what
+  runs out the 300 s cap and the context. Haiku in Claude Code read the given
+  range in 57 of 58 reads.
+- **`neighbors` goes unused.** Zero calls in 27 unprompted runs, including
+  questions that ask for a call path. `symbol` is named only in the skill,
+  the server instructions and the tool description; see the previous point.
+  Off by default since 0.6.7 (`--tools` brings it back).
+- **The prompt hint fires on chat, so setup wires it only with `--hook`.**
+  Measured offline on 2026-11-17 over 1,514 Mac prompts and 136 bench
+  prompts from two writers: the hint fired on 66.8% and 48.5% of them. The
+  two gates it now always applies (two prompt words the project has; still
+  named without function words) cut that to 35.8% and 26.5% with no keyed
+  eval line lost, but on chat-like prompts (a lexical proxy) it still
+  fires on 37.1% (Mac) and 26.6% (bench), about a third. Most of the Mac
+  residue is Ukrainian content words matching inside the one page per tree
+  that holds Ukrainian text; most of the bench residue is English
+  orchestrator chat whose ordinary words hit code by substring ("Try
+  again", "why is the scan taking so long?"). No lexical gate measured so
+  far separates these from short code questions, and short Ukrainian code
+  questions are in no keyed set, so the gates' harm there is unmeasured.
+  A question whose one project word is an identifier written as code (with
+  `_`, `::` or a lower-to-upper case change: `where is hint_lines`,
+  `де prompt_from_hook_json`) still fires. Known harm: one whose only
+  project word is a plain dictionary word (`where is the parser`) or a
+  number (`глянь 46`) is silent; counting digits as code let 12 chat
+  replies of 1,650 prompts fire and no code question (2026-11-18). The gates are code-only: the agent-memory line
+  still follows the memory gate alone, so a prompt of function words can
+  show a note with no code lines. Applying the gates to it lost 17 of 56
+  keyed memory queries (shop 20 → 12 of 26, bigcpp 29 → 20 of 30,
+  2026-11-18), since its words often occur only in notes.
+  A setup run without `--hook` removes a hook an earlier setup wrote; the
+  choice is not remembered, so an opted-in project needs `--hook` on every
+  setup run.
+- **The hook trades tools for hints.** With the prompt hook the agent
+  reads the injected lines and almost never calls a tool, so a wrong hint
+  line is not corrected by a search. Measured 2026-10-28 with
+  qwen3.8-27b and deepseek-v4.1-flash through OpenRouter:
+  - On question tasks over three fixture repos it did not lower
+    correctness and cut lines read.
+  - On edit tasks with look-alikes next to the target it did not
+    significantly lower correctness either (PASS 55/60 with the hook,
+    60/60 without; p 1.0 and 0.11 per model). The hint's first line was a
+    look-alike in 5 of 6 tasks, and the agent read that file too: one
+    extra file read where the look-alike sits in another file.
+  - The agent reads every candidate file of the hint in its first turn.
+    Neither a doc on each hint line nor a header that says "read the one
+    that fits" stopped it from reading a same-named twin.
+- **The hook cost grew with the prompt, and few subagents use the wiki.**
+  On the bench project (3,304 pages) `wiki hint` took about 5 ms per
+  prompt word, 4.7 s on a 1,246-word subagent hand-back, because it
+  scanned every page body once per word; it now takes 0.16-0.45 s flat,
+  and harness turns and one-word replies are silent. On that project 5 of
+  28 briefed subagents called the wiki: briefs already carry a median of
+  22 file paths, instructions in CLAUDE.md, the brief or memory did not
+  change tool choice, and the hook reaches only the main session, which
+  delegates everything.
+- **Claude Code agents grep more without the navigation skill.** Over 24
+  Haiku runs on the project above, tools loaded up front and no skill gave 48
+  Grep/Glob calls against 20 for the skill setup with deferred tools, yet a
+  median 5 turns against 7.5 and 138K input tokens against 174K, so setup no
+  longer installs that skill for Claude Code.
+- **pi does not show MCP server instructions** for `direct` servers (pi
+  1.3.0); only tool names, descriptions and parameter docs reach the model.
+  Without the `wiki-navigation` skill, a user-installed extension that makes
+  pi load a skill first (skill-first) led it in our runs to an unrelated
+  skill (`systematic-debugging`). Numbers: README, pi section.
+- **Two `wiki` servers in pi** (a global `~/.pi/agent/mcp.json` entry and the
+  project's `.pi/mcp.json`) give the model every tool twice, under two
+  names; the skill `wiki setup` writes names only `mcp__wiki__*`.
+- **pi loads project files only after trust**: `.pi/mcp.json` and project
+  skills need `/trust`, or `--approve` in print mode.
+- **Agents edit despite "do not edit".** Seen twice in field runs, once
+  applied. Run evaluations with edit tools excluded
+  (`pi --exclude-tools edit,write`) and check `git status` after.
+
+## Search
+
+- **A named file is a weight, not a guarantee.** A query word that is a file
+  name or a path suffix adds `W_FILE`, so a rare identifier on another page can
+  still lead (the named file was first in 778 of 866 generated queries, top 5 in
+  all), and a name on many pages (`mod.rs`) weighs little. `src/a.rs:120` and an
+  absolute path do not count, nor does a file name with no extension. A hint
+  ignores the rule: a prompt naming a file does not find it for that reason.
+- **Vocabulary is literal.** No synonyms: "credentials" does not find
+  `creds`. Query and field words are compared by their Snowball stem
+  (Ukrainian for Cyrillic, English otherwise), so a stem can also hit an
+  unrelated word that shares it, and two forms with different stems still
+  miss: "decision" does not find `decide`. Body text is matched by
+  substring, not by stem. Doc text helps only when the comment uses the user's word.
+- **Docs crowd out code without `kind`.** In a project with many spec and
+  plan pages, 2–3 of the top hits for a code question are docs or tests
+  unless the query passes `kind: code`.
+- **Doc labels match words, not meaning.** `search` with `docs` first wants
+  the query words in a row; when none match, a query naming several labels
+  one after another lists each, else labels opened (first or second word) by
+  the query's leading ID answer, else labels holding all its words but a few
+  stop words in any order, and a first line names the fallback. A bare number
+  (`7`, `2`) is not an ID there and a lone common word must be a whole label,
+  so `items 1, 2` gets no numbered sections; on 506 lead grep terms 1 answer
+  changed, on 124 joined lead greps 23 turned into label lists.
+  A paraphrase still misses. The fallbacks can answer a content query with
+  a loose label: on 217 lead grep terms that matched no label, 4 now get one,
+  1 of them not what the lead read next (`record run` → a `T2a` label holding
+  `record` and `run`). An in-order fallback with gaps was measured earlier
+  and dropped (0 gains on 380 lead grep terms).
+- **A bold label may wrap onto at most 3 more lines.** A bold-led line
+  whose `**` closes on one of the next 3 lines of its block is a label, its
+  text joined onto one line; a blank line, heading, new list item or
+  bold-led line before the close, a close further down, or a `**` never
+  closed gives no label. The close must be right-flanking as in CommonMark
+  (not after a space, and after punctuation only before a space,
+  punctuation or the line end), with an ASCII-only punctuation test. On
+  11,080 markdown files this adds 241 labels (+0.46%, none from code); the
+  3 bold-led lines that close further down (8-9 lines, all pasted code) and
+  the 11 never closed in their block stay unlabelled.
+- **Process folders and vendored code are skipped by name.** A `superpowers`
+  folder and `third_party`/`vendor`/`node_modules`-style folders are not
+  compiled (on one bench project 2,358 of 3,298 pages, 71%, and 77% of the
+  wiki's bytes). A project's own code in a folder of such a name is left out
+  too, unless compiled with `--no-ignore`; with it, vendored hits (e.g.
+  `TooManyInputsFlag` for the word "too") take result and hint slots again.
+- **Only identifier-shaped words are names.** A plain word (`refuse`, `go`,
+  `Order`) is ranked like any word even when a function has exactly that
+  name, and a query mixing words with identifiers keeps the ranked order
+  (the definition is added, not moved first). A name defined by no item, such
+  as a lambda, a variable, a function nested in another outside Python, or a
+  Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
+  A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
+  A name defined on more than 3 pages shows 3 definitions and no "+N more" marker.
+  `--format json` has no `not found` entries. On the 2026-11-11 bench replay
+  of 137 definition greps, one search with all names found 344 of 371
+  defined names (113 before exact names, 329 before nested Python functions);
+  each of the 14 distinct names one search per name still missed was a plain
+  word (`build`, `refuse`, many of them nested test helpers), a prefix
+  (`test_`) or heredoc Python (`to_dec`).
+- **A decision split across a function and an enum's docs is not found.**
+  "Where does it refuse to start" lands on the file, not on `decide`.
+- **`wiki hint` shows at most 2 lines per page**, so a third relevant
+  symbol in one file is not shown.
+- **`wiki hint`'s share rule is silent only on text whose words scatter.** Below half
+  the prompt's available score it prints no code lines (2026-11-01: 80 of
+  80 bench task prompts and code questions kept; 162 of 251 bench subagent
+  briefs whose hint named no file the agent opened silenced, 26 of 75 that
+  named one kept). Short chat with no task ("This is a no-op check. Just
+  reply ack", a reviewer's severity/priority boilerplate) still gets lines:
+  on 81 such texts over five wikis the best page scores a median 1.25 of
+  the available score, above the code questions' lowest (0.59), and no
+  measured statistic told them apart. Long task prompts lose lines too: 12
+  of 35 that showed the page their task names went silent. The gates of
+  2026-11-17 (two project words; still named without function words) take
+  out about half of the remaining chat fires; see "The prompt hint fires on
+  chat" above.
+- **A prompt that opens with pasted tagged text is treated as harness
+  text.** `wiki hint` is silent on any text whose first character is `<`
+  followed by a letter, so a person's prompt that starts with pasted XML or
+  HTML gets no hint (as since 0.6.1).
+
+## Call chains (`neighbors` with `symbol`, `callers`)
+
+- **Resolution is by name, not by type.** A member call on a variable
+  resolves to the methods of that name the caller's files see, else to the
+  one project method with that name. So `.size()` on a `std::vector` lists
+  `TaskRing::size`, `e.what()` can reach a vendored `exception::what`, and
+  a call through a base pointer lists whichever of base and overrides are
+  visible.
+- **Argument counts rule out only what cannot fit.** A Rust, Go or Python
+  function whose parameters cannot take a call's arguments is no match
+  (`.map(|x| …)` never reaches a two-parameter `map`). A C++ function is
+  ruled out only by too many arguments, since a default can sit on its
+  other declaration; JS/TS functions and decorated Python functions are
+  never ruled out. So `.get(k)` on a `HashMap` still lists a project
+  `Mapping::get(key)`, and all C++ overloads that can take the count are
+  listed.
+- **Not seen:** calls outside any function (module level, such as
+  Python under `if __name__ == "__main__":` or a TS top-level `init();`;
+  shell files are the exception, with a `<top level>` caller), functions
+  passed as values (callbacks, function pointers, lambdas stored and called
+  later), CommonJS renames (`const m =
+  require('./x')`, `const { a: b } = require(…)`), a TS default import
+  used as a namespace (`import d from './m'; d.f()`), and calls inside a
+  `macro_rules!` body. An empty `callers` result says so and points to grep.
+- **Shell code in strings is read only as a quoted argument of `trap`,
+  `eval` or `bash`/`sh`/`zsh -c`:** code built in a variable (`trap "$cmd"
+  EXIT`, `eval "$code"`), passed through `sudo`/`xargs`/`ssh`, or quoted in
+  any other command is no edge, and a string inside that string is not read
+  either.
+- **A shell function passed to a wrapper is not called:** in `wrap fn args`
+  only `wrap` gets the call; `fn` has no caller, even when `wrap` runs
+  `"$@"`.
+- **Rust macro arguments are read as tokens.** Any `name(…)` token tree
+  inside a macro invocation (`format!`, `select!`, `assert_eq!`, …) counts
+  as a call, so a tuple-struct or enum pattern in `matches!(x, Foo(y))`
+  links a project function named `Foo` that takes that many arguments. A
+  closure (`|a, b|`) or generic arguments at the top level of the call
+  leave its argument count unknown.
+- **Import aliases are one map per file and resolve by the last segment
+  only:** `import * as m from './a/b'`, `import a.b as m` and Go `m "a/b"`
+  make `m.f()` read as `b.f()`, so a second module named `b` elsewhere
+  matches too, and two imports aliased `m` in different functions both read
+  as the later one. A parameter or receiver named like the alias keeps its
+  own name.
+- **C++ `ns::f()` matches by the namespace's last segment.** A free
+  function records its innermost named namespace, inline and anonymous ones
+  looked through, and a same-file `namespace d = a::b;` reads as `b`. Not
+  handled: `using namespace X;` (a bare call resolves by name anyway), a call
+  written through an inline namespace (`fmt::v12::f()`), an alias declared in
+  another file, and a namespace opened by a macro (`FMT_BEGIN_NAMESPACE`) or
+  lost to a parse error. On a C++ trading system and fmt the first three cost no
+  call site; the last costs fmt about 60 `fmt::` and `detail::` calls.
+- **A C++ call to an explicit specialization is credited to the primary
+  template.** `blank<int>()` reaches `blank`; the specialization item
+  `blank<int>` shows no callers. The same holds for a conversion operator
+  (`Gate::operator bool`): an implicit conversion is no call site.
+- **No calls across languages.** A Python binding calling C++, or FFI, is
+  not an edge, by design.
+- **Unresolved names are dropped silently.** Builtins and std calls
+  (`len`, `join`, `std::move`) are correct drops; a project function the
+  rules miss looks the same.
+- Exactly-one rate over call sites whose name some project function
+  carries: C++ bare calls 85%, Rust 97%, Python 73%. JS/TS and Go are not
+  measured.
+- `items.json` grows about 22% (3.3 → 4.0 MB on the project above).
+
+## Extraction
+
+- **Items:** a private `macro_rules!` is not an item, nor is a function in
+  a Rust `extern` block. A JS/TS method of an exported class, or an
+  exported variable, reads `public: false`. An object-literal or
+  anonymous-class method is a free `fn` with no owner. The names of one
+  multi-declarator statement share its line range. JS/TS values inside a
+  top-level block (`if {…}`, `for (let …)`) and `require` bindings are
+  items. Go `var f = func…` is a `value`, while a JS arrow is an `fn`.
+- **C++ access is ignored:** every C++ item is `public: true`;
+  `private:` sections are not read. Only `## Exports` would change, and a
+  static scan misreads `public:` from macros (97 nanobind members) and
+  specifiers under `#if`.
+- **C++ declaration ↔ definition pairing** crosses files and directories
+  when the key `(owner, name, arity)` is unique among all header items and
+  among all implementation items; overloads that share that key pair when
+  their parameter types, as written, are unique on both sides too and they
+  are in one namespace (a method defined qualified at file scope has none,
+  so a method only must not be known to be in another). A namespace is
+  compared by its last segment, so `a::util::f(int)` pairs with
+  `b::util::f(int)`, and one opened by a macro leaves a colliding free
+  overload unpaired. The types must be spelled alike: `string` beside
+  `std::string` (a name seen through `using`), `unsigned` beside
+  `unsigned int`, `T const*` beside `const T*`, or an attribute on one
+  parameter leaves a colliding overload unpaired (a miss, never a wrong
+  pair), and so do overloads that differ only in `const`. An explicit
+  specialization headed `template<>` pairs only with another. In both
+  steps (same-stem and project-wide) a header item with a body never
+  pairs, and neither does a `static`, anonymous-namespace or class-body
+  definition in a `.cpp`. Two definitions of one key never pair. A
+  `= delete` or in-class `= default` function counts toward no key, so it
+  never blocks a sibling. A same-stem pair made on the parameter count is
+  kept even when another file defines the function with the exact types:
+  the neighbour may spell a type through an alias and the other file may
+  be another program's, so when the types really differ the kept pair is
+  wrong. Uniqueness can still mislead: on
+  `(owner, name, arity)` namespaces are not compared (a unique-key free
+  function in another named namespace can pair with an unrelated header
+  declaration; none observed), and a definition in an unindexed file
+  (`.mm`, `.cu`) is invisible, so a same-key `.cc` function would
+  pair instead (none observed). The owner is the last scope only
+  (`MapBaseObj::iterator::operator++` → `iterator`), so enclosing classes
+  are not compared either. Adding a file that defines a same-key function
+  unpairs a distant pair, by design. Templates: `Ring<T>::size` out of line
+  reaches its definition in walks, but the outline and `callers` asked on
+  the header are imprecise; not fixed. A fix was measured and dropped:
+  stripping `<T>` from the owner touched 27 items, rewrote `## Exports` on
+  9 pages and broke `callers` asked with `Ring<T>::size`, while the corpora
+  have no out-of-line template member in an implementation file. A
+  template member defined out of line keeps the owner `Ring<T>`, so the
+  outline lists it in its own group and a definition in the header gets a
+  second call edge next to its declaration. A leading macro can put the return type into the owner
+  (`handle api<Derived>`), and a free function with a template-id return
+  type can get that type as owner (`UniquePtr<TEST_INT>`).
+- **Included fragments (`.inl`, `.ipp`, `.tcc`) are not read.** The fragment
+  gets no page, the calls made inside its function bodies are missing from
+  `callers`, `calls` and `neighbors`, and the header declarations of those
+  functions stay unpaired.
+- **Shell (`.sh`, `.bash`) lists only function definitions.** Top-level
+  UPPERCASE assignments are found by `search` only by their exact name; other
+  variables (lowercase, inside a function or an `if`) are not indexed.
+  A file with no extension is read only on a `sh` or `bash` shebang
+  (`#!/bin/sh`, `#!/usr/bin/env bash`) that ends within the first 128 bytes;
+  a `dash`, `ash`, `ksh`, `zsh` or `python3` shebang, `env` with an option
+  argument or a variable before the program (`env -u VAR bash`,
+  `env FOO=1 bash`), or a shell script with another extension (`.zsh`,
+  `.ksh`) is not indexed. Autotools-style scripts with no extension and a
+  `sh` shebang (`configure`, `install-sh`, `depcomp`) are indexed when not
+  ignored.
+  An assignment with a trailing redirect (`HISTSIZE=-1 2>/dev/null`) is not indexed: the grammar reads it as a command with a missing name, which also swallows an assignment on the next line.
+  In a file with parse errors, an assignment inside a function the line regex finds is skipped, and one the grammar could not parse spans its first line only.
+  A function passed as an argument (`trap f EXIT`, `sudo f`, `command f`) is not a call
+  of `f`, and a call in a part the grammar could not parse has no caller (unless a
+  fully parsed function encloses it inside that part).
+  tree-sitter-bash 0.25 rejects some code bash takes: a case pattern with a
+  glob and a quote (`*' '*)`), `[ ] {` in a `${v#pat}` pattern, `;` in a
+  `${v:+word}` word. A file with such errors is parsed again from a copy
+  with those bytes blanked, same length and lines, and that tree is used
+  when it has fewer ERROR lines; other gaps (e.g. `${v:$((n-1))}`, `[` in
+  an extglob inside `[[ ]]`) still leave ERROR nodes.
+  Functions the tree still misses come from a line regex: no doc, and
+  a span that ends at the next `}` in column 0. Shell pages are reached by
+  path only, never by module stem or defined name. A same-named page in
+  another directory still shortens ids by directory, as any two pages do.
+  In a file with parse errors, the line regex also reads function-like
+  text in a here-document as a function, and that text can become the page
+  summary. The blanking pass reads `$((1<<n))` as a here-document start and
+  skips the rest of that file: the recovery is lost, never a wrong edge.
+- **tree-sitter-cpp misparses some `requires` clauses** (a grammar bug).
+- **C and C++ macros the parser cannot see through** can make one function
+  run to a much later line, so its range is too wide and the functions after
+  it are missed. Braces split across `#if`/`#else` branches are recovered: a
+  file whose first parse has errors is parsed again with the conditional
+  directives and every `#elif`/`#else` branch blanked, and its items are kept
+  next to the first parse's (on sqlite, redis, curl, git, fmt, nlohmann/json
+  and leveldb: 182 more functions found, 23 more right ends, none lost; the
+  second parse costs about a quarter more compile time on sqlite). Still too
+  wide: sqlite `build.c` `deleteTable` runs to line 5939 because of
+  `TESTONLY ( Index *pOld = )` and `SQLITE_NOINLINE` (105 functions missed),
+  and nlohmann/json `byte_swap` because `NLOHMANN_JSON_NAMESPACE_BEGIN`
+  defeats the second parse (31 missed).
+  Functions generated by macros (sqlite `ext/jni/sqlite3-jni.c`, `JniDecl*`)
+  are not seen. Measured coverage against universal-ctags: redis 99.2%,
+  sqlite 96.7%.
+
+## Comment docs
+
+- A file header after a shebang or `#pragma once` can be taken as the
+  first item's doc.
+- Python `##` comment blocks and `/*** x ***/` blocks with trailing stars
+  are not handled specially.
+- A short doc on a value can be rejected as a group label
+  (`// update check frequency` above `const DAILY`).
+- A function's doc at the very top of a file is treated as a file header.
+- A Doxygen/JSDoc lead right above a plain comment block keeps the plain
+  block out.
+- A macro line between a comment and its item stops the climb (e.g.
+  `V8_CLANG_NO_SANITIZE("address")`).
+- The mostly-code rule (half the lines end in `;`, `{` or `}`) also
+  rejects a 1–2 line prose comment that happens to end that way.
+
+## `page` and outlines
+
+- `page` with `full` and no `max_tokens` has no ceiling: a large docs page
+  comes back whole (20K chars seen), which a small agent then truncates.
+- Headings: Setext headings (a line underlined with === or ---) and
+  headings indented one to three spaces are not read.
+
+## Notes and ids
+
+- **Long titles give long ids.** An id over 200 bytes (a long H1, a
+  transliterated Cyrillic title) is cut and ends in a 16-hex hash of the
+  full slug, so it fits a file name but no longer reads as the whole title.
+- **H1 titles are cleaned of Markdown links and images only.** Images and
+  badges are dropped and `[text](url)` becomes `text` (code spans are kept);
+  HTML tags and other emphasis marks stay in the title and the id.
+  A `[text][ref]` form is a link only when the file defines `[ref]: ...`.
+  Brackets nested in alt text and URLs containing parentheses are not parsed.
+- **A date comes only from front matter or a dated file name, and only for
+  markdown pages.** Never from git or mtime, so a note without either shows
+  no `updated`.
+- **Ids changed for Cyrillic and accented titles.** After upgrading the
+  binary, recompile the wiki: linting an old wiki with a new binary (or the
+  reverse) reports false broken links.
+- **`large` measures the compiled page** against the default 4000-token
+  `neighbors` budget, not the source file's size.
+- **Body links to non-pages stay unresolved in Obsidian.** A `[[x]]` whose
+  slug is a page, and a relative Markdown link to an indexed page, are
+  rewritten to the page id (`rewrite::obsidian_fixups`); other targets, such
+  as `LICENSE` or a note naming no page, are left as written. Only a `#`
+  that starts a tag with a digit is escaped; letter tags (`#include`) in
+  prose still become tags. See the README, Obsidian and Quartz.
+- **Old pages keep the old format until recompiled.** Pages compiled by
+  0.6.7 or earlier have `## Metadata` bullets and an unfenced code body. Readers accept
+  both; a compile by a different tool version re-renders every page.
+- **The not-compiled note covers relative paths under pruned folders only.**
+  An absolute path, a gitignored path or a hidden file (`.env`) keeps the
+  closest-ids text.
+- **The not-compiled note is conservative about the project's own name.** When
+  the compile input's folder name appears in the typed path at or after the
+  pruned folder, the error keeps the closest-ids text.
+
+## `serve --source`
+
+- Files written only through `mmap` are not seen as changed.
+- Barrier files left by a crashed server stay in `.kulman/.serve/` until a
+  writer's rescan removes them, 10 s on.
+- A compile already running when `serve`'s binary is replaced still finishes.
+- `serve` sees a binary replaced only at a tool call or before a recompile,
+  and `touch` on the binary counts as a replacement.
+- `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
+  not the live snapshot; `lint` falls back to the snapshot when that read
+  would outrun the call.
+- A generated file ignored at file level still triggers a recompile when
+  it sits in a watched directory.
+- inotify watches `target/` and `.git` too: check the project's directory
+  count against `fs.inotify.max_user_watches`.
+- Every server on one `--dir`, readers too, watches the whole `--source`
+  recursively: N servers hold N copies of those watches.
+- Under edits that never pause for 150 ms, a compile starts 2 s after the
+  worker first sees one (after any running compile ends); a call then answers with `recompile still running` if that
+  compile takes longer than 3 s.
+- Servers from 0.6.2 or older do not take `writer.lock` and still race.
+  Restart old sessions after an upgrade.
+- Servers on one `--dir` are assumed to share inputs (`--source`,
+  `--memory`). If they differ, the writer's inputs win.
+- A call that meets a compile holding `compile.lock` past its 5 s answers
+  from the snapshot it has, with `recompile still running`; `wiki://index`
+  and `wiki://llms.txt` return an error instead.
+- A reader can load the output of a later compile that failed part way,
+  under the earlier ack's empty stale reason. The window is narrow; a plain
+  `serve` without `--source` has the same exposure.
+- Plain `serve` started while a compile holds `compile.lock`, with no
+  `index.json` yet, answers from an empty wiki with no stale line until
+  `index.json` appears.
+- Orphan cleanup compares file mtimes with the local clock: on NFS, a
+  server whose clock runs more than 10 s ahead can remove live barriers or
+  acks, and that call waits out its 5 s or reports a read error.
+- If the output dir is deleted (`rm -rf`) while a server runs, the old
+  writer keeps its lock on the deleted `writer.lock`, so a newly started
+  server can become a second writer until the old one restarts.
+
+## `wiki setup`
+
+- Agents: Claude Code, pi, Cursor and Codex. Cursor is detected only by a `.cursor/` folder and
+  needs its approval after setup; Codex by a `.codex/` folder (not its own home), and its server
+  entry is in the project's `.codex/config.toml`. Codex loads that server only in a project it
+  trusts, which setup cannot grant (it never writes Codex's own config). The project file was
+  checked with codex-cli 0.169.0-alpha.11.1 only (the version bundled in the Codex desktop app):
+  the first version that reads it is unknown. The desktop app loads the project's server once the
+  project is trusted, but did not ask about trust when the project was opened; setup's last line
+  says how to trust it. Whether other desktop app versions behave the same is not checked. The
+  Cursor editor is not checked, only `cursor-agent`.
+- The `.codex/config.toml` block is recognised as lines of text, not parsed. A multi-line string
+  value that holds exactly `wiki`'s block is treated as `wiki`'s own: setup says it is set up, a
+  memory switch or `--remove` edits the string. A key spelled with an escape sequence inside quotes
+  (`"c\u0061lque"` under `[mcp_servers]`, or `[mcp_servers."c\u0061lque"]`) is not recognised as
+  naming the server: setup appends its block, the file then holds two definitions of the same table,
+  and it no longer parses until one of them is removed by hand.
+- With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
+  not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
+  one an earlier setup created there with only the steps is removed. Seen
+  with pi 1.4.0: with both files present, each naming a different codeword, it saw only the
+  `AGENTS.md` one.
+- Local scope skips (exit 1) a file git already tracks.
+- The prompt hook is wired per agent: a run limited to some agents
+  (`--agent claude`) neither writes nor removes the other agents' hook.
+- Adding or removing the hook rewrites `.claude/settings*.json` in place,
+  not atomically, and pretty-printed with serde_json's layout: a hand-made
+  indentation or spacing is not kept. A settings file
+  that is a symbolic link is followed and the target rewritten.
+- `--remove` leaves `.kulman/` and the ignore lines in place.
+- The JSON configs (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `.claude/settings*.json`) and
+  `AGENTS.md` are read and written through a symlink, so setup and `--remove` edit the link's target
+  wherever it is. Only `.codex/config.toml` refuses a link.
+
+## Agent memory
+
+- A plain `wiki compile . .kulman` drops the agents' notes until the server
+  recompiles, so `wiki hint` loses the memory line meanwhile.
+- `--no-ignore` walks `.kulman/`, whose pages can hold memory text.
+- `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
+- Claude Code normalises the project path to NFC before slugging; the wiki
+  slugs the path as the OS gives it, so a path with decomposed characters may
+  give another slug. `--memory DIR` is the escape.
+- Claude Code's overrides are not honoured: the `autoMemoryDirectory` setting,
+  `CLAUDE_CODE_REMOTE_MEMORY_DIR`, `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` and
+  `CLAUDE_CODE_PROJECT_DIR_NAME`. `--memory DIR` is the escape.
+- A `projects/<slug>/` directory that is missing when `serve` starts is not
+  watched; restart the server once it exists.
+- Windows slugging (`C:/` paths, the `\\?\` prefix) is covered by unit tests only;
+  CI is Linux.
+- The tail's note scores share the project's idf scale (statistics over project
+  pages plus notes) while the code list keeps its own, notes left out; the two
+  scales differ by the notes' share of the corpus, and under a `kind` filter
+  also by the docs' share: the tail's note pass runs with `kind: None` while
+  the code list honours the caller's `kind` (the hint's note pass uses
+  `KindFilter::Code`). Measured trade-off at a gate of 8: on
+  this repo's real notes it raised code-query noise from 2 to 6 of 60, while
+  recall over all three measured corpora rose from 75 to 80 of 114.
+- The gate length is one number for every model, 4, chosen for Claude Haiku's
+  short code-shaped queries; at 4 most code queries carry one or two tail rows
+  (about 540 bytes more per `search` answer on this repo) that a model writing
+  longer queries would not need. The code list is unchanged either way.
+  `wiki hint` turns the name branch off past 64 distinct words: a long prompt
+  nearly always carries a four-letter word naming some note (a note under 44
+  of 48 long prompts, about 1 in 50 relevant). The number is a measured gap
+  (questions and bench prompts up to 48 words, long task prompts from 116),
+  not a property of prompts in general; a question longer than that shows a
+  note only when it outscores the code twice over.
+- A `--memory DIR` that does not exist yet, under a large parent (a home
+  directory), is watched through the whole parent; on Linux this can exhaust
+  `max_user_watches` and `serve` then fails to start. The escape is an
+  existing folder.
+- `HOME` is read before `USERPROFILE` when finding the config dir.
+- A note's author is the author name of the last commit to its file, which git
+  lets anyone set: it shows who to ask, it is not authentication.
+- An old `index.json` misreads your own committed notes as a co-author's
+  until the next compile, so the tail puts them last: without `origin`, every
+  relative-path note counts as a co-author's committed note; with `origin` but
+  without `mine`, your own committed notes do.
+- Trust order only reaches agents through the wiki: an agent that greps
+  `.agents/memory` directly still reads a co-author's note the wiki ranks
+  low.
+- "You" is the commit author email matching `git config user.email`, which
+  alone is read (an `author.email` setting or a `GIT_AUTHOR_EMAIL` override is
+  not recognised); git lets anyone set an author email, so it shows who to
+  ask, not proof.
+- A commit that leaves a note's file unchanged triggers no recompile, so the
+  author on a served row lags until the next compile or change to a note.
+- Origin lookup runs `git log` over the memory folder's whole history on every
+  compile, so a very long history adds compile time.
+- The ratio branch of the gate (a note scoring twice the best code hit) can
+  be gamed by a note whose summary is stuffed with common code words; the
+  origin label on the row is the defence, nothing filters such a note.
+- A name asked in the wrong case (`orderBook` for `OrderBook`) is `not found` as a definition; the ranked list still shows it.
+- Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
+- A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.

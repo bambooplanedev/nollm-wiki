@@ -93,9 +93,9 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
             bail!("{}", lines.join("\nkulman: "));
         }
     }
-    // Removing everything leaves calque's name in the agent configs of set-up projects.
-    let projects = (names.is_none() && state.modules.iter().any(|m| m == "calque")).then_some(
-        "projects set up with kulman still name \"calque\" in their agent configs: \
+    // Removing everything leaves wiki's name in the agent configs of set-up projects.
+    let projects = (names.is_none() && state.modules.iter().any(|m| m == "wiki")).then_some(
+        "projects set up with kulman still name \"wiki\" in their agent configs: \
          run \"kulman setup --scope repo --remove\" (or local) in each first",
     );
     if ask {

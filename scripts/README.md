@@ -4,7 +4,7 @@ This directory contains the tooling to turn a compiled wiki directory into a loc
 
 ## What It Does
 
-`quartz-publish.sh` takes a compiled wiki directory (from `calque`) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
+`quartz-publish.sh` takes a compiled wiki directory (from `wiki`) and publishes it as a [Quartz](https://quartz.jzhao.xyz/) static site. The script:
 1. Clones Quartz (pinned to `v4.5.2`) into `.quartz-build/` (reused across runs)
 2. Runs `npm install` once (then cached; retried if it did not finish)
 3. Copies wiki pages through `strip-chrome.awk` to remove compiler chrome, leaving out agent memory notes
@@ -53,8 +53,8 @@ Press Ctrl-C to stop the server.
 **Excluded:**
 - `AGENTS.md` — agent navigation notes are not published
 - Agent memory notes — pages flagged `"memory": true` in `index.json`, and the compiler's link lines to
-  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `calque serve`,
-  `calque setup` and `calque compile --memory DIR` make such pages, and so does a plain `calque compile` when the
+  them (`- [[id|...]]` list items and their `index.md` entry; links in page bodies are kept). `wiki serve`,
+  `wiki setup` and `wiki compile --memory DIR` make such pages, and so does a plain `wiki compile` when the
   source has `.agents/memory/`. The page count and link degrees in `index.md` still include them.
 - Non-markdown files: `index.json`, `items.json`, `llms.txt`, `.wiki/`
 
@@ -77,7 +77,7 @@ headings keeps them.
 scripts/test-strip-chrome.sh
 ```
 
-It compiles a small source tree with the current compiler (`$CALQUE_BIN` if set, else `cargo run`), runs
+It compiles a small source tree with the current compiler (`$WIKI_BIN` if set, else `cargo run`), runs
 the awk filter over the pages and asserts that the chrome and hand-written notes are removed while body content
 stays. CI runs it after `cargo test`.
 
@@ -104,11 +104,11 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 
 `selfhost.sh` — compiles this repository into its own wiki at `.kulman/`
 (always rebuilds the release binary first) and fails on a broken wikilink
-(`calque lint`). See Self-hosting in
-[calque's README](../crates/calque/README.md#self-hosting).
+(`wiki lint`). See Self-hosting in
+[`wiki`'s README](../crates/wiki/README.md#self-hosting).
 
 `release-assemble.sh <version> <dir> [--tree <out>]` — checks that `<dir>` holds the six release
-archives (`calque`, `plaz`, `kulman` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`,
+archives (`wiki`, `plaz`, `kulman` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`,
 each with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.json` (modules
 from [`release/modules.json`](../release/modules.json)) and a copy of `install.sh` into it; `--tree`
 also lays out the `latest/download/` and `download/v<version>/` paths a `file://`
@@ -130,7 +130,7 @@ the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `kul
 checks each binary's `--version` and sets up a throwaway git project. The release workflow runs it
 in Alpine and Debian containers and on macOS.
 
-Search-quality measurement now lives in `crates/calque/tests/eval.rs`, which scores a
+Search-quality measurement now lives in `crates/wiki/tests/eval.rs`, which scores a
 frozen corpus rather than the moving self-hosted one and runs in CI
 (`.github/workflows/rust.yml`: fmt, clippy, test, the strip-chrome test, docs). See the
-Testing section of [`crates/calque/docs/ARCHITECTURE.md`](../crates/calque/docs/ARCHITECTURE.md).
+Testing section of [`crates/wiki/docs/ARCHITECTURE.md`](../crates/wiki/docs/ARCHITECTURE.md).

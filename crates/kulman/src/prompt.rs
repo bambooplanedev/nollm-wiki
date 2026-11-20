@@ -96,7 +96,7 @@ mod tests {
     use super::*;
 
     const ITEMS: &[(&str, &str, bool)] = &[
-        ("calque", "the wiki", true),
+        ("wiki", "the wiki", true),
         ("plaz", "the charts", true),
         ("extra", "something else", false),
     ];
@@ -112,10 +112,10 @@ mod tests {
     #[test]
     fn empty_line_takes_the_defaults() {
         let (got, out) = pick("\n", false);
-        assert_eq!(got, ["calque", "plaz"]);
+        assert_eq!(got, ["wiki", "plaz"]);
         assert_eq!(
             out,
-            "Modules:\n  1 [x] calque - the wiki\n  2 [x] plaz - the charts\n  \
+            "Modules:\n  1 [x] wiki - the wiki\n  2 [x] plaz - the charts\n  \
              3 [ ] extra - something else\n\
              Numbers or names, separated by commas or spaces (empty: the marked ones): "
         );
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn numbers_and_names_both_select() {
-        assert_eq!(pick("3, calque\n", false).0, ["calque", "extra"]);
+        assert_eq!(pick("3, wiki\n", false).0, ["wiki", "extra"]);
         assert_eq!(pick("  2 extra 2\n", false).0, ["plaz", "extra"]);
         assert_eq!(pick("Local\n", true).0, ["local"]);
     }
@@ -142,8 +142,8 @@ mod tests {
 
     #[test]
     fn end_of_input_takes_the_defaults() {
-        assert_eq!(pick("", false).0, ["calque", "plaz"]);
-        assert_eq!(pick("9\n", false).0, ["calque", "plaz"]);
+        assert_eq!(pick("", false).0, ["wiki", "plaz"]);
+        assert_eq!(pick("9\n", false).0, ["wiki", "plaz"]);
         // One answer, no single default: nothing, for the caller to refuse.
         assert_eq!(pick("", true).0, [""; 0]);
     }

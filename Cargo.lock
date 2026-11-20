@@ -176,34 +176,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
 
 [[package]]
-name = "calque"
-version = "0.8.2"
-dependencies = [
- "aho-corasick",
- "anyhow",
- "assert_cmd",
- "blake3",
- "clap",
- "criterion",
- "frostem",
- "ignore",
- "insta",
- "mimalloc",
- "notify",
- "predicates",
- "rayon",
- "regex",
- "rmcp",
- "serde",
- "serde_json",
- "techlog",
- "tempfile",
- "thiserror",
- "tokio",
- "wiki-code",
-]
-
-[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1855,6 +1827,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7265c9301c16a8711c992c2d8da90ee77ef54b1ed51482d6dfeb00dc756b1297"
 dependencies = [
  "rustls-pki-types",
+]
+
+[[package]]
+name = "wiki"
+version = "0.8.2"
+dependencies = [
+ "aho-corasick",
+ "anyhow",
+ "assert_cmd",
+ "blake3",
+ "clap",
+ "criterion",
+ "frostem",
+ "ignore",
+ "insta",
+ "mimalloc",
+ "notify",
+ "predicates",
+ "rayon",
+ "regex",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "techlog",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "wiki-code",
 ]
 
 [[package]]

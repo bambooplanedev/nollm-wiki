@@ -77,7 +77,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         None => installed.clone(),
     };
     let chosen: Vec<&String> = installed.iter().filter(|n| wanted.contains(n)).collect();
-    let calque = chosen.iter().any(|n| *n == "calque");
+    let wiki = chosen.iter().any(|n| *n == "wiki");
     for (given, flag) in [
         (a.memory, "--memory"),
         (a.no_memory, "--no-memory"),
@@ -85,22 +85,22 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
         (a.hook, "--hook"),
         (a.no_hook, "--no-hook"),
     ] {
-        if given && !calque {
-            let why = format!("{flag} applies to calque, which is not chosen");
+        if given && !wiki {
+            let why = format!("{flag} applies to wiki, which is not chosen");
             return Err(Usage(why).into());
         }
     }
-    let memory_default = module("calque")
+    let memory_default = module("wiki")
         .and_then(|m| m.options.iter().find(|o| o.name == "memory"))
         .is_none_or(|o| o.default);
     let memory = match (a.memory, a.no_memory) {
         (true, _) => true,
         (_, true) => false,
-        _ if calque && ask && !a.remove => ask_yes("agent memory?", memory_default)?,
+        _ if wiki && ask && !a.remove => ask_yes("agent memory?", memory_default)?,
         _ => memory_default,
     };
-    // calque needs the scope even to remove; plaz does not.
-    let scope_needed = calque || !a.remove;
+    // wiki needs the scope even to remove; plaz does not.
+    let scope_needed = wiki || !a.remove;
     let scope = match a.scope {
         None if scope_needed && ask => {
             let items = [
@@ -142,21 +142,21 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     let mut failures: Vec<&str> = Vec::new();
     let mut first_code = None;
     for name in chosen {
-        let is_calque = name == "calque";
+        let is_wiki = name == "wiki";
         let mut args = vec!["setup"];
-        if let (true, Some(agent)) = (is_calque, &a.agent) {
+        if let (true, Some(agent)) = (is_wiki, &a.agent) {
             args.extend(["--agent", agent]);
         }
         if let Some(scope) = &scope {
             args.extend(["--scope", scope]);
         }
-        if is_calque && a.hook {
+        if is_wiki && a.hook {
             args.push("--hook");
         }
-        if is_calque && a.no_hook {
+        if is_wiki && a.no_hook {
             args.push("--no-hook");
         }
-        if is_calque {
+        if is_wiki {
             args.push(if memory { "--memory" } else { "--no-memory" });
         }
         if a.remove {
