@@ -190,7 +190,9 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
                 .filter(|m| m.kind() == "function_definition" && !m.has_error())
             {
                 Some(m) => (source, node) = (whole, m),
-                None => groups = cpp::directive_groups(source.text(), def.start_byte..def.end_byte),
+                // The directives are blank in the first-branch copy: read
+                // them from the file's text, which the offsets also index.
+                None => groups = cpp::directive_groups(whole.text(), def.start_byte..def.end_byte),
             }
         }
         let w = Walker {

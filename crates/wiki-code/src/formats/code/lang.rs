@@ -91,6 +91,12 @@ pub(crate) struct LangSpec {
     /// definition's spelling), given the definition and its name. `None`
     /// builds it from the source.
     pub(crate) fixed_signature: fn(Node, &str) -> Option<String>,
+    /// Node kinds of a type's body that a signature renders as `{…}`. C and
+    /// C++ can define a type inside a declaration (`typedef struct S {…} S;`)
+    /// and tree-sitter-cpp's error recovery can fold a whole class into the
+    /// return type of the next function, so the body lands inside the span
+    /// that the cut only bounds from the end.
+    pub(crate) elide_body: fn(&str) -> bool,
 }
 
 impl LangSpec {
@@ -120,6 +126,7 @@ impl LangSpec {
             query_gates_visibility: false,
             shape: default_shape,
             fixed_signature: |_, _| None,
+            elide_body: |_| false,
         }
     }
 }
