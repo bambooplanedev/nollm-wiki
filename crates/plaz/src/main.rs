@@ -13,11 +13,11 @@ const USAGE: &str = "usage: plaz build [--source DIR] [--vault DIR] | plaz setup
 
 const HELP: &str = "\
 build   write the vault of flowchart pages for the source tree
-setup   build, then keep .kulman/ out of git (--remove: delete the map's pages instead)
+setup   build, then keep .nollm-wiki/ out of git (--remove: delete the map's pages instead)
 
 --source DIR          the source tree (default .)
---vault DIR           build only: the vault (default <source>/.kulman, pages in its map/)
---scope repo|local    setup only, required unless --remove: ignore .kulman/ in .gitignore or in this clone's info/exclude
+--vault DIR           build only: the vault (default <source>/.nollm-wiki, pages in its map/)
+--scope repo|local    setup only, required unless --remove: ignore .nollm-wiki/ in .gitignore or in this clone's info/exclude
 --remove              setup only: delete the map's own pages instead of building
 --version             print the version
 --help, -h, help      print this text";

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Compile this repository into its own wiki at .kulman/ (self-hosting).
+# Compile this repository into its own wiki at .nollm-wiki/ (self-hosting).
 # Re-run after changes; compilation is incremental.
 set -euo pipefail
 
@@ -12,6 +12,6 @@ BIN="$REPO_ROOT/target/release/wiki"
 cargo build --release --manifest-path "$REPO_ROOT/Cargo.toml"
 
 cd "$REPO_ROOT"
-"$BIN" compile . .kulman --incremental --emit-json
+"$BIN" compile . .nollm-wiki --incremental --emit-json
 # Gate: a broken wikilink in the self-hosted wiki fails the script (exit 1).
-"$BIN" lint --dir .kulman
+"$BIN" lint --dir .nollm-wiki

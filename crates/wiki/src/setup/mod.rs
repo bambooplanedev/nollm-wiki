@@ -486,7 +486,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     if !opts.remove && !opts.agents.is_empty() && !warning.is_empty() {
         r.line(warning)?;
     }
-    // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
+    // Local scope only: repo scope puts just `.nollm-wiki/` in `.gitignore`.
     let mut ignore = vec![format!("{OUT_DIR}/")];
     if opts.memory {
         ignore.push(format!("/{}/", memory::REPO_DIR));
@@ -668,7 +668,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
 
     if opts.remove {
-        r.line("kept the ignore lines and .kulman/ (delete them by hand if unwanted)")?;
+        r.line("kept the ignore lines and .nollm-wiki/ (delete them by hand if unwanted)")?;
     } else if !local {
         r.item(
             &format!("{OUT_DIR}/ in .gitignore"),

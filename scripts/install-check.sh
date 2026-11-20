@@ -38,6 +38,6 @@ printf 'def f(x):\n    if x:\n        return 1\n    return 2\n' >f.py
 code=0 && "$bin/nollm-wiki" setup </dev/null || code=$?
 [ "$code" = 2 ] || fail "nollm-wiki setup without --scope and a terminal exited $code, not 2"
 "$bin/nollm-wiki" setup --scope repo --yes </dev/null || fail "nollm-wiki setup --scope repo failed"
-[ -f .kulman/index.md ] || fail "setup made no .kulman/index.md"
-[ -d .kulman/map ] || fail "setup made no .kulman/map/"
+[ -f .nollm-wiki/index.md ] || fail "setup made no .nollm-wiki/index.md"
+[ -d .nollm-wiki/map ] || fail "setup made no .nollm-wiki/map/"
 printf 'install-check.sh: %s on %s/%s: ok\n' "$version" "$(uname -s)" "$(uname -m)"

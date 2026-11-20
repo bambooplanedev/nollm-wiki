@@ -232,7 +232,10 @@ fn ensure_line_appends_once() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join(".gitignore");
     fs::write(&p, "target/").unwrap();
-    assert_eq!(ensure_line(&p, ".kulman/").unwrap(), Outcome::Done);
-    assert_eq!(fs::read_to_string(&p).unwrap(), "target/\n.kulman/\n");
-    assert_eq!(ensure_line(&p, ".kulman/").unwrap(), Outcome::AlreadyThere);
+    assert_eq!(ensure_line(&p, ".nollm-wiki/").unwrap(), Outcome::Done);
+    assert_eq!(fs::read_to_string(&p).unwrap(), "target/\n.nollm-wiki/\n");
+    assert_eq!(
+        ensure_line(&p, ".nollm-wiki/").unwrap(),
+        Outcome::AlreadyThere
+    );
 }

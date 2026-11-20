@@ -154,7 +154,7 @@ fn tree_with_every_skip(root: &Path) {
         ("node_modules/x/e.js", "n"),
         (".git/HEAD", "h"),
         ("sub/.git", "gitdir: elsewhere"),
-        (".kulman/page.md", "the output, not a skipped source"),
+        (".nollm-wiki/page.md", "the output, not a skipped source"),
         (".agents/memory/note.md", "compiled from the memory walk"),
     ] {
         let p = root.join(path);

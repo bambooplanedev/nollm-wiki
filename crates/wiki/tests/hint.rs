@@ -9,18 +9,18 @@ use common::write;
 
 const TASK: &str = "where are member creds loaded";
 
-/// `wiki compile <root> <root>/.kulman` through the CLI.
+/// `wiki compile <root> <root>/.nollm-wiki` through the CLI.
 fn compile(root: &Path) {
     Command::cargo_bin("wiki")
         .unwrap()
         .args(["compile"])
         .arg(root)
-        .arg(root.join(".kulman"))
+        .arg(root.join(".nollm-wiki"))
         .assert()
         .success();
 }
 
-/// A fresh project holding `files`, compiled into its `.kulman`.
+/// A fresh project holding `files`, compiled into its `.nollm-wiki`.
 fn project_of(files: &[(&str, &str)]) -> TempDir {
     let tmp = tempdir().unwrap();
     for (name, body) in files {
@@ -51,7 +51,7 @@ fn hint(dir: &Path, text: &str) -> String {
 }
 
 fn hint_in(tmp: &TempDir, text: &str) -> String {
-    hint(&tmp.path().join(".kulman"), text)
+    hint(&tmp.path().join(".nollm-wiki"), text)
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn hint_reads_claude_hook_json() {
 #[test]
 fn hint_text_may_start_with_a_dash() {
     let tmp = project();
-    let dir = tmp.path().join(".kulman");
+    let dir = tmp.path().join(".nollm-wiki");
     let out = Command::cargo_bin("wiki")
         .unwrap()
         .args(["hint", "--dir"])
@@ -276,7 +276,7 @@ fn memory_line(out: &str) -> Option<&str> {
 #[test]
 fn hint_adds_one_memory_line_after_the_code_lines() {
     let tmp = project_with_memory();
-    let dir = tmp.path().join(".kulman");
+    let dir = tmp.path().join(".nollm-wiki");
     // Title word, alias word and summary word (all 8+ characters) each gate the line in.
     for prompt in ["rotation", "keyrings", "overnight"] {
         let out = hint(&dir, &format!("{prompt} where are member creds loaded"));
@@ -320,7 +320,7 @@ fn hint_gate_length_comes_from_the_env() {
     let gated = Command::cargo_bin("wiki")
         .unwrap()
         .args(["hint", prompt, "--dir"])
-        .arg(tmp.path().join(".kulman"))
+        .arg(tmp.path().join(".nollm-wiki"))
         .env("WIKI_MEMORY_GATE", "8")
         .assert()
         .success();
@@ -331,7 +331,7 @@ fn hint_gate_length_comes_from_the_env() {
     let zero = Command::cargo_bin("wiki")
         .unwrap()
         .args(["hint", prompt, "--dir"])
-        .arg(tmp.path().join(".kulman"))
+        .arg(tmp.path().join(".nollm-wiki"))
         .env("WIKI_MEMORY_GATE", "0")
         .assert()
         .success();
@@ -389,7 +389,7 @@ fn hint_memory_gate_ignores_short_words() {
             "---\ntitle: Що робити в релізі\n---\n\nКонтрольний список релізу.\n",
         ),
     ]);
-    let dir = tmp.path().join(".kulman");
+    let dir = tmp.path().join(".nollm-wiki");
     assert!(memory_line(&hint(&dir, "що в")).is_none());
     assert!(memory_line(&hint(&dir, "що в контрольний")).is_some());
 }

@@ -699,7 +699,7 @@ fn the_default_home_is_dot_nollm_wiki_home() {
         .assert()
         .success();
     assert_binary(&user.join(".nollm-wiki-home"), "wiki", WIKI);
-    assert!(!user.join(".kulman").exists());
+    assert!(!user.join(".nollm-wiki").exists());
     assert!(!home.exists());
 }
 

@@ -195,7 +195,7 @@ fn install_sh_defaults_to_dot_nollm_wiki_home() {
         "nollm-wiki",
         NOLLM_WIKI_BYTES,
     );
-    assert!(!user.join(".kulman").exists());
+    assert!(!user.join(".nollm-wiki").exists());
 }
 
 #[test]
@@ -614,7 +614,7 @@ fn setup_with_the_real_wiki_and_plaz() {
         assert!(out.status.success(), "{}\n{}", stdout(&out), stderr(&out));
     };
     setup(&["--no-memory"]);
-    assert!(project.join(".kulman/map").is_dir());
+    assert!(project.join(".nollm-wiki/map").is_dir());
     assert!(!project.join(".agents/memory").exists());
     let mcp = || -> Value {
         fs::read(project.join(".cursor/mcp.json"))
@@ -626,7 +626,7 @@ fn setup_with_the_real_wiki_and_plaz() {
 
     // No agent in the project and none named: the wiki and the map all the same.
     assert!(!project.join(".cursor").exists());
-    fs::remove_dir_all(project.join(".kulman")).unwrap();
+    fs::remove_dir_all(project.join(".nollm-wiki")).unwrap();
     let out = nollm_wiki(&home, &base)
         .current_dir(&project)
         .env("PATH", &path)
@@ -634,8 +634,8 @@ fn setup_with_the_real_wiki_and_plaz() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}\n{}", stdout(&out), stderr(&out));
-    assert!(project.join(".kulman/index.md").is_file());
-    assert!(project.join(".kulman/map").is_dir());
+    assert!(project.join(".nollm-wiki/index.md").is_file());
+    assert!(project.join(".nollm-wiki/map").is_dir());
     assert!(stderr(&out).contains("no agent set up"), "{}", stderr(&out));
 }
 

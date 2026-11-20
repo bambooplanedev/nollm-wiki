@@ -6,7 +6,6 @@
 docs/superpowers/
 docs/dogfood/
 .superpowers/
-.wiki/
-.kulman/
+.nollm-wiki/
 /demo_raw/
 /demo_wiki/

@@ -30,8 +30,8 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
     if state.modules.is_empty() {
         bail!("nothing to set up: no module is installed (nollm-wiki install)");
     }
-    // The modules write into the project's `.kulman`: never into nollm-wiki's own home.
-    let project = std::env::current_dir().and_then(|d| std::fs::metadata(d.join(".kulman")));
+    // The modules write into the project's `.nollm-wiki`: never into nollm-wiki's own home.
+    let project = std::env::current_dir().and_then(|d| std::fs::metadata(d.join(".nollm-wiki")));
     if let (Ok(p), Ok(h)) = (project, std::fs::metadata(&home)) {
         if (p.dev(), p.ino()) == (h.dev(), h.ino()) {
             bail!(

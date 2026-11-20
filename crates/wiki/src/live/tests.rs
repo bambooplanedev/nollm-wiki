@@ -6,7 +6,7 @@ use notify::{Event, EventKind};
 
 #[test]
 fn opening_a_walked_file_is_not_an_edit() {
-    let dir = Path::new("/proj/.kulman");
+    let dir = Path::new("/proj/.nollm-wiki");
     let file = PathBuf::from("/proj/src/a.rs");
     let set = WatchSet::new(
         Path::new("/proj"),

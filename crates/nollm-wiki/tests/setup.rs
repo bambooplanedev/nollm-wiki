@@ -220,7 +220,7 @@ fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("plaz", LOGS)]);
     let project = t.path().join("project");
-    let home = project.join(".kulman");
+    let home = project.join(".nollm-wiki");
     fs::create_dir(&project).unwrap();
     nollm_wiki(&home, &base).arg("install").assert().success();
     let log = t.path().join("log");
@@ -238,6 +238,28 @@ fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!log.exists(), "no module runs");
+}
+
+#[test]
+fn setup_in_home_dir_does_not_collide_with_installer_home() {
+    let t = tempfile::tempdir().unwrap();
+    let base = release(&t.path().join("release"), "0.7.0", &[("plaz", LOGS)]);
+    let user = t.path().join("user");
+    fs::create_dir_all(user.join(".nollm-wiki")).unwrap();
+    let run = |args: &[&str]| {
+        // HOME is the project; the installer home is its `.nollm-wiki-home`, the data dir `.nollm-wiki`.
+        let mut cmd = nollm_wiki(&t.path().join("unused"), &base);
+        cmd.env_remove("NOLLM_WIKI_HOME")
+            .env("HOME", &user)
+            .env("NOLLM_WIKI_TEST_LOG", t.path().join("log"))
+            .current_dir(&user)
+            .args(args);
+        cmd.output().unwrap()
+    };
+    assert!(run(&["install"]).status.success());
+    assert!(user.join(".nollm-wiki-home").is_dir());
+    let out = run(&["setup", "--scope", "repo"]);
+    assert!(out.status.success(), "{}", stderr(&out));
 }
 
 #[test]

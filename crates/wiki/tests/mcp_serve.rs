@@ -756,7 +756,7 @@ fn serve_source_compiles_missing_wiki_and_answers() {
     let resp = search(&mut stdin, &stdout, 2, "oldword");
     let ids = hit_ids(&resp);
     assert_eq!(ids, ["alpha"]);
-    assert!(project.path().join(".kulman/index.json").exists());
+    assert!(project.path().join(".nollm-wiki/index.json").exists());
     assert_eq!(stale_block(&resp), None);
 
     drop(stdin);
@@ -770,7 +770,7 @@ fn serve_source_catches_up_an_existing_wiki() {
         incremental: true,
         ..Default::default()
     };
-    wiki::compile(project.path(), &project.path().join(".kulman"), &opts).unwrap();
+    wiki::compile(project.path(), &project.path().join(".nollm-wiki"), &opts).unwrap();
     // Edits made while no server ran: the start-up compile must pick them up.
     std::fs::write(
         project.path().join("notes/alpha.md"),
@@ -883,7 +883,7 @@ fn serve_source_sees_file_in_new_subdir() {
 fn serve_source_failed_compile_keeps_snapshot_and_says_stale() {
     use std::os::unix::fs::PermissionsExt;
     let project = source_project();
-    let wiki_dir = project.path().join(".kulman");
+    let wiki_dir = project.path().join(".nollm-wiki");
     let (mut child, mut stdin, stdout) = spawn_server_source(project.path(), &[]);
     initialize(&mut stdin, &stdout);
     assert_ne!(
@@ -1347,7 +1347,7 @@ fn notices(log: &std::path::Path) -> usize {
 #[test]
 fn a_replaced_binary_stops_recompiling_and_says_so() {
     let project = source_project();
-    let wiki_dir = project.path().join(".kulman");
+    let wiki_dir = project.path().join(".nollm-wiki");
     let (bins, bin, _) = installed_copies();
     let log = bins.path().join("stderr");
     let (mut child, mut stdin, stdout) = spawn_from(&bin, "--source", project.path(), &log);

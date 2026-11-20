@@ -34,7 +34,7 @@ pub mod support;
 pub mod walk;
 
 /// The folder inside a project that the tools write into.
-pub const OUT_DIR: &str = ".kulman";
+pub const OUT_DIR: &str = ".nollm-wiki";
 
 mod formats {
     pub(crate) mod code;
