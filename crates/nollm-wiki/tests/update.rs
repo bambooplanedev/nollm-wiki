@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use common::{
-    assert_binary, kulman, local_bin, no_tmp_left, path_first, path_linking, release, set_sha256,
-    snapshot, state, stderr, stdout, version_dir, KULMAN_BYTES,
+    assert_binary, local_bin, no_tmp_left, nollm_wiki, path_first, path_linking, release,
+    set_sha256, snapshot, state, stderr, stdout, version_dir, NOLLM_WIKI_BYTES,
 };
 use serde_json::json;
 
@@ -24,7 +24,7 @@ fn installed() -> (tempfile::TempDir, String, std::path::PathBuf) {
         &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki(&home, &base).arg("install").assert().success();
     (t, base, home)
 }
 
@@ -50,22 +50,22 @@ fn status_lists_what_is_installed() {
         &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let nothing = format!(
-        "nothing installed in {}; run kulman install",
+        "nothing installed in {}; run nollm-wiki install",
         home.display()
     );
     assert_eq!(lines(&out), [nothing]);
     assert!(!home.exists());
 
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki(&home, &base).arg("install").assert().success();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let first = format!("kulman 0.7.0 in {}", home.display());
+    let first = format!("nollm-wiki 0.7.0 in {}", home.display());
     let bin = home.join("bin").display().to_string();
-    let hint = format!("{bin} is not on PATH; to type kulman in a terminal, add it:");
+    let hint = format!("{bin} is not on PATH; to type nollm-wiki in a terminal, add it:");
     let export = format!("    export PATH=\"{bin}:$PATH\"");
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
     assert_eq!(
@@ -87,10 +87,10 @@ fn status_says_when_bin_is_not_on_path() {
     let (_t, base, home) = installed();
     let bin = home.join("bin");
     let line = format!(
-        "{} is not on PATH; to type kulman in a terminal, add it:",
+        "{} is not on PATH; to type nollm-wiki in a terminal, add it:",
         bin.display()
     );
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(lines(&out)[3], line);
     assert_eq!(
@@ -101,7 +101,7 @@ fn status_says_when_bin_is_not_on_path() {
     let path =
         std::env::join_paths(std::iter::once(bin.clone()).chain(std::env::split_paths(&own)))
             .unwrap();
-    let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+    let out = nollm_wiki(&home, &base).env("PATH", path).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!stdout(&out).contains("on PATH"), "{}", stdout(&out));
 }
@@ -112,19 +112,19 @@ fn status_takes_binaries_linked_into_path_as_on_path() {
     let (bin, links) = (home.join("bin"), t.path().join("links"));
     let say = |names: &[&str]| {
         let path = path_linking(&links, &bin, names);
-        let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+        let out = nollm_wiki(&home, &base).env("PATH", path).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let _ = fs::remove_dir_all(&links);
         stdout(&out)
     };
-    assert!(!say(&["kulman", "wiki", "plaz"]).contains("on PATH"));
-    // One module not linked, or kulman not linked: still said.
-    assert!(say(&["kulman", "wiki"]).contains("is not on PATH"));
+    assert!(!say(&["nollm-wiki", "wiki", "plaz"]).contains("on PATH"));
+    // One module not linked, or nollm-wiki not linked: still said.
+    assert!(say(&["nollm-wiki", "wiki"]).contains("is not on PATH"));
     assert!(say(&["wiki", "plaz"]).contains("is not on PATH"));
     // The first `plaz` on PATH is another program: still said.
-    let path = path_linking(&links, &bin, &["kulman", "wiki"]);
+    let path = path_linking(&links, &bin, &["nollm-wiki", "wiki"]);
     fs::write(links.join("plaz"), "#!/bin/sh\n").unwrap();
-    let out = kulman(&home, &base).env("PATH", path).output().unwrap();
+    let out = nollm_wiki(&home, &base).env("PATH", path).output().unwrap();
     assert!(stdout(&out).contains("is not on PATH"), "{}", stdout(&out));
 }
 
@@ -132,11 +132,11 @@ fn status_takes_binaries_linked_into_path_as_on_path() {
 fn status_marks_a_listed_binary_that_is_missing() {
     let (_t, base, home) = installed();
     fs::remove_file(home.join("bin/plaz")).unwrap();
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out)[1..3],
-        ["plaz  (missing: run kulman update)", "wiki"]
+        ["plaz  (missing: run nollm-wiki update)", "wiki"]
     );
 }
 
@@ -145,11 +145,11 @@ fn status_announces_a_newer_release() {
     let (t, base, home) = installed();
     // 0.10.0 is newer than 0.7.0 only when the three parts are compared as integers.
     release(&t.path().join("release"), "0.10.0", &[("wiki", WIKI)]);
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out).last().unwrap(),
-        "newer release: 0.10.0 (kulman update)"
+        "newer release: 0.10.0 (nollm-wiki update)"
     );
 }
 
@@ -162,7 +162,7 @@ fn status_gives_up_on_a_silent_host_by_its_own_wait() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("https://{}", listener.local_addr().unwrap());
     let start = std::time::Instant::now();
-    let out = kulman(&home, &base).output().unwrap();
+    let out = nollm_wiki(&home, &base).output().unwrap();
     let took = start.elapsed();
     assert!(out.status.success(), "{}", stderr(&out));
     let text = lines(&out);
@@ -187,10 +187,11 @@ fn status_survives_an_unreachable_release() {
         ),
         (
             "http://example.invalid/releases",
-            "could not check for a newer release (KULMAN_RELEASE_URL must start with ".to_string(),
+            "could not check for a newer release (NOLLM_WIKI_RELEASE_URL must start with "
+                .to_string(),
         ),
     ] {
-        let out = kulman(&home, base).output().unwrap();
+        let out = nollm_wiki(&home, base).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let text = lines(&out);
         assert_eq!(text.len(), 6, "{text:?}");
@@ -204,10 +205,10 @@ fn status_survives_an_unreachable_release() {
 #[test]
 fn update_moves_every_module() {
     let (t, base, home) = installed();
-    // kulman's own binary is the same in both releases: mark the old one to see it replaced.
-    fs::write(home.join("bin/kulman"), "old").unwrap();
+    // nollm-wiki's own binary is the same in both releases: mark the old one to see it replaced.
+    fs::write(home.join("bin/nollm-wiki"), "old").unwrap();
     publish_0_8(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["update", "--yes"])
         .output()
         .unwrap();
@@ -218,7 +219,7 @@ fn update_moves_every_module() {
         [
             "updated plaz 0.7.0 -> 0.8.0",
             "updated wiki 0.7.0 -> 0.8.0",
-            "updated kulman 0.7.0 -> 0.8.0",
+            "updated nollm-wiki 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
@@ -228,7 +229,7 @@ fn update_moves_every_module() {
     );
     assert_binary(&home, "wiki", WIKI_8);
     assert_binary(&home, "plaz", PLAZ_8);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
     assert_eq!(
         fs::read(home.join("manifest.json")).unwrap(),
         [
@@ -247,9 +248,9 @@ fn update_with_one_bad_archive_changes_nothing() {
     publish_0_8(t.path());
     set_sha256(&t.path().join("release"), "0.8.0", "plaz", &"0".repeat(64));
     let before = snapshot(t.path());
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
+    assert!(stderr(&out).contains("nollm-wiki: plaz: checksum mismatch"));
     assert_eq!(stderr(&out).lines().last(), Some("nothing changed"));
     assert_eq!(snapshot(t.path()), before);
 }
@@ -262,7 +263,7 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
         "0.9.0",
         &[("wiki", WIKI_8)],
     );
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .env("PATH", path_first(&dir))
         .args(["update", "--yes"])
         .output()
@@ -272,7 +273,7 @@ fn update_removes_a_module_the_release_no_longer_holds_and_says_so() {
         lines(&out),
         [
             "updated wiki 0.7.0 -> 0.9.0",
-            "updated kulman 0.7.0 -> 0.9.0",
+            "updated nollm-wiki 0.7.0 -> 0.9.0",
             "removed plaz: not in release 0.9.0",
             "restart running agent sessions; they keep the old binaries until then"
         ]
@@ -296,7 +297,7 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
     );
     fs::remove_file(home.join("bin/plaz")).unwrap();
     fs::create_dir(home.join("bin/plaz")).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["update", "--yes"])
         .output()
         .unwrap();
@@ -306,7 +307,7 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
         lines(&out),
         [
             "updated wiki 0.7.0 -> 0.9.0",
-            "updated kulman 0.7.0 -> 0.9.0"
+            "updated nollm-wiki 0.7.0 -> 0.9.0"
         ]
     );
     assert_eq!(
@@ -315,7 +316,7 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
     );
     fs::remove_dir(home.join("bin/plaz")).unwrap();
     fs::write(home.join("bin/plaz"), PLAZ).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["update", "--yes"])
         .output()
         .unwrap();
@@ -324,7 +325,7 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
         lines(&out),
         [
             "repaired wiki 0.9.0",
-            "repaired kulman 0.9.0",
+            "repaired nollm-wiki 0.9.0",
             "removed plaz: not in release 0.9.0"
         ]
     );
@@ -343,7 +344,7 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     let home = t.path().join("home");
     let dir = local_bin(&home);
     fs::create_dir_all(&dir).unwrap();
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .env("PATH", path_first(&dir))
         .args(["install", "--modules", "oldmod,plaz"])
         .assert()
@@ -352,7 +353,7 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     common::edit_manifest(&rel, "0.8.0", |m| {
         m["modules"][0]["replaces"] = json!(["oldmod"]);
     });
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .env("PATH", path_first(&dir))
         .args(["update", "--yes"])
         .output()
@@ -363,8 +364,8 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
         [
             "updated plaz 0.7.0 -> 0.8.0",
             "installed wiki 0.8.0",
-            "updated kulman 0.7.0 -> 0.8.0",
-            "removed oldmod: renamed wiki; run \"kulman setup --scope repo\" (or local) \
+            "updated nollm-wiki 0.7.0 -> 0.8.0",
+            "removed oldmod: renamed wiki; run \"nollm-wiki setup --scope repo\" (or local) \
              again in each project set up with oldmod",
             "restart running agent sessions; they keep the old binaries until then"
         ]
@@ -387,7 +388,7 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
 fn update_when_current_says_up_to_date() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
     assert_eq!(lines(&out), ["up to date"]);
@@ -395,7 +396,7 @@ fn update_when_current_says_up_to_date() {
 
     // A listed binary missing at the same version is put back.
     fs::remove_file(home.join("bin/plaz")).unwrap();
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
@@ -404,21 +405,21 @@ fn update_when_current_says_up_to_date() {
         [
             "repaired plaz 0.7.0",
             "repaired wiki 0.7.0",
-            "repaired kulman 0.7.0"
+            "repaired nollm-wiki 0.7.0"
         ]
     );
     assert_eq!(snapshot(t.path()), before);
 
     // So is manifest.json.
     fs::remove_file(home.join("manifest.json")).unwrap();
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         lines(&out),
         [
             "repaired plaz 0.7.0",
             "repaired wiki 0.7.0",
-            "repaired kulman 0.7.0"
+            "repaired nollm-wiki 0.7.0"
         ]
     );
     assert!(home.join("manifest.json").is_file());
@@ -431,9 +432,9 @@ fn update_does_not_downgrade() {
     let newer = release(&t.path().join("newer"), "0.10.0", &[("wiki", WIKI)]);
     let older = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
-    kulman(&home, &newer).arg("install").assert().success();
+    nollm_wiki(&home, &newer).arg("install").assert().success();
     let before = snapshot(t.path());
-    let out = kulman(&home, &older).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &older).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
     assert_eq!(
@@ -448,10 +449,10 @@ fn update_with_nothing_installed_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let expect = format!(
-        "kulman: nothing installed in {}; run kulman install",
+        "nollm-wiki: nothing installed in {}; run nollm-wiki install",
         home.display()
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -461,7 +462,7 @@ fn update_with_nothing_installed_creates_nothing() {
 #[test]
 fn remove_modules_drops_only_those() {
     let (t, base, home) = installed();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "plaz", "--yes"])
         .output()
         .unwrap();
@@ -469,7 +470,7 @@ fn remove_modules_drops_only_those() {
     assert_eq!(lines(&out), ["removed plaz"]);
     assert!(!home.join("bin/plaz").exists());
     assert_binary(&home, "wiki", WIKI);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
     assert_eq!(
         state(&home),
         json!({"version": "0.7.0", "modules": ["wiki"]})
@@ -477,22 +478,22 @@ fn remove_modules_drops_only_those() {
     no_tmp_left(&home);
 
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "plaz", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: plaz is not installed"));
+    assert!(stderr(&out).contains("nollm-wiki: plaz is not installed"));
     assert_eq!(snapshot(t.path()), before);
 
     // A listed binary already missing counts as removed.
     fs::remove_file(home.join("bin/wiki")).unwrap();
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .args(["remove", "--modules", "wiki", "--yes"])
         .assert()
         .success();
     assert_eq!(state(&home), json!({"version": "0.7.0", "modules": []}));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
 }
 
 #[test]
@@ -500,7 +501,7 @@ fn remove_everything_leaves_foreign_files() {
     let (t, base, home) = installed();
     fs::write(home.join("notes.txt"), "mine").unwrap();
     fs::write(home.join("bin/other"), "mine too").unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
@@ -510,8 +511,8 @@ fn remove_everything_leaves_foreign_files() {
         [
             "removed plaz",
             "removed wiki",
-            "removed kulman",
-            "projects set up with kulman still name \"wiki\" in their agent configs: run \"kulman \
+            "removed nollm-wiki",
+            "projects set up with nollm-wiki still name \"wiki\" in their agent configs: run \"nollm-wiki \
              setup --scope repo --remove\" (or local) in each first"
         ]
     );
@@ -530,33 +531,33 @@ fn remove_everything_leaves_foreign_files() {
 #[test]
 fn remove_without_wiki_says_nothing_of_projects() {
     let (_t, base, home) = installed();
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .args(["remove", "--modules", "wiki", "--yes"])
         .assert()
         .success();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(lines(&out), ["removed plaz", "removed kulman"]);
+    assert_eq!(lines(&out), ["removed plaz", "removed nollm-wiki"]);
 }
 
 #[test]
 fn remove_everything_removes_an_empty_home() {
     let (t, base, home) = installed();
-    // A stale temp entry is kulman's own; a listed binary already missing counts as removed.
+    // A stale temp entry is nollm-wiki's own; a listed binary already missing counts as removed.
     fs::create_dir(home.join(".tmp-stale")).unwrap();
     fs::remove_file(home.join("bin/plaz")).unwrap();
     let outside = snapshot(&t.path().join("user-home"));
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .assert()
         .success();
     assert!(!home.exists());
     assert_eq!(snapshot(&t.path().join("user-home")), outside);
 
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
@@ -565,17 +566,17 @@ fn remove_everything_removes_an_empty_home() {
     assert!(!home.exists());
 
     // A remove killed after state.json, before `.lock`: the next one finishes the job.
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki(&home, &base).arg("install").assert().success();
     for name in [
         "bin/wiki",
         "bin/plaz",
-        "bin/kulman",
+        "bin/nollm-wiki",
         "manifest.json",
         "state.json",
     ] {
         fs::remove_file(home.join(name)).unwrap();
     }
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
@@ -593,7 +594,7 @@ fn installed_with_requires() -> (tempfile::TempDir, String, std::path::PathBuf) 
         m["modules"][1]["requires"] = json!(["wiki"]);
     });
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki(&home, &base).arg("install").assert().success();
     (t, base, home)
 }
 
@@ -601,19 +602,19 @@ fn installed_with_requires() -> (tempfile::TempDir, String, std::path::PathBuf) 
 fn remove_refuses_a_module_another_installed_one_requires() {
     let (t, base, home) = installed_with_requires();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "wiki", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert!(stderr(&out).contains("kulman: cannot remove wiki: plaz requires it\n"));
+    assert!(stderr(&out).contains("nollm-wiki: cannot remove wiki: plaz requires it\n"));
     assert_eq!(snapshot(t.path()), before);
 }
 
 #[test]
 fn remove_a_module_together_with_the_one_that_requires_it() {
     let (_t, base, home) = installed_with_requires();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "wiki,plaz", "--yes"])
         .output()
         .unwrap();
@@ -622,30 +623,30 @@ fn remove_a_module_together_with_the_one_that_requires_it() {
 }
 
 #[test]
-fn remove_kulman_by_name_is_usage() {
+fn remove_nollm_wiki_by_name_is_usage() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
-        .args(["remove", "--modules", "wiki,kulman", "--yes"])
+    let out = nollm_wiki(&home, &base)
+        .args(["remove", "--modules", "wiki,nollm-wiki", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert_eq!(
         stderr(&out),
-        "kulman: kulman is not a module; kulman remove without --modules removes everything\n"
+        "nollm-wiki: nollm-wiki is not a module; nollm-wiki remove without --modules removes everything\n"
     );
     assert_eq!(snapshot(t.path()), before);
 
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "../x", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    assert!(stderr(&out).contains("kulman: --modules: bad name \"../x\""));
+    assert!(stderr(&out).contains("nollm-wiki: --modules: bad name \"../x\""));
     assert_eq!(snapshot(t.path()), before);
 
     // Spaces around a name are not part of it.
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .args(["remove", "--modules", " plaz", "--yes"])
         .assert()
         .success();
@@ -667,9 +668,9 @@ fn two_installs_at_once_keep_both_modules() {
     let user = t.path().join("user-home");
     fs::create_dir(&user).unwrap();
     let start = |module: &str| {
-        Command::new(assert_cmd::cargo::cargo_bin("kulman"))
-            .env("KULMAN_HOME", &home)
-            .env("KULMAN_RELEASE_URL", &base)
+        Command::new(assert_cmd::cargo::cargo_bin("nollm-wiki"))
+            .env("NOLLM_WIKI_HOME", &home)
+            .env("NOLLM_WIKI_RELEASE_URL", &base)
             .env("HOME", &user)
             .args(["install", "--modules", module])
             .stdin(Stdio::null())
@@ -689,7 +690,7 @@ fn two_installs_at_once_keep_both_modules() {
     );
     assert_binary(&home, "wiki", WIKI);
     assert_binary(&home, "plaz", PLAZ);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
 }
 
 /// Moves `home/bin` to `outside` and links `home/bin` to it.
@@ -706,11 +707,11 @@ fn remove_refuses_a_symlinked_bin() {
     link_bin(t.path(), &home);
     let before = snapshot(t.path());
     let expect = format!(
-        "kulman: {} is not a directory kulman can use",
+        "nollm-wiki: {} is not a directory nollm-wiki can use",
         home.join("bin").display()
     );
     for args in [&["remove", "--yes"][..], &["update"]] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
         assert_eq!(snapshot(t.path()), before, "{args:?}");
@@ -724,12 +725,15 @@ fn remove_refuses_a_directory_in_place_of_a_binary() {
     fs::create_dir(home.join("bin/plaz")).unwrap();
     fs::write(home.join("bin/plaz/inner"), "x").unwrap();
     let before = snapshot(t.path());
-    let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
+    let expect = format!(
+        "nollm-wiki: {} is not a file",
+        home.join("bin/plaz").display()
+    );
     for args in [
         &["remove", "--yes"][..],
         &["remove", "--modules", "wiki,plaz", "--yes"],
     ] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
         assert_eq!(snapshot(t.path()), before, "{args:?}");
@@ -744,12 +748,15 @@ fn remove_refuses_a_manifest_that_is_not_a_file_before_deleting_any_binary() {
     fs::create_dir(&manifest).unwrap();
     fs::write(manifest.join("inner"), "x").unwrap();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = format!("kulman: {} is not a file kulman wrote", manifest.display());
+    let expect = format!(
+        "nollm-wiki: {} is not a file nollm-wiki wrote",
+        manifest.display()
+    );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
 }
@@ -757,7 +764,7 @@ fn remove_refuses_a_manifest_that_is_not_a_file_before_deleting_any_binary() {
 #[test]
 fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
     for bad in [
-        r#"{"version":"0.7.0","modules":["wiki","kulman"]}"#,
+        r#"{"version":"0.7.0","modules":["wiki","nollm-wiki"]}"#,
         r#"{"version":"0.7.0","modules":["wiki","plaz","wiki"]}"#,
         r#"{"version":"0.7.0","modules":["../../victim"]}"#,
         r#"{"version":"#,
@@ -773,7 +780,7 @@ fn a_malformed_state_is_named_with_the_way_out_by_every_command() {
             &["remove", "--yes"],
             &["setup", "--scope", "repo"],
         ] {
-            let out = kulman(&home, &base).args(args).output().unwrap();
+            let out = nollm_wiki(&home, &base).args(args).output().unwrap();
             assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
             assert!(stderr(&out).contains(expect), "{}", stderr(&out));
             assert_eq!(snapshot(t.path()), before, "{args:?}");
@@ -790,7 +797,7 @@ fn update_adds_what_an_installed_module_now_requires() {
         &[("wiki", WIKI), ("plaz", PLAZ)],
     );
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -798,7 +805,7 @@ fn update_adds_what_an_installed_module_now_requires() {
     common::edit_manifest(&t.path().join("release"), "0.8.0", |m| {
         m["modules"][0]["requires"] = json!(["plaz"]);
     });
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     // The version changed, so the restart line stays; the new module is not "updated".
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
@@ -807,7 +814,7 @@ fn update_adds_what_an_installed_module_now_requires() {
         [
             "installed plaz 0.8.0",
             "updated wiki 0.7.0 -> 0.8.0",
-            "updated kulman 0.7.0 -> 0.8.0",
+            "updated nollm-wiki 0.7.0 -> 0.8.0",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
@@ -826,22 +833,22 @@ fn remove_on_a_home_with_no_state_deletes_no_file() {
         &["remove", "--modules", "wiki", "--yes"],
     ] {
         let (t, base, home) = installed();
-        // Not kulman's by any record: no state.json.
+        // Not nollm-wiki's by any record: no state.json.
         fs::remove_file(home.join("state.json")).unwrap();
         fs::remove_file(home.join("bin/wiki")).unwrap();
         fs::remove_file(home.join("bin/plaz")).unwrap();
         fs::write(home.join("notes.txt"), "mine").unwrap();
         let mut before = snapshot(&home);
         before.remove(Path::new(".lock"));
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki(&home, &base).args(args).output().unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
         let second = format!(
-            "{} holds files kulman has no record of; left as they are",
+            "{} holds files nollm-wiki has no record of; left as they are",
             home.display()
         );
         let third = format!(
             "to remove the installer itself, delete {}",
-            home.join("bin/kulman").display()
+            home.join("bin/nollm-wiki").display()
         );
         assert_eq!(lines(&out), ["nothing installed", &second, &third]);
         assert_eq!(snapshot(&home), before, "{args:?}");
@@ -857,9 +864,12 @@ fn update_refuses_a_directory_in_place_of_a_binary() {
     fs::create_dir(home.join("bin/plaz")).unwrap();
     fs::write(home.join("bin/plaz/inner"), "x").unwrap();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = format!("kulman: {} is not a file", home.join("bin/plaz").display());
+    let expect = format!(
+        "nollm-wiki: {} is not a file",
+        home.join("bin/plaz").display()
+    );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
 }
@@ -874,7 +884,7 @@ fn update_when_current_does_not_need_every_module_in_the_release() {
             .retain(|x| x["name"] != "plaz");
     });
     let before = snapshot(t.path());
-    let out = kulman(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "signature not checked: local release tree\n");
     assert_eq!(lines(&out), ["up to date"]);
@@ -888,15 +898,15 @@ fn remove_without_state_keeps_stale_temp_entries() {
     let home = t.path().join("home");
     fs::create_dir_all(home.join(".tmp-x")).unwrap();
     fs::write(home.join(".lock"), "").unwrap();
-    fs::write(home.join(".tmp-x/f"), "not kulman's by any record").unwrap();
-    let out = kulman(&home, &base)
+    fs::write(home.join(".tmp-x/f"), "not nollm-wiki's by any record").unwrap();
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         fs::read_to_string(home.join(".tmp-x/f")).unwrap(),
-        "not kulman's by any record"
+        "not nollm-wiki's by any record"
     );
 }
 
@@ -905,18 +915,18 @@ fn remove_without_a_terminal_needs_yes() {
     let (t, base, home) = installed();
     let before = snapshot(t.path());
     for args in [&["remove"][..], &["remove", "--modules", "plaz"]] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
         assert_eq!(
             stderr(&out),
-            "kulman: remove needs --yes when there is no terminal\n",
+            "nollm-wiki: remove needs --yes when there is no terminal\n",
             "{args:?}"
         );
         assert_eq!(stdout(&out), "", "{args:?}");
         assert_eq!(snapshot(t.path()), before, "{args:?}");
     }
     // The same command with --yes goes through: that is all --yes changes without a terminal.
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "plaz", "--yes"])
         .output()
         .unwrap();
@@ -933,7 +943,7 @@ fn remove_without_a_terminal_on_a_missing_home_is_usage_and_creates_nothing() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
-    let mut cmd = kulman(&home, &base);
+    let mut cmd = nollm_wiki(&home, &base);
     // All but the user's home, where an emulator (Rosetta) may keep a cache of its own.
     let tree = || {
         let mut s = snapshot(t.path());
@@ -979,11 +989,11 @@ fn an_unreadable_state_is_named_with_its_cause_by_every_command() {
         &["remove", "--yes"],
         &["setup", "--scope", "repo"],
     ] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki(&home, &base).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{args:?}: {}", stderr(&out));
         // The notice about an unsigned local tree may come first.
         let err = stderr(&out).replace("signature not checked: local release tree\n", "");
-        let expect = format!("kulman: {}: ", path.display());
+        let expect = format!("nollm-wiki: {}: ", path.display());
         assert!(err.lines().next().unwrap().starts_with(&expect), "{err}");
         assert!(!err.contains("delete it"), "{err}");
         assert_eq!(snapshot(t.path()), before, "{args:?}");
@@ -991,21 +1001,21 @@ fn an_unreadable_state_is_named_with_its_cause_by_every_command() {
 }
 
 #[test]
-fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
+fn remove_after_install_sh_alone_says_how_to_remove_nollm_wiki() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("wiki", WIKI)]);
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
-    fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
+    fs::write(home.join("bin/nollm-wiki"), NOLLM_WIKI_BYTES).unwrap();
     let before = snapshot(&home);
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let last = format!(
         "to remove the installer itself, delete {}",
-        home.join("bin/kulman").display()
+        home.join("bin/nollm-wiki").display()
     );
     assert_eq!(lines(&out), ["nothing installed", last.as_str()]);
     assert_eq!(snapshot(&home), before);
@@ -1014,8 +1024,8 @@ fn remove_after_install_sh_alone_says_how_to_remove_kulman() {
 #[test]
 fn status_command_equals_the_plain_form() {
     let (_t, base, home) = installed();
-    let plain = kulman(&home, &base).output().unwrap();
-    let named = kulman(&home, &base).arg("status").output().unwrap();
+    let plain = nollm_wiki(&home, &base).output().unwrap();
+    let named = nollm_wiki(&home, &base).arg("status").output().unwrap();
     assert!(named.status.success(), "{}", stderr(&named));
     assert_eq!(stdout(&named), stdout(&plain));
     assert_eq!(stderr(&named), stderr(&plain));
@@ -1031,7 +1041,7 @@ fn status_finds_bin_on_path_through_a_symlink() {
     let entries = [t.path().join("missing"), "relative".into(), link]
         .into_iter()
         .chain(std::env::split_paths(&own));
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .env("PATH", std::env::join_paths(entries).unwrap())
         .output()
         .unwrap();
@@ -1054,7 +1064,7 @@ fn installed_linked(foreign: &[&str]) -> (tempfile::TempDir, String, PathBuf, Pa
     for name in foreign {
         fs::write(dir.join(name), "mine").unwrap();
     }
-    kulman(&home, &base)
+    nollm_wiki(&home, &base)
         .env("PATH", path_first(&dir))
         .arg("install")
         .assert()
@@ -1067,14 +1077,14 @@ fn remove_modules_deletes_only_their_links() {
     let (_t, base, home, dir) = installed_linked(&[]);
     // A binary already gone leaves its link dangling: still removed.
     fs::remove_file(home.join("bin/plaz")).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--modules", "plaz", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "");
     assert!(fs::symlink_metadata(dir.join("plaz")).is_err());
-    for name in ["wiki", "kulman"] {
+    for name in ["wiki", "nollm-wiki"] {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)
@@ -1085,7 +1095,7 @@ fn remove_modules_deletes_only_their_links() {
 #[test]
 fn remove_everything_deletes_every_link_of_its_own() {
     let (_t, base, home, dir) = installed_linked(&["wiki"]);
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["remove", "--yes"])
         .output()
         .unwrap();
@@ -1102,15 +1112,15 @@ fn update_names_only_the_link_it_made() {
     fs::remove_file(dir.join("plaz")).unwrap();
     // A listed binary missing: the update repairs it, so it commits.
     fs::remove_file(home.join("bin/wiki")).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .env("PATH", path_first(&dir))
         .args(["update", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let linked = format!("kulman: linked plaz into {}", dir.display());
+    let linked = format!("nollm-wiki: linked plaz into {}", dir.display());
     assert_eq!(stderr(&out).lines().last(), Some(linked.as_str()));
-    for name in ["wiki", "plaz", "kulman"] {
+    for name in ["wiki", "plaz", "nollm-wiki"] {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)

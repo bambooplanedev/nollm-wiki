@@ -18,12 +18,11 @@ const PI_HOOK: &str = include_str!("wiki-hint.ts");
 const PI_HOOK_FILE: &str = ".pi/extensions/wiki-hint/index.ts";
 /// The command the agents run, found on `PATH`.
 const CMD: &str = "wiki";
-/// The command the agents run when this wiki is the kulman home's: found without `PATH`, and
+/// The command the agents run when this wiki is the nollm-wiki home's: found without `PATH`, and
 /// with no one's home path in a file the team shares. Run by a shell.
-const LAUNCH: &str = "\"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki\"";
+const LAUNCH: &str = "\"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki\"";
 /// [`LAUNCH`] for pi, which starts wiki without a shell.
-const PI_LAUNCH: &str =
-    r#"path.join(process.env.KULMAN_HOME || path.join(os.homedir(), ".kulman-home"), "bin/wiki")"#;
+const PI_LAUNCH: &str = r#"path.join(process.env.NOLLM_WIKI_HOME || path.join(os.homedir(), ".nollm-wiki-home"), "bin/wiki")"#;
 /// The navigation steps for an agent that reads `AGENTS.md` (Codex, Cursor), between markers so
 /// `--remove` takes out exactly them.
 const NAV_RULES: &str = include_str!("navigation.md");
@@ -85,17 +84,17 @@ fn pi_hook(cmd: &str, old: bool) -> String {
         .replace("\"<cmd>\"", PI_LAUNCH)
 }
 
-/// When this executable is the kulman home's `bin/wiki` (the home is `KULMAN_HOME`, else
-/// `$HOME/.kulman-home`): whether that home is `$HOME/.kulman-home`, where [`LAUNCH`] looks
-/// without `KULMAN_HOME`.
-fn kulman_home() -> Option<bool> {
+/// When this executable is the nollm-wiki home's `bin/wiki` (the home is `NOLLM_WIKI_HOME`, else
+/// `$HOME/.nollm-wiki-home`): whether that home is `$HOME/.nollm-wiki-home`, where [`LAUNCH`] looks
+/// without `NOLLM_WIKI_HOME`.
+fn nollm_wiki_home() -> Option<bool> {
     let var = |k| {
         std::env::var_os(k)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
-    let default = var("HOME").map(|h| h.join(".kulman-home"));
-    let home = var("KULMAN_HOME").or_else(|| default.clone())?;
+    let default = var("HOME").map(|h| h.join(".nollm-wiki-home"));
+    let home = var("NOLLM_WIKI_HOME").or_else(|| default.clone())?;
     let real = |p: &Path| p.canonicalize().ok();
     let exe = std::env::current_exe().ok()?;
     (real(&exe)? == real(&home.join("bin/wiki"))?)
@@ -277,7 +276,7 @@ fn lost(e: &str) -> String {
 /// hint): an `Environment:`, `Timeout:` or any other line is a setting setup did not write.
 fn claude_local_mcp(root: &Path, own: &[Value], remove: bool) -> Outcome {
     // Each entry's `Command:` and `Args:` lines, the latter also as Claude Code shows it: it
-    // prints `${VAR:-default}` as `${VAR}`, so [`LAUNCH`] reads `"${KULMAN_HOME}/bin/wiki"`.
+    // prints `${VAR:-default}` as `${VAR}`, so [`LAUNCH`] reads `"${NOLLM_WIKI_HOME}/bin/wiki"`.
     let lines: Vec<[String; 3]> = own
         .iter()
         .map(|v| {
@@ -290,7 +289,7 @@ fn claude_local_mcp(root: &Path, own: &[Value], remove: bool) -> Outcome {
             [
                 format!("Command: {}", v["command"].as_str().unwrap_or_default()),
                 format!("Args: {}", a.join(" ")),
-                format!("Args: {}", a.join(" ")).replace(":-$HOME/.kulman-home", ""),
+                format!("Args: {}", a.join(" ")).replace(":-$HOME/.nollm-wiki-home", ""),
             ]
         })
         .collect();
@@ -415,7 +414,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
     }
 
     // Own variants, this run's choice first; setup rewrites any of them and `--remove` takes any.
-    let home = kulman_home();
+    let home = nollm_wiki_home();
     let cmds: &[&str] = if home.is_some() {
         &[LAUNCH, CMD]
     } else {
@@ -480,7 +479,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             "warning: wiki is not on PATH; the agents will not find it until it is"
         }
         Some(false) => {
-            "warning: the agents find wiki through KULMAN_HOME; set it in their environment"
+            "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment"
         }
         _ => "",
     };

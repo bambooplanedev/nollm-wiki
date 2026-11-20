@@ -1281,7 +1281,7 @@ fn compile_never_reads_its_own_output_folder_as_a_source() {
                 .collect()
         };
         // One page per source file (src/a.rs, notes.txt). Read back as sources, the pages written
-        // into `.kulman` would add ids of their own (seen: `kulman_a`, `src_a`, `kulman_notes`).
+        // into `.kulman` would add ids of their own (seen: `nollm_wiki_a`, `src_a`, `nollm_wiki_notes`).
         let want = ["a", "notes"];
         assert_eq!(ids(&out), want, "respect_ignore={respect_ignore}");
         compile(project, &out, &opts).unwrap();

@@ -7,16 +7,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use common::{
-    assert_binary, kulman, per_target_kulman, release, snapshot, state, stderr, stdout,
-    version_dir, KULMAN_BYTES,
+    assert_binary, nollm_wiki, per_target_nollm_wiki, release, snapshot, state, stderr, stdout,
+    version_dir, NOLLM_WIKI_BYTES,
 };
 use serde_json::{json, Value};
 
 const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../install.sh");
 const WIKI: &[u8] = b"#!/bin/sh\necho wiki\n";
-const PUBLIC_KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/kulman.pub");
+const PUBLIC_KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/nollm-wiki.pub");
 /// The notice `install.sh` prints to stderr when there is no `minisign`.
-const NO_MINISIGN: &str = "install.sh: signature not checked (minisign not found); kulman checks \
+const NO_MINISIGN: &str =
+    "install.sh: signature not checked (minisign not found); nollm-wiki checks \
                            it on every install and update\n";
 /// What `install.sh` runs, linked from this `PATH`.
 const TOOLS: [&str; 20] = [
@@ -42,13 +43,13 @@ const TOOLS: [&str; 20] = [
     "printf",
 ];
 
-/// A temp root holding `release/` (0.7.0: wiki, and kulman as `kulman_bytes` per target); the
+/// A temp root holding `release/` (0.7.0: wiki, and nollm-wiki as `nollm_wiki_bytes` per target); the
 /// home `install.sh` is pointed at is `<root>/home`.
-fn setup(kulman_bytes: &[u8]) -> (tempfile::TempDir, String) {
+fn setup(nollm_wiki_bytes: &[u8]) -> (tempfile::TempDir, String) {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("release");
     let base = release(&dir, "0.7.0", &[("wiki", WIKI)]);
-    per_target_kulman(&dir, "0.7.0", kulman_bytes);
+    per_target_nollm_wiki(&dir, "0.7.0", nollm_wiki_bytes);
     (t, base)
 }
 
@@ -86,15 +87,15 @@ fn fake_minisign(t: &Path, code: i32) {
     fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// `sh` reading `script` from stdin, with `KULMAN_HOME=home`, the release, `HOME` a temp dir
+/// `sh` reading `script` from stdin, with `NOLLM_WIKI_HOME=home`, the release, `HOME` a temp dir
 /// beside `home`, and `PATH` the `tools` beside it.
 fn sh(home: &Path, base: &str, script: &[u8]) -> Output {
     let user = home.with_file_name("user-home");
     fs::create_dir_all(&user).unwrap();
     let mut child = Command::new("sh")
         .env("PATH", tools(&home.with_file_name("tools")))
-        .env("KULMAN_HOME", home)
-        .env("KULMAN_RELEASE_URL", base)
+        .env("NOLLM_WIKI_HOME", home)
+        .env("NOLLM_WIKI_RELEASE_URL", base)
         .env("HOME", &user)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -109,14 +110,14 @@ fn install_sh(home: &Path, base: &str) -> Output {
     sh(home, base, &fs::read(SCRIPT).unwrap())
 }
 
-/// Rewrites every `kulman-v…` line of the latest `SHA256SUMS` with `edit`.
+/// Rewrites every `nollm-wiki-v…` line of the latest `SHA256SUMS` with `edit`.
 fn edit_sums(t: &Path, edit: impl Fn(&str) -> String) {
     let path = t.join("release/latest/download/SHA256SUMS");
     let sums: String = fs::read_to_string(&path)
         .unwrap()
         .lines()
         .map(|l| {
-            if l.contains("  kulman-v0.7.0-") {
+            if l.contains("  nollm-wiki-v0.7.0-") {
                 edit(l)
             } else {
                 l.to_string()
@@ -143,53 +144,63 @@ fn nothing_in_user_home(t: &Path) {
 }
 
 #[test]
-fn install_sh_puts_kulman_in_bin() {
-    let (t, base) = setup(KULMAN_BYTES);
+fn install_sh_puts_nollm_wiki_in_bin() {
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
     // Nothing else is written: no state, no temp dir, nothing in the user's home.
-    assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+    assert_eq!(
+        paths(&home),
+        [PathBuf::from("bin"), "bin/nollm-wiki".into()]
+    );
     nothing_in_user_home(t.path());
     let bin = home.join("bin");
     assert_eq!(stderr(&out), NO_MINISIGN);
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\nnext: {}/kulman install\n",
+            "nollm-wiki installed in {}\nnext: {}/nollm-wiki install\n",
             bin.display(),
             bin.display()
         )
     );
     // Again over an older binary: replaced in place.
-    fs::write(home.join("bin/kulman"), b"old").unwrap();
+    fs::write(home.join("bin/nollm-wiki"), b"old").unwrap();
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
-    assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
+    assert_eq!(
+        paths(&home),
+        [PathBuf::from("bin"), "bin/nollm-wiki".into()]
+    );
 }
 
 #[test]
-fn install_sh_defaults_to_dot_kulman_home() {
-    let (t, base) = setup(KULMAN_BYTES);
+fn install_sh_defaults_to_dot_nollm_wiki_home() {
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let user = t.path().join("user-home");
     fs::create_dir_all(&user).unwrap();
     let out = Command::new("sh")
         .arg(SCRIPT)
-        .env_remove("KULMAN_HOME")
-        .env("KULMAN_RELEASE_URL", &base)
+        .env_remove("NOLLM_WIKI_HOME")
+        .env("NOLLM_WIKI_RELEASE_URL", &base)
         .env("HOME", &user)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&user.join(".kulman-home"), "kulman", KULMAN_BYTES);
+    assert_binary(
+        &user.join(".nollm-wiki-home"),
+        "nollm-wiki",
+        NOLLM_WIKI_BYTES,
+    );
     assert!(!user.join(".kulman").exists());
 }
 
 #[test]
 fn install_sh_over_an_installation_says_update() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     fs::create_dir_all(&home).unwrap();
     fs::write(
@@ -204,7 +215,7 @@ fn install_sh_over_an_installation_says_update() {
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\nkulman replaced; run \"{}/kulman update\" to bring the \
+            "nollm-wiki installed in {}\nnollm-wiki replaced; run \"{}/nollm-wiki update\" to bring the \
              modules to the same version\n",
             bin.display(),
             bin.display()
@@ -220,7 +231,7 @@ fn sums_and_signature(t: &Path) -> (PathBuf, PathBuf) {
 
 #[test]
 fn install_sh_checks_the_signature_with_minisign() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let (sums, sig) = sums_and_signature(t.path());
     // CRLF: the file is verified as downloaded, not as read.
     let crlf = fs::read_to_string(&sums).unwrap().replace('\n', "\r\n");
@@ -231,13 +242,16 @@ fn install_sh_checks_the_signature_with_minisign() {
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), "install.sh: signature checked\n");
-    assert_binary(&home, "kulman", KULMAN_BYTES);
-    assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
+    assert_eq!(
+        paths(&home),
+        [PathBuf::from("bin"), "bin/nollm-wiki".into()]
+    );
     let bin = home.join("bin");
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\nnext: {}/kulman install\n",
+            "nollm-wiki installed in {}\nnext: {}/nollm-wiki install\n",
             bin.display(),
             bin.display()
         )
@@ -276,7 +290,7 @@ fn install_sh_checks_the_signature_with_minisign() {
 
 #[test]
 fn install_sh_stops_when_the_signature_does_not_verify() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let (_, sig) = sums_and_signature(t.path());
     fs::write(&sig, "a signature\n").unwrap();
     fake_minisign(t.path(), 1);
@@ -291,7 +305,7 @@ fn install_sh_stops_when_the_signature_does_not_verify() {
     assert!(!home.exists());
     nothing_in_user_home(t.path());
     fs::create_dir_all(home.join("bin")).unwrap();
-    fs::write(home.join("bin/kulman"), "old").unwrap();
+    fs::write(home.join("bin/nollm-wiki"), "old").unwrap();
     let before = snapshot(&home);
     let out = install_sh(&home, &base);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
@@ -300,7 +314,7 @@ fn install_sh_stops_when_the_signature_does_not_verify() {
 
 #[test]
 fn install_sh_takes_no_signature_past_4096_bytes() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let (_, sig) = sums_and_signature(t.path());
     fs::write(&sig, "x".repeat(4097)).unwrap();
     fake_minisign(t.path(), 0);
@@ -317,12 +331,12 @@ fn install_sh_takes_no_signature_past_4096_bytes() {
 
 #[test]
 fn install_sh_goes_on_in_a_local_tree_without_a_signature() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     fake_minisign(t.path(), 1);
     let home = t.path().join("home");
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
     let bin = home.join("bin");
     assert_eq!(
         stderr(&out),
@@ -331,8 +345,8 @@ fn install_sh_goes_on_in_a_local_tree_without_a_signature() {
     assert_eq!(
         stdout(&out),
         format!(
-            "kulman installed in {}\n\
-             next: {}/kulman install\n",
+            "nollm-wiki installed in {}\n\
+             next: {}/nollm-wiki install\n",
             bin.display(),
             bin.display()
         )
@@ -354,9 +368,9 @@ fn install_sh_holds_the_release_key() {
 
 #[test]
 fn install_sh_leaves_nothing_when_the_archive_is_missing() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     for target in common::TARGETS {
-        let name = format!("kulman-v0.7.0-{target}.tar.gz");
+        let name = format!("nollm-wiki-v0.7.0-{target}.tar.gz");
         fs::remove_file(version_dir(&t.path().join("release"), "0.7.0").join(name)).unwrap();
     }
     let home = t.path().join("home");
@@ -372,7 +386,7 @@ fn install_sh_leaves_nothing_when_the_archive_is_missing() {
 
 #[test]
 fn install_sh_rejects_a_bad_checksum() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     edit_sums(t.path(), |l| format!("{}{}", "0".repeat(64), &l[64..]));
     let home = t.path().join("home");
     // A home this run created is removed again.
@@ -386,7 +400,7 @@ fn install_sh_rejects_a_bad_checksum() {
     assert!(!home.exists());
     // A home that existed keeps what it held, and gains nothing.
     fs::create_dir_all(home.join("bin")).unwrap();
-    fs::write(home.join("bin/kulman"), "old").unwrap();
+    fs::write(home.join("bin/nollm-wiki"), "old").unwrap();
     let before = snapshot(&home);
     let out = install_sh(&home, &base);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
@@ -401,11 +415,11 @@ fn install_sh_needs_exactly_one_line_for_this_machine() {
             "2 lines",
         ),
         (|_: &str| String::new(), "0 lines"),
-        // A version that is not X.Y.Z, or a short hash: not a kulman line at all.
+        // A version that is not X.Y.Z, or a short hash: not a nollm-wiki line at all.
         (|l: &str| l.replace("v0.7.0", "v0.7"), "0 lines"),
         (|l: &str| l[1..].to_string(), "bad line"),
     ] {
-        let (t, base) = setup(KULMAN_BYTES);
+        let (t, base) = setup(NOLLM_WIKI_BYTES);
         edit_sums(t.path(), edit);
         let home = t.path().join("home");
         let out = install_sh(&home, &base);
@@ -417,7 +431,7 @@ fn install_sh_needs_exactly_one_line_for_this_machine() {
 
 #[test]
 fn install_sh_refuses_a_bin_it_cannot_use() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let elsewhere = t.path().join("elsewhere");
     fs::create_dir_all(&home).unwrap();
@@ -426,31 +440,34 @@ fn install_sh_refuses_a_bin_it_cannot_use() {
     let out = install_sh(&home, &base);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let want = format!(
-        "{} is not a directory kulman can use",
+        "{} is not a directory nollm-wiki can use",
         home.join("bin").display()
     );
     assert!(stderr(&out).contains(&want), "{}", stderr(&out));
     assert_eq!(paths(&elsewhere), Vec::<PathBuf>::new());
-    // bin/kulman a directory: mv would move the binary into it.
+    // bin/nollm-wiki a directory: mv would move the binary into it.
     fs::remove_file(home.join("bin")).unwrap();
-    fs::create_dir_all(home.join("bin/kulman")).unwrap();
+    fs::create_dir_all(home.join("bin/nollm-wiki")).unwrap();
     let out = install_sh(&home, &base);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    assert_eq!(paths(&home), [PathBuf::from("bin"), "bin/kulman".into()]);
+    assert_eq!(
+        paths(&home),
+        [PathBuf::from("bin"), "bin/nollm-wiki".into()]
+    );
 }
 
 #[test]
 fn install_sh_takes_only_a_regular_file() {
-    let (t, base) = setup(KULMAN_BYTES);
-    // The archive for every target holds `kulman` as a symlink.
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
+    // The archive for every target holds `nollm-wiki` as a symlink.
     let stage = tempfile::tempdir().unwrap();
-    std::os::unix::fs::symlink("/bin/sh", stage.path().join("kulman")).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", stage.path().join("nollm-wiki")).unwrap();
     let vdir = version_dir(&t.path().join("release"), "0.7.0");
     for target in common::TARGETS {
-        let file = vdir.join(format!("kulman-v0.7.0-{target}.tar.gz"));
-        common::pack(stage.path(), &["kulman"], &file);
+        let file = vdir.join(format!("nollm-wiki-v0.7.0-{target}.tar.gz"));
+        common::pack(stage.path(), &["nollm-wiki"], &file);
         let sum = common::sha256(&file);
-        let name = format!("kulman-v0.7.0-{target}.tar.gz");
+        let name = format!("nollm-wiki-v0.7.0-{target}.tar.gz");
         edit_sums(t.path(), |l| {
             if l.ends_with(&name) {
                 format!("{sum}  {name}")
@@ -483,24 +500,24 @@ fn install_sh_takes_only_https_or_file() {
 }
 
 #[test]
-fn install_sh_then_kulman_install_works() {
-    let real = fs::read(env!("CARGO_BIN_EXE_kulman")).unwrap();
+fn install_sh_then_nollm_wiki_install_works() {
+    let real = fs::read(env!("CARGO_BIN_EXE_nollm-wiki")).unwrap();
     let (t, base) = setup(&real);
     let home = t.path().join("home");
     let out = install_sh(&home, &base);
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", &real);
-    let out = Command::new(home.join("bin/kulman"))
+    assert_binary(&home, "nollm-wiki", &real);
+    let out = Command::new(home.join("bin/nollm-wiki"))
         .args(["install", "--yes"])
-        .env("KULMAN_HOME", &home)
-        .env("KULMAN_RELEASE_URL", &base)
+        .env("NOLLM_WIKI_HOME", &home)
+        .env("NOLLM_WIKI_RELEASE_URL", &base)
         .env("HOME", t.path().join("user-home"))
         .stdin(Stdio::null())
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "wiki", WIKI);
-    assert_binary(&home, "kulman", &real);
+    assert_binary(&home, "nollm-wiki", &real);
     assert_eq!(
         state(&home),
         json!({"version": "0.7.0", "modules": ["wiki"]})
@@ -509,7 +526,7 @@ fn install_sh_then_kulman_install_works() {
 
 #[test]
 fn a_truncated_script_does_nothing() {
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let script = fs::read(SCRIPT).unwrap();
     let call = script.len() - b"main \"$@\"\n".len();
@@ -565,7 +582,7 @@ fn setup_with_the_real_wiki_and_plaz() {
         &[("wiki", &wiki), ("plaz", &plaz)],
     );
     let home = t.path().join("home");
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["install", "--modules", "wiki,plaz", "--yes"])
         .output()
         .unwrap();
@@ -586,7 +603,7 @@ fn setup_with_the_real_wiki_and_plaz() {
     assert!(git.success());
     let path = git_and_tar_only(t.path());
     let setup = |extra: &[&str]| {
-        let out = kulman(&home, &base)
+        let out = nollm_wiki(&home, &base)
             .current_dir(&project)
             .env("PATH", &path)
             .args(["setup", "--agent", "cursor", "--scope", "repo"])
@@ -610,7 +627,7 @@ fn setup_with_the_real_wiki_and_plaz() {
     // No agent in the project and none named: the wiki and the map all the same.
     assert!(!project.join(".cursor").exists());
     fs::remove_dir_all(project.join(".kulman")).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .current_dir(&project)
         .env("PATH", &path)
         .args(["setup", "--scope", "repo", "--yes"])
@@ -626,7 +643,7 @@ fn setup_with_the_real_wiki_and_plaz() {
 #[test]
 fn install_sh_installs_the_musl_build_on_linux() {
     use std::os::unix::fs::PermissionsExt;
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let user = t.path().join("user-home");
     fs::create_dir_all(&user).unwrap();
@@ -643,19 +660,19 @@ fn install_sh_installs_the_musl_build_on_linux() {
     let out = Command::new("sh")
         .arg(SCRIPT)
         .env("PATH", path)
-        .env("KULMAN_HOME", &home)
-        .env("KULMAN_RELEASE_URL", &base)
+        .env("NOLLM_WIKI_HOME", &home)
+        .env("NOLLM_WIKI_RELEASE_URL", &base)
         .env("HOME", &user)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki", NOLLM_WIKI_BYTES);
 }
 
 #[test]
 fn install_sh_has_no_build_for_an_intel_mac() {
     use std::os::unix::fs::PermissionsExt;
-    let (t, base) = setup(KULMAN_BYTES);
+    let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let user = t.path().join("user-home");
     fs::create_dir_all(&user).unwrap();
@@ -672,8 +689,8 @@ fn install_sh_has_no_build_for_an_intel_mac() {
     let out = Command::new("sh")
         .arg(SCRIPT)
         .env("PATH", path)
-        .env("KULMAN_HOME", &home)
-        .env("KULMAN_RELEASE_URL", &base)
+        .env("NOLLM_WIKI_HOME", &home)
+        .env("NOLLM_WIKI_RELEASE_URL", &base)
         .env("HOME", &user)
         .output()
         .unwrap();

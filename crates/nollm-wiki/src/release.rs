@@ -18,7 +18,8 @@ pub struct Manifest {
     pub version: String,
     pub modules: Vec<Module>,
     /// The installer itself: not a module, always installed.
-    pub kulman: Installer,
+    #[serde(rename = "nollm-wiki")]
+    pub nollm_wiki: Installer,
 }
 
 #[derive(Deserialize)]
@@ -68,9 +69,9 @@ impl Manifest {
         }
         for module in &m.modules {
             check_name(&module.name, "manifest")?;
-            // kulman is the installer, never a module.
-            if module.name == "kulman" {
-                bail!("bad name in manifest: kulman");
+            // nollm-wiki is the installer, never a module.
+            if module.name == "nollm-wiki" {
+                bail!("bad name in manifest: nollm-wiki");
             }
             for name in module.requires.iter().chain(&module.replaces) {
                 check_name(name, "manifest")?;
@@ -95,7 +96,7 @@ impl Manifest {
             }
         }
         let archives = m.modules.iter().flat_map(|x| x.archives.values());
-        for archive in archives.chain(m.kulman.archives.values()) {
+        for archive in archives.chain(m.nollm_wiki.archives.values()) {
             check_file(&archive.file, "manifest")?;
             let hex = archive.sha256.bytes().all(|b| b.is_ascii_hexdigit());
             if archive.sha256.len() != 64 || !hex {
@@ -110,10 +111,10 @@ impl Manifest {
         self.modules.iter().find(|m| m.name == name)
     }
 
-    /// The archive of `name` (a module, or `kulman`) for `target`.
+    /// The archive of `name` (a module, or `nollm-wiki`) for `target`.
     pub fn archive(&self, name: &str, target: &str) -> Result<&Archive> {
-        let archives = if name == "kulman" {
-            &self.kulman.archives
+        let archives = if name == "nollm-wiki" {
+            &self.nollm_wiki.archives
         } else {
             &self
                 .module(name)
@@ -185,7 +186,7 @@ pub fn check_base(given: &str) -> Result<&str> {
     if !base.contains(['?', '#']) && (https || local_path(base).is_some()) {
         Ok(base)
     } else {
-        bail!("KULMAN_RELEASE_URL must start with https:// or file:// (got {given})")
+        bail!("NOLLM_WIKI_RELEASE_URL must start with https:// or file:// (got {given})")
     }
 }
 
@@ -212,7 +213,7 @@ pub const WAIT: Wait = Wait {
     whole: Duration::from_secs(20),
 };
 
-/// For `kulman` with no command, which must not hang on a release host that does not answer.
+/// For `nollm-wiki` with no command, which must not hang on a release host that does not answer.
 pub const STATUS_WAIT: Wait = Wait {
     connect: Duration::from_secs(5),
     whole: Duration::from_secs(8),
@@ -256,7 +257,7 @@ fn download(
 }
 
 /// The release key (a minisign public key file), compiled in: there is no other.
-const PUBLIC_KEY: &str = include_str!("../../../release/kulman.pub");
+const PUBLIC_KEY: &str = include_str!("../../../release/nollm-wiki.pub");
 
 /// The most bytes read for `manifest.json.minisig` (one is about 300).
 const SIGNATURE_LIMIT: u64 = 4096;
@@ -467,7 +468,7 @@ mod tests {
     fn a_manifest_without_summary_or_options_parses() {
         let m = Manifest::parse(
             br#"{"version": "0.1.0", "modules": [{"name": "wiki"}],
-            "kulman": {"archives": {}}, "later": 1}"#,
+            "nollm-wiki": {"archives": {}}, "later": 1}"#,
         )
         .unwrap();
         assert_eq!(m.modules[0].summary, "");
@@ -478,7 +479,7 @@ mod tests {
     fn replaces_names_a_gone_module_only_one_module_claims() {
         let parse = |modules: &str| {
             let text = format!(
-                r#"{{"version": "0.1.0", "modules": {modules}, "kulman": {{"archives": {{}}}}}}"#
+                r#"{{"version": "0.1.0", "modules": {modules}, "nollm-wiki": {{"archives": {{}}}}}}"#
             );
             Manifest::parse(text.as_bytes()).map_err(|e| e.to_string())
         };

@@ -1,4 +1,4 @@
-//! `~/.kulman-home`: where it is, one run at a time, the state, and placing binaries.
+//! `~/.nollm-wiki-home`: where it is, one run at a time, the state, and placing binaries.
 
 use std::env;
 use std::fs::{self, File, TryLockError};
@@ -23,13 +23,13 @@ pub struct Home {
     _lock: File,
 }
 
-/// `KULMAN_HOME` (empty counts as unset; made absolute), else `$HOME/.kulman-home`.
+/// `NOLLM_WIKI_HOME` (empty counts as unset; made absolute), else `$HOME/.nollm-wiki-home`.
 pub fn home_path() -> Result<PathBuf> {
     let set = |key| env::var_os(key).filter(|v| !v.is_empty());
-    let path = match (set("KULMAN_HOME"), set("HOME")) {
+    let path = match (set("NOLLM_WIKI_HOME"), set("HOME")) {
         (Some(home), _) => PathBuf::from(home),
-        (None, Some(home)) => Path::new(&home).join(".kulman-home"),
-        (None, None) => bail!("set HOME or KULMAN_HOME"),
+        (None, Some(home)) => Path::new(&home).join(".nollm-wiki-home"),
+        (None, None) => bail!("set HOME or NOLLM_WIKI_HOME"),
     };
     Ok(std::path::absolute(path)?)
 }
@@ -45,7 +45,7 @@ impl Home {
         }
         let lock_path = path.join(".lock");
         let mut said = false;
-        // Twice at most: a failed first install or a `kulman remove` may remove home and its
+        // Twice at most: a failed first install or a `nollm-wiki remove` may remove home and its
         // lock file while this run waits for that lock.
         for _ in 0..2 {
             let created = match fs::create_dir(&path) {
@@ -69,7 +69,7 @@ impl Home {
                     Err(TryLockError::WouldBlock) => {
                         if !said {
                             let at = lock_path.display();
-                            eprintln!("kulman: waiting for another kulman run ({at})");
+                            eprintln!("nollm-wiki: waiting for another nollm-wiki run ({at})");
                             said = true;
                         }
                         f.lock().map(|()| (f, new))
@@ -106,18 +106,20 @@ impl Home {
         )
     }
 
-    /// `<home>/bin`, if present, is a real directory: never a symlink kulman would write or
+    /// `<home>/bin`, if present, is a real directory: never a symlink nollm-wiki would write or
     /// delete through. (Home itself may be a symlink.)
     fn check_bin(&self) -> Result<()> {
         let bin = self.path.join("bin");
         match fs::symlink_metadata(&bin) {
-            Ok(m) if !m.is_dir() => bail!("{} is not a directory kulman can use", bin.display()),
+            Ok(m) if !m.is_dir() => {
+                bail!("{} is not a directory nollm-wiki can use", bin.display())
+            }
             _ => Ok(()),
         }
     }
 
     /// Deletes every `<home>/.tmp-*`: under the lock, any found is left by a dead run. Only
-    /// when a state records home as kulman's.
+    /// when a state records home as nollm-wiki's.
     pub fn clean_tmp(&self) -> Result<()> {
         let named = |p: &Path| p.display().to_string();
         for entry in fs::read_dir(&self.path).with_context(|| named(&self.path))? {
@@ -196,13 +198,13 @@ impl State {
         let valid = |s: &State| {
             release::is_version(&s.version)
                 && s.modules.iter().enumerate().all(|(i, name)| {
-                    release::is_name(name) && name != "kulman" && !s.modules[..i].contains(name)
+                    release::is_name(name) && name != "nollm-wiki" && !s.modules[..i].contains(name)
                 })
         };
         match state {
             Some(state) if valid(&state) => Ok(Some(state)),
             _ => bail!(
-                "{} is not a state file kulman wrote; fix it, or delete it and run kulman install",
+                "{} is not a state file nollm-wiki wrote; fix it, or delete it and run nollm-wiki install",
                 path.display()
             ),
         }
@@ -215,7 +217,7 @@ pub struct Staged {
     pub path: PathBuf,
 }
 
-/// Fetches, checks and unpacks each of `names` (modules and `kulman`) into the temp dir;
+/// Fetches, checks and unpacks each of `names` (modules and `nollm-wiki`) into the temp dir;
 /// nothing is fetched unless the release has an archive for every one. Nothing outside the
 /// temp dir is touched.
 pub fn stage(
@@ -254,7 +256,7 @@ pub fn stage(
 pub static COMMITTING: AtomicBool = AtomicBool::new(false);
 
 /// Renames each staged binary (already synced) into `bin/` in the given order (the caller
-/// puts kulman last), then writes `manifest.json`, then `state.json`, each through a synced
+/// puts nollm-wiki last), then writes `manifest.json`, then `state.json`, each through a synced
 /// temp file. Removing the temp dir and linking every installed binary for the terminal
 /// (`link`) afterwards are best effort: the install is done.
 pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) -> Result<()> {
@@ -276,7 +278,11 @@ pub fn commit(home: &Home, staged: &[Staged], manifest: &[u8], state: &State) ->
     let _ = fs::remove_dir_all(home.tmp());
     link(
         &bin,
-        state.modules.iter().map(String::as_str).chain(["kulman"]),
+        state
+            .modules
+            .iter()
+            .map(String::as_str)
+            .chain(["nollm-wiki"]),
     );
     Ok(())
 }
@@ -304,14 +310,19 @@ fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
     for name in names {
         let at = dir.join(name);
         let target = bin.join(name);
-        let left = || eprintln!("kulman: left {} as it is (not a kulman link)", at.display());
+        let left = || {
+            eprintln!(
+                "nollm-wiki: left {} as it is (not a nollm-wiki link)",
+                at.display()
+            );
+        };
         let made = match fs::read_link(&at) {
             Ok(old) if old == target => continue,
             // Only an own link with a different spelling is renamed over: through a temp link
             // that is removed only once this run has made it; a file put at `at` between the
             // read and the rename would be replaced.
             Ok(old) if ours(&old) => {
-                let tmp = dir.join(format!(".{name}.kulman-{}", std::process::id()));
+                let tmp = dir.join(format!(".{name}.nollm-wiki-{}", std::process::id()));
                 symlink(&target, &tmp).and_then(|()| {
                     fs::rename(&tmp, &at).inspect_err(|_| {
                         let _ = fs::remove_file(&tmp);
@@ -339,11 +350,15 @@ fn link<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
         };
         match made {
             Ok(()) => linked.push(name),
-            Err(e) => eprintln!("kulman: warning: cannot link {}: {e}", at.display()),
+            Err(e) => eprintln!("nollm-wiki: warning: cannot link {}: {e}", at.display()),
         }
     }
     if !linked.is_empty() {
-        eprintln!("kulman: linked {} into {}", linked.join(" "), dir.display());
+        eprintln!(
+            "nollm-wiki: linked {} into {}",
+            linked.join(" "),
+            dir.display()
+        );
     }
 }
 
@@ -362,7 +377,7 @@ fn unlink<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
         });
         if ours {
             if let Err(e) = delete(&at) {
-                eprintln!("kulman: warning: {e}");
+                eprintln!("nollm-wiki: warning: {e}");
             }
         }
     }
@@ -373,7 +388,7 @@ fn unlink<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) {
 fn sync_dir(dir: &Path) {
     match File::open(dir).and_then(|d| d.sync_all()) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => {
-            eprintln!("kulman: warning: could not sync {}: {e}", dir.display());
+            eprintln!("nollm-wiki: warning: could not sync {}: {e}", dir.display());
         }
         _ => {}
     }
@@ -396,7 +411,7 @@ fn write(home: &Home, name: &str, bytes: &[u8]) -> Result<()> {
     fs::rename(&tmp, &dest).with_context(|| dest.display().to_string())
 }
 
-/// With no state, kulman has no record of owning anything: deletes `.lock` only, then `bin/`
+/// With no state, nollm-wiki has no record of owning anything: deletes `.lock` only, then `bin/`
 /// and home if empty. Returns whether home still holds anything.
 pub fn remove_lock(home: &Home) -> Result<bool> {
     delete(&home.path.join(".lock"))?;
@@ -406,7 +421,7 @@ pub fn remove_lock(home: &Home) -> Result<bool> {
 }
 
 /// Deletes `bin/<name>` and its link for the terminal (`unlink`) for each of `names`, then writes
-/// `state` (a crash in between leaves a listed binary missing, which `kulman update` puts back).
+/// `state` (a crash in between leaves a listed binary missing, which `nollm-wiki update` puts back).
 pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()> {
     let bin = home.path.join("bin");
     let paths: Vec<PathBuf> = names.iter().map(|n| bin.join(n)).collect();
@@ -422,14 +437,14 @@ pub fn remove_modules(home: &Home, names: &[String], state: &State) -> Result<()
     Ok(())
 }
 
-/// Deletes `bin/<module>` for each of `modules` and `bin/kulman`, then `manifest.json`,
+/// Deletes `bin/<module>` for each of `modules` and `bin/nollm-wiki`, then `manifest.json`,
 /// `state.json` and `.lock` last (a run that arrives after the lock is gone finds no state);
 /// then `bin/` and home if empty; first, their links for the terminal (`unlink`). Nothing else is
 /// touched: any other file keeps its directory.
 pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
     let bin = home.path.join("bin");
     let mut paths: Vec<PathBuf> = modules.iter().map(|n| bin.join(n)).collect();
-    paths.push(bin.join("kulman"));
+    paths.push(bin.join("nollm-wiki"));
     check_files(&paths)?;
     // The records too, each a regular file or absent, before the first deletion.
     for name in ["manifest.json", "state.json"] {
@@ -437,10 +452,13 @@ pub fn remove_all(home: &Home, modules: &[String]) -> Result<()> {
         match fs::symlink_metadata(&path) {
             Ok(m) if m.is_file() => {}
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-            _ => bail!("{} is not a file kulman wrote", path.display()),
+            _ => bail!("{} is not a file nollm-wiki wrote", path.display()),
         }
     }
-    unlink(&bin, modules.iter().map(String::as_str).chain(["kulman"]));
+    unlink(
+        &bin,
+        modules.iter().map(String::as_str).chain(["nollm-wiki"]),
+    );
     for path in &paths {
         delete(path)?;
     }

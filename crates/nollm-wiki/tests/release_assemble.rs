@@ -1,4 +1,4 @@
-//! `scripts/release-assemble.sh` over fake archives, and what it assembles read by `kulman` and
+//! `scripts/release-assemble.sh` over fake archives, and what it assembles read by `nollm-wiki` and
 //! `install.sh` from a `file://` tree in a temp dir.
 mod common;
 
@@ -6,17 +6,17 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use common::{assert_binary, kulman, pack, sha256, state, stderr, TARGETS};
+use common::{assert_binary, nollm_wiki, pack, sha256, state, stderr, TARGETS};
 use serde_json::json;
 
 const SCRIPT: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../scripts/release-assemble.sh"
 );
-const BINARIES: [&str; 3] = ["wiki", "plaz", "kulman"];
+const BINARIES: [&str; 3] = ["wiki", "plaz", "nollm-wiki"];
 const VERSION: &str = "0.7.0";
 
-/// This machine's target, as `kulman` and `install.sh` pick it.
+/// This machine's target, as `nollm-wiki` and `install.sh` pick it.
 const HERE: &str = if cfg!(target_os = "macos") {
     "aarch64-apple-darwin"
 } else {
@@ -75,11 +75,11 @@ fn fails(out: &Output, expect: &str) {
 }
 
 #[test]
-fn the_assembled_manifest_is_one_kulman_reads() {
+fn the_assembled_manifest_is_one_nollm_wiki_reads() {
     let (t, dir) = assets();
     let base = assembled(t.path(), &dir);
     let home = t.path().join("home");
-    let out = kulman(&home, &base)
+    let out = nollm_wiki(&home, &base)
         .args(["install", "--yes"])
         .output()
         .unwrap();
@@ -96,8 +96,8 @@ fn the_assembled_manifest_is_one_kulman_reads() {
     assert_eq!(m["modules"][0]["options"][0]["name"], "memory");
     assert_eq!(m["modules"][0]["options"][0]["default"], true);
     assert_eq!(
-        m["kulman"]["archives"][HERE],
-        json!({"file": file("kulman", HERE), "sha256": sha256(&dir.join(file("kulman", HERE)))})
+        m["nollm-wiki"]["archives"][HERE],
+        json!({"file": file("nollm-wiki", HERE), "sha256": sha256(&dir.join(file("nollm-wiki", HERE)))})
     );
 }
 
@@ -267,11 +267,11 @@ fn install_sh_installs_from_the_assembled_tree() {
     fs::create_dir_all(&user).unwrap();
     let out = Command::new("sh")
         .arg(&published)
-        .env("KULMAN_HOME", &home)
-        .env("KULMAN_RELEASE_URL", &base)
+        .env("NOLLM_WIKI_HOME", &home)
+        .env("NOLLM_WIKI_RELEASE_URL", &base)
         .env("HOME", &user)
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "kulman", &bytes("kulman", HERE));
+    assert_binary(&home, "nollm-wiki", &bytes("nollm-wiki", HERE));
 }

@@ -777,7 +777,7 @@ fn search_from(cwd: &std::path::Path) -> assert_cmd::assert::Assert {
 }
 
 #[test]
-fn read_commands_default_to_dot_kulman_then_out() {
+fn read_commands_default_to_dot_nollm_wiki_then_out() {
     let dir = tempdir().unwrap();
     let cwd = dir.path();
     fs::write(cwd.join("alpha.txt"), "# Alpha\n\nAlpha body.\n").unwrap();

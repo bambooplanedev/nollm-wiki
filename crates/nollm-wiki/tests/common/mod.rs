@@ -1,4 +1,4 @@
-//! A release laid out in a temp dir, and a `kulman` that never leaves it.
+//! A release laid out in a temp dir, and a `nollm-wiki` that never leaves it.
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 
 pub const TARGETS: [&str; 2] = ["aarch64-apple-darwin", "x86_64-unknown-linux-musl"];
 
-/// The bytes the helper packs as kulman's own binary.
-pub const KULMAN_BYTES: &[u8] = b"#!/bin/sh\necho kulman\n";
+/// The bytes the helper packs as nollm-wiki's own binary.
+pub const NOLLM_WIKI_BYTES: &[u8] = b"#!/bin/sh\necho nollm-wiki\n";
 
 /// Lays out `latest/download/manifest.json` and `download/v<version>/` (manifest, one
-/// `.tar.gz` per module and for kulman, `SHA256SUMS`) under `dir`; returns the `file://` base.
+/// `.tar.gz` per module and for nollm-wiki, `SHA256SUMS`) under `dir`; returns the `file://` base.
 /// wiki and plaz are `default: true`, any other module `default: false`.
 pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
     let vdir = version_dir(dir, version);
@@ -35,7 +35,7 @@ pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
             .collect();
         Value::Object(archives)
     };
-    let kulman = entry("kulman", KULMAN_BYTES);
+    let nollm_wiki = entry("nollm-wiki", NOLLM_WIKI_BYTES);
     let modules: Vec<Value> = modules
         .iter()
         .map(|(name, bytes)| {
@@ -50,7 +50,7 @@ pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
         })
         .collect();
     let manifest =
-        json!({ "version": version, "modules": modules, "kulman": { "archives": kulman } });
+        json!({ "version": version, "modules": modules, "nollm-wiki": { "archives": nollm_wiki } });
     fs::write(vdir.join("SHA256SUMS"), sums).unwrap();
     write_manifest(dir, version, &manifest);
     format!("file://{}", dir.display())
@@ -129,19 +129,19 @@ pub fn sha256(path: &Path) -> String {
     hex::encode(Sha256::digest(fs::read(path).unwrap()))
 }
 
-/// `kulman` with `KULMAN_HOME=home`, the release, `HOME` a temp dir beside `home`, stdin an empty closed pipe (not a terminal).
-pub fn kulman(home: &Path, release: &str) -> Command {
+/// `nollm-wiki` with `NOLLM_WIKI_HOME=home`, the release, `HOME` a temp dir beside `home`, stdin an empty closed pipe (not a terminal).
+pub fn nollm_wiki(home: &Path, release: &str) -> Command {
     let user = home.with_file_name("user-home");
     fs::create_dir_all(&user).unwrap();
-    let mut cmd = Command::cargo_bin("kulman").unwrap();
-    cmd.env("KULMAN_HOME", home)
-        .env("KULMAN_RELEASE_URL", release)
+    let mut cmd = Command::cargo_bin("nollm-wiki").unwrap();
+    cmd.env("NOLLM_WIKI_HOME", home)
+        .env("NOLLM_WIKI_RELEASE_URL", release)
         .env("HOME", &user)
         .write_stdin(Vec::new());
     cmd
 }
 
-/// Starts `kulman <args>` (set up as [`kulman`] does, stdin null) while the caller holds
+/// Starts `nollm-wiki <args>` (set up as [`nollm-wiki`] does, stdin null) while the caller holds
 /// `<home>/.lock`; asserts that its first stderr line says it waits for that lock (within 10 s,
 /// so a run that waits silently fails the test instead of hanging it) and that it is still
 /// running. Returns it, and the rest of its stderr once it ends.
@@ -153,9 +153,9 @@ pub fn started_waiting(
     use std::io::{BufRead, Read};
     let user = home.with_file_name("user-home");
     fs::create_dir_all(&user).unwrap();
-    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("kulman"))
-        .env("KULMAN_HOME", home)
-        .env("KULMAN_RELEASE_URL", release)
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("nollm-wiki"))
+        .env("NOLLM_WIKI_HOME", home)
+        .env("NOLLM_WIKI_RELEASE_URL", release)
         .env("HOME", &user)
         .args(args)
         .stdin(std::process::Stdio::null())
@@ -177,7 +177,7 @@ pub fn started_waiting(
         .recv_timeout(std::time::Duration::from_secs(10))
         .expect("no line on stderr while the lock is held");
     let expect = format!(
-        "kulman: waiting for another kulman run ({})\n",
+        "nollm-wiki: waiting for another nollm-wiki run ({})\n",
         home.join(".lock").display()
     );
     assert_eq!(line, expect);
@@ -200,7 +200,7 @@ pub fn state(home: &Path) -> Value {
 /// What every command says of a `state.json` it cannot read.
 pub fn not_a_state(home: &Path) -> String {
     format!(
-        "kulman: {} is not a state file kulman wrote; fix it, or delete it and run kulman install",
+        "nollm-wiki: {} is not a state file nollm-wiki wrote; fix it, or delete it and run nollm-wiki install",
         home.join("state.json").display()
     )
 }
@@ -258,18 +258,18 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<PathBuf, (&'static str, u32,
     }
 }
 
-/// Packs `bytes` as `kulman-v<version>-<target>.tar.gz` for every target, points the manifest's
-/// `kulman` entry at them and lists them in `SHA256SUMS`, which it also copies to
+/// Packs `bytes` as `nollm-wiki-v<version>-<target>.tar.gz` for every target, points the manifest's
+/// `nollm-wiki` entry at them and lists them in `SHA256SUMS`, which it also copies to
 /// `latest/download/`: the layout `install.sh` reads.
-pub fn per_target_kulman(dir: &Path, version: &str, bytes: &[u8]) {
+pub fn per_target_nollm_wiki(dir: &Path, version: &str, bytes: &[u8]) {
     let vdir = version_dir(dir, version);
     let stage = tempfile::tempdir().unwrap();
-    fs::write(stage.path().join("kulman"), bytes).unwrap();
+    fs::write(stage.path().join("nollm-wiki"), bytes).unwrap();
     let mut sums = fs::read_to_string(vdir.join("SHA256SUMS")).unwrap();
     let mut archives = serde_json::Map::new();
     for target in TARGETS {
-        let file = format!("kulman-v{version}-{target}.tar.gz");
-        pack(stage.path(), &["kulman"], &vdir.join(&file));
+        let file = format!("nollm-wiki-v{version}-{target}.tar.gz");
+        pack(stage.path(), &["nollm-wiki"], &vdir.join(&file));
         let sum = sha256(&vdir.join(&file));
         sums.push_str(&format!("{sum}  {file}\n"));
         archives.insert(target.to_string(), json!({ "file": file, "sha256": sum }));
@@ -277,7 +277,7 @@ pub fn per_target_kulman(dir: &Path, version: &str, bytes: &[u8]) {
     fs::write(vdir.join("SHA256SUMS"), &sums).unwrap();
     fs::write(dir.join("latest/download/SHA256SUMS"), &sums).unwrap();
     edit_manifest(dir, version, |m| {
-        m["kulman"]["archives"] = Value::Object(archives);
+        m["nollm-wiki"]["archives"] = Value::Object(archives);
     });
 }
 
@@ -293,7 +293,7 @@ pub fn path_linking(links: &Path, bin: &Path, names: &[&str]) -> std::ffi::OsStr
     std::env::join_paths(dirs).unwrap()
 }
 
-/// `$HOME/.local/bin` of the user home [`kulman`] sets for `home` (not created).
+/// `$HOME/.local/bin` of the user home [`nollm-wiki`] sets for `home` (not created).
 pub fn local_bin(home: &Path) -> PathBuf {
     home.with_file_name("user-home").join(".local/bin")
 }

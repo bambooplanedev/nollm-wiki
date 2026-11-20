@@ -5,12 +5,12 @@
 #
 # Run it in a terminal, inside this checkout: gh takes the repository from it, and minisign asks
 # for the secret key's password on the terminal, once per file. The script reads the draft
-# v<version> (it must be under the releases address of crates/kulman/src/install.rs, so a fork's
+# v<version> (it must be under the releases address of crates/nollm-wiki/src/install.rs, so a fork's
 # draft is refused, and hold exactly the 9 files the release workflow uploads), downloads it into a
 # temp dir, checks every archive's SHA-256 against SHA256SUMS and manifest.json, the manifest's
 # version, and install.sh against the tag's, signs manifest.json and SHA256SUMS (minisign -S;
 # --key is passed as -s, otherwise minisign's default key is used), verifies both signatures with
-# release/kulman.pub and uploads the two .minisig files to the draft. With --replace, signatures
+# release/nollm-wiki.pub and uploads the two .minisig files to the draft. With --replace, signatures
 # already on the draft are replaced; without it they stop the script. It never publishes: it ends
 # with the command to. It never reads, copies or prints the secret key, and never sees the
 # password. Exit 0, or 1 with a line naming what is wrong; nothing is uploaded unless every check
@@ -18,7 +18,7 @@
 #
 # Needs gh, minisign, jq, git, and sha256sum or shasum.
 #
-# KULMAN_SIGN_NO_TTY_CHECK=1 skips the terminal check, for the tests only (they run a fake
+# NOLLM_WIKI_SIGN_NO_TTY_CHECK=1 skips the terminal check, for the tests only (they run a fake
 # minisign); the real minisign still needs the terminal for the password.
 
 set -eu
@@ -26,7 +26,7 @@ LC_ALL=C
 export LC_ALL
 
 targets='aarch64-apple-darwin x86_64-unknown-linux-musl'
-binaries='wiki plaz kulman'
+binaries='wiki plaz nollm-wiki'
 
 die() {
     printf 'release-sign.sh: %s\n' "$1" >&2
@@ -54,7 +54,7 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# X.Y.Z, each a number with no leading zero (but 0), as kulman reads it.
+# X.Y.Z, each a number with no leading zero (but 0), as nollm-wiki reads it.
 case $version in
     *[!0-9.]*) die "bad version: $version" ;;
 esac
@@ -62,7 +62,7 @@ printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]{0,18})(\.(0|[1-9][0-9]{0,18}
     die "bad version: $version"
 tag=v$version
 
-if [ "${KULMAN_SIGN_NO_TTY_CHECK:-}" != 1 ] && [ ! -t 0 ]; then
+if [ "${NOLLM_WIKI_SIGN_NO_TTY_CHECK:-}" != 1 ] && [ ! -t 0 ]; then
     die "run it in a terminal: minisign asks there for the secret key's password"
 fi
 
@@ -84,13 +84,13 @@ case $key in
 esac
 repo=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 cd -- "$repo"
-pub=release/kulman.pub
+pub=release/nollm-wiki.pub
 # The releases address the installer uses (install.rs), so a draft of a fork is never signed.
 extract='s|^const RELEASES: &str = "\(https://github\.com/[^/"]*/[^/"]*/releases\)";$|\1|p'
-releases=$(sed -n "$extract" crates/kulman/src/install.rs 2>/dev/null) || :
+releases=$(sed -n "$extract" crates/nollm-wiki/src/install.rs 2>/dev/null) || :
 case $releases in
     https://*/releases) ;;
-    *) die "no releases address in crates/kulman/src/install.rs" ;;
+    *) die "no releases address in crates/nollm-wiki/src/install.rs" ;;
 esac
 keyid=$(sed -n '1s/^untrusted comment: minisign public key //p' "$pub" 2>/dev/null) || :
 [ -n "$keyid" ] || die "$pub is not a minisign public key file"
@@ -153,15 +153,15 @@ manifest=$dl/manifest.json
     die "SHA256SUMS does not list exactly the 6 archives of $version"
 stated=$(jq -r '.version' "$manifest") || die "manifest.json cannot be read"
 [ "$stated" = "$version" ] || die "manifest.json states version $stated, not $version"
-n=$(jq -r '[.modules[].archives[], .kulman.archives[]] | length' "$manifest") ||
-    die "manifest.json does not list archives as kulman reads them"
+n=$(jq -r '[.modules[].archives[], .["nollm-wiki"].archives[]] | length' "$manifest") ||
+    die "manifest.json does not list archives as nollm-wiki reads them"
 [ "$n" = 6 ] || die "manifest.json lists $n archives, not 6"
 for f in $archives; do
     sum=$(sha "$dl/$f")
     sum=${sum%% *}
     [ "$(awk -v f="$f" '$2 == f { print $1 }' "$sums")" = "$sum" ] ||
         die "$f: its SHA-256 is not the one in SHA256SUMS"
-    in_manifest=$(jq -r --arg f "$f" '[.modules[].archives[], .kulman.archives[]]
+    in_manifest=$(jq -r --arg f "$f" '[.modules[].archives[], .["nollm-wiki"].archives[]]
         | map(select(.file == $f) | .sha256) | if length == 1 then .[0] else "" end' "$manifest")
     [ "$in_manifest" = "$sum" ] || die "$f: its SHA-256 is not the one in manifest.json"
 done
@@ -182,12 +182,12 @@ printf 'minisign asks for the password twice, once per file\n'
 
 for f in manifest.json SHA256SUMS; do
     if [ -n "$key" ]; then
-        minisign -S -s "$key" -m "$dl/$f" -t "kulman $version $f" || die "$f: signing failed"
+        minisign -S -s "$key" -m "$dl/$f" -t "nollm-wiki $version $f" || die "$f: signing failed"
     else
-        minisign -S -m "$dl/$f" -t "kulman $version $f" || die "$f: signing failed"
+        minisign -S -m "$dl/$f" -t "nollm-wiki $version $f" || die "$f: signing failed"
     fi
 done
-# -H: only the prehashed form, the one kulman takes.
+# -H: only the prehashed form, the one nollm-wiki takes.
 for f in manifest.json SHA256SUMS; do
     minisign -V -H -q -p "$pub" -m "$dl/$f" -x "$dl/$f.minisig" ||
         die "$f: the new signature does not verify with $pub (signed with another key?);\

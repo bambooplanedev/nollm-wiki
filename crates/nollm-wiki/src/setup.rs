@@ -1,4 +1,4 @@
-//! `kulman setup`: runs each chosen module's own setup in the current project.
+//! `nollm-wiki setup`: runs each chosen module's own setup in the current project.
 
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::process::ExitStatusExt;
@@ -11,32 +11,32 @@ use crate::release::Manifest;
 use crate::{ask_choose, ask_yes, asks, on_path, store, SetupArgs, Usage};
 use store::State;
 
-/// `kulman setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
+/// `nollm-wiki setup`: runs `<home>/bin/<module> setup …` for each chosen module, in manifest order,
 /// in the current directory, whatever the earlier ones returned; when any failed, names them
 /// and exits with the first failure's status.
 pub(super) fn setup(a: SetupArgs) -> Result<()> {
     for name in a.modules.iter().flatten() {
-        if name == "kulman" {
-            return Err(Usage("kulman is not a module".to_string()).into());
+        if name == "nollm-wiki" {
+            return Err(Usage("nollm-wiki is not a module".to_string()).into());
         }
     }
     let home = store::home_path()?;
     let Some(state) = State::load(&home)? else {
         bail!(
-            "nothing installed in {}; run kulman install",
+            "nothing installed in {}; run nollm-wiki install",
             home.display()
         );
     };
     if state.modules.is_empty() {
-        bail!("nothing to set up: no module is installed (kulman install)");
+        bail!("nothing to set up: no module is installed (nollm-wiki install)");
     }
-    // The modules write into the project's `.kulman`: never into kulman's own home.
+    // The modules write into the project's `.kulman`: never into nollm-wiki's own home.
     let project = std::env::current_dir().and_then(|d| std::fs::metadata(d.join(".kulman")));
     if let (Ok(p), Ok(h)) = (project, std::fs::metadata(&home)) {
         if (p.dev(), p.ino()) == (h.dev(), h.ino()) {
             bail!(
-                "{} is kulman's own folder; set the project up from another directory or move \
-                 KULMAN_HOME",
+                "{} is nollm-wiki's own folder; set the project up from another directory or move \
+                 NOLLM_WIKI_HOME",
                 home.display()
             );
         }
@@ -50,7 +50,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
             return Err(unknown_module(&manifest, name));
         }
         if !state.modules.contains(name) {
-            bail!("{name} is not installed; run kulman install --modules {name}");
+            bail!("{name} is not installed; run nollm-wiki install --modules {name}");
         }
     }
     let ask = asks(a.yes);
@@ -122,7 +122,7 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
             .filter(std::fs::Metadata::is_file);
         match meta.map(|m| m.permissions().mode()) {
             None => bail!(
-                "{name} is installed but {} is missing; run kulman update",
+                "{name} is installed but {} is missing; run nollm-wiki update",
                 path.display()
             ),
             Some(mode) if mode & 0o111 == 0 => bail!("{} is not executable", path.display()),
@@ -178,13 +178,13 @@ pub(super) fn setup(a: SetupArgs) -> Result<()> {
             },
             Err(e) => (format!("cannot run {}: {e}", path.display()), 1),
         };
-        eprintln!("kulman: {name} setup failed ({how})");
+        eprintln!("nollm-wiki: {name} setup failed ({how})");
         failures.push(name);
         first_code.get_or_insert(code);
     }
     if let Some(code) = first_code {
         eprintln!(
-            "kulman: setup finished with errors: {}",
+            "nollm-wiki: setup finished with errors: {}",
             failures.join(", ")
         );
         std::process::exit(code);

@@ -1,4 +1,4 @@
-//! kulman: installs, updates and sets up the modules of the kulman set into `~/.kulman-home`.
+//! nollm-wiki: installs, updates and sets up the modules of the nollm-wiki set into `~/.nollm-wiki-home`.
 
 mod install;
 mod prompt;
@@ -31,7 +31,7 @@ struct Cli {
 enum Cmd {
     /// Show what is installed and whether a newer release exists (the same as no command).
     Status,
-    /// Install modules of a release into ~/.kulman-home/bin (with kulman itself).
+    /// Install modules of a release into ~/.nollm-wiki-home/bin (with nollm-wiki itself).
     Install {
         /// Modules to install, comma separated (default: the release's defaults).
         #[arg(long, value_delimiter = ',')]
@@ -43,15 +43,15 @@ enum Cmd {
         #[arg(long)]
         yes: bool,
     },
-    /// Update kulman and every installed module to the latest release.
+    /// Update nollm-wiki and every installed module to the latest release.
     Update {
         /// Ask nothing: take the defaults and go on.
         #[arg(long)]
         yes: bool,
     },
-    /// Remove the named modules, or everything kulman installed.
+    /// Remove the named modules, or everything nollm-wiki installed.
     Remove {
-        /// Modules to remove, comma separated (default: every module, kulman and its files).
+        /// Modules to remove, comma separated (default: every module, nollm-wiki and its files).
         #[arg(long, value_delimiter = ',')]
         modules: Option<Vec<String>>,
         /// Ask nothing: say yes and go on.
@@ -134,7 +134,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("kulman: {e:#}");
+            eprintln!("nollm-wiki: {e:#}");
             if changes && !store::COMMITTING.load(std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("nothing changed");
             }
@@ -222,11 +222,11 @@ fn reachable<'a>(bin: &Path, names: impl IntoIterator<Item = &'a str>) -> bool {
     on_path(bin) || names.into_iter().all(|n| resolves_on_path(bin, n))
 }
 
-/// What kulman says when `bin` is not on `PATH`, a convenience for the terminal only (agents
+/// What nollm-wiki says when `bin` is not on `PATH`, a convenience for the terminal only (agents
 /// need no `PATH`): two lines, the second one to copy.
 fn path_hint(bin: &Path) -> String {
     let bin = bin.display();
-    format!("{bin} is not on PATH; to type kulman in a terminal, add it:\n    export PATH=\"{bin}:$PATH\"")
+    format!("{bin} is not on PATH; to type nollm-wiki in a terminal, add it:\n    export PATH=\"{bin}:$PATH\"")
 }
 
 /// `state.json` exists under `home`: checked before anything is created.
