@@ -194,7 +194,22 @@ pub(super) fn shared_declaration_signature(
         spec,
     );
     let tail = render_span(text, root, own.start_byte(), own.end_byte(), spec);
-    Some(format!("{head}{tail}").trim().to_string())
+    Some(bounded(format!("{head}{tail}").trim().to_string()))
+}
+
+/// Characters a signature keeps. A safety net, not a style limit: above every
+/// correct signature measured (the longest, 804, is a `nlohmann/json`
+/// conversion operator's `enable_if` head), so it bites only on a parse the
+/// structural cuts did not catch.
+const SIGNATURE_BUDGET: usize = 1000;
+
+/// `sig` cut to `SIGNATURE_BUDGET` characters, with `…` when cut. Counts
+/// `chars()`, never bytes, so a multi-byte scalar is never split.
+fn bounded(sig: String) -> String {
+    match sig.char_indices().nth(SIGNATURE_BUDGET) {
+        Some((at, _)) => format!("{}…", &sig[..at]),
+        None => sig,
+    }
 }
 
 /// Build a one-line signature from a definition node: its source text up to
@@ -259,7 +274,7 @@ pub(super) fn build_signature(
         let rendered = render_span(text, value, value.start_byte(), value.end_byte(), spec);
         sig = append_value(sig, rendered.trim(), shape.has_type);
     }
-    sig
+    bounded(sig)
 }
 
 /// Characters of a retained value kept in a signature. Measured on the Python

@@ -702,6 +702,18 @@ fn a_type_body_inside_a_signature_is_elided() {
 }
 
 #[test]
+fn an_overlong_signature_is_cut_with_an_ellipsis() {
+    let params = (0..200)
+        .map(|i| format!("int a{i}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let e = crate::extract("f.h", &format!("void f({params});\n"));
+    let sig = &e.items[0].signature;
+    assert_eq!(sig.chars().count(), 1001, "{sig}");
+    assert!(sig.starts_with("void f(int a0, int a1") && sig.ends_with('…'));
+}
+
+#[test]
 fn a_signature_never_reads_back_a_skipped_branch_or_a_broken_declarator() {
     // A first-branch item reads the copy it was parsed from: the `#else`
     // branch, blank there, once rendered into `sleep`'s signature (reduced
