@@ -636,6 +636,9 @@ pub fn run(
 /// in practice.
 pub(crate) const WORKERS: usize = 16;
 
+/// The most of a cancel's `reason` written to stderr.
+const CANCEL_REASON_CHARS: usize = 200;
+
 /// Answer newline-delimited JSON-RPC from `input` through `reply` until it
 /// ends, then wait for the calls in flight; returns whether any message
 /// came. Calls that read the wiki go to `workers` threads; the rest
@@ -690,8 +693,19 @@ pub(crate) fn serve(
                 // Unknown and finished ids, and `initialize` (answered at
                 // once), are not in flight: ignored, as the spec allows.
                 Ok(msg) if msg["method"] == "notifications/cancelled" => {
-                    if let Some(c) = in_flight().get(&msg["params"]["requestId"].to_string()) {
+                    let id = &msg["params"]["requestId"];
+                    if let Some(c) = in_flight().get(&id.to_string()) {
                         c.store(true, Ordering::Relaxed);
+                        // The reason is the client's text: escaped onto one
+                        // line and capped.
+                        let reason = match msg["params"]["reason"].as_str() {
+                            Some(r) => {
+                                let r: String = r.chars().take(CANCEL_REASON_CHARS).collect();
+                                format!(": {}", r.escape_debug())
+                            }
+                            None => String::new(),
+                        };
+                        eprintln!("serve: request {id} cancelled{reason}");
                     }
                 }
                 Ok(msg)

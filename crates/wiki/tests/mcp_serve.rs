@@ -1750,3 +1750,54 @@ fn a_cancel_for_no_call_in_flight_is_ignored() {
     drop(stdin);
     let _ = child.wait();
 }
+
+/// A cancel that hits a call in flight is logged to stderr with its reason,
+/// escaped onto one line; a cancel for no call in flight logs nothing.
+#[test]
+fn a_cancel_is_logged_with_its_reason_on_one_line() {
+    let (_tmp, out) = compile_fixture();
+    std::fs::create_dir(out.join(".serve")).unwrap();
+    let mut server = Command::new(env!("CARGO_BIN_EXE_wiki"));
+    server
+        .args(["serve", "--dir"])
+        .arg(&out)
+        .stderr(Stdio::piped());
+    let (mut child, mut stdin, stdout) = attach(server);
+    let mut stderr = child.stderr.take().unwrap();
+    initialize(&mut stdin, &stdout);
+
+    // A compile holds the lock, so the call below stays in flight.
+    let (held, release) = (mpsc::channel(), mpsc::channel::<()>());
+    let d = out.clone();
+    let cli = std::thread::spawn(move || {
+        wiki::dirlock::exclusive(&d, || {
+            held.0.send(()).unwrap();
+            let _ = release.1.recv_timeout(Duration::from_secs(15));
+        });
+    });
+    held.1.recv().unwrap();
+    send_call(&mut stdin, 2, "search", &json!({"query": "gradient"}));
+    std::thread::sleep(Duration::from_millis(300));
+    for params in [
+        json!({"requestId": 2, "reason": "user\naborted"}),
+        json!({"requestId": 99, "reason": "unknown"}),
+    ] {
+        send(
+            &mut stdin,
+            &json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": params}),
+        );
+    }
+    drop(stdin);
+    let _ = child.wait();
+    release.0.send(()).unwrap();
+    cli.join().unwrap();
+
+    let mut log = String::new();
+    std::io::Read::read_to_string(&mut stderr, &mut log).unwrap();
+    let cancels: Vec<&str> = log.lines().filter(|l| l.contains("cancel")).collect();
+    assert_eq!(
+        cancels,
+        [r"serve: request 2 cancelled: user\naborted"],
+        "{log}"
+    );
+}
