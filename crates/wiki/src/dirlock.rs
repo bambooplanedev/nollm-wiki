@@ -52,7 +52,7 @@ pub fn try_shared<T>(dir: &Path, f: impl FnOnce() -> T) -> Option<T> {
 }
 
 /// `shared` waiting no later than `until`, or until this thread's call is
-/// [`CANCELLED`]: tries at least once, then every 10 ms; `None` if a
+/// `CANCELLED`: tries at least once, then every 10 ms; `None` if a
 /// compile still holds the lock.
 pub fn shared_until<T>(dir: &Path, until: Instant, f: impl FnOnce() -> T) -> Option<T> {
     let lock = open(dir, "compile.lock").ok();
