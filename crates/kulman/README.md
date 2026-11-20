@@ -216,7 +216,6 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
-      "replaces": ["kalka"],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
         "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }

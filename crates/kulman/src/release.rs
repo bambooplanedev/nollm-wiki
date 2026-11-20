@@ -482,8 +482,8 @@ mod tests {
             );
             Manifest::parse(text.as_bytes()).map_err(|e| e.to_string())
         };
-        let ok = parse(r#"[{"name": "calque", "replaces": ["kalka"]}, {"name": "plaz"}]"#);
-        assert_eq!(ok.unwrap().modules[0].replaces, ["kalka"]);
+        let ok = parse(r#"[{"name": "calque", "replaces": ["oldmod"]}, {"name": "plaz"}]"#);
+        assert_eq!(ok.unwrap().modules[0].replaces, ["oldmod"]);
         for (modules, why) in [
             (
                 r#"[{"name": "calque", "replaces": ["../x"]}]"#,

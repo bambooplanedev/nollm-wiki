@@ -339,18 +339,18 @@ fn update_whose_removal_fails_after_the_commit_finishes_it_on_the_next_run() {
 fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
     let t = tempfile::tempdir().unwrap();
     let rel = t.path().join("release");
-    let base = release(&rel, "0.7.0", &[("kalka", CALQUE), ("plaz", PLAZ)]);
+    let base = release(&rel, "0.7.0", &[("oldmod", CALQUE), ("plaz", PLAZ)]);
     let home = t.path().join("home");
     let dir = local_bin(&home);
     fs::create_dir_all(&dir).unwrap();
     kulman(&home, &base)
         .env("PATH", path_first(&dir))
-        .args(["install", "--modules", "kalka,plaz"])
+        .args(["install", "--modules", "oldmod,plaz"])
         .assert()
         .success();
     publish_0_8(t.path());
     common::edit_manifest(&rel, "0.8.0", |m| {
-        m["modules"][0]["replaces"] = json!(["kalka"]);
+        m["modules"][0]["replaces"] = json!(["oldmod"]);
     });
     let out = kulman(&home, &base)
         .env("PATH", path_first(&dir))
@@ -364,8 +364,8 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
             "installed calque 0.8.0",
             "updated plaz 0.7.0 -> 0.8.0",
             "updated kulman 0.7.0 -> 0.8.0",
-            "removed kalka: renamed calque; run \"kulman setup --scope repo\" (or local) \
-             again in each project set up with kalka",
+            "removed oldmod: renamed calque; run \"kulman setup --scope repo\" (or local) \
+             again in each project set up with oldmod",
             "restart running agent sessions; they keep the old binaries until then"
         ]
     );
@@ -374,8 +374,8 @@ fn update_puts_the_new_name_of_a_renamed_module_in_its_place() {
         json!({"version": "0.8.0", "modules": ["calque", "plaz"]})
     );
     assert_binary(&home, "calque", CALQUE_8);
-    assert!(!home.join("bin/kalka").exists());
-    assert!(fs::symlink_metadata(dir.join("kalka")).is_err());
+    assert!(!home.join("bin/oldmod").exists());
+    assert!(fs::symlink_metadata(dir.join("oldmod")).is_err());
     assert_eq!(
         fs::read_link(dir.join("calque")).unwrap(),
         home.join("bin/calque")

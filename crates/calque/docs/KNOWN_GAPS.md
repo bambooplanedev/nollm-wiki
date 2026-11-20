@@ -476,8 +476,8 @@ per question is noise-level: treat single results as anecdotes.
   that is a symbolic link is followed and the target rewritten.
 - `--remove` leaves `.kulman/` and the ignore lines in place.
 - The JSON configs (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `.claude/settings*.json`) and
-  `AGENTS.md` are read and written through a symlink, so setup, `--remove` and the removal of
-  kalka's entries edit the link's target wherever it is. Only `.codex/config.toml` refuses a link.
+  `AGENTS.md` are read and written through a symlink, so setup and `--remove` edit the link's target
+  wherever it is. Only `.codex/config.toml` refuses a link.
 
 ## Agent memory
 

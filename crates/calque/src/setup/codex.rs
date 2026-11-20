@@ -4,7 +4,7 @@
 
 mod toml;
 
-use super::edit::{self, inside, other_names, prune_dirs, Outcome};
+use super::edit::{inside, other_names, prune_dirs, Outcome};
 use super::{cli, Report};
 use crate::{memory, WikiError};
 use serde_json::Value;
@@ -22,21 +22,6 @@ const HOME: &str =
 pub(super) fn hint(root: &Path) -> String {
     let path = memory::display_path(root);
     format!("Codex loads the server only in a project it trusts: run codex in the project and accept the question, or add [projects.\"{path}\"] trust_level = \"trusted\" to ~/.codex/config.toml")
-}
-/// Takes out the block `kalka setup` wrote before the module was renamed calque, for any of the
-/// `own` entries started by name, in either line ending, when the file may be edited.
-pub(super) fn forget_kalka(root: &Path, own: &[Value]) -> std::io::Result<Outcome> {
-    if matches!(read(root), Ok(Some(_))) {
-        for eol in ["\n", "\r\n"] {
-            for e in own {
-                let block = toml::block(e, eol).replace("calque", "kalka");
-                if edit::remove_block(root, &root.join(FILE), &block)? == Outcome::Done {
-                    return Ok(Outcome::Done);
-                }
-            }
-        }
-    }
-    Ok(Outcome::AlreadyThere)
 }
 /// What the machine-wide entry is reported as (`CODEX_HOME` may put it anywhere).
 const MACHINE: &str = "Codex calque server (machine-wide)";
