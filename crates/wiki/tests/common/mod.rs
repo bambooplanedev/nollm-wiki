@@ -106,3 +106,25 @@ pub fn entry(out: &Path, id: &str) -> serde_json::Value {
         .find(|e| e["id"] == id)
         .unwrap_or_else(|| panic!("no index entry `{id}`"))
 }
+
+/// Put an executable file at `path`, written by a child process. Written from
+/// the test process, its write fd leaks into any child another test thread
+/// forks meanwhile and stays open there until that child execs, and running
+/// `path` in that window fails with ETXTBSY ("Text file busy") on Linux.
+pub fn write_exe(path: &Path, content: &[u8]) {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", "cat > \"$0\" && chmod 755 \"$0\""])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    sh.stdin.take().unwrap().write_all(content).unwrap();
+    assert!(sh.wait().unwrap().success(), "writing {}", path.display());
+}
+
+/// A copy of the wiki binary at `path`, through [`write_exe`].
+pub fn copy_wiki(path: &Path) {
+    write_exe(path, &std::fs::read(env!("CARGO_BIN_EXE_wiki")).unwrap());
+}

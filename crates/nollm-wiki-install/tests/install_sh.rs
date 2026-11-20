@@ -8,7 +8,7 @@ use std::process::{Command, Output, Stdio};
 
 use common::{
     assert_binary, nollm_wiki_install, per_target_nollm_wiki_install, release, snapshot, state,
-    stderr, stdout, version_dir, NOLLM_WIKI_BYTES,
+    stderr, stdout, version_dir, write_exe, NOLLM_WIKI_BYTES,
 };
 use serde_json::{json, Value};
 
@@ -76,15 +76,13 @@ fn tools(dir: &Path) -> PathBuf {
 /// A fake `minisign` on the `PATH` of `sh`: it writes its arguments, one per line, to
 /// `<t>/minisign.args`, and the file named after `-VHm` to `<t>/minisign.file`, and exits `code`.
 fn fake_minisign(t: &Path, code: i32) {
-    use std::os::unix::fs::PermissionsExt;
     let path = tools(&t.join("tools")).join("minisign");
     let script = format!(
         "#!/bin/sh\nprintf '%s\\n' \"$@\" >'{}'\ncat -- \"$2\" >'{}'\nexit {code}\n",
         t.join("minisign.args").display(),
         t.join("minisign.file").display()
     );
-    fs::write(&path, script).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    write_exe(&path, script.as_bytes());
 }
 
 /// `sh` reading `script` from stdin, with `NOLLM_WIKI_HOME=home`, the release, `HOME` a temp dir
@@ -544,7 +542,6 @@ fn a_truncated_script_does_nothing() {
 /// A dir holding `git` and `tar` only, as scripts that run the real ones: a `PATH` with no
 /// `claude` or `codex`.
 fn git_and_tar_only(dir: &Path) -> PathBuf {
-    use std::os::unix::fs::PermissionsExt;
     let bin = dir.join("path");
     fs::create_dir_all(&bin).unwrap();
     for tool in ["git", "tar"] {
@@ -555,8 +552,10 @@ fn git_and_tar_only(dir: &Path) -> PathBuf {
         let real = String::from_utf8(found.stdout).unwrap();
         assert!(found.status.success(), "{tool} is not on PATH");
         let path = bin.join(tool);
-        fs::write(&path, format!("#!/bin/sh\nexec '{}' \"$@\"\n", real.trim())).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+        write_exe(
+            &path,
+            format!("#!/bin/sh\nexec '{}' \"$@\"\n", real.trim()).as_bytes(),
+        );
     }
     bin
 }
@@ -642,7 +641,6 @@ fn setup_with_the_real_wiki_and_plaz() {
 /// `Linux/x86_64` gets the static musl build, whatever libc the machine has (commit fb738eb).
 #[test]
 fn install_sh_installs_the_musl_build_on_linux() {
-    use std::os::unix::fs::PermissionsExt;
     let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let user = t.path().join("user-home");
@@ -650,12 +648,10 @@ fn install_sh_installs_the_musl_build_on_linux() {
     let bin = t.path().join("path");
     fs::create_dir_all(&bin).unwrap();
     let uname = bin.join("uname");
-    fs::write(
+    write_exe(
         &uname,
-        "#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo x86_64 ;; esac\n",
-    )
-    .unwrap();
-    fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).unwrap();
+        b"#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo x86_64 ;; esac\n",
+    );
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let out = Command::new("sh")
         .arg(SCRIPT)
@@ -671,7 +667,6 @@ fn install_sh_installs_the_musl_build_on_linux() {
 
 #[test]
 fn install_sh_has_no_build_for_an_intel_mac() {
-    use std::os::unix::fs::PermissionsExt;
     let (t, base) = setup(NOLLM_WIKI_BYTES);
     let home = t.path().join("home");
     let user = t.path().join("user-home");
@@ -679,12 +674,10 @@ fn install_sh_has_no_build_for_an_intel_mac() {
     let bin = t.path().join("path");
     fs::create_dir_all(&bin).unwrap();
     let uname = bin.join("uname");
-    fs::write(
+    write_exe(
         &uname,
-        "#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo x86_64 ;; esac\n",
-    )
-    .unwrap();
-    fs::set_permissions(&uname, fs::Permissions::from_mode(0o755)).unwrap();
+        b"#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo x86_64 ;; esac\n",
+    );
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap());
     let out = Command::new("sh")
         .arg(SCRIPT)

@@ -6,6 +6,9 @@ use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 
+mod common;
+use common::write_exe;
+
 const SKILL: &str = include_str!("../src/setup/SKILL.md");
 
 /// The skill setup writes when the memory folder is `dir`.
@@ -28,8 +31,7 @@ impl Fixture {
     }
     fn stub(&self, name: &str, body: &str) {
         let p = self.bin().join(name);
-        fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+        write_exe(&p, format!("#!/bin/sh\n{body}\n").as_bytes());
     }
     /// The calls to `claude`.
     fn claude_log(&self) -> String {
@@ -69,7 +71,7 @@ impl Fixture {
 fn wiki_in(home: &Path) -> PathBuf {
     let exe = home.join("bin/wiki");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
-    fs::copy(env!("CARGO_BIN_EXE_wiki"), &exe).unwrap();
+    common::copy_wiki(&exe);
     exe
 }
 
@@ -469,8 +471,7 @@ fn setup_does_not_take_another_program_called_wiki_for_this_one() {
     let f = fixture(true, false);
     let other = f.root().join("other");
     fs::create_dir_all(&other).unwrap();
-    fs::write(other.join("wiki"), "#!/bin/sh\necho nope\n").unwrap();
-    fs::set_permissions(other.join("wiki"), fs::Permissions::from_mode(0o755)).unwrap();
+    write_exe(&other.join("wiki"), b"#!/bin/sh\necho nope\n");
     let a = f
         .run(
             Path::new(env!("CARGO_BIN_EXE_wiki")),
@@ -1259,12 +1260,10 @@ fn a_codex_found_through_a_relative_path_entry_is_the_one_that_runs() {
     fs::create_dir_all(&dir).unwrap();
     let stub = dir.join("codex");
     let get = codex_get("serve --source .", "-");
-    fs::write(
+    write_exe(
         &stub,
-        format!("#!/bin/sh\necho \"$@\" >> {t}/codex.log\n[ \"$2\" = get ] && printf '%s\\n' '{get}'\n:\n"),
-    )
-    .unwrap();
-    fs::set_permissions(&stub, fs::Permissions::from_mode(0o755)).unwrap();
+        format!("#!/bin/sh\necho \"$@\" >> {t}/codex.log\n[ \"$2\" = get ] && printf '%s\\n' '{get}'\n:\n").as_bytes(),
+    );
     let path = format!("node_modules/.bin:{}", f.bin().display());
     let a = Command::cargo_bin("wiki")
         .unwrap()

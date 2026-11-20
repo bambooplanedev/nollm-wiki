@@ -302,3 +302,20 @@ pub fn path_first(first: impl Into<PathBuf>) -> std::ffi::OsString {
     let own = std::env::var_os("PATH").unwrap_or_default();
     std::env::join_paths(std::iter::once(first.into()).chain(std::env::split_paths(&own))).unwrap()
 }
+
+/// Put an executable file at `path`, written by a child process. Written from
+/// the test process, its write fd leaks into any child another test thread
+/// forks meanwhile and stays open there until that child execs, and running
+/// `path` in that window fails with ETXTBSY ("Text file busy") on Linux.
+pub fn write_exe(path: &Path, content: &[u8]) {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", "cat > \"$0\" && chmod 755 \"$0\""])
+        .arg(path)
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    sh.stdin.take().unwrap().write_all(content).unwrap();
+    assert!(sh.wait().unwrap().success(), "writing {}", path.display());
+}
