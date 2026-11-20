@@ -404,6 +404,33 @@ fn two_definitions_of_one_key_never_pair() {
     assert_eq!(named(&idx, "src/wait.cc", "wait").len(), 2);
 }
 
+#[test]
+fn a_c_definition_pairs_and_a_cc_homonym_of_it_blocks_the_pair() {
+    let idx = compile_with_items(&[
+        (
+            "include/lib/api.h",
+            "int api_open(int fd);\nint api_reset(int fd);\n",
+        ),
+        (
+            "crypto/fd.c",
+            "int api_open(int fd) { return fd; }\nint api_reset(int fd) { return 0; }\n",
+        ),
+        (
+            "test/reset_test.cc",
+            "int api_reset(int fd) { return 1; }\n",
+        ),
+    ]);
+    assert_eq!(
+        named(&idx, "include/lib/api.h", "api_open")[0]["twin"],
+        "crypto/fd.c:1-1"
+    );
+    for path in ["include/lib/api.h", "crypto/fd.c", "test/reset_test.cc"] {
+        for it in named(&idx, path, "api_reset") {
+            assert!(it.get("twin").is_none(), "{path}: {it}");
+        }
+    }
+}
+
 /// Asserts that no item of `path` has a twin.
 fn no_twins(idx: &(serde_json::Value, serde_json::Value), path: &str) {
     for it in items_of(idx, path) {
