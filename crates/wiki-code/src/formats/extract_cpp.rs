@@ -479,12 +479,12 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
         .or_else(|| default_cut(def));
     // A definition in a broken class body can parse as a `declaration` with
     // no `body`, its body an ERROR after the declarator: stop there.
-    let broken = declarator.and_then(|d| {
+    let error_after_declarator = declarator.and_then(|d| {
         def.children(&mut def.walk())
             .find(|c| c.is_error() && c.start_byte() >= d.end_byte())
     });
     Shape {
-        cut: [cut, broken]
+        cut: [cut, error_after_declarator]
             .into_iter()
             .flatten()
             .min_by_key(Node::start_byte),
@@ -696,6 +696,8 @@ pub(crate) fn reparse(parser: &mut Parser, text: &str, tree: &Tree) -> Option<(T
         return None;
     }
     let copy = first_branch(text);
+    // Offsets of the copy's tree index `text` too (plaz reads directives there).
+    debug_assert_eq!(copy.len(), text.len());
     parser
         .parse(&copy, None)
         .filter(|t| damage(t.root_node()) < damage(tree.root_node()))

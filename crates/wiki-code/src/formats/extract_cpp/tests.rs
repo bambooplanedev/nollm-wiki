@@ -677,8 +677,14 @@ fn a_type_body_inside_a_signature_is_elided() {
     let src = "template<typename R>\nclass P\n{\n    template<typename B>\n    static auto m(B& o) -> decltype(o.f(), std::declval<B&>())\n    {\n        if (o.x) { return o; }\n        return o;\n    }\n\n    template<typename B>\n    static B& m(B& o)\n    {\n        return o;\n    }\n};\n";
     let e = crate::extract("p.hpp", src);
     let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
-    assert!(
-        sigs.iter().all(|s| !s.contains("return")),
+    // The misparse is still a misparse, but the class body stays out.
+    assert_eq!(
+        sigs,
+        [
+            "template<typename R> class P {…} template<typename B> static B& m(B& o)",
+            "class P",
+            "template<typename B> static auto m(B& o) -> decltype(o.f()",
+        ],
         "body leaked into a signature: {sigs:?}"
     );
 
@@ -722,16 +728,23 @@ fn a_signature_never_reads_back_a_skipped_branch_or_a_broken_declarator() {
     // A declaration that runs on into an ERROR stops at its declarator: the
     // class's closing brace once ended the macro's signature.
     let broken = "class B : public A\n{\n    MACRO(B, A, x)\n};\nint main()\n";
-    for (path, src) in [("bt.c", src), ("m.cpp", broken)] {
+    for (path, src, want) in [
+        (
+            "bt.c",
+            src,
+            &[
+                "void b(int t)",
+                "STUB sleep(int t, return false",
+                "int skipped",
+            ][..],
+        ),
+        ("m.cpp", broken, &["MACRO(B, A, x)"][..]),
+    ] {
         let sigs: Vec<String> = crate::extract(path, src)
             .items
             .into_iter()
             .map(|i| i.signature)
             .collect();
-        assert!(
-            sigs.iter()
-                .all(|s| !s.contains("#else") && !s.ends_with('}')),
-            "{sigs:?}"
-        );
+        assert_eq!(sigs, want, "{path}");
     }
 }

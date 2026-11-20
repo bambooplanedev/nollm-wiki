@@ -73,7 +73,7 @@ fn descendant_spans(
                 break;
             }
             if !cursor.goto_parent() {
-                out.sort_unstable();
+                out.sort_unstable_by_key(|&(a, b, _)| (a, b));
                 return out;
             }
         }
@@ -82,7 +82,7 @@ fn descendant_spans(
 
 /// A segment of a signature span that `render_span` does not render as plain
 /// text. See `render_span`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy)]
 enum Seg {
     Comment,
     Body,
@@ -145,6 +145,8 @@ fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec
         }
     };
     for (a, b, seg) in spans {
+        // `descendant_spans` reports ordered, non-overlapping spans.
+        debug_assert!(a >= pos);
         push_plain(&mut out, pos, a);
         match seg {
             Seg::Comment => {}
