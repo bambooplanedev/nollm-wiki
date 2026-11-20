@@ -1583,6 +1583,9 @@ fn the_search_first_rules_are_in_every_copy() {
         ("INSTRUCTIONS", wiki::serve::INSTRUCTIONS),
         ("render_agents_md", agents.as_str()),
     ] {
+        if name == "render_agents_md" {
+            assert!(text.contains("`wiki search \"<name> <name>\"`"), "{name}");
+        }
         assert!(text.contains("same turn as `search`"), "{name}");
         assert!(text.contains("put several in one query"), "{name}");
         assert!(text.contains("`callers`"), "{name}");
