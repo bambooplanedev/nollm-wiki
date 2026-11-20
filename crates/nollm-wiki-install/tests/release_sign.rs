@@ -3,11 +3,10 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-use common::{sha256, stderr, stdout, TARGETS};
+use common::{sha256, stderr, stdout, write_exe, TARGETS};
 use serde_json::json;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -277,8 +276,7 @@ esac
 "#;
 
 fn fake(path: &Path, script: &str) {
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    write_exe(path, script.as_bytes());
 }
 
 fn strings(v: &[&str]) -> Vec<String> {

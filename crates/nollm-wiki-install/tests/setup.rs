@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
-use common::{nollm_wiki_install, release, stderr};
+use common::{nollm_wiki_install, release, stderr, write_exe};
 use serde_json::{json, Value};
 
 /// A module that appends `<name> <args>` to `$NOLLM_WIKI_TEST_LOG`.
@@ -432,7 +432,7 @@ fn setup_runs_every_module_even_when_one_fails() {
 fn setup_remove_runs_every_module_even_when_one_fails() {
     let f = installed(LOGS_THEN_FAILS, "wiki,plaz");
     // plaz fails too: the status is the first failure's.
-    fs::write(f.home.join("bin/plaz"), b"#!/bin/sh\nexit 4\n").unwrap();
+    write_exe(&f.home.join("bin/plaz"), b"#!/bin/sh\nexit 4\n");
     let out = f.setup(&["--remove", "--scope", "repo"]);
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     assert_eq!(f.logged(), ["wiki setup --scope repo --memory --remove"]);
