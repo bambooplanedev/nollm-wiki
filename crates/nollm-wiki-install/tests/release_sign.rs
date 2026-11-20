@@ -301,7 +301,7 @@ fn assert_signed(f: &Fixture, key: Option<&str>) {
             "-m".into(),
             at(name),
             "-t".into(),
-            format!("nollm-wiki-install {VERSION} {name}"),
+            format!("nollm-wiki {VERSION} {name}"),
         ]);
         assert_eq!(call, &want);
     }

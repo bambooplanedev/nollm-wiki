@@ -90,7 +90,7 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
             let lines: Vec<_> = (blocked.iter())
                 .map(|(a, b)| format!("cannot remove {a}: {b} requires it"))
                 .collect();
-            bail!("{}", lines.join("\nnollm-wiki: "));
+            bail!("{}", lines.join("\nnollm-wiki-install: "));
         }
     }
     // Removing everything leaves wiki's name in the agent configs of set-up projects.

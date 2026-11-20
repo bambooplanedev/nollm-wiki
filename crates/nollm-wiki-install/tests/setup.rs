@@ -205,7 +205,11 @@ fn setup_of_a_module_not_installed_says_how() {
         &out,
         "nollm-wiki-install: --modules: unknown module \"nope\" (known: wiki, plaz)",
     );
-    assert!(!stderr(&out).contains("; run"), "{}", stderr(&out));
+    assert!(
+        !stderr(&out).contains("install --modules"),
+        "{}",
+        stderr(&out)
+    );
     usage(
         &f.setup(&["--modules", "plaz,", "--scope", "repo"]),
         "nollm-wiki-install: --modules: bad name \"\"",

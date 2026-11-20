@@ -182,9 +182,9 @@ printf 'minisign asks for the password twice, once per file\n'
 
 for f in manifest.json SHA256SUMS; do
     if [ -n "$key" ]; then
-        minisign -S -s "$key" -m "$dl/$f" -t "nollm-wiki-install $version $f" || die "$f: signing failed"
+        minisign -S -s "$key" -m "$dl/$f" -t "nollm-wiki $version $f" || die "$f: signing failed"
     else
-        minisign -S -m "$dl/$f" -t "nollm-wiki-install $version $f" || die "$f: signing failed"
+        minisign -S -m "$dl/$f" -t "nollm-wiki $version $f" || die "$f: signing failed"
     fi
 done
 # -H: only the prehashed form, the one nollm-wiki-install takes.
