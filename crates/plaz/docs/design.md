@@ -50,7 +50,7 @@ Each chart carries a coverage line: counts of resolved / one of / outside / hidd
 
 ## What changed in the logic (planned, not built)
 
-Against any commit, default HEAD (uncommitted work vs last commit). plaz would extract the old tree from a `git archive` of that commit into a temporary directory and compare by node identity = function + condition text + arm order (set difference, no tree matching). The output would be a page for people and the same text for agents through the CLI. Git is the history; no map history is stored.
+Against any commit, default HEAD (uncommitted work vs last commit). plaz would extract the old tree from a `git archive` of that commit into a temporary directory and compare by node identity = function + condition text + arm order (set difference, no tree matching). The output would be a page for people, and the same text in the terminal. Git is the history; no map history is stored.
 
 ## Output
 
