@@ -212,6 +212,20 @@ fn setup_twice_is_a_no_op() {
 }
 
 #[test]
+fn a_foreign_agents_md_navigation_block_survives_setup_and_remove_untouched() {
+    let f = fixture(true, false);
+    let agents = f.root().join("AGENTS.md");
+    let foreign =
+        "# Mine\n<!-- wiki:navigation -->\nsomeone else's rules\n<!-- /wiki:navigation -->\n";
+    fs::write(&agents, foreign).unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(out(&a).contains("skipped"), "{}", out(&a));
+    assert_eq!(read(&agents), foreign);
+    f.setup(&["--agent", "codex", "--scope", "repo", "--remove"]);
+    assert_eq!(read(&agents), foreign);
+}
+
+#[test]
 fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     let f = fixture(true, true);
     let foreign = "{\"mcpServers\":{\"wiki\":{\"command\":\"other\"}}}";
