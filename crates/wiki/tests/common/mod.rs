@@ -111,11 +111,10 @@ pub fn entry(out: &Path, id: &str) -> serde_json::Value {
 /// the test process, its write fd leaks into any child another test thread
 /// forks meanwhile and stays open there until that child execs, and running
 /// `path` in that window fails with ETXTBSY ("Text file busy") on Linux.
-#[cfg(unix)]
 pub fn write_exe(path: &Path, content: &[u8]) {
     use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut sh = Command::new("sh")
+    use std::process::Stdio;
+    let mut sh = std::process::Command::new("sh")
         .args(["-c", "cat > \"$0\" && chmod 755 \"$0\""])
         .arg(path)
         .stdin(Stdio::piped())
@@ -123,12 +122,6 @@ pub fn write_exe(path: &Path, content: &[u8]) {
         .unwrap();
     sh.stdin.take().unwrap().write_all(content).unwrap();
     assert!(sh.wait().unwrap().success(), "writing {}", path.display());
-}
-
-/// No fork race to dodge off Unix.
-#[cfg(not(unix))]
-pub fn write_exe(path: &Path, content: &[u8]) {
-    std::fs::write(path, content).unwrap();
 }
 
 /// A copy of the wiki binary at `path`, through [`write_exe`].
