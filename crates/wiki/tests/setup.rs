@@ -227,6 +227,29 @@ fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
 }
 
 #[test]
+fn a_stale_foreign_wiki_entry_survives_setup_and_remove_untouched() {
+    let f = fixture(true, true);
+    let mcp = f.root().join(".mcp.json");
+    let stale = "{\"mcpServers\":{\"wiki\":{\"command\":\"wiki\",\"args\":[\"serve\",\"--dir\",\"demo_wiki\"]}}}";
+    fs::write(&mcp, stale).unwrap();
+    let a = f.setup(&["--agent", "claude", "--scope", "repo"]).code(1);
+    assert!(
+        out(&a).contains("\"wiki\" has another value"),
+        "{}",
+        out(&a)
+    );
+    assert_eq!(read(&mcp), stale);
+    f.setup(&[
+        "--agent",
+        "claude,pi,cursor,codex",
+        "--scope",
+        "repo",
+        "--remove",
+    ]);
+    assert_eq!(read(&mcp), stale);
+}
+
+#[test]
 fn setup_local_uses_claude_cli_and_git_exclude() {
     let f = fixture(true, true);
     f.setup(&["--agent", "claude,pi", "--scope", "local"])
