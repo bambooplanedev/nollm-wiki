@@ -54,7 +54,7 @@ Against any commit, default HEAD (uncommitted work vs last commit). plaz would e
 
 ## Output
 
-Markdown pages with Mermaid, written by default into `<source>/.nollm-wiki/map/`, beside the pages of `wiki`, or into a vault given with `--vault`, with references to code as wikilinks to the wiki's code pages when that vault has them and as plain `path:start-end` otherwise. Quartz builds them into a browser site (the main human view); Obsidian opens them as a vault; agents read the same pages or call the CLI. plaz emits Quartz-compatible content; it does not ship or run Quartz. One vault holds the map of one source tree: a build that finds no code file warns and leaves the vault as it is.
+Markdown pages with Mermaid, written by default into `<source>/.nollm-wiki/map/`, beside the pages of `wiki`, or into a vault given with `--vault`, with references to code as wikilinks to the wiki's code pages when that vault has them and as plain `path:start-end` otherwise. Quartz builds them into a browser site (the main human view); Obsidian opens them as a vault. The pages are for people: `plaz setup` tells agents nothing about them. plaz emits Quartz-compatible content; it does not ship or run Quartz. One vault holds the map of one source tree: a build that finds no code file warns and leaves the vault as it is.
 
 ## Non-goals
 
