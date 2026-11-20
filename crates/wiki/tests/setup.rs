@@ -482,7 +482,7 @@ fn setup_does_not_take_another_program_called_wiki_for_this_one() {
 #[test]
 fn setup_does_not_wait_for_a_wiki_that_stalls() {
     let f = fixture(false, false);
-    f.stub("wiki", "sleep 30");
+    f.stub("wiki", "while :; do :; done");
     let t = std::time::Instant::now();
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
     assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
