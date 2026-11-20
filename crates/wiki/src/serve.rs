@@ -34,9 +34,9 @@ pub const INSTRUCTIONS: &str =
     "Map of this project. To find code, call `search` with the words of \
 what you are looking for and `kind: \"code\"`; each symbol line is \
 `path:start-end  name  signature`. Read only those lines with your file tool: \
-the ranges are exact, do not re-derive them with grep. Names you \
-already know go to `search` (one call can carry several); `page` with a path \
-is for the whole map of a module you do not know yet. Do not call grep, find or ls in \
+the ranges are exact, do not re-derive them with grep. Look up names you \
+already know with `search`; put several in one query. Use `page` only to see \
+every symbol of a module you have not seen. Do not call grep, find or ls in \
 the same turn as \
 `search`: read its answer first. Use `search` for where something is defined \
 or handled, `callers` for who calls a function, grep for every occurrence of a \

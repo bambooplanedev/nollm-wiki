@@ -399,9 +399,9 @@ Codex про сервер `wiki` на всю машину (`codex mcp get wiki`,
    Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are exact — do not
    re-derive them with grep.
-3. Names you already know go to `search`, one call can carry several. Only for the whole map of a
-   module you do not know yet, call `page` with the path; it lists every symbol with its lines. To see what
-   calls a function, call `callers` with the path and `symbol` instead of grepping for its name.
+3. Look up names you already know with `search`; put several in one query. Use `page` only to
+   see every symbol of a module you have not seen. To see what calls a function, call `callers`
+   with the path and `symbol` instead of grepping for its name.
 4. Do not call grep, find or ls in the same turn as `search`. Wait for the `search` answer and
    read it first; most of the time it already holds what you need.
 5. Pick the tool by the question: where something is defined or handled, `search`; who calls a
