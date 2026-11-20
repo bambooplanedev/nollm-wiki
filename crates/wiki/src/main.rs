@@ -15,7 +15,7 @@ use wiki::setup::{Agent, Scope, SetupOptions};
 use wiki::{compile, CompileOptions};
 use wiki_code::OUT_DIR;
 
-const DIR_HELP: &str = "Wiki to read (default: `.kulman` if that directory exists, else `out`)";
+const DIR_HELP: &str = "Wiki to read (default: `.nollm-wiki` if that directory exists, else `out`)";
 
 #[derive(Parser)]
 #[command(
@@ -146,8 +146,8 @@ enum Command {
         /// Compile this project, watch it, and recompile on every edit.
         #[arg(long)]
         source: Option<PathBuf>,
-        /// Wiki to serve (default: `<source>/.kulman` with `--source`, else
-        /// `.kulman` if that directory exists, else `out`).
+        /// Wiki to serve (default: `<source>/.nollm-wiki` with `--source`, else
+        /// `.nollm-wiki` if that directory exists, else `out`).
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Tools to expose, comma-separated, from search, page, neighbors,
@@ -164,7 +164,7 @@ enum Command {
     Hint {
         /// The task text (not used with `--claude-hook`).
         text: Option<String>,
-        /// Wiki to read (default: `.kulman`, or `$CLAUDE_PROJECT_DIR/.kulman` with `--claude-hook`).
+        /// Wiki to read (default: `.nollm-wiki`, or `$CLAUDE_PROJECT_DIR/.nollm-wiki` with `--claude-hook`).
         #[arg(long)]
         dir: Option<PathBuf>,
         /// Read a Claude Code `UserPromptSubmit` hook's JSON from stdin.
@@ -185,7 +185,7 @@ enum Command {
         /// No prompt hook (the default): one an earlier setup wrote is removed.
         #[arg(long)]
         no_hook: bool,
-        /// Undo what setup wrote (ignore lines and `.kulman/` stay).
+        /// Undo what setup wrote (ignore lines and `.nollm-wiki/` stay).
         #[arg(long)]
         remove: bool,
         /// Set up agent memory (the default).
@@ -256,7 +256,7 @@ fn ask_agents(yes: bool) -> Result<Vec<Agent>> {
     wiki::setup::parse_agents(&answer).map_err(anyhow::Error::msg)
 }
 
-/// The wiki a command reads: `--dir`, else `./.kulman` if it exists, else `out`.
+/// The wiki a command reads: `--dir`, else `./.nollm-wiki` if it exists, else `out`.
 fn wiki_dir(dir: Option<PathBuf>) -> PathBuf {
     dir.unwrap_or_else(|| {
         let local = PathBuf::from(OUT_DIR);

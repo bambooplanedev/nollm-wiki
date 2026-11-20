@@ -275,7 +275,7 @@ fn the_cli_reports_counts_and_fails_cleanly() {
         .success()
         .stdout("map: 3 written, 0 unchanged, 0 removed\n")
         .stderr("");
-    assert!(d.path().join(".kulman/map/src/a_rs.md").exists());
+    assert!(d.path().join(".nollm-wiki/map/src/a_rs.md").exists());
 
     let out = assert_cmd::cargo_bin_cmd!()
         .args(["build", "--source", "/no/such/dir"])

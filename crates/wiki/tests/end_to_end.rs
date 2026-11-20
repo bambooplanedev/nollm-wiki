@@ -49,7 +49,7 @@ fn output_is_deterministic_across_jobs() {
     );
     // The Python path resolves owners by ancestry, gates on `__all__`, and
     // splices decorators — none of which the .txt or .rs fixtures exercise.
-    // Written into the tempdir, so it never compiles into `.kulman/`.
+    // Written into the tempdir, so it never compiles into `.nollm-wiki/`.
     // Named deep_py.py (not deep.py) because deep.rs already slugs to "deep";
     // a colliding slug would silently drop one fixture and this test would
     // pass for the wrong reason.
@@ -1249,7 +1249,7 @@ fn map_folder_survives(out_dir: &str) {
 
 #[test]
 fn compile_leaves_the_map_folder_alone() {
-    map_folder_survives(".kulman");
+    map_folder_survives(".nollm-wiki");
 }
 
 #[test]
@@ -1258,17 +1258,17 @@ fn compile_leaves_the_map_folder_of_a_visible_output_folder_alone() {
 }
 
 /// The output folder is excluded by its path, not only by the hidden-folder
-/// rule: a `.gitignore` that whitelists `.kulman/`, or `--no-ignore`, still
+/// rule: a `.gitignore` that whitelists `.nollm-wiki/`, or `--no-ignore`, still
 /// reads no page of an earlier run as a source.
 #[test]
 fn compile_never_reads_its_own_output_folder_as_a_source() {
     for respect_ignore in [true, false] {
         let dir = tempdir().unwrap();
         let project = dir.path();
-        write(project, ".gitignore", "!.kulman/\n");
+        write(project, ".gitignore", "!.nollm-wiki/\n");
         write(project, "src/a.rs", "pub fn f() {}\n");
         write(project, "notes.txt", "# Notes\n\nAbout f.\n");
-        let out = project.join(".kulman");
+        let out = project.join(".nollm-wiki");
         let opts = CompileOptions {
             respect_ignore,
             ..Default::default()
@@ -1281,7 +1281,7 @@ fn compile_never_reads_its_own_output_folder_as_a_source() {
                 .collect()
         };
         // One page per source file (src/a.rs, notes.txt). Read back as sources, the pages written
-        // into `.kulman` would add ids of their own (seen: `kulman_a`, `src_a`, `kulman_notes`).
+        // into `.nollm-wiki` would add ids of their own (seen: `nollm_wiki_a`, `src_a`, `nollm_wiki_notes`).
         let want = ["a", "notes"];
         assert_eq!(ids(&out), want, "respect_ignore={respect_ignore}");
         compile(project, &out, &opts).unwrap();

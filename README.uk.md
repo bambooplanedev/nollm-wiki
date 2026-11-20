@@ -1,21 +1,22 @@
 [English](README.md) · **Українська**
 
-# kulman
+# nollm-wiki
 
-**kulman** читається «кульман»: кульман — креслярська дошка конструкторського бюро; тут це вхідні
-двері набору: він встановлює інструменти й налаштовує проєкт.
+**Карта проєкту для агентів, що пишуть код, і зрозумілий людям огляд бізнес-логіки, зібрані з коду без LLM.**
 
-[![CI](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/kulman/actions/workflows/rust.yml)
-[![Release](https://img.shields.io/github/v/release/bambooplanedev/kulman)](https://github.com/bambooplanedev/kulman/releases)
+[![CI](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml)
+[![Release](https://img.shields.io/github/v/release/bambooplanedev/nollm-wiki)](https://github.com/bambooplanedev/nollm-wiki/releases)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-kulman — набір інструментів для агентів, що пишуть код, і людей, які з ними працюють; назви взято
-з креслярських дошок і плазів авіаційного конструкторського бюро. `wiki` компілює проєкт у карту,
-в якій агент може шукати, — де лежить кожна функція, хто її викликає, які рядки читати, — а `plaz`
-малює справжні рішення кожної функції, щоб їх читали люди. Жоден не викликає модель: ті самі
-джерела дають побайтово той самий результат, а `kulman` встановлює обидва й налаштовує їх у проєкті
-однією командою на кожен крок.
+nollm-wiki перетворює проєкт на карту, в якій агент може шукати, — де лежить кожна функція, хто її
+викликає, які рядки читати, — і на схеми рішень, що показують людям бізнес-логіку кожної функції.
+Ніщо не викликає модель: ті самі джерела дають побайтово той самий результат.
+
+- `wiki` компілює карту й віддає її агентам через MCP;
+- `plaz` малює бізнес-логіку кожної функції — її справжні рішення — як схеми, які можуть читати люди;
+- `nollm-wiki-install` встановлює обидва, перевіряє підпис релізу й налаштовує їх у проєкті однією
+  командою.
 
 ## Навіщо
 
@@ -26,8 +27,6 @@ kulman — набір інструментів для агентів, що пи�
 
 `wiki` дає агентові пошук у проєкті; `plaz` малює для людини схему рішень кожної функції. Що
 виміряно: [Що заощаджує `wiki` і коли](#що-заощаджує-wiki-і-коли).
-
-`kulman` встановлює й оновлює обидва однією командою і перевіряє підпис релізу.
 
 ## Що заощаджує `wiki` і коли
 
@@ -52,13 +51,14 @@ kulman — набір інструментів для агентів, що пи�
 
 Заощадження на реальній роботі не показано. Умови, інтервали й межі кожної цифри — у розділі
 [Виміряне `wiki`](crates/wiki/README.uk.md#виміряне). Результати з інших проєктів і моделей
-додаватимемо, коли їх виміряють, і ви можете [виміряти на своєму та відкрити issue](https://github.com/bambooplanedev/kulman/issues).
+додаватимемо, коли їх виміряють, і ви можете [виміряти на своєму та відкрити issue](https://github.com/bambooplanedev/nollm-wiki/issues).
 
 ## Назви
 
 | Назва | Як читати | Що означає слово |
 |---|---|---|
-| kulman | «кульман» | креслярська дошка конструкторського бюро — вхідні двері: встановлює інструменти, налаштовує проєкт |
+| nollm-wiki | назва проєкту | проєкт: карта для агентів і схеми бізнес-логіки для людей |
+| `nollm-wiki-install` | nollm-wiki install | пряма назва: інсталятор інструментів |
 | `wiki` | wiki | пряма назва: модуль, що компілює вікі проєкту й віддає її агентам |
 | plaz | «плаз» | підлога, на якій бюро викреслює справжні лінії планера в натуральну величину — справжні рішення кожної функції |
 | techlog | «теклог» | бортовий журнал літака — памʼять агента про проєкт |
@@ -66,46 +66,46 @@ kulman — набір інструментів для агентів, що пи�
 
 ## Встановлення
 
-Сам `kulman` завантажується одним рядком:
+Сам `nollm-wiki-install` завантажується одним рядком:
 
-    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/kulman/releases/latest/download/install.sh | sh
+    curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/nollm-wiki/releases/latest/download/install.sh | sh
 
-Скрипт завантажує архів `kulman` для вашої системи, перевіряє його за `SHA256SUMS` релізу (і
-зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.kulman-home/bin/kulman`.
-Більше він нічого не записує і не змінює профілів оболонки. Додайте `~/.kulman-home/bin` у свій
-`PATH` самі, якщо хочете набирати `kulman` у терміналі; агенти знаходять `wiki` і без цього, а коли
-`~/.local/bin` уже в `PATH`, `kulman install` лінкує туди інструменти. Релізи підписані: `install.sh` перевіряє підпис
-`SHA256SUMS`, якщо встановлено `minisign`, а `kulman` перевіряє кожен реліз, який читає (див.
+Скрипт завантажує архів `nollm-wiki-install` для вашої системи, перевіряє його за `SHA256SUMS` релізу (і
+зупиняється, якщо немає ні `sha256sum`, ні `shasum`) та кладе бінарник у `~/.nollm-wiki-home/bin/nollm-wiki-install`.
+Більше він нічого не записує і не змінює профілів оболонки. Додайте `~/.nollm-wiki-home/bin` у свій
+`PATH` самі, якщо хочете набирати `nollm-wiki-install` у терміналі; агенти знаходять `wiki` і без цього, а коли
+`~/.local/bin` уже в `PATH`, `nollm-wiki-install install` лінкує туди інструменти. Релізи підписані: `install.sh` перевіряє підпис
+`SHA256SUMS`, якщо встановлено `minisign`, а `nollm-wiki-install` перевіряє кожен реліз, який читає (див.
 [Перевірка релізу](#перевірка-релізу)).
 
 Далі встановіть модулі:
 
-    kulman install
+    nollm-wiki-install install
 
-Ця команда кладе `wiki` і `plaz` (модулі релізу за замовчуванням) у `~/.kulman-home/bin`, поруч із
-`kulman`, а в `~/.kulman-home` — `manifest.json` релізу і `state.json`. Поза цією текою нічого не
+Ця команда кладе `wiki` і `plaz` (модулі релізу за замовчуванням) у `~/.nollm-wiki-home/bin`, поруч із
+`nollm-wiki-install`, а в `~/.nollm-wiki-home` — `manifest.json` релізу і `state.json`. Поза цією текою нічого не
 записується. Потім у кожному проєкті:
 
     cd your-project
-    kulman setup --scope repo
+    nollm-wiki-install setup --scope repo
 
-Ця команда запускає там `wiki setup` і `plaz setup`. Вони пишуть у теку проєкту `.kulman/`, додають
+Ця команда запускає там `wiki setup` і `plaz setup`. Вони пишуть у теку проєкту `.nollm-wiki/`, додають
 конфіги агентів для знайдених агентів (Claude Code, pi, Cursor, Codex; хук запиту — лише з `--hook`), створюють `.agents/memory/` і
-додають `.kulman/` у `.gitignore`. `--scope repo` пише закомічені файли для всієї команди;
+додають `.nollm-wiki/` у `.gitignore`. `--scope repo` пише закомічені файли для всієї команди;
 `--scope local` пише їх лише для цієї робочої копії й вносить у `.git/info/exclude` (що пише кожен режим і для якого агента:
 [налаштування `wiki`](crates/wiki/README.uk.md#wiki-setup)).
 
-Згодом `kulman update` доводить усе до останнього релізу, `kulman setup --scope repo --remove`
-скасовує налаштування проєкту (з тим самим `--scope`, з яким його налаштовували), а `kulman remove`
-видаляє те, що встановив kulman. Команди, прапорці, коди виходу й будова релізу:
-[crates/kulman/README.uk.md](crates/kulman/README.uk.md).
+Згодом `nollm-wiki-install update` доводить усе до останнього релізу, `nollm-wiki-install setup --scope repo --remove`
+скасовує налаштування проєкту (з тим самим `--scope`, з яким його налаштовували), а `nollm-wiki-install remove`
+видаляє те, що встановив nollm-wiki. Команди, прапорці, коди виходу й будова релізу:
+[crates/nollm-wiki-install/README.uk.md](crates/nollm-wiki-install/README.uk.md).
 
 ### Нехай це зробить ваш агент
 
 Якщо не хочете виконувати ці кроки вручну, вставте це у чат свого агента для програмування:
 
-    Install or update kulman in this project by following
-    https://raw.githubusercontent.com/bambooplanedev/kulman/main/docs/agent-setup.md
+    Install or update nollm-wiki in this project by following
+    https://raw.githubusercontent.com/bambooplanedev/nollm-wiki/main/docs/agent-setup.md
     Ask me before installing, updating, or changing any file outside this agent's own configuration.
 
 Заздалегідь прочитайте [docs/agent-setup.md](docs/agent-setup.md), щоб побачити, що скажуть агентові.
@@ -113,15 +113,15 @@ kulman — набір інструментів для агентів, що пи�
 ### Перевірка релізу
 
 `manifest.json` і `SHA256SUMS` релізу підписані через minisign ключем релізів,
-[`release/kulman.pub`](release/kulman.pub); кожен архів перевіряється за сумами SHA-256 у них.
-`kulman` відхиляє реліз, підпис якого не проходить перевірку або, через `https://`, відсутній;
+[`release/nollm-wiki.pub`](release/nollm-wiki.pub); кожен архів перевіряється за сумами SHA-256 у них.
+`nollm-wiki-install` відхиляє реліз, підпис якого не проходить перевірку або, через `https://`, відсутній;
 `install.sh` перевіряє підпис, якщо встановлено `minisign`, а інакше каже, що не перевірив. Ключ,
 команди для перевірки релізу вручну, те, як реліз підписують, і обмеження:
-[Підписи](crates/kulman/README.uk.md#підписи).
+[Підписи](crates/nollm-wiki-install/README.uk.md#підписи).
 
 ## Модулі
 
-**[kulman](crates/kulman/README.uk.md)** встановлює, оновлює й видаляє модулі та запускає їхнє
+**[nollm-wiki-install](crates/nollm-wiki-install/README.uk.md)** встановлює, оновлює й видаляє модулі та запускає їхнє
 налаштування в проєкті. Це інсталятор, а не модуль.
 
 **[`wiki`](crates/wiki/README.uk.md)** компілює проєкт — код, нотатки, документацію — у вікі з
@@ -156,25 +156,25 @@ Python, C і C++; інші мови отримують примітку «not co
 Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `git`, `jq` та
 користувач без прав root.
 
-    git clone https://github.com/bambooplanedev/kulman
-    cd kulman
-    cargo install --path crates/wiki        # у ~/.cargo/bin
+    git clone https://github.com/bambooplanedev/nollm-wiki
+    cd nollm-wiki
+    cargo install --path crates/wiki      # у ~/.cargo/bin
     cargo install --path crates/plaz
-    cargo install --path crates/kulman
+    cargo install --path crates/nollm-wiki-install
 
     cargo test
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
 
-`cargo install` кладе бінарники в `~/.cargo/bin`. На двох системах, для яких є реліз, `kulman`,
+`cargo install` кладе бінарники в `~/.cargo/bin`. На двох системах, для яких є реліз, `nollm-wiki-install`,
 зібраний так, встановлює модулі з опублікованого релізу. На будь-якій іншій системі він цього не
-може: збірки для неї немає, і `kulman install` зупиняється з `no build for <os>/<arch>`. Там
+може: збірки для неї немає, і `nollm-wiki-install install` зупиняється з `no build for <os>/<arch>`. Там
 користуйтеся зібраними тут `wiki` і `plaz` і запускайте їхній власний setup у кожному проєкті
-(`wiki setup --scope repo`, `plaz setup --scope repo`). Власні тести kulman встановлюють реліз,
+(`wiki setup --scope repo`, `plaz setup --scope repo`). Тести `nollm-wiki-install` встановлюють реліз,
 тож їм теж потрібна одна з цих двох систем. Пуш тегу `v*`, що збігається з версією робочого
 простору, збирає архіви для macOS і Linux, перевіряє, що вони встановлюються, і створює чернетку
 GitHub Release з їхніми `SHA256SUMS`; власник підписує чернетку через `scripts/release-sign.sh` і
-потім публікує її ([Підписи](crates/kulman/README.uk.md#підписи)).
+потім публікує її ([Підписи](crates/nollm-wiki-install/README.uk.md#підписи)).
 
 ## Ліцензія
 

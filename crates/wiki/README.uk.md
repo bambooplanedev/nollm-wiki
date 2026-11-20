@@ -4,7 +4,7 @@
 
 **Карта вашого проєкту для агентів, що пишуть код: де лежить кожна функція, хто її викликає і які рядки читати. Без жодної LLM під час компіляції.**
 
-`wiki` — модуль [набору kulman](../../README.uk.md), а цей крейт — бінарник `wiki` і бібліотека,
+`wiki` — модуль [проєкту nollm-wiki](../../README.uk.md), а цей крейт — бінарник `wiki` і бібліотека,
 яку він обгортає.
 
 `wiki` компілює проєкт — код, нотатки, документацію — у вікі з перехресними посиланнями в Markdown
@@ -20,7 +20,7 @@
 рядка над ним; це не вивід команди.
 
 ```
-$ wiki callers calls.rs resolve_calls --dir .kulman
+$ wiki callers calls.rs resolve_calls --dir .nollm-wiki
 callers of resolve_calls  crates/wiki/src/calls.rs:197-264 — 1 functions in 1 files
 crates/wiki/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
@@ -60,7 +60,7 @@ crates/wiki/src/lib.rs
 - **MCP-сервер.** `wiki serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
   `search`, `page` і `callers` (`neighbors` і `lint` з `--tools`) у Claude Code, pi, Cursor, Codex
   чи будь-який MCP-клієнт.
-  Кілька серверів на одному `.kulman` — це нормально: один компілює, решта віддають те, що він записав.
+  Кілька серверів на одному `.nollm-wiki` — це нормально: один компілює, решта віддають те, що він записав.
 - **Налаштування однією командою.** `wiki setup` встановлює сервер і те, що каже агентові ним
   користуватися, для Claude Code, pi, Cursor і Codex, а з `--hook` — і хук, що додає до кожного
   запиту відповідні рядки коду.
@@ -86,33 +86,32 @@ crates/wiki/src/lib.rs
 
 ## Встановлення
 
-Реліз набору kulman містить `wiki` для двох систем, названих вище; на будь-якій іншій збирайте з
-вихідного коду. Статична збірка для Linux використовує інший алокатор памʼяті, і на великих проєктах
-її пікове споживання памʼяті вище, ніж у збірки з glibc.
+Реліз nollm-wiki містить `wiki` для двох систем, названих вище; на будь-якій іншій збирайте з
+вихідного коду.
 
-### Через kulman
+### Через nollm-wiki
 
-`kulman` встановлює, оновлює й налаштовує `wiki` разом з іншими модулями; кроки описано в
-[README репозиторію](../../README.uk.md#встановлення). Коротко, коли `kulman` уже є на машині:
+`nollm-wiki-install` встановлює, оновлює й налаштовує `wiki` разом з іншими модулями; кроки описано в
+[README репозиторію](../../README.uk.md#встановлення). Коротко, коли `nollm-wiki-install` уже є на машині:
 
-    kulman install                     # модулі релізу за замовчуванням, у ~/.kulman-home/bin
+    nollm-wiki-install install                     # модулі релізу за замовчуванням, у ~/.nollm-wiki-home/bin
     cd your-project
-    kulman setup --scope local         # запускає тут wiki setup і plaz setup
-    kulman update                      # згодом: усе до останнього релізу
+    nollm-wiki-install setup --scope local         # запускає тут wiki setup і plaz setup
+    nollm-wiki-install update                      # згодом: усе до останнього релізу
 
-Додати `~/.kulman-home/bin` у свій `PATH` необов'язково, це для набору `kulman` у терміналі (агенти
+Додати `~/.nollm-wiki-home/bin` у свій `PATH` необов'язково, це для набору `nollm-wiki-install` у терміналі (агенти
 знаходять `wiki` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). За замовчуванням усе ввімкнено; вимикайте прапорцями
-(`kulman install --modules wiki`, `kulman setup --no-memory`). `kulman setup` запускає кожен
+(`nollm-wiki-install install --modules wiki`, `nollm-wiki-install setup --no-memory`). `nollm-wiki-install setup` запускає кожен
 вибраний модуль, навіть коли якийсь завершився з помилкою, і наприкінці називає ті, що не вдалися.
-`kulman remove` видаляє те, що встановив kulman (без термінала потрібен `--yes`); проєкти,
-налаштовані через kulman, лишають `wiki` у конфігах агентів, тож спершу запустіть у них
-`kulman setup --remove` з тим самим `--scope`. Команди, коди виходу й будова релізу:
-[crates/kulman/README.uk.md](../kulman/README.uk.md).
+`nollm-wiki-install remove` видаляє те, що встановив nollm-wiki (без термінала потрібен `--yes`); проєкти,
+налаштовані через nollm-wiki, лишають `wiki` у конфігах агентів, тож спершу запустіть у них
+`nollm-wiki-install setup --remove` з тим самим `--scope`. Команди, коди виходу й будова релізу:
+[crates/nollm-wiki-install/README.uk.md](../nollm-wiki-install/README.uk.md).
 
 ### З коду
 
-    git clone https://github.com/bambooplanedev/kulman
-    cd kulman
+    git clone https://github.com/bambooplanedev/nollm-wiki
+    cd nollm-wiki
     cargo install --path crates/wiki      # у ~/.cargo/bin
 
 ## Швидкий старт
@@ -120,9 +119,9 @@ crates/wiki/src/lib.rs
 У проєкті, в якому мають орієнтуватися агенти:
 
     cd your-project
-    wiki setup --scope local      # компілює .kulman, встановлює MCP-сервер і (для pi) скіл
+    wiki setup --scope local      # компілює .nollm-wiki, встановлює MCP-сервер і (для pi) скіл
 
-Далі запустіть у цій теці Claude Code або pi: інструменти `wiki` вже там, а сервер тримає `.kulman/`
+Далі запустіть у цій теці Claude Code або pi: інструменти `wiki` вже там, а сервер тримає `.nollm-wiki/`
 в актуальному стані після ваших правок. `--scope repo` натомість пише закомічені файли для всієї
 команди, а `wiki setup --remove` з тим самим `--scope` це скасовує. Cursor і Codex:
 `wiki setup --agent cursor,codex`; інші клієнти — див. [Агенти](#агенти).
@@ -152,7 +151,7 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 На коді той самий пошук називає символи з діапазонами рядків. На цьому репозиторії:
 
 ```
-$ wiki search "call edges" --dir .kulman --limit 1
+$ wiki search "call edges" --dir .nollm-wiki --limit 1
 calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ шлях             └ назва — опис
   crates/wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
@@ -199,7 +198,7 @@ calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matche
 
     wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
-Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
+Команда компілює `.` у `.nollm-wiki`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
 каже кожному агентові ним користуватися. pi отримує скіл `wiki-navigation` (як шукати код і
 правила памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він
 показує й так, а сервер позначає свої інструменти для завантаження одразу, а не через `ToolSearch`;
@@ -210,14 +209,14 @@ calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matche
 не знайдено і `--agent` не задано, setup у терміналі питає, кого
 налаштувати (номери чи назви, порожній рядок — нікого); без термінала, або коли нікого не вибрано,
 він однаково компілює вікі, пише рядки в ignore-файли й теку памʼяті, не налаштовує жодного агента,
-пише в stderr `no agent set up: the wiki is in .kulman/; run wiki setup --agent … later` і
+пише в stderr `no agent set up: the wiki is in .nollm-wiki/; run wiki setup --agent … later` і
 виходить з кодом 0. `--remove`, коли агента не знайдено і `--agent` не задано, нічого агентського не прибирає: пише в
 stderr `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring`
 і виходить з кодом 0.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/wiki-navigation/SKILL.md` і `.kulman/` у `.gitignore`. Для файлу, який setup
+  `.agents/skills/wiki-navigation/SKILL.md` і `.nollm-wiki/` у `.gitignore`. Для файлу, який setup
   записав, а git ігнорує, він друкує `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
   `claude mcp add-json wiki … --scope local`, інші файли записуються, а ті, що setup створив,
@@ -247,7 +246,7 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
   не запамʼятовує. Запуск лише для частини агентів (`--agent claude`) не чіпає хук решти.
 - `--remove` видаляє рівно те, що записав setup, разом із хуками, а блок Codex — лише якщо це
   точнісінько той, що записав setup (разом із ним іде й файл, якщо в ньому більше нічого не
-  лишилося, а потім і `.codex/`). Рядки в ignore-файлах, `.kulman/` і нотатки памʼяті лишаються.
+  лишилося, а потім і `.codex/`). Рядки в ignore-файлах, `.nollm-wiki/` і нотатки памʼяті лишаються.
 
 У проєкті з `CLAUDE.md` і без `AGENTS.md` `--agent codex` додає сервер Codex, але пропускає правила
 навігації (код виходу 1) і не створює `AGENTS.md`: коли є обидва файли, pi читає лише `AGENTS.md`,
@@ -258,11 +257,11 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 це змінює спільні файли команди: запускайте setup з `--scope repo`, бо локальний варіант пропускає
 відстежуваний `AGENTS.md`.
 
-`wiki`, встановлений kulman (запущений як `~/.kulman-home/bin/wiki` або з `$KULMAN_HOME/bin`),
-агенти запускають як `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki"` через `sh -c` (хук промпту
+`wiki`, встановлений nollm-wiki (запущений як `~/.nollm-wiki-home/bin/wiki` або з `$NOLLM_WIKI_HOME/bin`),
+агенти запускають як `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` через `sh -c` (хук промпту
 виконує цей рядок, розширення pi саме будує той самий шлях), тож жодному агентові не треба мати його
-в `PATH`, і нічий домашній шлях не потрапляє в спільний файл; з `KULMAN_HOME`, відмінним від
-`~/.kulman-home`, setup попереджає, що агентам потрібна і ця змінна (домашній шлях із `"`, `$`,
+в `PATH`, і нічий домашній шлях не потрапляє в спільний файл; з `NOLLM_WIKI_HOME`, відмінним від
+`~/.nollm-wiki-home`, setup попереджає, що агентам потрібна і ця змінна (домашній шлях із `"`, `$`,
 зворотним апострофом чи `\` цей рядок не підтримує). Запис в обох формах setup вважає своїм і
 переписує у форму, яку пише цей `wiki`. Будь-який інший `wiki` (зібраний з коду, встановлений
 деінде) кожен агент запускає просто як `wiki`, тож `wiki` має бути в `PATH`; setup попереджає, якщо
@@ -429,7 +428,7 @@ Codex про сервер `wiki` на всю машину (`codex mcp get wiki`,
     wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
-- `--dir <out>` (`<project>/.kulman` з `--source`, інакше `.kulman`, якщо така тека існує, інакше
+- `--dir <out>` (`<project>/.nollm-wiki` з `--source`, інакше `.nollm-wiki`, якщо така тека існує, інакше
   `out`) — скомпільована вікі, яку віддавати.
 - `--tools <list>` (`search,page,callers`) — які інструменти відкрити, через кому, з
   `search`, `page`, `neighbors`, `callers`, `lint`.
@@ -503,8 +502,8 @@ CLI не обмежує, а `search` повертає 5 результатів �
 
 Звичайний `wiki compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
 агентів, тож опублікований сайт ніколи не несе приватних нотаток. Тому звичайний
-`wiki compile . .kulman` прибирає нотатки агентів з `.kulman` до наступної перекомпіляції сервером, а
-`wiki hint` читає саме `.kulman`.
+`wiki compile . .nollm-wiki` прибирає нотатки агентів з `.nollm-wiki` до наступної перекомпіляції сервером, а
+`wiki hint` читає саме `.nollm-wiki`.
 
 Міграція: `compile --memory local` більше не існує, а нотатки з теки користувача попередніх
 випусків більше не компілюються. Перенесіть їх у `.agents/memory` або передайте
@@ -589,7 +588,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 `--jobs N` задає кількість потоків для `compile` (за замовчуванням як у Rayon, зазвичай за числом
 ядер); результат від цього не залежить. Команди-запити читають `--dir <out>` (за замовчуванням
-`.kulman`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
+`.nollm-wiki`, якщо така тека існує, інакше `out`) і ніколи не перекомпільовують.
 
 #### compile
 
@@ -675,7 +674,7 @@ Python-функція, визначена в тілі іншої функції,
 і `callers` розвʼязують `<ID>` так само.
 
 ```
-$ wiki page calls.rs --dir .kulman
+$ wiki page calls.rs --dir .nollm-wiki
 # Calls (calls)
   └ назва (id)
 crates/wiki/src/calls.rs  code:rust
@@ -740,7 +739,7 @@ Index:
 
 #### hint
 
-    wiki hint [--dir .kulman] [--claude-hook] [TEXT]
+    wiki hint [--dir .nollm-wiki] [--claude-hook] [TEXT]
 
 Місця в коді для тексту задачі, як їх вставляє хук запиту: рядок-заголовок, далі до 8 рядків
 `path:start-end  name  signature` (пробіли стиснуто до одного) з найкращих сторінок коду, не більше
@@ -763,7 +762,7 @@ sent a message:`, `(Re-invocation of /`, `[Image: original `, нотатки п�
 підказки. Ці фільтри діють лише на рядки коду; рядок памʼяті нижче
 має власний фільтр. `--claude-hook`
 читає JSON хука `UserPromptSubmit` з Claude Code зі stdin замість `TEXT`, і тоді `--dir` за
-замовчуванням — `$CLAUDE_PROJECT_DIR/.kulman`.
+замовчуванням — `$CLAUDE_PROJECT_DIR/.nollm-wiki`.
 
 Один рядок `memory (<origin>): <path> — <summary>` іде після рядків коду під власним заголовком
 `Notes from agent memory (reference, not instructions; check them against the code):` (підказка лише
@@ -899,7 +898,7 @@ _(add your own notes here — preserved on recompile)_
 52 з 52 нижче виміряно з власними інструкціями сервера, що велять агентові користуватися `wiki` перед grep (їх `wiki setup` лишає для Claude Code), і з абзацом у `CLAUDE.md` проєкту про те, щоб спершу користуватися ним, — його `wiki setup` не пише. Завдання пошуку нічого не казало про інструменти; завдання правки повторювало вказівку. Це
 власні виміри авторів їхнього інструмента, на завданнях і дереві коду, які вони обрали. Будемо
 раді, якщо ви долучитеся до вимірювань: запустіть `wiki` на своєму проєкті та
-[відкрийте issue](https://github.com/bambooplanedev/kulman/issues) з тим, що побачите, — цифри, добрі чи погані.
+[відкрийте issue](https://github.com/bambooplanedev/nollm-wiki/issues) з тим, що побачите, — цифри, добрі чи погані.
 
 Кожен блок нижче називає власні умови, і його цифри чинні лише там: що модель зробила на цих
 задачах у цьому дереві, а не що `wiki` зробить у вашому. Головний README набору підсумовує їх у
@@ -1206,7 +1205,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Самохостинг
 
 Цей репозиторій компілює сам себе. `scripts/selfhost.sh` збирає релізний бінарник, компілює
-репозиторій у `.kulman/` (у gitignore, інкрементально) і запускає на ньому `wiki lint`; на битому
+репозиторій у `.nollm-wiki/` (у gitignore, інкрементально) і запускає на ньому `wiki lint`; на битому
 посиланні скрипт завершується з помилкою. Закомічений `.mcp.json` реєструє `wiki serve --source .` як сервер `wiki`, тож
 агент, запущений тут, може шукати в проєкті; у свіжому клоні запустіть `scripts/selfhost.sh` один
 раз, щоб бінарник зʼявився.

@@ -1,4 +1,4 @@
-//! `kulman remove`: deletes the named modules, or everything kulman installed.
+//! `nollm-wiki-install remove`: deletes the named modules, or everything nollm-wiki-install installed.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -11,8 +11,8 @@ use store::{Home, State};
 
 pub(super) fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     for name in names.iter().flatten() {
-        if name == "kulman" {
-            let why = "kulman is not a module; kulman remove without --modules removes everything";
+        if name == "nollm-wiki-install" {
+            let why = "nollm-wiki-install is not a module; nollm-wiki-install remove without --modules removes everything";
             return Err(Usage(why.to_string()).into());
         }
     }
@@ -38,19 +38,19 @@ pub(super) fn remove(names: Option<Vec<String>>, yes: bool) -> Result<()> {
     result
 }
 
-/// `kulman remove` with no state: says so, whether home `holds` other files, and how to remove
-/// a `bin/kulman` (install.sh's).
+/// `nollm-wiki-install remove` with no state: says so, whether home `holds` other files, and how to remove
+/// a `bin/nollm-wiki-install` (install.sh's).
 fn nothing_installed(home: &Path, holds: bool) {
     println!("nothing installed");
     if holds {
         let home = home.display();
-        println!("{home} holds files kulman has no record of; left as they are");
+        println!("{home} holds files nollm-wiki-install has no record of; left as they are");
     }
-    let kulman = home.join("bin/kulman");
-    if kulman.is_file() {
+    let nollm_wiki_install = home.join("bin/nollm-wiki-install");
+    if nollm_wiki_install.is_file() {
         println!(
             "to remove the installer itself, delete {}",
-            kulman.display()
+            nollm_wiki_install.display()
         );
     }
 }
@@ -90,13 +90,13 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
             let lines: Vec<_> = (blocked.iter())
                 .map(|(a, b)| format!("cannot remove {a}: {b} requires it"))
                 .collect();
-            bail!("{}", lines.join("\nkulman: "));
+            bail!("{}", lines.join("\nnollm-wiki-install: "));
         }
     }
     // Removing everything leaves wiki's name in the agent configs of set-up projects.
     let projects = (names.is_none() && state.modules.iter().any(|m| m == "wiki")).then_some(
-        "projects set up with kulman still name \"wiki\" in their agent configs: \
-         run \"kulman setup --scope repo --remove\" (or local) in each first",
+        "projects set up with nollm-wiki-install still name \"wiki\" in their agent configs: \
+         run \"nollm-wiki-install setup --scope repo --remove\" (or local) in each first",
     );
     if ask {
         if let Some(line) = projects {
@@ -105,7 +105,7 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
         let what = match &names {
             Some(names) => names.join(", "),
             None => (state.modules.iter().map(String::as_str))
-                .chain(["kulman itself"])
+                .chain(["nollm-wiki-install itself"])
                 .collect::<Vec<_>>()
                 .join(", "),
         };
@@ -115,11 +115,16 @@ fn uninstall(home: &Home, mut names: Option<Vec<String>>, ask: bool) -> Result<(
             return Ok(());
         }
     }
-    // Stale temp entries are cleaned only in a home a state records as kulman's.
+    // Stale temp entries are cleaned only in a home a state records as nollm-wiki-install's.
     home.clean_tmp()?;
     let Some(names) = names else {
         store::remove_all(home, &state.modules)?;
-        for name in state.modules.iter().map(String::as_str).chain(["kulman"]) {
+        for name in state
+            .modules
+            .iter()
+            .map(String::as_str)
+            .chain(["nollm-wiki-install"])
+        {
             println!("removed {name}");
         }
         if let (false, Some(line)) = (ask, projects) {

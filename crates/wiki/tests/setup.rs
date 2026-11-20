@@ -47,15 +47,15 @@ impl Fixture {
             .current_dir(self.root())
             .env("PATH", self.bin())
             .env("HOME", self.home())
-            .env_remove("KULMAN_HOME")
+            .env_remove("NOLLM_WIKI_HOME")
             .env("XDG_DATA_HOME", self.home())
             .env("LOCALAPPDATA", self.home())
             .env("CLAUDE_CONFIG_DIR", self.claude_config());
         c
     }
-    /// wiki in the default kulman home, `$HOME/.kulman-home`.
+    /// wiki in the default nollm-wiki home, `$HOME/.nollm-wiki-home`.
     fn home_wiki(&self) -> PathBuf {
-        wiki_in(&self.home().join(".kulman-home"))
+        wiki_in(&self.home().join(".nollm-wiki-home"))
     }
     fn home(&self) -> PathBuf {
         self.tmp.path().join("home")
@@ -65,7 +65,7 @@ impl Fixture {
     }
 }
 
-/// A copy of wiki at `home/bin/wiki`, where a kulman install puts it.
+/// A copy of wiki at `home/bin/wiki`, where a nollm-wiki install puts it.
 fn wiki_in(home: &Path) -> PathBuf {
     let exe = home.join("bin/wiki");
     fs::create_dir_all(exe.parent().unwrap()).unwrap();
@@ -136,7 +136,7 @@ fn dirs(dir: &Path) -> Vec<PathBuf> {
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
         let n = p.file_name().unwrap().to_string_lossy().into_owned();
-        if p.is_dir() && n != ".git" && n != ".kulman" {
+        if p.is_dir() && n != ".git" && n != ".nollm-wiki" {
             v.extend(dirs(&p));
             v.push(p);
         }
@@ -150,7 +150,7 @@ fn files(dir: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     for e in fs::read_dir(dir).unwrap() {
         let p = e.unwrap().path();
         let n = p.file_name().unwrap().to_string_lossy().into_owned();
-        if n == ".git" || n == ".kulman" {
+        if n == ".git" || n == ".nollm-wiki" {
             continue;
         }
         if p.is_dir() {
@@ -191,8 +191,10 @@ fn setup_repo_installs_mcp_skill_and_ignore() {
         read(&r.join(".agents/skills/wiki-navigation/SKILL.md")),
         skill(".agents/memory")
     );
-    assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
-    assert!(r.join(".kulman/index.json").exists());
+    assert!(read(&r.join(".gitignore"))
+        .lines()
+        .any(|l| l == ".nollm-wiki/"));
+    assert!(r.join(".nollm-wiki/index.json").exists());
 }
 
 #[test]
@@ -274,7 +276,7 @@ fn setup_local_uses_claude_cli_and_git_exclude() {
     assert!(!f.root().join(".mcp.json").exists());
     let ex = read(&f.root().join(".git/info/exclude"));
     for l in [
-        ".kulman/",
+        ".nollm-wiki/",
         "/.pi/mcp.json",
         "/.agents/skills/wiki-navigation/",
         "/.agents/memory/",
@@ -312,7 +314,7 @@ fn setup_remove_restores_the_project() {
         .setup(&["--remove", "--agent", "claude,pi", "--scope", "repo"])
         .success();
     let mut want = before;
-    want.push((f.root().join(".gitignore"), b".kulman/\n".to_vec()));
+    want.push((f.root().join(".gitignore"), b".nollm-wiki/\n".to_vec()));
     want.sort();
     assert_eq!(files(&f.root()), want);
     // The memory folder setup created stays, like any note in it.
@@ -320,8 +322,8 @@ fn setup_remove_restores_the_project() {
     want_dirs.extend([f.root().join(".agents"), f.root().join(".agents/memory")]);
     want_dirs.sort();
     assert_eq!(dirs(&f.root()), want_dirs);
-    assert!(f.root().join(".kulman").exists());
-    assert!(out(&a).contains("kept the ignore lines and .kulman/"));
+    assert!(f.root().join(".nollm-wiki").exists());
+    assert!(out(&a).contains("kept the ignore lines and .nollm-wiki/"));
 }
 
 #[test]
@@ -371,7 +373,8 @@ fn no_agent() -> Fixture {
     f
 }
 
-const NO_AGENT: &str = "no agent set up: the wiki is in .kulman/; run wiki setup --agent … later";
+const NO_AGENT: &str =
+    "no agent set up: the wiki is in .nollm-wiki/; run wiki setup --agent … later";
 
 #[test]
 fn setup_with_no_agent_still_compiles_and_exits_0() {
@@ -381,13 +384,13 @@ fn setup_with_no_agent_still_compiles_and_exits_0() {
     assert_eq!(err.lines().collect::<Vec<_>>(), [NO_AGENT]);
     assert!(!out(&a).contains("not on PATH"), "{}", out(&a));
     let r = f.root();
-    assert!(r.join(".kulman/index.json").exists());
+    assert!(r.join(".nollm-wiki/index.json").exists());
     // What a setup with an agent writes besides the agent's own files, and nothing else.
     let (files, dirs) = tree(&r);
     assert_eq!(
         files,
         [
-            (PathBuf::from(".gitignore"), b".kulman/\n".to_vec()),
+            (PathBuf::from(".gitignore"), b".nollm-wiki/\n".to_vec()),
             (
                 PathBuf::from("src/lib.rs"),
                 b"pub fn load_creds() {}\n".to_vec()
@@ -423,7 +426,7 @@ fn setup_remove_with_no_agent_is_not_an_error() {
     for _ in 0..2 {
         let a = f.setup(&["--remove", "--scope", "local"]).success();
         assert!(
-            out(&a).contains("kept the ignore lines and .kulman/"),
+            out(&a).contains("kept the ignore lines and .nollm-wiki/"),
             "{}",
             out(&a)
         );
@@ -559,9 +562,9 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
     let ex = read(&main.join(".git/info/exclude"));
     // Worktree top: lines unprefixed. Subdirectory: anchored to the worktree top, so prefixed.
     for l in [
-        ".kulman/",
+        ".nollm-wiki/",
         "/.pi/mcp.json",
-        "/src/.kulman/",
+        "/src/.nollm-wiki/",
         "/src/.pi/mcp.json",
         "/src/.agents/skills/wiki-navigation/",
     ] {
@@ -626,9 +629,9 @@ fn setup_local_leaves_a_foreign_claude_server_alone() {
         !log.contains("mcp add-json") && !log.contains("mcp remove"),
         "{log}"
     );
-    // The skipped server leaves no exclude line; `.kulman/` still gets one.
+    // The skipped server leaves no exclude line; `.nollm-wiki/` still gets one.
     let ex = read(&f.root().join(".git/info/exclude"));
-    assert!(ex.lines().any(|l| l == ".kulman/"), "{ex}");
+    assert!(ex.lines().any(|l| l == ".nollm-wiki/"), "{ex}");
 }
 
 #[test]
@@ -772,7 +775,9 @@ fn a_run_without_the_hook_flag_leaves_an_unreadable_settings_file_and_succeeds()
         assert!(o.lines().any(|l| l.starts_with(start)), "{o}");
         // The rest of the run still happened.
         assert!(r.join(".pi/mcp.json").exists(), "{o}");
-        assert!(read(&r.join(".gitignore")).lines().any(|l| l == ".kulman/"));
+        assert!(read(&r.join(".gitignore"))
+            .lines()
+            .any(|l| l == ".nollm-wiki/"));
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"{\"x\": \"\xff\"}");
     }
@@ -819,7 +824,7 @@ fn a_run_without_the_hook_flag_removes_its_own_pi_hook_and_leaves_an_edited_one(
     let path = r.join(PI_EXT);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     let old = include_str!("../src/setup/wiki-hint.ts")
-        .replace("<out>", ".kulman")
+        .replace("<out>", ".nollm-wiki")
         .replace("<cmd>", "wiki");
     fs::write(&path, &old).unwrap();
     let a = f.setup(&args).success();
@@ -892,7 +897,7 @@ fn setup_and_serve_find_the_claude_memory_folder() {
         "{}",
         out(&a)
     );
-    let index = read(&f.root().join(".kulman/index.json"));
+    let index = read(&f.root().join(".nollm-wiki/index.json"));
     assert!(index.contains(&format!("{shown}/n.md")), "{index}");
     assert!(index.contains("\"memory\": true"), "{index}");
     assert!(!index.contains("logs/x.md"), "{index}");
@@ -931,7 +936,7 @@ fn setup_local_creates_agents_memory_and_excludes_it() {
     let note = dir.join("tide.md");
     fs::write(&note, "# Tide table\n\nHarbour tide notes.\n").unwrap();
     f.setup(&args).success();
-    let index = read(&f.root().join(".kulman/index.json"));
+    let index = read(&f.root().join(".nollm-wiki/index.json"));
     assert!(index.contains(".agents/memory/tide.md"), "{index}");
     assert!(index.contains("\"memory\": true"), "{index}");
     f.setup(&[&["--remove"], &args[..]].concat()).success();
@@ -1609,13 +1614,13 @@ fn setup_waits_for_a_compile_holding_the_lock() {
     use std::time::Duration;
     let f = fixture(true, true);
     let root = f.root();
-    fs::create_dir_all(root.join(".kulman/.serve")).unwrap();
+    fs::create_dir_all(root.join(".nollm-wiki/.serve")).unwrap();
     let (held_tx, held_rx) = channel();
     let (release_tx, release_rx) = channel::<()>();
     std::thread::scope(|s| {
         let root_ref = &root;
         s.spawn(move || {
-            wiki::dirlock::exclusive(&root_ref.join(".kulman"), || {
+            wiki::dirlock::exclusive(&root_ref.join(".nollm-wiki"), || {
                 held_tx.send(()).unwrap();
                 let _ = release_rx.recv_timeout(Duration::from_secs(20));
             });
@@ -1625,19 +1630,19 @@ fn setup_waits_for_a_compile_holding_the_lock() {
             f.setup(&["--agent", "claude", "--scope", "repo"]).success();
         });
         std::thread::sleep(Duration::from_secs(1));
-        assert!(!root.join(".kulman/index.json").exists());
+        assert!(!root.join(".nollm-wiki/index.json").exists());
         release_tx.send(()).unwrap();
         setup.join().unwrap();
     });
-    assert!(root.join(".kulman/index.json").exists());
+    assert!(root.join(".nollm-wiki/index.json").exists());
 }
 
 #[test]
 fn setup_on_a_fresh_repo_creates_no_serve_dir() {
     let f = fixture(true, true);
     f.setup(&["--agent", "claude", "--scope", "repo"]).success();
-    assert!(f.root().join(".kulman/index.json").exists());
-    assert!(!f.root().join(".kulman/.serve").exists());
+    assert!(f.root().join(".nollm-wiki/index.json").exists());
+    assert!(!f.root().join(".nollm-wiki/.serve").exists());
 }
 
 const ALL_AGENTS: [&str; 5] = [
@@ -1648,7 +1653,7 @@ const ALL_AGENTS: [&str; 5] = [
     "--hook",
 ];
 
-/// Files and directories below `root` (`.git` and `.kulman` left out), relative to it.
+/// Files and directories below `root` (`.git` and `.nollm-wiki` left out), relative to it.
 fn tree(root: &Path) -> (Vec<(PathBuf, Vec<u8>)>, Vec<PathBuf>) {
     let rel = |p: &Path| p.strip_prefix(root).unwrap().to_path_buf();
     (
@@ -1687,7 +1692,7 @@ fn setup_no_memory_creates_no_folder_and_serves_without_memory() {
     let skill = read(&r.join(".agents/skills/wiki-navigation/SKILL.md"));
     assert!(!skill.contains("# Memory"), "{skill}");
     assert!(skill.ends_with("fall back to grep.\n"), "{skill}");
-    let index = read(&r.join(".kulman/index.json"));
+    let index = read(&r.join(".nollm-wiki/index.json"));
     assert!(
         !index.contains("note.md") && !index.contains("tide.md"),
         "{index}"
@@ -1758,7 +1763,7 @@ fn setup_no_memory_then_default_turns_memory_on() {
         read(&f.root().join(".codex/config.toml")),
         CODEX_BLOCK_NO_MEMORY
     );
-    let index = read(&f.root().join(".kulman/index.json"));
+    let index = read(&f.root().join(".nollm-wiki/index.json"));
     assert!(!index.contains("note.md"), "{index}");
 }
 
@@ -1931,27 +1936,28 @@ fn setup_remove_ignores_the_memory_flags() {
     assert_eq!(run(&no, "--no-memory"), want);
 }
 
-// Run from the kulman home, setup starts wiki through the launch line: no `PATH`, and no one's
+// Run from the nollm-wiki home, setup starts wiki through the launch line: no `PATH`, and no one's
 // home path in a file the team shares. These texts are what the agents run, pinned exactly.
 
 const LAUNCH_ENTRY: &str = r#"{
   "command": "sh",
   "args": [
     "-c",
-    "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki\" serve --source ."
+    "exec \"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki\" serve --source ."
   ]
 }"#;
 /// The `Args:` line of `claude mcp get` for the launch entry: as stored, and as Claude Code
 /// (2026-11-15) shows it, with `${VAR:-default}` printed as `${VAR}`.
 const LAUNCH_ARGS: &str =
-    r#"-c exec "${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki" serve --source ."#;
-const LAUNCH_SHOWN: &str = r#"-c exec "${KULMAN_HOME}/bin/wiki" serve --source ."#;
+    r#"-c exec "${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki" serve --source ."#;
+const LAUNCH_SHOWN: &str = r#"-c exec "${NOLLM_WIKI_HOME}/bin/wiki" serve --source ."#;
 /// The launch entry as `claude mcp add-json` gets it.
-const LAUNCH_JSON: &str = r#"{"command":"sh","args":["-c","exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki\" serve --source ."]}"#;
-const LAUNCH_HOOK: &str = r#""${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki" hint --claude-hook"#;
+const LAUNCH_JSON: &str = r#"{"command":"sh","args":["-c","exec \"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki\" serve --source ."]}"#;
+const LAUNCH_HOOK: &str =
+    r#""${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki" hint --claude-hook"#;
 const LAUNCH_CODEX_BLOCK: &str = r#"[mcp_servers.wiki]
 command = "sh"
-args = ["-c", "exec \"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki\" serve --source ."]
+args = ["-c", "exec \"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki\" serve --source ."]
 "#;
 const LAUNCH_PI_HOOK: &str = r#"// Adds the project wiki's code lines for the prompt before the model runs (installed by wiki setup --hook).
 import { execFileSync } from "node:child_process";
@@ -1964,7 +1970,7 @@ export default function (pi: ExtensionAPI) {
     if (event.messageType !== "user" || !event.prompt.trim()) return;
     let text = "";
     try {
-      text = execFileSync(path.join(process.env.KULMAN_HOME || path.join(os.homedir(), ".kulman-home"), "bin/wiki"), ["hint", "--dir", path.join(ctx.cwd, ".kulman"), "--", event.prompt], {
+      text = execFileSync(path.join(process.env.NOLLM_WIKI_HOME || path.join(os.homedir(), ".nollm-wiki-home"), "bin/wiki"), ["hint", "--dir", path.join(ctx.cwd, ".nollm-wiki"), "--", event.prompt], {
         encoding: "utf8",
         timeout: 3000,
       });
@@ -1977,8 +1983,8 @@ export default function (pi: ExtensionAPI) {
 }
 "#;
 const PI_EXT: &str = ".pi/extensions/wiki-hint/index.ts";
-const KULMAN_HOME_WARNING: &str =
-    "warning: the agents find wiki through KULMAN_HOME; set it in their environment";
+const NOLLM_WIKI_HOME_WARNING: &str =
+    "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment";
 
 /// An `mcpServers` file holding only `entry`, as setup writes it.
 fn mcp_json(entry: &str) -> String {
@@ -2007,7 +2013,7 @@ fn assert_launch_files(r: &Path) {
 }
 
 #[test]
-fn setup_from_the_kulman_home_writes_the_launch_line_and_no_path_warning() {
+fn setup_from_the_nollm_wiki_home_writes_the_launch_line_and_no_path_warning() {
     let f = fixture(false, true);
     codex_stub(&f);
     let a = f.run(&f.home_wiki(), &ALL_AGENTS).assert().success();
@@ -2018,7 +2024,7 @@ fn setup_from_the_kulman_home_writes_the_launch_line_and_no_path_warning() {
 }
 
 #[test]
-fn setup_local_from_the_kulman_home_adds_the_launch_line_through_claude() {
+fn setup_local_from_the_nollm_wiki_home_adds_the_launch_line_through_claude() {
     for shown in [LAUNCH_SHOWN, LAUNCH_ARGS] {
         let f = fixture(false, true);
         claude_stub_args(&f, "sh", shown);
@@ -2056,7 +2062,7 @@ fn setup_local_from_the_kulman_home_adds_the_launch_line_through_claude() {
 }
 
 #[test]
-fn setup_local_from_the_kulman_home_switches_memory_on_the_shown_entry() {
+fn setup_local_from_the_nollm_wiki_home_switches_memory_on_the_shown_entry() {
     let f = fixture(false, true);
     claude_stub_args(&f, "sh", &format!("{LAUNCH_SHOWN} --memory none"));
     fs::write(f.tmp.path().join("state"), "x").unwrap();
@@ -2071,7 +2077,7 @@ fn setup_local_from_the_kulman_home_switches_memory_on_the_shown_entry() {
 }
 
 #[test]
-fn setup_local_from_the_kulman_home_leaves_another_sh_server_alone() {
+fn setup_local_from_the_nollm_wiki_home_leaves_another_sh_server_alone() {
     let f = fixture(false, true);
     claude_stub_args(&f, "sh", r#"-c exec "/other/wiki" serve --source ."#);
     fs::write(f.tmp.path().join("state"), "x").unwrap();
@@ -2092,7 +2098,7 @@ fn setup_local_from_the_kulman_home_leaves_another_sh_server_alone() {
 }
 
 #[test]
-fn setup_local_from_the_kulman_home_replaces_a_bare_claude_entry() {
+fn setup_local_from_the_nollm_wiki_home_replaces_a_bare_claude_entry() {
     let f = fixture(false, true);
     claude_stub(&f, "wiki");
     fs::write(f.tmp.path().join("state"), "x").unwrap();
@@ -2107,7 +2113,7 @@ fn setup_local_from_the_kulman_home_replaces_a_bare_claude_entry() {
 }
 
 #[test]
-fn setup_from_the_kulman_home_rewrites_a_bare_project_in_place_and_remove_takes_either_form() {
+fn setup_from_the_nollm_wiki_home_rewrites_a_bare_project_in_place_and_remove_takes_either_form() {
     let f = fixture(true, true);
     codex_stub(&f);
     let (r, exe) = (f.root(), f.home_wiki());
@@ -2131,7 +2137,7 @@ fn setup_from_the_kulman_home_rewrites_a_bare_project_in_place_and_remove_takes_
 }
 
 #[test]
-fn setup_outside_the_kulman_home_rewrites_a_launch_project_in_place_and_remove_takes_it() {
+fn setup_outside_the_nollm_wiki_home_rewrites_a_launch_project_in_place_and_remove_takes_it() {
     let f = fixture(true, true);
     codex_stub(&f);
     let (r, exe) = (f.root(), f.home_wiki());
@@ -2158,7 +2164,7 @@ fn setup_outside_the_kulman_home_rewrites_a_launch_project_in_place_and_remove_t
 }
 
 #[test]
-fn setup_local_outside_the_kulman_home_replaces_a_launch_claude_entry_and_remove_takes_it() {
+fn setup_local_outside_the_nollm_wiki_home_replaces_a_launch_claude_entry_and_remove_takes_it() {
     let f = fixture(true, true);
     claude_stub_args(&f, "sh", LAUNCH_SHOWN);
     fs::write(f.tmp.path().join("state"), "x").unwrap();
@@ -2176,28 +2182,28 @@ fn setup_local_outside_the_kulman_home_replaces_a_launch_claude_entry_and_remove
 }
 
 #[test]
-fn setup_from_a_kulman_home_elsewhere_says_the_agents_need_kulman_home() {
+fn setup_from_a_nollm_wiki_home_elsewhere_says_the_agents_need_nollm_wiki_home() {
     let f = fixture(false, true);
-    let elsewhere = f.tmp.path().join("my \"kulman\" $home: x");
+    let elsewhere = f.tmp.path().join("my \"nollm-wiki\" $home: x");
     let exe = wiki_in(&elsewhere);
     let args = ["--agent", "claude", "--scope", "repo"];
     let a = f
         .run(&exe, &args)
-        .env("KULMAN_HOME", &elsewhere)
+        .env("NOLLM_WIKI_HOME", &elsewhere)
         .assert()
         .success();
     assert!(
-        out(&a).lines().any(|l| l == KULMAN_HOME_WARNING),
+        out(&a).lines().any(|l| l == NOLLM_WIKI_HOME_WARNING),
         "{}",
         out(&a)
     );
     assert!(!out(&a).contains("not on PATH"), "{}", out(&a));
     assert_eq!(read(&f.root().join(".mcp.json")), mcp_json(LAUNCH_ENTRY));
-    // `KULMAN_HOME` naming the default home: the agents find it without it.
-    let default = f.home().join(".kulman-home");
+    // `NOLLM_WIKI_HOME` naming the default home: the agents find it without it.
+    let default = f.home().join(".nollm-wiki-home");
     let a = f
         .run(&wiki_in(&default), &args)
-        .env("KULMAN_HOME", &default)
+        .env("NOLLM_WIKI_HOME", &default)
         .assert()
         .success();
     let o = out(&a);

@@ -29,7 +29,7 @@ fn has_line(path: &Path, line: &str) -> bool {
     std::fs::read_to_string(path).is_ok_and(|t| t.lines().any(|l| l.trim() == line))
 }
 
-/// Makes sure `.kulman/` is ignored, in `.gitignore` or in the repository's
+/// Makes sure `.nollm-wiki/` is ignored, in `.gitignore` or in the repository's
 /// exclude file as `scope` says; a line in either file counts. Returns the
 /// file it changed. Scope `Local` outside a repository says so on stdout.
 pub fn ensure_ignored(source: &Path, scope: Scope) -> Result<Option<PathBuf>, Error> {

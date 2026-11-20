@@ -12,7 +12,7 @@ use serde_json::json;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const VERSION: &str = "0.7.0";
-const BINARIES: [&str; 3] = ["wiki", "plaz", "kulman"];
+const BINARIES: [&str; 3] = ["wiki", "plaz", "nollm-wiki-install"];
 /// What the script runs, linked from this `PATH`; `gh` and `minisign` are fakes.
 const TOOLS: [&str; 22] = [
     "sh",
@@ -41,7 +41,9 @@ const TOOLS: [&str; 22] = [
 
 /// The releases address of `install.rs`, which the script must take as this repository's.
 fn releases() -> String {
-    let source = fs::read_to_string(Path::new(ROOT).join("crates/kulman/src/install.rs")).unwrap();
+    let source =
+        fs::read_to_string(Path::new(ROOT).join("crates/nollm-wiki-install/src/install.rs"))
+            .unwrap();
     let start = source.find("const RELEASES: &str = \"").unwrap() + 24;
     let len = source[start..].find('"').unwrap();
     source[start..start + len].to_string()
@@ -51,7 +53,7 @@ fn archive(binary: &str, target: &str) -> String {
     format!("{binary}-v{VERSION}-{target}.tar.gz")
 }
 
-/// A temp root: `repo/` (the script, `install.sh` and `release/kulman.pub`, committed and tagged
+/// A temp root: `repo/` (the script, `install.sh` and `release/nollm-wiki.pub`, committed and tagged
 /// v0.7.0), `gh/assets/` (the draft's 9 files) and `gh/draft` (there: the release is a draft),
 /// `bin/` (the `PATH`), `home/` (the `HOME`). The fakes log to `gh.log`, `upload.args` and
 /// `minisign.log`; `verify.code` is the exit code of `minisign -V`.
@@ -103,8 +105,8 @@ impl Fixture {
         for rel in [
             "scripts/release-sign.sh",
             "install.sh",
-            "release/kulman.pub",
-            "crates/kulman/src/install.rs",
+            "release/nollm-wiki.pub",
+            "crates/nollm-wiki-install/src/install.rs",
         ] {
             fs::create_dir_all(repo.join(rel).parent().unwrap()).unwrap();
             fs::copy(Path::new(ROOT).join(rel), repo.join(rel)).unwrap();
@@ -144,7 +146,7 @@ impl Fixture {
         let manifest = json!({
             "version": VERSION,
             "modules": modules,
-            "kulman": {"archives": entries("kulman")},
+            "nollm-wiki-install": {"archives": entries("nollm-wiki-install")},
         });
         fs::write(assets.join("SHA256SUMS"), sums).unwrap();
         fs::write(
@@ -180,7 +182,7 @@ impl Fixture {
         self.path("gh/assets").join(name)
     }
 
-    /// The script run from the temp root, stdin not a terminal, with `KULMAN_SIGN_NO_TTY_CHECK`.
+    /// The script run from the temp root, stdin not a terminal, with `NOLLM_WIKI_SIGN_NO_TTY_CHECK`.
     fn sign(&self, args: &[&str]) -> Output {
         self.run(args, true)
     }
@@ -197,7 +199,7 @@ impl Fixture {
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .stdin(Stdio::null());
         if skip_tty_check {
-            cmd.env("KULMAN_SIGN_NO_TTY_CHECK", "1");
+            cmd.env("NOLLM_WIKI_SIGN_NO_TTY_CHECK", "1");
         }
         cmd.output().unwrap()
     }
@@ -299,12 +301,12 @@ fn assert_signed(f: &Fixture, key: Option<&str>) {
             "-m".into(),
             at(name),
             "-t".into(),
-            format!("kulman {VERSION} {name}"),
+            format!("nollm-wiki {VERSION} {name}"),
         ]);
         assert_eq!(call, &want);
     }
     for (call, name) in calls[2..].iter().zip(["manifest.json", "SHA256SUMS"]) {
-        let mut want = strings(&["-V", "-H", "-q", "-p", "release/kulman.pub", "-m"]);
+        let mut want = strings(&["-V", "-H", "-q", "-p", "release/nollm-wiki.pub", "-m"]);
         want.extend([at(name), "-x".into(), at(&format!("{name}.minisig"))]);
         assert_eq!(call, &want);
     }
@@ -354,7 +356,7 @@ fn a_draft_is_checked_signed_verified_and_uploaded_but_not_published() {
         text.starts_with(&format!("repository: {repository}\nrelease: {release}\n")),
         "{text}"
     );
-    assert!(text.contains("with the key 87CC6E990C51AF83 (release/kulman.pub)\n"));
+    assert!(text.contains("with the key 87CC6E990C51AF83 (release/nollm-wiki.pub)\n"));
     assert!(text.contains("minisign asks for the password twice, once per file\n"));
     assert!(text.ends_with(
         "v0.7.0 is signed and still a draft (11 files). To publish it:\n    gh release edit \
@@ -514,13 +516,13 @@ fn a_manifest_hash_that_differs_is_refused() {
     let f = Fixture::new();
     let path = f.asset("manifest.json");
     let mut m: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    m["kulman"]["archives"][TARGETS[1]]["sha256"] = json!("0".repeat(64));
+    m["nollm-wiki-install"]["archives"][TARGETS[1]]["sha256"] = json!("0".repeat(64));
     fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
     f.refused_unsigned(
         &f.sign(&[VERSION]),
         &format!(
             "release-sign.sh: {}: its SHA-256 is not the one in manifest.json\n",
-            archive("kulman", TARGETS[1])
+            archive("nollm-wiki-install", TARGETS[1])
         ),
     );
 }
@@ -580,7 +582,7 @@ fn a_signature_that_does_not_verify_is_not_uploaded() {
     f.refused(
         &f.sign(&[VERSION]),
         "release-sign.sh: manifest.json: the new signature does not verify with \
-         release/kulman.pub (signed with another key?); nothing uploaded\n",
+         release/nollm-wiki.pub (signed with another key?); nothing uploaded\n",
     );
     // Both files were signed, then the first check stopped it.
     let calls = f.minisign_calls();

@@ -48,8 +48,8 @@ fn setup_repo_builds_the_map_and_ignores_the_folder() {
     let d = project();
     let o = plaz(d.path(), &["--scope", "repo"]);
     assert_eq!(o.status.code(), Some(0));
-    assert!(d.path().join(".kulman/map/src/a_rs.md").is_file());
-    assert_eq!(read(d.path().join(".gitignore")), ".kulman/\n");
+    assert!(d.path().join(".nollm-wiki/map/src/a_rs.md").is_file());
+    assert_eq!(read(d.path().join(".gitignore")), ".nollm-wiki/\n");
 }
 
 #[test]
@@ -57,12 +57,12 @@ fn setup_adds_the_line_once() {
     let d = project();
     plaz(d.path(), &["--scope", "repo"]);
     plaz(d.path(), &["--scope", "repo"]);
-    assert_eq!(read(d.path().join(".gitignore")), ".kulman/\n");
+    assert_eq!(read(d.path().join(".gitignore")), ".nollm-wiki/\n");
 
     let d = project();
     std::fs::write(d.path().join(".gitignore"), "target").unwrap();
     plaz(d.path(), &["--scope", "repo"]);
-    assert_eq!(read(d.path().join(".gitignore")), "target\n.kulman/\n");
+    assert_eq!(read(d.path().join(".gitignore")), "target\n.nollm-wiki/\n");
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn setup_local_writes_the_exclude_file() {
     git_init(d.path());
     let o = plaz(d.path(), &["--scope", "local"]);
     assert_eq!(o.status.code(), Some(0));
-    assert!(read(d.path().join(".git/info/exclude")).ends_with(".kulman/\n"));
+    assert!(read(d.path().join(".git/info/exclude")).ends_with(".nollm-wiki/\n"));
     assert!(!d.path().join(".gitignore").exists());
 
     // a line in the other file counts, and a second run adds nothing
@@ -81,7 +81,7 @@ fn setup_local_writes_the_exclude_file() {
 
     let d = project();
     git_init(d.path());
-    std::fs::write(d.path().join(".gitignore"), " .kulman/ \n").unwrap();
+    std::fs::write(d.path().join(".gitignore"), " .nollm-wiki/ \n").unwrap();
     let before = read(d.path().join(".git/info/exclude"));
     plaz(d.path(), &["--scope", "local"]);
     assert_eq!(read(d.path().join(".git/info/exclude")), before);
@@ -100,7 +100,7 @@ fn setup_local_outside_git_says_so() {
     let o = plaz(d.path(), &["--scope", "local"]);
     assert_eq!(o.status.code(), Some(0));
     assert!(stdout(&o).contains("not a git repository: nothing to exclude"));
-    assert!(d.path().join(".kulman/map/src/a_rs.md").is_file());
+    assert!(d.path().join(".nollm-wiki/map/src/a_rs.md").is_file());
     assert!(!d.path().join(".gitignore").exists());
 }
 
@@ -112,7 +112,7 @@ fn setup_without_scope_is_a_usage_error() {
         assert_eq!(o.status.code(), Some(2), "{args:?}");
         assert!(String::from_utf8_lossy(&o.stderr).starts_with("usage: plaz"));
     }
-    assert!(!d.path().join(".kulman").exists());
+    assert!(!d.path().join(".nollm-wiki").exists());
     assert!(!d.path().join(".gitignore").exists());
 }
 
@@ -126,7 +126,7 @@ fn remove_takes_only_the_maps_pages() {
         .unwrap()
         .parse()
         .unwrap();
-    let kulman = d.path().join(".kulman");
+    let out = d.path().join(".nollm-wiki");
     let foreign = [
         ("map/note.md", "hand-written\n"),
         (
@@ -135,7 +135,7 @@ fn remove_takes_only_the_maps_pages() {
         ),
         ("index.md", "# index\n"),
     ];
-    common::write_files(&kulman, &foreign);
+    common::write_files(&out, &foreign);
 
     let o = plaz(d.path(), &["--remove"]);
     assert_eq!(o.status.code(), Some(0));
@@ -143,18 +143,18 @@ fn remove_takes_only_the_maps_pages() {
     // overwrite one; with no pages to write it skips them silently.
     assert_eq!(stdout(&o), format!("map: {written} removed\n"));
     for (path, text) in foreign {
-        assert_eq!(read(kulman.join(path)), text);
+        assert_eq!(read(out.join(path)), text);
     }
-    assert!(!kulman.join("map/src").exists());
-    assert_eq!(read(d.path().join(".gitignore")), ".kulman/\n");
+    assert!(!out.join("map/src").exists());
+    assert_eq!(read(d.path().join(".gitignore")), ".nollm-wiki/\n");
 
     // with nothing else in map/, the folder goes too
-    std::fs::remove_file(kulman.join("map/note.md")).unwrap();
-    std::fs::remove_file(kulman.join("map/old.md")).unwrap();
+    std::fs::remove_file(out.join("map/note.md")).unwrap();
+    std::fs::remove_file(out.join("map/old.md")).unwrap();
     plaz(d.path(), &["--scope", "repo"]);
     plaz(d.path(), &["--remove"]);
-    assert!(!kulman.join("map").exists());
-    assert!(kulman.join("index.md").is_file());
+    assert!(!out.join("map").exists());
+    assert!(out.join("index.md").is_file());
 }
 
 #[test]
@@ -163,5 +163,5 @@ fn remove_with_nothing_built_is_fine() {
     let o = plaz(d.path(), &["--remove"]);
     assert_eq!(o.status.code(), Some(0));
     assert_eq!(stdout(&o), "map: 0 removed\n");
-    assert!(!d.path().join(".kulman").exists());
+    assert!(!d.path().join(".nollm-wiki").exists());
 }

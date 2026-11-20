@@ -9,9 +9,9 @@ size — the real decisions of each function.
 
 The map is for the person who owns the code, to read the business logic and set tasks from it. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
 
-It is a module of the [kulman set](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. Its version is the workspace's.
+It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. Its version is the workspace's.
 
-**Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `kulman install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
+**Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `nollm-wiki-install install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
 
 ## Build
 
@@ -23,14 +23,14 @@ It is a module of the [kulman set](../../README.md), beside [`wiki`](../wiki/REA
     plaz build [--source DIR] [--vault DIR]
     plaz setup [--source DIR] --scope repo|local [--remove]
 
-`plaz build` reads the code under `--source` (default `.`) and writes the pages to `<source>/.kulman/map/`, or to `map/` under `--vault`. Pages carry the front matter `tags: ["plaz"]` and `kind: map`; a file at a page path without it is left alone and counted. Unchanged pages are not rewritten, pages of files that are gone are removed, and the output is the same on every run. A tree with no code file leaves the folder as it is, with a warning. Directories named `third_party`, `third-party`, `vendor`, `vendored` or `node_modules` are skipped; a line in a `.ignore` file (such as `extern/`) skips any other bundled code. Code references become wikilinks to `wiki`'s code pages when the vault holds a compiled project wiki, and plain `path:start-end` otherwise.
+`plaz build` reads the code under `--source` (default `.`) and writes the pages to `<source>/.nollm-wiki/map/`, or to `map/` under `--vault`. Pages carry the front matter `tags: ["plaz"]` and `kind: map`; a file at a page path without it is left alone and counted. Unchanged pages are not rewritten, pages of files that are gone are removed, and the output is the same on every run. A tree with no code file leaves the folder as it is, with a warning. Directories named `third_party`, `third-party`, `vendor`, `vendored` or `node_modules` are skipped; a line in a `.ignore` file (such as `extern/`) skips any other bundled code. Code references become wikilinks to `wiki`'s code pages when the vault holds a compiled project wiki, and plain `path:start-end` otherwise.
 
-`plaz setup` builds the map and makes sure `.kulman/` is ignored by git:
+`plaz setup` builds the map and makes sure `.nollm-wiki/` is ignored by git:
 
-- `--scope repo` adds the line `.kulman/` to `<source>/.gitignore`, shared with the team.
+- `--scope repo` adds the line `.nollm-wiki/` to `<source>/.gitignore`, shared with the team.
 - `--scope local` adds it to the repository's `info/exclude`, for this clone only. Outside a git repository it builds the map, says `not a git repository: nothing to exclude` and changes no file.
 - A line in either file counts: nothing is added twice.
-- `--remove` deletes only the map's own pages and the folders left empty under `.kulman/map/`, `map/` itself included once it is empty; the ignore line stays, and `wiki`'s files in `.kulman/` are not touched.
+- `--remove` deletes only the map's own pages and the folders left empty under `.nollm-wiki/map/`, `map/` itself included once it is empty; the ignore line stays, and the `wiki` module's files in `.nollm-wiki/` are not touched.
 
 `plaz setup` and `wiki setup` can both run in one project: each keeps to its own pages.
 

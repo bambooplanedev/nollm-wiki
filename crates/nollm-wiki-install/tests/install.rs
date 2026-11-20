@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 use common::{
-    archive_path, assert_binary, edit_manifest, kulman, local_bin, no_tmp_left, pack, path_first,
-    read_manifest, release, replace_archive, set_sha256, snapshot, state, stderr, stdout,
-    version_dir, KULMAN_BYTES,
+    archive_path, assert_binary, edit_manifest, local_bin, no_tmp_left, nollm_wiki_install, pack,
+    path_first, read_manifest, release, replace_archive, set_sha256, snapshot, state, stderr,
+    stdout, version_dir, NOLLM_WIKI_BYTES,
 };
 use serde_json::{json, Value};
 
@@ -29,13 +29,13 @@ fn setup() -> (tempfile::TempDir, String) {
 fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) -> String {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     break_it(&t.path().join("release"));
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "plaz"])
         .output()
         .unwrap();
@@ -51,11 +51,14 @@ fn plaz_fails_and_changes_nothing(break_it: impl FnOnce(&Path), expect: &str) ->
 fn install_defaults_installs_every_default_module() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "wiki", WIKI);
     assert_binary(&home, "plaz", PLAZ);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki-install", NOLLM_WIKI_BYTES);
     assert_eq!(
         state(&home),
         json!({"version": "0.7.0", "modules": ["plaz", "wiki"]})
@@ -73,7 +76,7 @@ fn install_defaults_installs_every_default_module() {
     for line in [
         "installed wiki 0.7.0",
         "installed plaz 0.7.0",
-        "installed kulman 0.7.0",
+        "installed nollm-wiki-install 0.7.0",
     ] {
         assert!(text.lines().any(|l| l == line), "{text}");
     }
@@ -84,7 +87,7 @@ fn install_defaults_installs_every_default_module() {
 fn install_modules_takes_only_the_named() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki", "--yes"])
         .assert()
         .success();
@@ -98,7 +101,7 @@ fn install_modules_takes_only_the_named() {
     // The same version again adds the missing module; a stale temp entry is cleared first.
     fs::create_dir(home.join(".tmp-stale")).unwrap();
     fs::write(home.join(".tmp-stale/junk"), "x").unwrap();
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "plaz"])
         .assert()
         .success();
@@ -119,7 +122,10 @@ fn install_a_module_whose_default_is_false_is_left_out() {
         &[("wiki", WIKI), ("plaz", PLAZ), ("extra", b"extra")],
     );
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     assert!(!home.join("bin/extra").exists());
     assert_eq!(
         state(&home),
@@ -131,7 +137,7 @@ fn install_a_module_whose_default_is_false_is_left_out() {
 fn install_checksum_mismatch_changes_nothing() {
     plaz_fails_and_changes_nothing(
         |r| set_sha256(r, "0.7.0", "plaz", &"0".repeat(64)),
-        "kulman: plaz: checksum mismatch",
+        "nollm-wiki-install: plaz: checksum mismatch",
     );
 }
 
@@ -139,7 +145,7 @@ fn install_checksum_mismatch_changes_nothing() {
 fn install_missing_archive_changes_nothing() {
     plaz_fails_and_changes_nothing(
         |r| fs::remove_file(archive_path(r, "0.7.0", "plaz")).unwrap(),
-        "kulman: plaz: download failed: file://",
+        "nollm-wiki-install: plaz: download failed: file://",
     );
     let err = plaz_fails_and_changes_nothing(
         |r| fs::remove_file(archive_path(r, "0.7.0", "plaz")).unwrap(),
@@ -152,7 +158,7 @@ fn install_missing_archive_changes_nothing() {
 fn install_broken_archive_changes_nothing() {
     plaz_fails_and_changes_nothing(
         |r| replace_archive(r, "0.7.0", "plaz", b"this is not a tar.gz"),
-        "kulman: plaz: cannot unpack: ",
+        "nollm-wiki-install: plaz: cannot unpack: ",
     );
 }
 
@@ -173,7 +179,7 @@ fn install_refuses_a_symlink_member() {
                 std::os::unix::fs::symlink("../../outside", d.join("plaz")).unwrap();
             });
         },
-        "kulman: plaz: archive holds no regular file plaz",
+        "nollm-wiki-install: plaz: archive holds no regular file plaz",
     );
 }
 
@@ -186,7 +192,7 @@ fn install_refuses_a_directory_member() {
                 fs::write(d.join("plaz/inner"), "x").unwrap();
             });
         },
-        "kulman: plaz: archive holds no regular file plaz",
+        "nollm-wiki-install: plaz: archive holds no regular file plaz",
     );
 }
 
@@ -202,12 +208,12 @@ fn install_refuses_a_hard_link_member() {
                 fs::hard_link(d.join("x"), d.join("plaz")).unwrap();
             });
         },
-        "kulman: plaz: ",
+        "nollm-wiki-install: plaz: ",
     );
     let line = err.lines().next().unwrap();
     assert!(
-        line.starts_with("kulman: plaz: cannot unpack: ")
-            || line == "kulman: plaz: archive holds no regular file plaz",
+        line.starts_with("nollm-wiki-install: plaz: cannot unpack: ")
+            || line == "nollm-wiki-install: plaz: archive holds no regular file plaz",
         "{err}"
     );
 }
@@ -226,7 +232,7 @@ fn install_refuses_a_member_written_through_a_symlink() {
             });
             fs::remove_file(dir.join("evil")).unwrap();
         },
-        "kulman: plaz: ",
+        "nollm-wiki-install: plaz: ",
     );
 }
 
@@ -236,11 +242,11 @@ fn install_refuses_bad_entries_in_the_manifest() {
     let bad: [(Edit, &str); 4] = [
         (
             |m| m["modules"][1]["requires"] = json!(["../y"]),
-            "kulman: bad name in manifest: ../y",
+            "nollm-wiki-install: bad name in manifest: ../y",
         ),
         (
             |m| {
-                for a in m["kulman"]["archives"]
+                for a in m["nollm-wiki-install"]["archives"]
                     .as_object_mut()
                     .unwrap()
                     .values_mut()
@@ -248,11 +254,11 @@ fn install_refuses_bad_entries_in_the_manifest() {
                     a["file"] = json!("../k.tar.gz");
                 }
             },
-            "kulman: bad name in manifest: ../k.tar.gz",
+            "nollm-wiki-install: bad name in manifest: ../k.tar.gz",
         ),
         (
-            |m| m["modules"][1]["name"] = json!("kulman"),
-            "kulman: bad name in manifest: kulman",
+            |m| m["modules"][1]["name"] = json!("nollm-wiki-install"),
+            "nollm-wiki-install: bad name in manifest: nollm-wiki-install",
         ),
         (
             |m| {
@@ -264,7 +270,7 @@ fn install_refuses_bad_entries_in_the_manifest() {
                     a["sha256"] = json!("abc");
                 }
             },
-            "kulman: bad sha256 in manifest: abc",
+            "nollm-wiki-install: bad sha256 in manifest: abc",
         ),
     ];
     for (edit, expect) in bad {
@@ -282,7 +288,7 @@ fn install_bounds_the_manifest_it_downloads() {
                 m["padding"] = json!(" ".repeat(1 << 20));
             });
         },
-        "kulman: manifest.json: download failed: file://",
+        "nollm-wiki-install: manifest.json: download failed: file://",
     );
     assert!(
         err.lines()
@@ -302,7 +308,7 @@ fn install_refuses_a_path_like_name() {
                 m["modules"][1]["name"] = json!("../x");
             });
         },
-        "kulman: bad name in manifest: ../x",
+        "nollm-wiki-install: bad name in manifest: ../x",
     );
     plaz_fails_and_changes_nothing(
         |r| {
@@ -316,7 +322,7 @@ fn install_refuses_a_path_like_name() {
                 }
             });
         },
-        "kulman: bad name in manifest: ../plaz.tar.gz",
+        "nollm-wiki-install: bad name in manifest: ../plaz.tar.gz",
     );
     let (t, base) = setup();
     let home = t.path().join("home");
@@ -327,12 +333,12 @@ fn install_refuses_a_path_like_name() {
         ("", ""),
         ("wiki,,plaz", ""),
     ] {
-        let out = kulman(&home, &base)
+        let out = nollm_wiki_install(&home, &base)
             .args(["install", "--modules", given])
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{given:?}");
-        let expect = format!("kulman: --modules: bad name \"{name}\"");
+        let expect = format!("nollm-wiki-install: --modules: bad name \"{name}\"");
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     }
     assert!(!home.exists());
@@ -342,17 +348,18 @@ fn install_refuses_a_path_like_name() {
 fn install_modules_takes_spaces_after_commas_and_names_the_unknown() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    for name in ["wikix", "kulman"] {
-        let out = kulman(&home, &base)
+    for name in ["wikix", "nollm-wiki-install"] {
+        let out = nollm_wiki_install(&home, &base)
             .args(["install", "--modules", &format!("wiki,{name}")])
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
-        let expect = format!("kulman: --modules: unknown module \"{name}\" (known: wiki, plaz)");
+        let expect =
+            format!("nollm-wiki-install: --modules: unknown module \"{name}\" (known: wiki, plaz)");
         assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     }
     assert!(!home.exists());
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki, plaz "])
         .assert()
         .success();
@@ -366,7 +373,7 @@ fn install_modules_takes_spaces_after_commas_and_names_the_unknown() {
 fn an_unknown_module_is_usage_even_when_the_installed_version_differs() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -376,7 +383,7 @@ fn an_unknown_module_is_usage_even_when_the_installed_version_differs() {
     )
     .unwrap();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--yes", "--modules", "nope"])
         .output()
         .unwrap();
@@ -394,7 +401,7 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     let (t, base) = setup();
     let rel = t.path().join("release");
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -403,7 +410,10 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
         "0.8.0",
         &[("wiki", b"wiki 0.8"), ("plaz", b"plaz 0.8")],
     );
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
     assert_binary(&home, "wiki", WIKI);
@@ -415,23 +425,27 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     assert!(text.lines().any(|l| l == "installed plaz 0.7.0"), "{text}");
     assert!(
         text.lines()
-            .any(|l| l == "newer release 0.8.0: kulman update"),
+            .any(|l| l == "newer release 0.8.0: nollm-wiki-install update"),
         "{text}"
     );
 
     // --version other than the installed one: today's advice.
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--version", "0.8.0"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: version 0.7.0 is installed; run kulman update"));
+    assert!(stderr(&out)
+        .contains("nollm-wiki-install: version 0.7.0 is installed; run nollm-wiki-install update"));
     assert_eq!(snapshot(t.path()), before);
 
     // The latest manifest unreadable: install works, and says the check failed, in one line.
     fs::write(rel.join("latest/download/manifest.json"), "broken").unwrap();
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     let said: Vec<&str> = text
@@ -448,10 +462,14 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
     // The installed version's manifest unreadable: said, with where, and nothing changes.
     let newer = release(&t.path().join("newer"), "0.8.0", &[("wiki", WIKI)]);
     let before = snapshot(t.path());
-    let out = kulman(&home, &newer).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &newer)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    let expect =
-        format!("kulman: manifest.json: download failed: {newer}/download/v0.7.0/manifest.json: ");
+    let expect = format!(
+        "nollm-wiki-install: manifest.json: download failed: {newer}/download/v0.7.0/manifest.json: "
+    );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(snapshot(t.path()), before);
 }
@@ -460,12 +478,12 @@ fn install_when_a_newer_release_exists_stays_at_the_installed_version() {
 fn install_version_of_the_installed_release_works_while_a_newer_exists() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     publish_newer(&t.path().join("release"));
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--version", "0.7.0", "--modules", "plaz"])
         .output()
         .unwrap();
@@ -493,7 +511,7 @@ fn install_reads_the_installed_version_once_it_holds_the_lock() {
     let (t, base) = setup();
     let rel = t.path().join("release");
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -530,7 +548,7 @@ fn a_failure_once_files_change_does_not_say_nothing_changed() {
     use std::os::unix::fs::PermissionsExt;
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -544,13 +562,13 @@ fn a_failure_once_files_change_does_not_say_nothing_changed() {
         mode(0o755);
         panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "plaz"])
         .output()
         .unwrap();
     mode(0o755);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = format!("kulman: {}: ", bin.join("plaz").display());
+    let expect = format!("nollm-wiki-install: {}: ", bin.join("plaz").display());
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(
         !stderr(&out).contains("nothing changed"),
@@ -563,16 +581,19 @@ fn a_failure_once_files_change_does_not_say_nothing_changed() {
 fn install_puts_back_a_listed_binary_that_is_missing() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     fs::remove_file(home.join("bin/plaz")).unwrap();
-    fs::remove_file(home.join("bin/kulman")).unwrap();
-    let out = kulman(&home, &base)
+    fs::remove_file(home.join("bin/nollm-wiki-install")).unwrap();
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "plaz", PLAZ);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki-install", NOLLM_WIKI_BYTES);
     assert_eq!(
         state(&home),
         json!({"version": "0.7.0", "modules": ["plaz", "wiki"]})
@@ -583,13 +604,19 @@ fn install_puts_back_a_listed_binary_that_is_missing() {
 fn install_with_nothing_to_do_says_so_and_changes_nothing() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let before = snapshot(t.path());
     for (args, names) in [
         (&["install"][..], "plaz, wiki"),
         (&["install", "--modules", "plaz"], "plaz"),
     ] {
-        let out = kulman(&home, &base).args(args).output().unwrap();
+        let out = nollm_wiki_install(&home, &base)
+            .args(args)
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
         assert_eq!(stderr(&out), "signature not checked: local release tree\n");
         assert_eq!(
@@ -606,13 +633,19 @@ fn install_at_a_newer_version_says_remove() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let newer = release(&t.path().join("newer"), "0.10.0", &[("wiki", WIKI)]);
-    kulman(&home, &newer).arg("install").assert().success();
+    nollm_wiki_install(&home, &newer)
+        .arg("install")
+        .assert()
+        .success();
     let before = snapshot(&home);
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(stderr(&out).contains(
-        "kulman: version 0.10.0 is installed, newer than 0.7.0; \
-         run kulman remove, then kulman install --version 0.7.0"
+        "nollm-wiki-install: version 0.10.0 is installed, newer than 0.7.0; \
+         run nollm-wiki-install remove, then nollm-wiki-install install --version 0.7.0"
     ));
     assert_eq!(snapshot(&home), before);
 }
@@ -630,30 +663,31 @@ fn install_version_must_match_the_manifest() {
         serde_json::to_vec(&read_manifest(&rel, "0.7.0")).unwrap(),
     )
     .unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--version", "0.6.0"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr(&out).contains("kulman: manifest.json of 0.6.0 states version 0.7.0"),
+        stderr(&out).contains("nollm-wiki-install: manifest.json of 0.6.0 states version 0.7.0"),
         "{}",
         stderr(&out)
     );
     assert!(!home.exists());
 
     // A release that does not exist: where it was looked for.
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--version", "0.6.12"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    let expect =
-        format!("kulman: manifest.json: download failed: {base}/download/v0.6.12/manifest.json: ");
+    let expect = format!(
+        "nollm-wiki-install: manifest.json: download failed: {base}/download/v0.6.12/manifest.json: "
+    );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!home.exists());
 
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--version", "v0.7"])
         .output()
         .unwrap();
@@ -661,7 +695,7 @@ fn install_version_must_match_the_manifest() {
 
     // The latest manifest is not read with --version: break it, install still works.
     fs::write(rel.join("latest/download/manifest.json"), "broken").unwrap();
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--version", "0.7.0"])
         .assert()
         .success();
@@ -672,31 +706,31 @@ fn install_version_must_match_the_manifest() {
 fn install_without_home_says_so() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    for kulman_home in [None, Some("")] {
-        let mut cmd = kulman(&home, &base);
-        cmd.env_remove("HOME").env_remove("KULMAN_HOME");
-        if let Some(v) = kulman_home {
-            cmd.env("KULMAN_HOME", v);
+    for nollm_wiki_home in [None, Some("")] {
+        let mut cmd = nollm_wiki_install(&home, &base);
+        cmd.env_remove("HOME").env_remove("NOLLM_WIKI_HOME");
+        if let Some(v) = nollm_wiki_home {
+            cmd.env("NOLLM_WIKI_HOME", v);
         }
         let out = cmd.arg("install").output().unwrap();
         assert_eq!(out.status.code(), Some(1));
-        assert!(stderr(&out).contains("kulman: set HOME or KULMAN_HOME"));
+        assert!(stderr(&out).contains("nollm-wiki-install: set HOME or NOLLM_WIKI_HOME"));
     }
     assert!(!home.exists());
 }
 
 #[test]
-fn the_default_home_is_dot_kulman_home() {
+fn the_default_home_is_dot_nollm_wiki_home() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let user = t.path().join("user-home");
-    kulman(&home, &base)
-        .env_remove("KULMAN_HOME")
+    nollm_wiki_install(&home, &base)
+        .env_remove("NOLLM_WIKI_HOME")
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
-    assert_binary(&user.join(".kulman-home"), "wiki", WIKI);
-    assert!(!user.join(".kulman").exists());
+    assert_binary(&user.join(".nollm-wiki-home"), "wiki", WIKI);
+    assert!(!user.join(".nollm-wiki").exists());
     assert!(!home.exists());
 }
 
@@ -722,12 +756,15 @@ fn install_rejects_a_plain_http_base() {
             "https://example.invalid/releases#x",
         ),
     ] {
-        let out = kulman(&home, base).arg("install").output().unwrap();
+        let out = nollm_wiki_install(&home, base)
+            .arg("install")
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2), "{base}");
         assert_eq!(
             stderr(&out),
             format!(
-                "kulman: KULMAN_RELEASE_URL must start with https:// or file:// (got {shown})\n\
+                "nollm-wiki-install: NOLLM_WIKI_RELEASE_URL must start with https:// or file:// (got {shown})\n\
                  nothing changed\n"
             ),
             "{base}"
@@ -742,14 +779,14 @@ fn install_without_tar_says_so() {
     let home = t.path().join("home");
     let empty = t.path().join("empty-path");
     fs::create_dir(&empty).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", &empty)
         .arg("install")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr(&out).contains("kulman: tar is required"),
+        stderr(&out).contains("nollm-wiki-install: tar is required"),
         "{}",
         stderr(&out)
     );
@@ -763,17 +800,20 @@ fn install_says_how_to_add_to_path() {
     let bin = home.join("bin");
     let hint = [
         format!(
-            "{} is not on PATH; to type kulman in a terminal, add it:",
+            "{} is not on PATH; to type nollm-wiki-install in a terminal, add it:",
             bin.display()
         ),
         format!("    export PATH=\"{}:$PATH\"", bin.display()),
     ];
-    let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
+    let next = "next: run \"nollm-wiki-install setup --scope repo\" (or local) in a project";
     let full = format!(
-        "next: run \"{}/kulman setup --scope repo\" (or local) in a project",
+        "next: run \"{}/nollm-wiki-install setup --scope repo\" (or local) in a project",
         bin.display()
     );
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     let text = stdout(&out);
     assert_eq!(
         text.lines().rev().take(3).collect::<Vec<_>>(),
@@ -788,7 +828,7 @@ fn install_says_how_to_add_to_path() {
             .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
     )
     .unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path)
         .arg("install")
         .output()
@@ -803,9 +843,12 @@ fn a_failed_first_install_leaves_no_home() {
     let (t, base) = setup();
     set_sha256(&t.path().join("release"), "0.7.0", "plaz", &"0".repeat(64));
     let home = t.path().join("home");
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(stderr(&out).contains("kulman: plaz: checksum mismatch"));
+    assert!(stderr(&out).contains("nollm-wiki-install: plaz: checksum mismatch"));
     assert!(!home.exists());
 }
 
@@ -813,13 +856,13 @@ fn a_failed_first_install_leaves_no_home() {
 fn install_into_a_missing_parent_says_so() {
     let (t, base) = setup();
     let parent = t.path().join("missing");
-    let out = kulman(&t.path().join("home"), &base)
-        .env("KULMAN_HOME", parent.join("home"))
+    let out = nollm_wiki_install(&t.path().join("home"), &base)
+        .env("NOLLM_WIKI_HOME", parent.join("home"))
         .arg("install")
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
-    let expect = format!("kulman: {} does not exist", parent.display());
+    let expect = format!("nollm-wiki-install: {} does not exist", parent.display());
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert!(!parent.exists());
 }
@@ -850,12 +893,15 @@ fn a_home_that_is_a_dangling_link_is_said_removed() {
     let (t, base) = setup();
     let home = t.path().join("home");
     std::os::unix::fs::symlink(t.path().join("nowhere"), &home).unwrap();
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert_eq!(
         stderr(&out),
         format!(
-            "kulman: cannot lock {}: it was removed while waiting\nnothing changed\n",
+            "nollm-wiki-install: cannot lock {}: it was removed while waiting\nnothing changed\n",
             home.join(".lock").display()
         )
     );
@@ -866,7 +912,7 @@ fn a_home_that_is_a_dangling_link_is_said_removed() {
 fn install_refuses_a_symlinked_bin() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -874,13 +920,13 @@ fn install_refuses_a_symlinked_bin() {
     fs::rename(home.join("bin"), &outside).unwrap();
     std::os::unix::fs::symlink(&outside, home.join("bin")).unwrap();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "plaz"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let expect = format!(
-        "kulman: {} is not a directory kulman can use",
+        "nollm-wiki-install: {} is not a directory nollm-wiki-install can use",
         home.join("bin").display()
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -896,10 +942,13 @@ fn install_checks_every_build_before_any_download() {
     fs::remove_file(archive_path(&rel, "0.7.0", "wiki")).unwrap();
     edit_manifest(&rel, "0.7.0", |m| m["modules"][1]["archives"] = json!({}));
     let home = t.path().join("home");
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1));
     assert!(
-        stderr(&out).contains("kulman: plaz: no build for "),
+        stderr(&out).contains("nollm-wiki-install: plaz: no build for "),
         "{}",
         stderr(&out)
     );
@@ -912,7 +961,10 @@ fn install_fetches_a_module_whose_file_it_finds_unlisted() {
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
     fs::write(home.join("bin/wiki"), "FOREIGN").unwrap();
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(
         stdout(&out).lines().any(|l| l == "installed wiki 0.7.0"),
@@ -930,10 +982,16 @@ fn install_fetches_a_module_whose_file_it_finds_unlisted() {
 fn install_with_no_state_over_an_older_installation_fetches_every_module() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     fs::remove_file(home.join("state.json")).unwrap();
     publish_newer(&t.path().join("release"));
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_binary(&home, "wiki", b"wiki 0.8");
     assert_binary(&home, "plaz", b"plaz 0.8");
@@ -952,7 +1010,10 @@ fn a_failed_install_into_a_directory_with_no_state_deletes_nothing_there() {
     fs::create_dir_all(home.join(".tmp-mine")).unwrap();
     fs::write(home.join(".tmp-mine/notes"), "mine").unwrap();
     let before = snapshot(&home);
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert!(
         stderr(&out).contains("plaz: checksum mismatch"),
@@ -966,7 +1027,7 @@ fn a_failed_install_into_a_directory_with_no_state_deletes_nothing_there() {
 fn install_refuses_a_directory_in_place_of_the_manifest() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
@@ -974,13 +1035,13 @@ fn install_refuses_a_directory_in_place_of_the_manifest() {
     fs::create_dir(home.join("manifest.json")).unwrap();
     fs::write(home.join("manifest.json/inner"), "x").unwrap();
     let before = snapshot(t.path());
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "plaz"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let expect = format!(
-        "kulman: {} is not a file",
+        "nollm-wiki-install: {} is not a file",
         home.join("manifest.json").display()
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -988,35 +1049,47 @@ fn install_refuses_a_directory_in_place_of_the_manifest() {
 }
 
 #[test]
-fn install_leaves_an_installed_kulman_alone() {
+fn install_leaves_an_installed_nollm_wiki_install_alone() {
     let (t, base) = setup();
     let home = t.path().join("home");
-    kulman(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     // Marked, to see it is not replaced; its archive gone, to see it is not fetched.
-    fs::write(home.join("bin/kulman"), "mine").unwrap();
-    fs::remove_file(archive_path(&t.path().join("release"), "0.7.0", "kulman")).unwrap();
+    fs::write(home.join("bin/nollm-wiki-install"), "mine").unwrap();
+    fs::remove_file(archive_path(
+        &t.path().join("release"),
+        "0.7.0",
+        "nollm-wiki-install",
+    ))
+    .unwrap();
     for _ in 0..2 {
-        let out = kulman(&home, &base)
+        let out = nollm_wiki_install(&home, &base)
             .args(["install", "--modules", "plaz"])
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
-        assert!(!stdout(&out).contains("kulman 0.7.0"), "{}", stdout(&out));
-        assert_eq!(fs::read(home.join("bin/kulman")).unwrap(), b"mine");
+        assert!(
+            !stdout(&out).contains("nollm-wiki-install 0.7.0"),
+            "{}",
+            stdout(&out)
+        );
+        assert_eq!(
+            fs::read(home.join("bin/nollm-wiki-install")).unwrap(),
+            b"mine"
+        );
     }
     assert_binary(&home, "plaz", PLAZ);
 }
 
 #[test]
 fn a_failed_install_with_no_state_leaves_no_lock() {
-    // What install.sh leaves: bin/kulman and nothing else. With no tar the install fails.
+    // What install.sh leaves: bin/nollm-wiki-install and nothing else. With no tar the install fails.
     let (t, base) = setup();
     let home = t.path().join("home");
     fs::create_dir_all(home.join("bin")).unwrap();
-    fs::write(home.join("bin/kulman"), KULMAN_BYTES).unwrap();
+    fs::write(home.join("bin/nollm-wiki-install"), NOLLM_WIKI_BYTES).unwrap();
     let empty = t.path().join("empty-path");
     fs::create_dir(&empty).unwrap();
     // Then with a `.lock` it did not create: that one stays too, as it was found.
@@ -1025,14 +1098,14 @@ fn a_failed_install_with_no_state_leaves_no_lock() {
             fs::write(home.join(".lock"), "").unwrap();
         }
         let before = snapshot(&home);
-        let out = kulman(&home, &base)
+        let out = nollm_wiki_install(&home, &base)
             .env("PATH", &empty)
             .arg("install")
             .output()
             .unwrap();
         assert_eq!(out.status.code(), Some(1));
         assert!(
-            stderr(&out).contains("kulman: tar is required"),
+            stderr(&out).contains("nollm-wiki-install: tar is required"),
             "{}",
             stderr(&out)
         );
@@ -1045,7 +1118,10 @@ fn state_and_manifest_end_with_one_newline() {
     let (t, base) = setup();
     let rel = t.path().join("release");
     let home = t.path().join("home");
-    kulman(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let state = fs::read(home.join("state.json")).unwrap();
     assert!(
         state.ends_with(b"}\n"),
@@ -1058,7 +1134,10 @@ fn state_and_manifest_end_with_one_newline() {
     fs::write(version_dir(&rel, "0.7.0").join("manifest.json"), &manifest).unwrap();
     fs::write(rel.join("latest/download/manifest.json"), &manifest).unwrap();
     fs::remove_file(home.join("manifest.json")).unwrap();
-    kulman(&home, &base).arg("update").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("update")
+        .assert()
+        .success();
     assert_eq!(fs::read(home.join("manifest.json")).unwrap(), manifest);
 }
 
@@ -1073,27 +1152,30 @@ fn install_links_each_binary_into_local_bin_on_path() {
     fs::create_dir_all(&real).unwrap();
     fs::create_dir_all(dir.parent().unwrap()).unwrap();
     std::os::unix::fs::symlink(&real, &dir).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path_first(format!("{}/", dir.display())))
         .arg("install")
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let linked = format!("kulman: linked plaz wiki kulman into {}\n", dir.display());
+    let linked = format!(
+        "nollm-wiki-install: linked plaz wiki nollm-wiki-install into {}\n",
+        dir.display()
+    );
     assert_eq!(stderr(&out), format!("{UNSIGNED}{linked}"));
-    for name in ["wiki", "plaz", "kulman"] {
+    for name in ["wiki", "plaz", "nollm-wiki-install"] {
         assert_eq!(
             fs::read_link(real.join(name)).unwrap(),
             home.join("bin").join(name)
         );
     }
-    // kulman is reached through its link: named plainly, with no PATH hint before it.
-    let next = "next: run \"kulman setup --scope repo\" (or local) in a project";
+    // nollm-wiki-install is reached through its link: named plainly, with no PATH hint before it.
+    let next = "next: run \"nollm-wiki-install setup --scope repo\" (or local) in a project";
     assert_eq!(stdout(&out).lines().last(), Some(next), "{}", stdout(&out));
 }
 
 #[test]
-fn install_leaves_what_is_not_a_kulman_link() {
+fn install_leaves_what_is_not_a_nollm_wiki_install_link() {
     let (t, base) = setup();
     let home = t.path().join("home");
     let dir = local_bin(&home);
@@ -1101,11 +1183,11 @@ fn install_leaves_what_is_not_a_kulman_link() {
     fs::write(dir.join("wiki"), "mine").unwrap();
     fs::write(t.path().join("plaz"), "mine").unwrap();
     std::os::unix::fs::symlink(t.path().join("plaz"), dir.join("plaz")).unwrap();
-    // Dangling, into another kulman home.
-    let other = t.path().join("other-home/bin/kulman");
-    std::os::unix::fs::symlink(&other, dir.join("kulman")).unwrap();
+    // Dangling, into another nollm-wiki home.
+    let other = t.path().join("other-home/bin/nollm-wiki-install");
+    std::os::unix::fs::symlink(&other, dir.join("nollm-wiki-install")).unwrap();
     let before = snapshot(&dir);
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path_first(&dir))
         .arg("install")
         .output()
@@ -1114,7 +1196,7 @@ fn install_leaves_what_is_not_a_kulman_link() {
     let left = |n: &str| {
         let at = dir.join(n);
         format!(
-            "kulman: left {} as it is (not a kulman link)\n",
+            "nollm-wiki-install: left {} as it is (not a nollm-wiki-install link)\n",
             at.display()
         )
     };
@@ -1122,7 +1204,7 @@ fn install_leaves_what_is_not_a_kulman_link() {
         "{UNSIGNED}{}{}{}",
         left("plaz"),
         left("wiki"),
-        left("kulman")
+        left("nollm-wiki-install")
     );
     assert_eq!(stderr(&out), expect);
     assert_eq!(snapshot(&dir), before);
@@ -1131,7 +1213,7 @@ fn install_leaves_what_is_not_a_kulman_link() {
 #[test]
 fn install_replaces_its_own_links_by_the_home_as_given_or_its_real_path() {
     let (t, base) = setup();
-    // KULMAN_HOME reaches the home through a symlink.
+    // NOLLM_WIKI_HOME reaches the home through a symlink.
     let real = t.path().join("home");
     fs::create_dir(&real).unwrap();
     let home = t.path().join("home-link");
@@ -1142,16 +1224,19 @@ fn install_replaces_its_own_links_by_the_home_as_given_or_its_real_path() {
     std::os::unix::fs::symlink(home.join("bin/wiki"), dir.join("wiki")).unwrap();
     let real_bin = real.canonicalize().unwrap().join("bin");
     std::os::unix::fs::symlink(real_bin.join("plaz"), dir.join("plaz")).unwrap();
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path_first(&dir))
         .arg("install")
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    // wiki's link is already the one kulman makes: left, not named.
-    let linked = format!("kulman: linked plaz kulman into {}\n", dir.display());
+    // wiki's link is already the one nollm-wiki-install makes: left, not named.
+    let linked = format!(
+        "nollm-wiki-install: linked plaz nollm-wiki-install into {}\n",
+        dir.display()
+    );
     assert_eq!(stderr(&out), format!("{UNSIGNED}{linked}"));
-    for name in ["wiki", "plaz", "kulman"] {
+    for name in ["wiki", "plaz", "nollm-wiki-install"] {
         assert_eq!(
             fs::read_link(dir.join(name)).unwrap(),
             home.join("bin").join(name)
@@ -1167,14 +1252,14 @@ fn install_again_leaves_links_that_are_already_right() {
     let dir = local_bin(&home);
     fs::create_dir_all(&dir).unwrap();
     let run = || {
-        kulman(&home, &base)
+        nollm_wiki_install(&home, &base)
             .env("PATH", path_first(&dir))
             .arg("install")
             .output()
             .unwrap()
     };
     assert!(run().status.success());
-    let names = ["wiki", "plaz", "kulman"];
+    let names = ["wiki", "plaz", "nollm-wiki-install"];
     let inodes = || names.map(|n| fs::symlink_metadata(dir.join(n)).unwrap().ino());
     let before = inodes();
     // A listed binary missing: this install commits again.
@@ -1198,10 +1283,10 @@ fn install_links_nothing_without_local_bin_as_a_folder_on_path() {
     let home = t.path().join("home");
     let dir = local_bin(&home);
     let hint = format!(
-        "{} is not on PATH; to type kulman in a terminal, add it:",
+        "{} is not on PATH; to type nollm-wiki-install in a terminal, add it:",
         home.join("bin").display()
     );
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path_first(&dir))
         .arg("install")
         .output()
@@ -1217,10 +1302,13 @@ fn install_links_nothing_without_local_bin_as_a_folder_on_path() {
     let dir = local_bin(&home);
     fs::create_dir_all(&dir).unwrap();
     let hint = format!(
-        "{} is not on PATH; to type kulman in a terminal, add it:",
+        "{} is not on PATH; to type nollm-wiki-install in a terminal, add it:",
         home.join("bin").display()
     );
-    let out = kulman(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), UNSIGNED);
     assert!(stdout(&out).lines().any(|l| l == hint), "{}", stdout(&out));
@@ -1241,7 +1329,7 @@ fn a_link_that_cannot_be_made_is_a_warning() {
         mode(0o755);
         panic!("needs a user that cannot write to a mode 555 directory (not root)");
     }
-    let out = kulman(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .env("PATH", path_first(&dir))
         .arg("install")
         .output()
@@ -1251,7 +1339,7 @@ fn a_link_that_cannot_be_made_is_a_warning() {
     let warn = |n: &str| {
         let at = dir.join(n);
         format!(
-            "kulman: warning: cannot link {}: Permission denied (os error 13)\n",
+            "nollm-wiki-install: warning: cannot link {}: Permission denied (os error 13)\n",
             at.display()
         )
     };
@@ -1259,9 +1347,9 @@ fn a_link_that_cannot_be_made_is_a_warning() {
         "{UNSIGNED}{}{}{}",
         warn("plaz"),
         warn("wiki"),
-        warn("kulman")
+        warn("nollm-wiki-install")
     );
     assert_eq!(stderr(&out), expect);
-    assert_binary(&home, "kulman", KULMAN_BYTES);
+    assert_binary(&home, "nollm-wiki-install", NOLLM_WIKI_BYTES);
     assert_eq!(fs::read_dir(&dir).unwrap().count(), 0);
 }

@@ -216,13 +216,13 @@ fn a_switch_rewrites_only_the_command_and_args_lines() {
         with_body(spaced, &entry(CMD, false)),
         "[mcp_servers.wiki]\n\ncommand = \"wiki\"\nargs = [\"serve\", \"--source\", \".\", \"--memory\", \"none\"]\n"
     );
-    // From the kulman home, the block that starts wiki by name is wiki's own and rewritten.
+    // From the nollm-wiki home, the block that starts wiki by name is wiki's own and rewritten.
     let launch = [entry(LAUNCH, true), entry(CMD, true)];
     assert_eq!(state(&around(&crlf(B)), &launch), State::OursOther);
     assert_eq!(
         with_body(&around(&crlf(B)), &launch[0]),
         around(&crlf(
-            "[mcp_servers.wiki]\ncommand = \"sh\"\nargs = [\"-c\", \"exec \\\"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki\\\" serve --source .\"]\n"
+            "[mcp_servers.wiki]\ncommand = \"sh\"\nargs = [\"-c\", \"exec \\\"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki\\\" serve --source .\"]\n"
         ))
     );
 }

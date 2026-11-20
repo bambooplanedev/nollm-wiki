@@ -1,4 +1,4 @@
-//! `kulman install` and `kulman update`: the release choice, staging and commit.
+//! `nollm-wiki-install install` and `nollm-wiki-install update`: the release choice, staging and commit.
 
 use std::collections::BTreeSet;
 
@@ -8,12 +8,12 @@ use crate::{ask_choose, ask_yes, is_installed, path_hint, reachable, release, st
 use release::Manifest;
 use store::{Home, State};
 
-/// Default release location; `KULMAN_RELEASE_URL` overrides it.
-const RELEASES: &str = "https://github.com/bambooplanedev/kulman/releases";
+/// Default release location; `NOLLM_WIKI_RELEASE_URL` overrides it.
+const RELEASES: &str = "https://github.com/bambooplanedev/nollm-wiki/releases";
 
 /// The release base, checked: a usage error when it is neither https:// nor file://.
 pub(super) fn release_base() -> Result<String> {
-    let base = std::env::var("KULMAN_RELEASE_URL")
+    let base = std::env::var("NOLLM_WIKI_RELEASE_URL")
         .ok()
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| RELEASES.to_string());
@@ -74,12 +74,12 @@ fn check_version(state: &State, manifest: &Manifest) -> Result<()> {
     let (have, want) = (&state.version, &manifest.version);
     let order = release::version_key(have).cmp(&release::version_key(want));
     if order.is_lt() {
-        bail!("version {have} is installed; run kulman update");
+        bail!("version {have} is installed; run nollm-wiki-install update");
     }
     if order.is_gt() {
         bail!(
             "version {have} is installed, newer than {want}; \
-             run kulman remove, then kulman install --version {want}"
+             run nollm-wiki-install remove, then nollm-wiki-install install --version {want}"
         );
     }
     Ok(())
@@ -100,14 +100,17 @@ pub(super) fn install(wanted: Option<Vec<String>>, version: Option<&str>, ask: b
     }
     let bin = home.path.join("bin");
     let modules = State::load(&home.path)?.map_or_else(Vec::new, |s| s.modules);
-    let names = modules.iter().map(String::as_str).chain(["kulman"]);
-    let kulman = if reachable(&bin, names) {
-        "kulman".to_string()
+    let names = modules
+        .iter()
+        .map(String::as_str)
+        .chain(["nollm-wiki-install"]);
+    let nollm_wiki_install = if reachable(&bin, names) {
+        "nollm-wiki-install".to_string()
     } else {
         println!("{}", path_hint(&bin));
-        bin.join("kulman").display().to_string()
+        bin.join("nollm-wiki-install").display().to_string()
     };
-    println!("next: run \"{kulman} setup --scope repo\" (or local) in a project");
+    println!("next: run \"{nollm_wiki_install} setup --scope repo\" (or local) in a project");
     Ok(())
 }
 
@@ -123,7 +126,7 @@ fn place(
     ask: bool,
 ) -> Result<bool> {
     let state = State::load(&home.path)?;
-    // Stale temp entries are cleaned only in a home a state records as kulman's.
+    // Stale temp entries are cleaned only in a home a state records as nollm-wiki-install's.
     if state.is_some() {
         home.clean_tmp()?;
     }
@@ -140,7 +143,7 @@ fn place(
             }
             latest => {
                 note = Some(match latest {
-                    Ok((m, _)) => format!("newer release {}: kulman update", m.version),
+                    Ok((m, _)) => format!("newer release {}: nollm-wiki-install update", m.version),
                     Err(e) => format!(
                         "could not check for a newer release ({base}: {})",
                         e.root_cause()
@@ -166,8 +169,9 @@ fn place(
     };
     let chosen = choose(&manifest, wanted)?;
     let mut modules = BTreeSet::new();
-    // At the same version, an installed kulman is the release's already.
-    let kulman_too = state.is_none() || !home.path.join("bin/kulman").is_file();
+    // At the same version, an installed nollm-wiki-install is the release's already.
+    let nollm_wiki_install_too =
+        state.is_none() || !home.path.join("bin/nollm-wiki-install").is_file();
     if let Some(state) = state {
         check_version(&state, &manifest)?;
         modules.extend(state.modules);
@@ -180,12 +184,12 @@ fn place(
     {
         let path = bin.join(name);
         eprintln!(
-            "kulman: replacing {}: kulman has no record of installing it",
+            "nollm-wiki-install: replacing {}: nollm-wiki-install has no record of installing it",
             path.display()
         );
     }
     // Only a module the state lists counts as installed when its file is there: any other file
-    // at bin/<name> is replaced by the fetched, checked release. kulman last, renamed last.
+    // at bin/<name> is replaced by the fetched, checked release. nollm-wiki-install last, renamed last.
     let mut names: Vec<String> = chosen
         .union(&modules)
         .filter(|n| !modules.contains(*n) || missing(n))
@@ -198,8 +202,8 @@ fn place(
             return Ok(false);
         }
     }
-    if kulman_too {
-        names.push("kulman".to_string());
+    if nollm_wiki_install_too {
+        names.push("nollm-wiki-install".to_string());
     }
     // Every chosen module is listed and in bin/ (so the state stays as it is): nothing to write.
     if names.is_empty() && home.path.join("manifest.json").is_file() {
@@ -236,7 +240,7 @@ pub(super) fn update(ask: bool) -> Result<()> {
     let target = target()?;
     if !is_installed(&home_path)? {
         bail!(
-            "nothing installed in {}; run kulman install",
+            "nothing installed in {}; run nollm-wiki-install install",
             home_path.display()
         );
     }
@@ -267,8 +271,8 @@ fn installed_has(home: &Home, state: &State) -> bool {
     manifest.is_some_and(|m| state.modules.iter().all(|n| m.module(n).is_some()))
 }
 
-/// Under the lock: unless already current or newer, stages kulman and every installed module
-/// at the latest version, and only when all are ready commits them (kulman last). With `ask`,
+/// Under the lock: unless already current or newer, stages nollm-wiki-install and every installed module
+/// at the latest version, and only when all are ready commits them (nollm-wiki-install last). With `ask`,
 /// a move to a newer release, or any removal, is asked first.
 fn renew(
     home: &Home,
@@ -280,14 +284,18 @@ fn renew(
 ) -> Result<()> {
     let Some(state) = State::load(&home.path)? else {
         bail!(
-            "nothing installed in {}; run kulman install",
+            "nothing installed in {}; run nollm-wiki-install install",
             home.path.display()
         );
     };
     home.clean_tmp()?;
     let (have, latest) = (&state.version, &manifest.version);
     let bin = home.path.join("bin");
-    let listed = state.modules.iter().map(String::as_str).chain(["kulman"]);
+    let listed = state
+        .modules
+        .iter()
+        .map(String::as_str)
+        .chain(["nollm-wiki-install"]);
     match release::version_key(have).cmp(&release::version_key(latest)) {
         std::cmp::Ordering::Greater => {
             println!("installed {have} is newer than the latest release {latest}; nothing changed");
@@ -326,7 +334,7 @@ fn renew(
         return Ok(());
     }
     let mut names: Vec<String> = modules.iter().cloned().collect();
-    names.push("kulman".to_string());
+    names.push("nollm-wiki-install".to_string());
     let staged = store::stage(home, base, manifest, target, &names)?;
     let old_modules = state.modules.clone();
     // Committed still listing the modules that go, so a run cut off before their removal
@@ -341,7 +349,7 @@ fn renew(
     for s in &staged {
         // A module the release newly requires was not there before; at the same version, files
         // are only put back.
-        if s.name != "kulman" && !old_modules.contains(&s.name) {
+        if s.name != "nollm-wiki-install" && !old_modules.contains(&s.name) {
             println!("installed {} {latest}", s.name);
         } else if have == latest {
             println!("repaired {} {latest}", s.name);
@@ -356,7 +364,7 @@ fn renew(
     for old in &gone {
         match renamed(old) {
             Some(new) => println!(
-                "removed {old}: renamed {new}; run \"kulman setup --scope repo\" \
+                "removed {old}: renamed {new}; run \"nollm-wiki-install setup --scope repo\" \
                  (or local) again in each project set up with {old}"
             ),
             None => println!("removed {old}: not in release {latest}"),
