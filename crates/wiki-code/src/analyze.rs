@@ -50,11 +50,12 @@ pub struct Call {
 }
 
 /// One tree the items came from, with the text its nodes index: the file's
-/// text, or a component's script view (markup blanked in place). A shell
-/// tree re-parsed from a blanked copy and a C/C++ tree of the first
-/// preprocessor branch index the file's own text: those copies have its
-/// length and lines, and the extraction reads the original bytes with them.
-/// Items' `call_sites` are read from the last source only.
+/// text, or a component's script view (markup blanked in place). A C/C++
+/// tree of the first preprocessor branch carries the copy it was parsed
+/// from, other branches blank, so a node spanning one never reads it back;
+/// the copy has the file's length and lines, so its offsets also index the
+/// file's text. A shell tree re-parsed from a blanked copy indexes the
+/// file's own text. Items' `call_sites` are read from the last source only.
 #[derive(Clone, Debug)]
 pub struct Source {
     tree: Tree,
@@ -64,11 +65,11 @@ pub struct Source {
 }
 
 impl Source {
-    pub(crate) fn new(tree: Tree, text: &str, family: Family) -> Source {
-        let aliases = code::import_aliases(tree.root_node(), text);
+    pub(crate) fn new(tree: Tree, text: String, family: Family) -> Source {
+        let aliases = code::import_aliases(tree.root_node(), &text);
         Source {
             tree,
-            text: text.to_string(),
+            text,
             aliases,
             family,
         }
