@@ -71,12 +71,9 @@ fn entry(cmd: &str, memory: bool) -> Value {
     json!({"command": "sh", "args": ["-c", format!("exec {cmd} {}", a.join(" "))]})
 }
 
-/// pi's extension starting `cmd`; `old`: as setup wrote it while the hook was on by default.
-fn pi_hook(cmd: &str, old: bool) -> String {
-    let mut text = PI_HOOK.replace("<out>", OUT_DIR);
-    if old {
-        text = text.replace("setup --hook)", "setup unless --no-hook)");
-    }
+/// pi's extension starting `cmd`.
+fn pi_hook(cmd: &str) -> String {
+    let text = PI_HOOK.replace("<out>", OUT_DIR);
     if cmd == CMD {
         return text.replace("<cmd>", CMD);
     }
@@ -121,11 +118,29 @@ fn executable(_: &std::fs::Metadata) -> bool {
     true
 }
 
+/// The executable regular files called `name` on `PATH`, in order.
+fn on_path(name: &str) -> impl Iterator<Item = PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|d| d.join(name))
+        .filter(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 /// First executable regular file called `name` on `PATH`.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|d| d.join(name))
-        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
+    on_path(name).next()
+}
+
+/// Whether the program at `p` is this tool: `--version` prints `wiki <digit>…`, as clap does.
+/// Another tool called `wiki` on `PATH` is not.
+fn is_this_tool(p: &Path) -> bool {
+    Command::new(p).arg("--version").output().is_ok_and(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .strip_prefix(&format!("{CMD} "))
+            .is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+    })
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -474,17 +489,22 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let warning = match home {
-        None if find_on_path(CMD).is_none() => {
-            "warning: wiki is not on PATH; the agents will not find it until it is"
+    let found: Vec<PathBuf> = on_path(CMD).collect();
+    let warning = match (home, found.first()) {
+        (None, Some(p)) if !found.iter().any(|p| is_this_tool(p)) => format!(
+            "warning: {} is not this wiki; the agents will not find wiki until it is on PATH",
+            p.display()
+        ),
+        (None, None) => {
+            "warning: wiki is not on PATH; the agents will not find it until it is".into()
         }
-        Some(false) => {
-            "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment"
+        (Some(false), _) => {
+            "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment".into()
         }
-        _ => "",
+        _ => String::new(),
     };
     if !opts.remove && !opts.agents.is_empty() && !warning.is_empty() {
-        r.line(warning)?;
+        r.line(&warning)?;
     }
     // Local scope only: repo scope puts just `.nollm-wiki/` in `.gitignore`.
     let mut ignore = vec![format!("{OUT_DIR}/")];
@@ -606,17 +626,14 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
 
         // Hook: only with `--hook`. `--remove`, and a run without `--hook`, take out one an
-        // earlier setup wrote (the hook was on by default up to 0.8).
+        // earlier setup wrote.
         let file = match (pi, local) {
             (true, _) => PI_HOOK_FILE,
             (false, true) => ".claude/settings.local.json",
             (false, false) => ".claude/settings.json",
         };
         let path = root.join(file);
-        let pi_own: Vec<String> = [false, true]
-            .iter()
-            .flat_map(|&old| cmds.iter().map(move |c| pi_hook(c, old)))
-            .collect();
+        let pi_own: Vec<String> = cmds.iter().map(|c| pi_hook(c)).collect();
         let pi_own: Vec<&str> = pi_own.iter().map(String::as_str).collect();
         let own: Vec<Value> = cmds
             .iter()

@@ -214,6 +214,20 @@ fn setup_twice_is_a_no_op() {
 }
 
 #[test]
+fn a_foreign_agents_md_navigation_block_survives_setup_and_remove_untouched() {
+    let f = fixture(true, false);
+    let agents = f.root().join("AGENTS.md");
+    let foreign =
+        "# Mine\n<!-- wiki:navigation -->\nsomeone else's rules\n<!-- /wiki:navigation -->\n";
+    fs::write(&agents, foreign).unwrap();
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    assert!(out(&a).contains("skipped"), "{}", out(&a));
+    assert_eq!(read(&agents), foreign);
+    f.setup(&["--agent", "codex", "--scope", "repo", "--remove"]);
+    assert_eq!(read(&agents), foreign);
+}
+
+#[test]
 fn setup_leaves_a_foreign_wiki_entry_and_exits_1() {
     let f = fixture(true, true);
     let foreign = "{\"mcpServers\":{\"wiki\":{\"command\":\"other\"}}}";
@@ -438,6 +452,34 @@ fn setup_local_writes_wiki_and_warns_when_it_is_not_on_path() {
     let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
     assert!(out(&a).contains("not on PATH"));
     assert!(read(&f.root().join(".pi/mcp.json")).contains("\"command\": \"wiki\""));
+}
+
+#[test]
+fn setup_does_not_take_another_program_called_wiki_for_this_one() {
+    let f = fixture(false, false);
+    f.stub("wiki", "echo 'Federated Wiki 0.1'");
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    let o = out(&a);
+    assert!(o.contains("is not this wiki"), "{o}");
+    assert!(
+        o.contains(&f.bin().join("wiki").display().to_string()),
+        "{o}"
+    );
+    // A real one further along PATH is still taken.
+    let f = fixture(true, false);
+    let other = f.root().join("other");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("wiki"), "#!/bin/sh\necho nope\n").unwrap();
+    fs::set_permissions(other.join("wiki"), fs::Permissions::from_mode(0o755)).unwrap();
+    let a = f
+        .run(
+            Path::new(env!("CARGO_BIN_EXE_wiki")),
+            &["--agent", "pi", "--scope", "local"],
+        )
+        .env("PATH", format!("{}:{}", other.display(), f.bin().display()))
+        .assert()
+        .success();
+    assert!(!out(&a).contains("warning"), "{}", out(&a));
 }
 
 /// Puts the real `git` on the stub PATH.
@@ -765,21 +807,15 @@ fn a_local_run_without_the_hook_flag_leaves_a_hook_git_tracks() {
 }
 
 #[test]
-fn a_run_without_the_hook_flag_removes_an_older_pi_hook_and_leaves_an_edited_one() {
+fn a_run_without_the_hook_flag_removes_its_own_pi_hook_and_leaves_an_edited_one() {
     let f = fixture(true, true);
     let r = f.root();
     let args = ["--agent", "pi", "--scope", "repo"];
     let path = r.join(PI_EXT);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
-    // As wiki 0.8 wrote it, when the hook was on by default.
     let old = include_str!("../src/setup/wiki-hint.ts")
         .replace("<out>", ".nollm-wiki")
-        .replace("<cmd>", "wiki")
-        .replace(
-            "(installed by wiki setup --hook)",
-            "(installed by wiki setup unless --no-hook)",
-        );
-    assert!(old.contains("unless --no-hook"));
+        .replace("<cmd>", "wiki");
     fs::write(&path, &old).unwrap();
     let a = f.setup(&args).success();
     assert!(!r.join(".pi/extensions").exists());

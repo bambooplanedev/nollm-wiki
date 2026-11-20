@@ -23,7 +23,7 @@ not, it prints `install.sh: signature not checked (minisign not found); nollm-wi
 install and update` (or `... not checked: local release tree`); tell the user that. Set `Installed:` to the version `nollm-wiki --version` now prints.
 
 **Installed.** Run `nollm-wiki` (no arguments). If it prints `nothing installed in <home>; run nollm-wiki
-install`, nollm-wiki is there but no modules are: say you will install ``wiki`` and `plaz`, and after
+install`, nollm-wiki is there but no modules are: say you will install `wiki` and `plaz`, and after
 the user agrees run `nollm-wiki install --yes`. Otherwise the first line is `nollm-wiki <installed> in
 <home>`. The last line is `newer release: <newest> (nollm-wiki update)`, `up to date`, or `could not
 check for a newer release (...)`; in that case show the line to the user and do not update. If a
