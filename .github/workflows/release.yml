@@ -1,6 +1,6 @@
 name: Release
 
-# Builds calque, plaz and kulman for aarch64-apple-darwin and x86_64-unknown-linux-musl, assembles
+# Builds wiki, plaz and kulman for aarch64-apple-darwin and x86_64-unknown-linux-musl, assembles
 # the release (scripts/release-assemble.sh) and installs it the way a user does on Alpine, Debian
 # and macOS (scripts/install-check.sh). On a pull request that touches the build, that is all.
 # On a `v*` tag, which must equal the workspace version, it then makes a DRAFT release: nothing
@@ -63,7 +63,7 @@ jobs:
         run: |
           rustup toolchain install 1.90 --profile minimal
           rustup default 1.90
-          cargo build --release --locked -p calque -p plaz -p kulman
+          cargo build --release --locked -p wiki -p plaz -p kulman
           echo "BIN_DIR=target/release" >> "$GITHUB_ENV"
       # Static musl, built in Alpine into its own target dir; the container writes as root.
       # The image is pinned by digest: rust:1.90-alpine (multi-arch index).
@@ -72,7 +72,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/w -w /w -e CARGO_TARGET_DIR=/w/target-musl \
             rust@sha256:b4b54b176a74db7e5c68fdfe6029be39a02ccbcfe72b6e5a3e18e2c61b57ae26 \
-            sh -c 'apk add --no-cache build-base && cargo build --release --locked -p calque -p plaz -p kulman'
+            sh -c 'apk add --no-cache build-base && cargo build --release --locked -p wiki -p plaz -p kulman'
           sudo chown -R "$(id -u):$(id -g)" target-musl
           echo "BIN_DIR=target-musl/release" >> "$GITHUB_ENV"
       - name: Check the architecture and pack one archive per binary
@@ -81,7 +81,7 @@ jobs:
           TARGET: ${{ matrix.target }}
           ARCH: ${{ matrix.arch }}
         run: |
-          for b in calque plaz kulman; do
+          for b in wiki plaz kulman; do
             file "$BIN_DIR/$b"
             file "$BIN_DIR/$b" | grep -q "$ARCH" || { echo "$b is not $ARCH"; exit 1; }
             a="$b-v$VERSION-$TARGET.tar.gz"

@@ -68,22 +68,22 @@ struct SetupArgs {
     /// Modules to set up, comma separated (default: every installed module).
     #[arg(long, value_delimiter = ',')]
     modules: Option<Vec<String>>,
-    /// calque: agent memory on (default: the release's choice, on unless it says off).
+    /// wiki: agent memory on (default: the release's choice, on unless it says off).
     #[arg(long, conflicts_with = "no_memory")]
     memory: bool,
-    /// calque: agent memory off.
+    /// wiki: agent memory off.
     #[arg(long)]
     no_memory: bool,
-    /// calque: the agents to wire, passed through as given.
+    /// wiki: the agents to wire, passed through as given.
     #[arg(long, value_name = "LIST")]
     agent: Option<String>,
     /// repo (committed, for the whole team) or local (this checkout only).
     #[arg(long, value_parser = ["repo", "local"])]
     scope: Option<String>,
-    /// calque: the prompt hook (off by default).
+    /// wiki: the prompt hook (off by default).
     #[arg(long, conflicts_with = "no_hook")]
     hook: bool,
-    /// calque: no prompt hook (the default).
+    /// wiki: no prompt hook (the default).
     #[arg(long)]
     no_hook: bool,
     /// Undo each module's setup.

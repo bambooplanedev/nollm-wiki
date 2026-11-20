@@ -30,7 +30,7 @@ printf '%s\n' "$out"
 printf '%s\n' "$out" | grep -qxF "$bin is not on PATH; to type kulman in a terminal, add it:" || fail "no 'is not on PATH' line"
 printf '%s\n' "$out" | grep -qxF "    export PATH=\"$bin:\$PATH\"" || fail "no 'export PATH' line"
 case $("$bin/kulman") in "kulman $version in "*) ;; *) fail "kulman does not show $version" ;; esac
-for b in kulman calque plaz; do
+for b in kulman wiki plaz; do
     [ "$("$bin/$b" --version)" = "$b $version" ] || fail "$b --version is not $b $version"
 done
 cd -- "$tmp/project" && git init -q

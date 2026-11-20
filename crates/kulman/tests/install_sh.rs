@@ -13,7 +13,7 @@ use common::{
 use serde_json::{json, Value};
 
 const SCRIPT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../install.sh");
-const CALQUE: &[u8] = b"#!/bin/sh\necho calque\n";
+const WIKI: &[u8] = b"#!/bin/sh\necho wiki\n";
 const PUBLIC_KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../release/kulman.pub");
 /// The notice `install.sh` prints to stderr when there is no `minisign`.
 const NO_MINISIGN: &str = "install.sh: signature not checked (minisign not found); kulman checks \
@@ -42,12 +42,12 @@ const TOOLS: [&str; 20] = [
     "printf",
 ];
 
-/// A temp root holding `release/` (0.7.0: calque, and kulman as `kulman_bytes` per target); the
+/// A temp root holding `release/` (0.7.0: wiki, and kulman as `kulman_bytes` per target); the
 /// home `install.sh` is pointed at is `<root>/home`.
 fn setup(kulman_bytes: &[u8]) -> (tempfile::TempDir, String) {
     let t = tempfile::tempdir().unwrap();
     let dir = t.path().join("release");
-    let base = release(&dir, "0.7.0", &[("calque", CALQUE)]);
+    let base = release(&dir, "0.7.0", &[("wiki", WIKI)]);
     per_target_kulman(&dir, "0.7.0", kulman_bytes);
     (t, base)
 }
@@ -499,11 +499,11 @@ fn install_sh_then_kulman_install_works() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_binary(&home, "calque", CALQUE);
+    assert_binary(&home, "wiki", WIKI);
     assert_binary(&home, "kulman", &real);
     assert_eq!(
         state(&home),
-        json!({"version": "0.7.0", "modules": ["calque"]})
+        json!({"version": "0.7.0", "modules": ["wiki"]})
     );
 }
 
@@ -545,16 +545,16 @@ fn git_and_tar_only(dir: &Path) -> PathBuf {
 }
 
 #[test]
-#[ignore = "needs target/release/calque and target/release/plaz (cargo build --release)"]
-fn setup_with_the_real_calque_and_plaz() {
+#[ignore = "needs target/release/wiki and target/release/plaz (cargo build --release)"]
+fn setup_with_the_real_wiki_and_plaz() {
     let target = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
         || Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target"),
         PathBuf::from,
     );
     let built = |name: &str| fs::read(target.join("release").join(name)).ok();
-    let (Some(calque), Some(plaz)) = (built("calque"), built("plaz")) else {
+    let (Some(wiki), Some(plaz)) = (built("wiki"), built("plaz")) else {
         panic!(
-            "no {}/release/{{calque,plaz}}: run cargo build --release",
+            "no {}/release/{{wiki,plaz}}: run cargo build --release",
             target.display()
         );
     };
@@ -562,11 +562,11 @@ fn setup_with_the_real_calque_and_plaz() {
     let base = release(
         &t.path().join("release"),
         "0.7.0",
-        &[("calque", &calque), ("plaz", &plaz)],
+        &[("wiki", &wiki), ("plaz", &plaz)],
     );
     let home = t.path().join("home");
     let out = kulman(&home, &base)
-        .args(["install", "--modules", "calque,plaz", "--yes"])
+        .args(["install", "--modules", "wiki,plaz", "--yes"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -603,9 +603,9 @@ fn setup_with_the_real_calque_and_plaz() {
         fs::read(project.join(".cursor/mcp.json"))
             .map_or(Value::Null, |b| serde_json::from_slice(&b).unwrap())
     };
-    assert!(mcp()["mcpServers"]["calque"].is_object(), "{}", mcp());
+    assert!(mcp()["mcpServers"]["wiki"].is_object(), "{}", mcp());
     setup(&["--remove"]);
-    assert!(mcp()["mcpServers"].get("calque").is_none(), "{}", mcp());
+    assert!(mcp()["mcpServers"].get("wiki").is_none(), "{}", mcp());
 
     // No agent in the project and none named: the wiki and the map all the same.
     assert!(!project.join(".cursor").exists());
