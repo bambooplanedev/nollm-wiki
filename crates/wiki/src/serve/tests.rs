@@ -309,3 +309,61 @@ fn calls_beyond_the_workers_queue_and_ping_does_not() {
     );
     assert!(at(3) > first + Duration::from_secs(1), "{replies:?}");
 }
+
+/// A sample value of a schema property's type.
+fn sample(schema: &Value) -> Value {
+    let ty = match &schema["type"] {
+        Value::Array(types) => types[0].clone(),
+        ty => ty.clone(),
+    };
+    match ty.as_str() {
+        Some("string") => "x".into(),
+        Some("integer") => 1.into(),
+        Some("boolean") => true.into(),
+        Some("array") => serde_json::json!(["x"]),
+        other => panic!("no sample for type {other:?}"),
+    }
+}
+
+/// `tool`'s schema in `tools.json` and the struct `T` its arguments
+/// deserialize into name the same fields, and the required ones are
+/// exactly those without a default.
+fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str) {
+    let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    let schema = &tools.iter().find(|t| t["name"] == tool).unwrap()["inputSchema"];
+    let props = schema["properties"].as_object().unwrap();
+    let full: serde_json::Map<String, Value> =
+        props.iter().map(|(k, v)| (k.clone(), sample(v))).collect();
+    let parsed: T = serde_json::from_value(Value::Object(full.clone())).unwrap();
+    let back = serde_json::to_value(parsed).unwrap();
+    let mut fields: Vec<&String> = back.as_object().unwrap().keys().collect();
+    let mut names: Vec<&String> = props.keys().collect();
+    fields.sort();
+    names.sort();
+    assert_eq!(fields, names, "{tool}: struct fields vs schema properties");
+    let required = schema["required"].as_array().cloned().unwrap_or_default();
+    for name in props.keys() {
+        let mut without = full.clone();
+        without.remove(name);
+        assert_eq!(
+            serde_json::from_value::<T>(Value::Object(without)).is_err(),
+            required.contains(&name.as_str().into()),
+            "{tool}.{name}: required in the schema iff the struct needs it"
+        );
+    }
+}
+
+#[test]
+fn tool_schemas_match_the_params_structs() {
+    schema_matches::<SearchParams>("search");
+    schema_matches::<NeighborsParams>("neighbors");
+    schema_matches::<CallersParams>("callers");
+    schema_matches::<PageParams>("page");
+    let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    let lint = tools.iter().find(|t| t["name"] == "lint").unwrap();
+    assert_eq!(lint["inputSchema"]["properties"], serde_json::json!({}));
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let mut all = TOOLS.to_vec();
+    all.sort_unstable();
+    assert_eq!(names, all);
+}

@@ -232,6 +232,7 @@ fn parse<T: serde::de::DeserializeOwned>(args: Value) -> Result<T, Value> {
 
 // Field docs are the schemas in `serve/tools.json`.
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub(crate) struct SearchParams {
     pub query: String,
     pub kind: Option<String>,
@@ -242,6 +243,7 @@ pub(crate) struct SearchParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub(crate) struct NeighborsParams {
     pub id: String,
     pub depth: Option<usize>,
@@ -253,6 +255,7 @@ pub(crate) struct NeighborsParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub(crate) struct CallersParams {
     pub id: String,
     pub symbol: String,
@@ -261,6 +264,7 @@ pub(crate) struct CallersParams {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
 pub(crate) struct PageParams {
     pub id: String,
     pub full: Option<bool>,
