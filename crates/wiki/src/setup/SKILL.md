@@ -9,7 +9,8 @@ description: Find where something is or how it works in this project's code. Use
    what you are looking for and `kind: "code"`. Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are
    exact — do not re-derive them with grep.
-3. For a module's map, call `page` (`mcp__wiki__page`) with the path; it lists every symbol
+3. Names you already know go to `search`, one call can carry several. Only for the whole map of a
+   module you do not know yet, call `page` (`mcp__wiki__page`) with the path; it lists every symbol
    with its lines. To see what calls a function,
    call `callers` (`mcp__wiki__callers`) with the path and `symbol`
    instead of grepping for its name.

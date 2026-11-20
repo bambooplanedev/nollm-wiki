@@ -4,7 +4,8 @@
    Each symbol line is `path:start-end  name  signature`.
 2. Read only those lines with your file tool. The start and end lines are exact — do not
    re-derive them with grep.
-3. For a module's map, call `page` with the path; it lists every symbol with its lines. To see what
+3. Names you already know go to `search`, one call can carry several. Only for the whole map of a
+   module you do not know yet, call `page` with the path; it lists every symbol with its lines. To see what
    calls a function, call `callers` with the path and `symbol` instead of grepping for its name.
 4. Do not call grep, find or ls in the same turn as `search`. Wait for the `search` answer and
    read it first; most of the time it already holds what you need.
