@@ -1031,3 +1031,40 @@ fn a_malformed_index_json_names_the_file_and_the_compile_command() {
             .and(contains(format!(" — run `wiki compile <input> {w}`"))),
         );
 }
+
+/// A client that closed the server's stdout is gone: the next reply ends
+/// the server instead of leaving it running with nobody to answer.
+#[test]
+fn serve_ends_when_stdout_closes() {
+    use std::io::Write;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+    let (_tmp, out) = common::seed_corpus(3);
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_wiki"))
+        .args(["serve", "--dir"])
+        .arg(&out)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    // stdin stays open: only the failed write can end the server.
+    let mut stdin = child.stdin.take().unwrap();
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n")
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            child.kill().unwrap();
+            panic!("serve still running after its stdout closed");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(!status.success());
+    drop(stdin);
+}

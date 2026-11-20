@@ -33,8 +33,6 @@ blake3 = "1"
 ignore = "0.4"
 regex = "1"
 notify = "8"
-rmcp = { version = "3", features = ["server", "transport-io", "macros", "schemars"] }
-tokio = { version = "1", features = ["rt"] }
 frostem = { version = "=2.20261016.3", default-features = false, features = ["english", "ukrainian"] }
 
 [target.'cfg(target_env = "musl")'.dependencies]

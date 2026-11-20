@@ -15,10 +15,7 @@ fn fixture(files: usize) -> (tempfile::TempDir, PathBuf) {
 
 /// Page count of the snapshot `state` answers from now.
 fn pages(state: &Arc<WikiState>) -> usize {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
-    rt.block_on(state.snapshot()).0.list_pages().len()
+    state.snapshot().0.list_pages().len()
 }
 
 #[test]
@@ -141,11 +138,8 @@ fn a_timed_out_snapshot_says_recompile_still_running() {
     let (tmp, out) = fixture(3);
     let state = WikiState::load(&out).unwrap();
     let (release, cli) = hold(&tmp, &out);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let t = Instant::now();
-    let (wiki, reason) = rt.block_on(state.snapshot());
+    let (wiki, reason) = state.snapshot();
     assert!(
         t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
         "{:?}",
@@ -155,7 +149,7 @@ fn a_timed_out_snapshot_says_recompile_still_running() {
     assert_eq!(reason.as_deref(), Some(crate::live::RUNNING));
     release.send(()).unwrap();
     cli.join().unwrap();
-    let (wiki, reason) = rt.block_on(state.snapshot());
+    let (wiki, reason) = state.snapshot();
     assert_eq!(wiki.list_pages().len(), 5);
     assert_eq!(reason, None);
 }
@@ -193,11 +187,8 @@ fn lint_answers_from_the_snapshot_while_a_compile_holds_the_lock() {
     let state = WikiState::load(&out).unwrap();
     let server = WikiServer::new(Arc::clone(&state), out.clone(), &["lint"]);
     let (release, cli) = hold(&tmp, &out);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap();
     let t = Instant::now();
-    let r = rt.block_on(server.lint()).unwrap();
+    let r = server.lint().unwrap();
     // One wait, not two.
     assert!(
         t.elapsed() < crate::live::WAIT + Duration::from_secs(1),
@@ -206,10 +197,11 @@ fn lint_answers_from_the_snapshot_while_a_compile_holds_the_lock() {
     );
     release.send(()).unwrap();
     cli.join().unwrap();
-    let texts: Vec<&str> = r
-        .content
+    let texts: Vec<&str> = r["content"]
+        .as_array()
+        .unwrap()
         .iter()
-        .filter_map(|c| c.as_text().map(|t| t.text.as_str()))
+        .filter_map(|c| c["text"].as_str())
         .collect();
     let report: serde_json::Value = serde_json::from_str(texts[0]).unwrap();
     assert_eq!(report["total_pages"], 3);
@@ -277,4 +269,101 @@ fn snapshot_survives_the_index_of_another_version() {
     value["entries"][1].as_object_mut().unwrap().remove("title");
     std::fs::write(out.join("index.json"), value.to_string()).unwrap();
     assert_eq!(pages(&state), 3);
+}
+
+/// With two workers and a compile holding the lock, two calls share one
+/// wait, the third starts only when a worker frees, and a ping answers at
+/// once.
+#[test]
+fn calls_beyond_the_workers_queue_and_ping_does_not() {
+    let (tmp, out) = fixture(3);
+    let state = WikiState::load(&out).unwrap();
+    let server = WikiServer::new(state, out.clone(), &["search"]);
+    let (release, cli) = hold(&tmp, &out);
+    let call = |id: u64| {
+        serde_json::json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "search", "arguments": {"query": "x"}}})
+        .to_string()
+    };
+    let ping = r#"{"jsonrpc":"2.0","id":4,"method":"ping"}"#.to_string();
+    let input = [call(1), call(2), call(3), ping].join("\n");
+    let t = Instant::now();
+    let replies = Mutex::new(Vec::new());
+    let read = serve(&server, input.as_bytes(), 2, &|r: Value| {
+        replies
+            .lock()
+            .unwrap()
+            .push((r["id"].as_u64().unwrap(), t.elapsed()));
+    })
+    .unwrap();
+    let _ = release.send(());
+    cli.join().unwrap();
+    assert!(read);
+    let replies = replies.into_inner().unwrap();
+    let at = |id| replies.iter().find(|r| r.0 == id).unwrap().1;
+    assert!(at(4) < Duration::from_secs(1), "{replies:?}");
+    let first = at(1).max(at(2));
+    assert!(
+        first < crate::live::WAIT + Duration::from_secs(1),
+        "{replies:?}"
+    );
+    assert!(at(3) > first + Duration::from_secs(1), "{replies:?}");
+}
+
+/// A sample value of a schema property's type.
+fn sample(schema: &Value) -> Value {
+    let ty = match &schema["type"] {
+        Value::Array(types) => types[0].clone(),
+        ty => ty.clone(),
+    };
+    match ty.as_str() {
+        Some("string") => "x".into(),
+        Some("integer") => 1.into(),
+        Some("boolean") => true.into(),
+        Some("array") => serde_json::json!(["x"]),
+        other => panic!("no sample for type {other:?}"),
+    }
+}
+
+/// `tool`'s schema in `tools.json` and the struct `T` its arguments
+/// deserialize into name the same fields, and the required ones are
+/// exactly those without a default.
+fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str) {
+    let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    let schema = &tools.iter().find(|t| t["name"] == tool).unwrap()["inputSchema"];
+    let props = schema["properties"].as_object().unwrap();
+    let full: serde_json::Map<String, Value> =
+        props.iter().map(|(k, v)| (k.clone(), sample(v))).collect();
+    let parsed: T = serde_json::from_value(Value::Object(full.clone())).unwrap();
+    let back = serde_json::to_value(parsed).unwrap();
+    let mut fields: Vec<&String> = back.as_object().unwrap().keys().collect();
+    let mut names: Vec<&String> = props.keys().collect();
+    fields.sort();
+    names.sort();
+    assert_eq!(fields, names, "{tool}: struct fields vs schema properties");
+    let required = schema["required"].as_array().cloned().unwrap_or_default();
+    for name in props.keys() {
+        let mut without = full.clone();
+        without.remove(name);
+        assert_eq!(
+            serde_json::from_value::<T>(Value::Object(without)).is_err(),
+            required.contains(&name.as_str().into()),
+            "{tool}.{name}: required in the schema iff the struct needs it"
+        );
+    }
+}
+
+#[test]
+fn tool_schemas_match_the_params_structs() {
+    schema_matches::<SearchParams>("search");
+    schema_matches::<NeighborsParams>("neighbors");
+    schema_matches::<CallersParams>("callers");
+    schema_matches::<PageParams>("page");
+    let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    let lint = tools.iter().find(|t| t["name"] == "lint").unwrap();
+    assert_eq!(lint["inputSchema"]["properties"], serde_json::json!({}));
+    let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    let mut all = TOOLS.to_vec();
+    all.sort_unstable();
+    assert_eq!(names, all);
 }
