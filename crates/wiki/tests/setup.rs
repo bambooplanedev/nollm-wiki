@@ -437,6 +437,34 @@ fn setup_local_writes_wiki_and_warns_when_it_is_not_on_path() {
     assert!(read(&f.root().join(".pi/mcp.json")).contains("\"command\": \"wiki\""));
 }
 
+#[test]
+fn setup_does_not_take_another_program_called_wiki_for_this_one() {
+    let f = fixture(false, false);
+    f.stub("wiki", "echo 'Federated Wiki 0.1'");
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    let o = out(&a);
+    assert!(o.contains("is not this wiki"), "{o}");
+    assert!(
+        o.contains(&f.bin().join("wiki").display().to_string()),
+        "{o}"
+    );
+    // A real one further along PATH is still taken.
+    let f = fixture(true, false);
+    let other = f.root().join("other");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("wiki"), "#!/bin/sh\necho nope\n").unwrap();
+    fs::set_permissions(other.join("wiki"), fs::Permissions::from_mode(0o755)).unwrap();
+    let a = f
+        .run(
+            Path::new(env!("CARGO_BIN_EXE_wiki")),
+            &["--agent", "pi", "--scope", "local"],
+        )
+        .env("PATH", format!("{}:{}", other.display(), f.bin().display()))
+        .assert()
+        .success();
+    assert!(!out(&a).contains("warning"), "{}", out(&a));
+}
+
 /// Puts the real `git` on the stub PATH.
 fn real_git(f: &Fixture) {
     let out = std::process::Command::new("which")

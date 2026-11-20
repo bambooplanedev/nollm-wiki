@@ -119,11 +119,29 @@ fn executable(_: &std::fs::Metadata) -> bool {
     true
 }
 
+/// The executable regular files called `name` on `PATH`, in order.
+fn on_path(name: &str) -> impl Iterator<Item = PathBuf> {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::split_paths(&path)
+        .map(|d| d.join(name))
+        .filter(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
 /// First executable regular file called `name` on `PATH`.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|d| d.join(name))
-        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
+    on_path(name).next()
+}
+
+/// Whether the program at `p` is this tool: `--version` prints `wiki <digit>…`, as clap does.
+/// Another tool called `wiki` on `PATH` is not.
+fn is_this_tool(p: &Path) -> bool {
+    Command::new(p).arg("--version").output().is_ok_and(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .strip_prefix(&format!("{CMD} "))
+            .is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
+    })
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -472,17 +490,22 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let warning = match home {
-        None if find_on_path(CMD).is_none() => {
-            "warning: wiki is not on PATH; the agents will not find it until it is"
+    let found: Vec<PathBuf> = on_path(CMD).collect();
+    let warning = match (home, found.first()) {
+        (None, Some(p)) if !found.iter().any(|p| is_this_tool(p)) => format!(
+            "warning: {} is not this wiki; the agents will not find wiki until it is on PATH",
+            p.display()
+        ),
+        (None, None) => {
+            "warning: wiki is not on PATH; the agents will not find it until it is".into()
         }
-        Some(false) => {
-            "warning: the agents find wiki through KULMAN_HOME; set it in their environment"
+        (Some(false), _) => {
+            "warning: the agents find wiki through KULMAN_HOME; set it in their environment".into()
         }
-        _ => "",
+        _ => String::new(),
     };
     if !opts.remove && !opts.agents.is_empty() && !warning.is_empty() {
-        r.line(warning)?;
+        r.line(&warning)?;
     }
     // Local scope only: repo scope puts just `.kulman/` in `.gitignore`.
     let mut ignore = vec![format!("{OUT_DIR}/")];
