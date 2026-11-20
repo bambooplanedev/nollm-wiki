@@ -1584,8 +1584,16 @@ fn the_search_first_rules_are_in_every_copy() {
         ("render_agents_md", agents.as_str()),
     ] {
         assert!(text.contains("same turn as `search`"), "{name}");
+        assert!(text.contains("put several in one query"), "{name}");
         assert!(text.contains("`callers`"), "{name}");
         assert!(text.contains("every occurrence of a literal"), "{name}");
+    }
+    assert!(agents.contains("`wiki search \"<name> <name>\"`"));
+    for (name, readme) in [
+        ("README.md", include_str!("../README.md")),
+        ("README.uk.md", include_str!("../README.uk.md")),
+    ] {
+        assert!(readme.contains(NAV), "{name}");
     }
 }
 

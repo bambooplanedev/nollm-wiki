@@ -233,7 +233,7 @@ tree first — start here.\n\n\
 - Machine map for tools: `llms.txt`.\n\
 - Get a page + its N-hop neighborhood: `wiki neighbors <id> --depth N`.\n\
 - Code symbols with their line ranges: `items.json` (keyed by page id).\n\
-- A module's map: `wiki page <id>` (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
+- Look up names you already know with `wiki search \"<name> <name>\"`; put several in one query. Use `wiki page <id>` only to see every symbol of a module you have not seen (one line per symbol, `start-end kind signature`); `--full` for the whole page.\n\
 - What a function calls, through all levels: `wiki neighbors <id> --symbol <fn>`.\n\
 - Do not call grep, find or ls in the same turn as `search`: read its answer first.\n\
 - Where something is defined or handled: `search`. Who calls a function: `callers`. For every occurrence of a literal string (an env var, a message, a config key), grep.\n\
