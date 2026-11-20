@@ -462,7 +462,7 @@ fn setup_does_not_take_another_program_called_wiki_for_this_one() {
         o.contains(&f.bin().join("wiki").display().to_string()),
         "{o}"
     );
-    // A real one further along PATH is still taken.
+    // The first `wiki` on PATH is the one agents run, even with a real one further along.
     let f = fixture(true, false);
     let other = f.root().join("other");
     fs::create_dir_all(&other).unwrap();
@@ -476,7 +476,17 @@ fn setup_does_not_take_another_program_called_wiki_for_this_one() {
         .env("PATH", format!("{}:{}", other.display(), f.bin().display()))
         .assert()
         .success();
-    assert!(!out(&a).contains("warning"), "{}", out(&a));
+    assert!(out(&a).contains("is not this wiki"), "{}", out(&a));
+}
+
+#[test]
+fn setup_does_not_wait_for_a_wiki_that_stalls() {
+    let f = fixture(false, false);
+    f.stub("wiki", "sleep 30");
+    let t = std::time::Instant::now();
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert!(t.elapsed().as_secs() < 10, "{:?}", t.elapsed());
+    assert!(out(&a).contains("is not this wiki"), "{}", out(&a));
 }
 
 /// Puts the real `git` on the stub PATH.

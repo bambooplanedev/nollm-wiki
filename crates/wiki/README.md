@@ -257,8 +257,8 @@ prompt hook runs that line, pi's extension builds the same path itself), so no a
 `$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
 own and is rewritten to the form this `wiki` writes. Any other `wiki` (built from source, installed
 elsewhere) has every agent run the server as plain `wiki`, so `wiki` must be on `PATH`; setup
-warns when it is not, or when the `wiki` found first is another program (one whose `--version` does not
-start with `wiki <version>`). Safe to run twice. An entry, file or block at the same place with other content is left alone
+warns when it is not, or when the first `wiki` on `PATH` is another program (one whose `--version` does not print
+`wiki <version>` within 2 seconds): agents would start that one, so put this `wiki` earlier on `PATH`. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
 pretty JSON with its keys and their order kept.
 
