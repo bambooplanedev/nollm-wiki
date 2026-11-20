@@ -1,16 +1,13 @@
 [English](README.md) · **Українська**
 
-# calque
-
-**calque** читається «калька»: калька — прозорий креслярський папір; тут це точна копія вашого
-проєкту, яку читають агенти.
+# `wiki`
 
 **Карта вашого проєкту для агентів, що пишуть код: де лежить кожна функція, хто її викликає і які рядки читати. Без жодної LLM під час компіляції.**
 
-calque — модуль [набору kulman](../../README.uk.md), а цей крейт — бінарник `calque` і бібліотека,
+`wiki` — модуль [набору kulman](../../README.uk.md), а цей крейт — бінарник `wiki` і бібліотека,
 яку він обгортає.
 
-`calque` компілює проєкт — код, нотатки, документацію — у вікі з перехресними посиланнями в Markdown
+`wiki` компілює проєкт — код, нотатки, документацію — у вікі з перехресними посиланнями в Markdown
 і карту символів з діапазонами рядків, а потім віддає її агентам через MCP. Агент питає `search`,
 де щось лежить, і отримує рядки `path:start-end`, питає `callers`, хто викликає функцію, і читає
 здебільшого саме ці рядки, а не шукає через grep і не відкриває файли цілком. Під час компіляції жодна модель
@@ -23,9 +20,9 @@ calque — модуль [набору kulman](../../README.uk.md), а цей к�
 рядка над ним; це не вивід команди.
 
 ```
-$ calque callers calls.rs resolve_calls --dir .kulman
-callers of resolve_calls  crates/calque/src/calls.rs:197-264 — 1 functions in 1 files
-crates/calque/src/lib.rs
+$ wiki callers calls.rs resolve_calls --dir .kulman
+callers of resolve_calls  crates/wiki/src/calls.rs:197-264 — 1 functions in 1 files
+crates/wiki/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
   └ рядки функції             └ рядок виклику
 ```
@@ -36,7 +33,7 @@ crates/calque/src/lib.rs
 - [Вимоги](#вимоги)
 - [Встановлення](#встановлення)
 - [Швидкий старт](#швидкий-старт)
-- [Використання](#використання) — [агенти](#агенти): [`calque setup`](#calque-setup) ·
+- [Використання](#використання) — [агенти](#агенти): [`wiki setup`](#wiki-setup) ·
   [Cursor](#cursor) · [Codex](#codex) · [інші](#інші-mcp-клієнти) — [MCP-сервер](#mcp-сервер) ·
   [памʼять агента](#памʼять-агента) · [CLI](#cli)
 - [Що створюється](#що-створюється) — [сторінка](#сторінка) · [файли](#файли) ·
@@ -60,11 +57,11 @@ crates/calque/src/lib.rs
 - **Виклики в обидва боки.** `callers` показує функції, які викликають функцію, з рядками кожного
   виклику; `neighbors --symbol` (CLI; MCP з `--tools`) — усе, що функція
   викликає, рівень за рівнем.
-- **MCP-сервер.** `calque serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
+- **MCP-сервер.** `wiki serve --source .` компілює проєкт, перекомпільовує його після правок і віддає
   `search`, `page` і `callers` (`neighbors` і `lint` з `--tools`) у Claude Code, pi, Cursor, Codex
   чи будь-який MCP-клієнт.
   Кілька серверів на одному `.kulman` — це нормально: один компілює, решта віддають те, що він записав.
-- **Налаштування однією командою.** `calque setup` встановлює сервер і те, що каже агентові ним
+- **Налаштування однією командою.** `wiki setup` встановлює сервер і те, що каже агентові ним
   користуватися, для Claude Code, pi, Cursor і Codex, а з `--hook` — і хук, що додає до кожного
   запиту відповідні рядки коду.
 - **Памʼять агента.** Нотатки з `.agents/memory/` і з тек, у які агенти вже пишуть самі (поки що
@@ -84,31 +81,31 @@ crates/calque/src/lib.rs
   релізного бінарника. Збірка для Linux статична й працює однаково на системах із glibc і з musl.
 - Або Rust 1.90 чи новіший, щоб зібрати з коду (для `cargo test` потрібні ще й `git`, `jq` та
   користувач без прав root). На Windows не перевірено.
-- Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `calque setup --scope local`
+- Для агентів: MCP-клієнт — Claude Code, pi, Cursor, Codex, Claude Desktop чи інший. `wiki setup --scope local`
   для Claude Code також потребує CLI `claude` у `PATH`.
 
 ## Встановлення
 
-Реліз набору kulman містить `calque` для двох систем, названих вище; на будь-якій іншій збирайте з
+Реліз набору kulman містить `wiki` для двох систем, названих вище; на будь-якій іншій збирайте з
 вихідного коду. Статична збірка для Linux використовує інший алокатор памʼяті, і на великих проєктах
 її пікове споживання памʼяті вище, ніж у збірки з glibc.
 
 ### Через kulman
 
-`kulman` встановлює, оновлює й налаштовує `calque` разом з іншими модулями; кроки описано в
+`kulman` встановлює, оновлює й налаштовує `wiki` разом з іншими модулями; кроки описано в
 [README репозиторію](../../README.uk.md#встановлення). Коротко, коли `kulman` уже є на машині:
 
     kulman install                     # модулі релізу за замовчуванням, у ~/.kulman-home/bin
     cd your-project
-    kulman setup --scope local         # запускає тут calque setup і plaz setup
+    kulman setup --scope local         # запускає тут wiki setup і plaz setup
     kulman update                      # згодом: усе до останнього релізу
 
 Додати `~/.kulman-home/bin` у свій `PATH` необов'язково, це для набору `kulman` у терміналі (агенти
-знаходять `calque` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). За замовчуванням усе ввімкнено; вимикайте прапорцями
-(`kulman install --modules calque`, `kulman setup --no-memory`). `kulman setup` запускає кожен
+знаходять `wiki` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). За замовчуванням усе ввімкнено; вимикайте прапорцями
+(`kulman install --modules wiki`, `kulman setup --no-memory`). `kulman setup` запускає кожен
 вибраний модуль, навіть коли якийсь завершився з помилкою, і наприкінці називає ті, що не вдалися.
 `kulman remove` видаляє те, що встановив kulman (без термінала потрібен `--yes`); проєкти,
-налаштовані через kulman, лишають `calque` у конфігах агентів, тож спершу запустіть у них
+налаштовані через kulman, лишають `wiki` у конфігах агентів, тож спершу запустіть у них
 `kulman setup --remove` з тим самим `--scope`. Команди, коди виходу й будова релізу:
 [crates/kulman/README.uk.md](../kulman/README.uk.md).
 
@@ -116,34 +113,34 @@ crates/calque/src/lib.rs
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman
-    cargo install --path crates/calque      # у ~/.cargo/bin
+    cargo install --path crates/wiki      # у ~/.cargo/bin
 
 ## Швидкий старт
 
 У проєкті, в якому мають орієнтуватися агенти:
 
     cd your-project
-    calque setup --scope local      # компілює .kulman, встановлює MCP-сервер і (для pi) скіл
+    wiki setup --scope local      # компілює .kulman, встановлює MCP-сервер і (для pi) скіл
 
-Далі запустіть у цій теці Claude Code або pi: інструменти `calque` вже там, а сервер тримає `.kulman/`
+Далі запустіть у цій теці Claude Code або pi: інструменти `wiki` вже там, а сервер тримає `.kulman/`
 в актуальному стані після ваших правок. `--scope repo` натомість пише закомічені файли для всієї
-команди, а `calque setup --remove` з тим самим `--scope` це скасовує. Cursor і Codex:
-`calque setup --agent cursor,codex`; інші клієнти — див. [Агенти](#агенти).
+команди, а `wiki setup --remove` з тим самим `--scope` це скасовує. Cursor і Codex:
+`wiki setup --agent cursor,codex`; інші клієнти — див. [Агенти](#агенти).
 
 Щоб спробувати сам компілятор на згенерованому корпусі:
 
-    calque generate demo_raw --files 12 --seed 42
-    calque compile demo_raw demo_wiki
-    calque search gradient --dir demo_wiki --limit 2
-    calque neighbors gradient_descent --max-tokens 800 --dir demo_wiki
+    wiki generate demo_raw --files 12 --seed 42
+    wiki compile demo_raw demo_wiki
+    wiki search gradient --dir demo_wiki --limit 2
+    wiki neighbors gradient_descent --max-tokens 800 --dir demo_wiki
 
 ```
-$ calque compile demo_raw demo_wiki
+$ wiki compile demo_raw demo_wiki
 Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans, 0 large
                       └ сторінка, на яку ніщо не посилається
 
-$ calque search gradient --dir demo_wiki --limit 2
+$ wiki search gradient --dir demo_wiki --limit 2
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with…
 └ id              └ шлях                └ назва — опис
     Gradient Descent is often paired with Learning Rate Schedule in prod…
@@ -155,13 +152,13 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 На коді той самий пошук називає символи з діапазонами рядків. На цьому репозиторії:
 
 ```
-$ calque search "call edges" --dir .kulman --limit 1
-calls  crates/calque/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
+$ wiki search "call edges" --dir .kulman --limit 1
+calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ шлях             └ назва — опис
-  crates/calque/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  crates/wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ шлях:рядки               └ імʼя         └ сигнатура                                        └ документація
-  crates/calque/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  crates/calque/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
+  crates/wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  crates/wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Використання
@@ -173,7 +170,7 @@ calls  crates/calque/src/calls.rs  Calls — Call edges between code items: matc
 для файлів. `callers` відповідає на «що зламається, якщо це змінити». Отримавши план,
 специфікацію чи журнал, агент передає їхні шляхи в параметр `docs`
 інструмента `search` і отримує діапазон рядків кроку за його міткою (`T5k`) або словами назви
-(`calque search T5k --docs plan.md` у командному рядку). Кожен шлях друкується один раз, далі
+(`wiki search T5k --docs plan.md` у командному рядку). Кожен шлях друкується один раз, далі
 `  start-end  label` на збіг; `load-profile` і `load profile` збігаються однаково, але після точних
 збігів. Якщо `limit` відсікає мітку, що повторюється в одному документі з тим самим початком
 (`N11: …` у журналі), видно і її перший, і останній запис. План, специфікацію й журнал варто
@@ -188,49 +185,49 @@ calls  crates/calque/src/calls.rs  Calls — Call edges between code items: matc
 а коли не відповіла жодна мітка — рядки таблиць, що містять слова запиту поспіль (`| W21 | D12 |` для `W21`
 чи `D12`), спершу зі збігом у першій клітинці; перший рядок називає цей запасний пошук. Порожня відповідь каже, що мітки не знайдено, і радить інші слова або grep.
 
-| агент | що записує `calque setup` | що каже йому користуватися вікі |
+| агент | що записує `wiki setup` | що каже йому користуватися вікі |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local) | інструкції сервера; інструменти завантажуються одразу |
-| pi | `.pi/mcp.json`, скіл `calque-navigation` | скіл (інструкцій сервера pi не показує) |
+| pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл (інструкцій сервера pi не показує) |
 | Cursor | `.cursor/mcp.json` | описи інструментів (у наших прогонах їх вистачило) |
 | Codex | `.codex/config.toml`, [правила навігації](#правила-навігації) в `AGENTS.md` | `AGENTS.md` |
 | будь-який інший MCP-клієнт | — ([вручну](#інші-mcp-клієнти)) | правила навігації в його файлі інструкцій |
 
-#### `calque setup`
+#### `wiki setup`
 
-`calque setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
+`wiki setup` налаштовує агентів, щоб вони самі користувалися вікі. Запускайте в корені проєкту:
 
-    calque setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
+    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
-Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`calque serve --source .`) і те, що
-каже кожному агентові ним користуватися. pi отримує скіл `calque-navigation` (як шукати код і
+Команда компілює `.` у `.kulman`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
+каже кожному агентові ним користуватися. pi отримує скіл `wiki-navigation` (як шукати код і
 правила памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він
 показує й так, а сервер позначає свої інструменти для завантаження одразу, а не через `ToolSearch`;
 власну памʼять Claude Code вікі читає сама. Codex не читає ні того, ні того, тож отримує правила
-навігації в `AGENTS.md`, між маркерами `<!-- calque:navigation -->`. Агенти визначаються автоматично
+навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. Агенти визначаються автоматично
 (`.claude/`, `CLAUDE.md` чи `claude` у `PATH`; `.pi/` чи `pi` у `PATH`; тека `.cursor/` чи `.codex/`,
 але не `.codex/`, що є власною текою Codex), якщо `--agent` їх не називає. Коли жодного агента
 не знайдено і `--agent` не задано, setup у терміналі питає, кого
 налаштувати (номери чи назви, порожній рядок — нікого); без термінала, або коли нікого не вибрано,
 він однаково компілює вікі, пише рядки в ignore-файли й теку памʼяті, не налаштовує жодного агента,
-пише в stderr `no agent set up: the wiki is in .kulman/; run calque setup --agent … later` і
+пише в stderr `no agent set up: the wiki is in .kulman/; run wiki setup --agent … later` і
 виходить з кодом 0. `--remove`, коли агента не знайдено і `--agent` не задано, нічого агентського не прибирає: пише в
 stderr `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring`
 і виходить з кодом 0.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/calque-navigation/SKILL.md` і `.kulman/` у `.gitignore`. Для файлу, який setup
+  `.agents/skills/wiki-navigation/SKILL.md` і `.kulman/` у `.gitignore`. Для файлу, який setup
   записав, а git ігнорує, він друкує `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
-  `claude mcp add-json calque … --scope local`, інші файли записуються, а ті, що setup створив,
+  `claude mcp add-json wiki … --scope local`, інші файли записуються, а ті, що setup створив,
   вносяться в `.git/info/exclude`, зокрема `/.agents/memory/`, коли памʼять увімкнена; уже наявний
   `.codex/config.toml` редагується й туди не вноситься. Файл, який git уже відстежує,
   пропускається; для нього беріть `--scope repo`.
 - Памʼять агента ввімкнена за замовчуванням: обидва варіанти створюють `.agents/memory/`.
   З `--no-memory` тека `.agents/memory/` не створюється, компіляція йде без памʼяті, а сервер
-  реєструється як `calque serve --source . --memory none`. Повторний запуск з іншим вибором
-  перемикає зареєстрований сервер; сервер, доданий через CLI `claude`, або таблиця `calque` у
+  реєструється як `wiki serve --source . --memory none`. Повторний запуск з іншим вибором
+  перемикає зареєстрований сервер; сервер, доданий через CLI `claude`, або таблиця `wiki` у
   `.codex/config.toml` з вашими власними налаштуваннями лишаються як є, і setup про це повідомляє:
   видаліть такий запис і запустіть setup знову.
 - Обидва варіанти записують сервер Codex у власний `.codex/config.toml` проєкту, і CLI `codex` для
@@ -239,8 +236,8 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
   тоді, коли і stdin, і stdout — термінали; `--yes` — те саме, що відсутність термінала.
 - Хук запиту (`--hook`, за замовчуванням вимкнений) додає рядки коду з вікі до кожного запиту,
   перш ніж його побачить модель. Claude Code отримує запис `UserPromptSubmit`
-  (`calque hint --claude-hook`) у `.claude/settings.json` (`settings.local.json` з `--scope local`);
-  pi — `.pi/extensions/calque-hint/index.ts`. Хук мовчить, коли вікі немає, її не прочитати або
+  (`wiki hint --claude-hook`) у `.claude/settings.json` (`settings.local.json` з `--scope local`);
+  pi — `.pi/extensions/wiki-hint/index.ts`. Хук мовчить, коли вікі немає, її не прочитати або
   нічого не збіглося, і ніколи не блокує запит. За замовчуванням він вимкнений, бо досі спрацьовує
   приблизно на третині розмовних запитів (див. `docs/KNOWN_GAPS.md`). Запуск без `--hook`
   (`--no-hook` — те саме) прибирає хук, який записав попередній setup, розпізнаючи його так само
@@ -261,14 +258,14 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 це змінює спільні файли команди: запускайте setup з `--scope repo`, бо локальний варіант пропускає
 відстежуваний `AGENTS.md`.
 
-`calque`, встановлений kulman (запущений як `~/.kulman-home/bin/calque` або з `$KULMAN_HOME/bin`),
-агенти запускають як `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` через `sh -c` (хук промпту
+`wiki`, встановлений kulman (запущений як `~/.kulman-home/bin/wiki` або з `$KULMAN_HOME/bin`),
+агенти запускають як `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki"` через `sh -c` (хук промпту
 виконує цей рядок, розширення pi саме будує той самий шлях), тож жодному агентові не треба мати його
 в `PATH`, і нічий домашній шлях не потрапляє в спільний файл; з `KULMAN_HOME`, відмінним від
 `~/.kulman-home`, setup попереджає, що агентам потрібна і ця змінна (домашній шлях із `"`, `$`,
 зворотним апострофом чи `\` цей рядок не підтримує). Запис в обох формах setup вважає своїм і
-переписує у форму, яку пише цей `calque`. Будь-який інший `calque` (зібраний з коду, встановлений
-деінде) кожен агент запускає просто як `calque`, тож `calque` має бути в `PATH`; setup попереджає,
+переписує у форму, яку пише цей `wiki`. Будь-який інший `wiki` (зібраний з коду, встановлений
+деінде) кожен агент запускає просто як `wiki`, тож `wiki` має бути в `PATH`; setup попереджає,
 якщо його там немає. Запускати двічі безпечно. Запис, файл чи блок на тому самому місці з іншим
 вмістом лишається як є, і setup про нього повідомляє, робить решту й виходить з кодом 1.
 JSON-конфіг, який редагує setup, переписується з відступом у 2 пробіли, ключі та їхній порядок
@@ -276,11 +273,11 @@ JSON-конфіг, який редагує setup, переписується з 
 
 Після setup: pi завантажує файли проєкту лише після того, як ви довірите проєкт (`/trust` або
 `--approve` у режимі print), а `cursor-agent` завантажує новий сервер лише після того, як його
-ввімкнено (`cursor-agent mcp enable calque`); редактор Cursor показує його в Settings → Tools & MCP.
+ввімкнено (`cursor-agent mcp enable wiki`); редактор Cursor показує його в Settings → Tools & MCP.
 
 #### Claude Code вручну
 
-    claude mcp add-json calque '{"command":"calque","args":["serve","--source","."]}' --scope local
+    claude mcp add-json wiki '{"command":"wiki","args":["serve","--source","."]}' --scope local
 
 або запис `mcpServers` з розділу [MCP-сервер](#mcp-сервер) у `.mcp.json` проєкту. Claude Code
 показує інструкції сервера з кроками навігації, тож для пошуку коду скіл не потрібен; вікі читає
@@ -288,7 +285,7 @@ JSON-конфіг, який редагує setup, переписується з 
 
 #### pi
 
-`calque setup --agent pi` записує `.pi/mcp.json` і скіл `calque-navigation`; pi завантажує і те, і
+`wiki setup --agent pi` записує `.pi/mcp.json` і скіл `wiki-navigation`; pi завантажує і те, і
 те після `/trust` (`--approve` з `pi -p`). Без скілу pi не обійдеться: інструкцій MCP-сервера для
 серверів `direct` він не показує, тож про вікі знає лише з описів інструментів і скілу. Без нього в
 наших прогонах модель шукала через grep, а коли встановлене користувачем розширення змушувало pi
@@ -298,19 +295,19 @@ JSON-конфіг, який редагує setup, переписується з 
 Вручну — `.pi/mcp.json` у проєкті:
 
 ```json
-{ "mcpServers": { "calque": { "command":"calque", "args": ["serve", "--source", "."], "exposure": "direct" } } }
+{ "mcpServers": { "wiki": { "command":"wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-і [правила навігації](#правила-навігації) в `.agents/skills/calque-navigation/SKILL.md`, під front
-matter з `name: calque-navigation` і `description:`, що каже, коли скіл потрібен (`calque setup`
+і [правила навігації](#правила-навігації) в `.agents/skills/wiki-navigation/SKILL.md`, під front
+matter з `name: wiki-navigation` і `description:`, що каже, коли скіл потрібен (`wiki setup`
 пише «Find where something is or how it works in this project's code. Use before grep, find or
 reading whole files, whenever the task needs a function, type, handler or module location.»); за
 ними pi скіл і знаходить.
 
 Залиште лише сервер проєкту: якщо в `~/.pi/agent/mcp.json` теж є сервер вікі, під будь-якою назвою,
 видаліть його. З обома модель бачить кожен інструмент вікі двічі під двома назвами (pi називає їх
-за сервером: `mcp__calque__search` для цього), а скіл, який пише `calque setup`, називає лише
-`mcp__calque__*`. Щоб перевірити, не даючи pi змінювати файли:
+за сервером: `mcp__wiki__search` для цього), а скіл, який пише `wiki setup`, називає лише
+`mcp__wiki__*`. Щоб перевірити, не даючи pi змінювати файли:
 `pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
 
 Виміряно по одному разу на питання з Mellum2.1 12B-A2.5B на llama-server, на трьох питаннях про
@@ -325,7 +322,7 @@ reading whole files, whenever the task needs a function, type, handler or module
 `.cursor/mcp.json` у проєкті (або `~/.cursor/mcp.json` для всіх проєктів) приймає той самий запис:
 
 ```json
-{ "mcpServers": { "calque": { "command":"calque", "args": ["serve", "--source", "."] } } }
+{ "mcpServers": { "wiki": { "command":"wiki", "args": ["serve", "--source", "."] } } }
 ```
 
 Cursor запускає сервер у теці проєкту, тож `--source .` працює. У `cursor-agent` новий сервер
@@ -341,12 +338,12 @@ Cursor запускає сервер у теці проєкту, тож `--sourc
 
 #### Codex
 
-`calque setup --agent codex` дописує це у власний `.codex/config.toml` проєкту й створює файл, якщо
+`wiki setup --agent codex` дописує це у власний `.codex/config.toml` проєкту й створює файл, якщо
 його немає; з `--no-memory` у `args` додатково є `"--memory", "none"`:
 
 ```toml
-[mcp_servers.calque]
-command = "calque"
+[mcp_servers.wiki]
+command = "wiki"
 args = ["serve", "--source", "."]
 ```
 
@@ -363,19 +360,19 @@ codex-cli 0.169.0-alpha.11.1 (версія, вбудована в цей зас�
 файл проєкту, не перевірено.
 
 Setup дописує блок лише там, де може його впізнати. Блок його власний, коли за заголовком
-`[mcp_servers.calque]` ідуть рівно рядок `command` і один із двох рядків `args`; тоді setup
+`[mcp_servers.wiki]` ідуть рівно рядок `command` і один із двох рядків `args`; тоді setup
 перемикає памʼять, переписуючи лише `args`, а `--remove` його видаляє. Усе інше, що може визначати
 сервер (додаткові ключі на кшталт `env` чи `cwd`, ключ у лапках чи з крапками, вбудований
 `mcp_servers = { … }`, файл, до якого веде посилання, або такий, що його в local-режимі відстежує
-git), лишається як є, і setup повідомляє про це рядком `skipped .codex/config.toml calque server: …`
+git), лишається як є, і setup повідомляє про це рядком `skipped .codex/config.toml wiki server: …`
 (код виходу 1), бо друге визначення зробило б файл некоректним; тоді додайте сервер вручну. Інші
 таблиці у файлі ніколи не змінюються.
 
 Коли `codex` є в `PATH`, кожен запуск setup і `--remove`, що може редагувати файл проєкту, питає
-Codex про сервер `calque` на всю машину (`codex mcp get calque`, поза будь-яким проєктом, щоб не
+Codex про сервер `wiki` на всю машину (`codex mcp get wiki`, поза будь-яким проєктом, щоб не
 відповів файл батьківського проєкту). Такий сервер — інший сервер, і він далі працює в кожній іншій
 сесії Codex: setup повідомляє про нього й називає команду, що його видаляє, під час запуску, який
-застає проєкт без власного сервера `calque` (код виходу 1); `--remove` згадує про нього під час
+застає проєкт без власного сервера `wiki` (код виходу 1); `--remove` згадує про нього під час
 кожного запуску, не змінюючи коду виходу. Без `codex` у `PATH` setup туди не дивиться.
 
 Інструменти вікі позначені як «лише читання», тож Codex запускає їх без запитів, зокрема в
@@ -392,7 +389,7 @@ Codex про сервер `calque` на всю машину (`codex mcp get calq
 
 #### Правила навігації
 
-Те, що `calque setup` кладе в `AGENTS.md` для Codex, — для будь-якого агента, якому вони потрібні у
+Те, що `wiki setup` кладе в `AGENTS.md` для Codex, — для будь-якого агента, якому вони потрібні у
 файлі інструкцій. Англійською, бо їх читає агент:
 
 ```
@@ -414,13 +411,13 @@ Codex про сервер `calque` на всю машину (`codex mcp get calq
 
 ### MCP-сервер
 
-`calque serve` віддає скомпільовану вікі MCP-клієнтам через stdio. `calque setup` пише цю
+`wiki serve` віддає скомпільовану вікі MCP-клієнтам через stdio. `wiki setup` пише цю
 конфігурацію за вас; вручну вона така:
 
 ```json
 {
   "mcpServers": {
-    "calque": { "command":"calque", "args": ["serve", "--source", "."] }
+    "wiki": { "command":"wiki", "args": ["serve", "--source", "."] }
   }
 }
 ```
@@ -428,7 +425,7 @@ Codex про сервер `calque` на всю машину (`codex mcp get calq
 `--source .` працює для клієнтів, що стартують у теці проєкту, як Claude Code і pi; для решти,
 наприклад Claude Desktop, вкажіть абсолютний шлях до проєкту.
 
-    calque serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
+    wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — ще й компілювати цей проєкт і тримати вікі в актуальному стані.
 - `--dir <out>` (`<project>/.kulman` з `--source`, інакше `.kulman`, якщо така тека існує, інакше
@@ -459,7 +456,7 @@ CLI не обмежує, а `search` повертає 5 результатів �
 в кожному запиті. `neighbors` теж вмикається лише явно: агенти майже ніколи його не викликали (16 з
 11 056 викликів у вимірюваннях, 0 з 37 на тестовій машині), а його схема займала близько чверті
 токенів інструментів на кожному ході. `--tools search,page,neighbors,callers` повертає його. Закомічений
-блок AGENTS.md чи skill, що його ще називає, `calque setup` не оновлює: блок, який відрізняється від
+блок AGENTS.md чи skill, що його ще називає, `wiki setup` не оновлює: блок, який відрізняється від
 його власного, він лишає як є й повідомляє про це; видаліть блок або файл skill і запустіть setup ще раз.
 
 **Ресурси:** кожна сторінка — `wiki://page/<id>` (Markdown), плюс `wiki://index` (`index.json`) і
@@ -477,22 +474,22 @@ CLI не обмежує, а `search` повертає 5 результатів �
 вікі: перед кожним запитом він звіряє відбиток `index.json` і перечитує вікі після перекомпіляції;
 якщо перечитати не вдалося, лишається попередній знімок, а спроба повторюється на наступному запиті.
 
-**Замінений бінарник.** Сервер, який бачить, що його виконуваний файл `calque` замінили чи видалили
+**Замінений бінарник.** Сервер, який бачить, що його виконуваний файл `wiki` замінили чи видалили
 (нове встановлення, перезбірка, симлінк на іншу збірку), до кінця життя перестає компілювати й писати
 в `<dir>`, щоб старий компілятор не переписав новішу вікі. Він не завершується і далі відповідає з
 `<dir>`, перечитуючи її, як описано вище. Про це один раз сказано в stderr, а кожен результат отримує
-рядок `wiki may be stale: the calque server is out of date, ...`: перезапустіть сесію агента або
+рядок `wiki may be stale: the wiki server is out of date, ...`: перезапустіть сесію агента або
 перепідключіть MCP-сервер.
 
 ### Памʼять агента
 
 Агенти тримають нотатки як Markdown-файли. Вікі компілює теки, у які вони пишуть, а `search` і
-`calque hint` показують відповідні нотатки після коду. Джерела:
+`wiki hint` показують відповідні нотатки після коду. Джерела:
 
-- **`.agents/memory/`** у проєкті. `calque setup` створює її в обох режимах, якщо не передано `--no-memory`; з `--scope local` ще й
-  вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `calque compile`
+- **`.agents/memory/`** у проєкті. `wiki setup` створює її в обох режимах, якщо не передано `--no-memory`; з `--scope local` ще й
+  вносить `/.agents/memory/` у `.git/info/exclude`, тож нотатки лишаються приватними. `wiki compile`
   включає її, якщо не передано `--memory none`.
-- **Власні теки агентів.** Їх шукають `serve --source` і `calque setup`. Поки що це
+- **Власні теки агентів.** Їх шукають `serve --source` і `wiki setup`. Поки що це
   `<config dir>/projects/<slug>/memory/` Claude Code, де config dir — це `CLAUDE_CONFIG_DIR` або
   `~/.claude`, а `<slug>` — шлях основної робочої копії репозиторію, у якому кожну одиницю UTF-16, що
   не є ASCII-літерою чи цифрою, замінено на `-` (тож кирилична чи акцентована літера дає один `-`, а
@@ -503,10 +500,10 @@ CLI не обмежує, а `search` повертає 5 результатів �
   теки замість пошуку. У `compile` і `serve` `--memory none` вимикає всю памʼять, зокрема
   `.agents/memory` (зміна поведінки: раніше `.agents/memory` лишалася).
 
-Звичайний `calque compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
+Звичайний `wiki compile . out` компілює лише `.agents/memory` і теки з `--memory`, але ніколи теки
 агентів, тож опублікований сайт ніколи не несе приватних нотаток. Тому звичайний
-`calque compile . .kulman` прибирає нотатки агентів з `.kulman` до наступної перекомпіляції сервером, а
-`calque hint` читає саме `.kulman`.
+`wiki compile . .kulman` прибирає нотатки агентів з `.kulman` до наступної перекомпіляції сервером, а
+`wiki hint` читає саме `.kulman`.
 
 Міграція: `compile --memory local` більше не існує, а нотатки з теки користувача попередніх
 випусків більше не компілюються. Перенесіть їх у `.agents/memory` або передайте
@@ -518,7 +515,7 @@ CLI не обмежує, а `search` повертає 5 результатів �
 її назві, псевдонімах чи описі, або запит називає день її `updated`, або вона набирає щонайменше
 вдвічі більше за найкращий збіг у коді (нотатка оцінюється за сторінками проєкту разом із нотатками,
 збіг у коді — лише за сторінками проєкту). Нотатки проходять фільтри `code` і `docs`, а
-`calque hint` додає один рядок памʼяті за тим самим правилом (див. [hint](#hint)). Нотатки ніколи не
+`wiki hint` додає один рядок памʼяті за тим самим правилом (див. [hint](#hint)). Нотатки ніколи не
 зсувають ранг сторінки коду: PageRank і медіана для `llms.txt` рахуються лише за сторінками проєкту.
 
 Кожен рядок нотатки каже, звідки вона: `memory (local): /abs/x.md — summary` для нотатки в теці
@@ -530,7 +527,7 @@ email автора того коміту збігається з вашим `git
 його ніде не зберігають і не показують), і `, edited`, коли робоча копія відрізняється від того
 коміту. У JSON збіги мають `"memory": true`, `"origin": "local"` чи `"repo"`, `"author"`, коли він
 відомий, `"mine": true` для ваших нотаток і `"edited": true`, коли файл змінено. Походження
-визначається під час компіляції — `calque compile` і кожної перекомпіляції `serve --source`; відповідь
+визначається під час компіляції — `wiki compile` і кожної перекомпіляції `serve --source`; відповідь
 на `search` чи хук git не викликає. Нотатки впорядковано за довірою, а серед рівних зберігається
 порядок за оцінкою: спершу локальні, далі ваші власні чи змінені закомічені, далі решта; `search`
 показує дві найдовіреніші нотатки, що пройшли відбір, а рядок памʼяті в хуку — найдовіренішу.
@@ -540,7 +537,7 @@ email автора того коміту збігається з вашим `git
 місяця; без року підходить будь-який рік). Сторінки проєкту за датою не знаходяться ніколи.
 
 Нотатка може замінити старішу через `supersedes:` у front matter (назви, псевдоніми чи
-ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка ніколи не зʼявляється після рядків коду, а `calque hint` її не показує; список за тегом
+ідентифікатори, у синтаксисі `aliases:`). Тоді старіша нотатка ніколи не зʼявляється після рядків коду, а `wiki hint` її не показує; список за тегом
 дописує ` (superseded by <id>)` після її рядка (`"superseded_by"` у JSON).
 Зіставляються лише нотатки памʼяті, імʼя, що ні з чим не збіглося, ігнорується, а коли таких нотаток
 кілька, показується найменший ідентифікатор.
@@ -555,7 +552,7 @@ YAML-список; теги переводяться в нижній регіс�
 збіг (`provisioning` знаходить `brew_provision`, `сторінок` знаходить `Сторінка`): слова запиту й
 полів порівнюються за основою Snowball, англійською чи українською за письмом, нижче за точний і
 префіксний збіг у ранжуванні. Текстову сторінку понад приблизно 16 000 символів (4000 токенів)
-`calque lint` позначає як `large` (див. [lint](#lint)).
+`wiki lint` позначає як `large` (див. [lint](#lint)).
 
 Ці правила містить скіл pi (`<memory-dir>` — це `.agents/memory`); якщо в агента скілів немає,
 скопіюйте їх у його файл інструкцій. Правила англійською, бо їх читає агент:
@@ -574,7 +571,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 ### CLI
 
-    calque [--jobs N] <command>
+    wiki [--jobs N] <command>
 
 | команда | що робить |
 |---|---|
@@ -595,7 +592,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 #### compile
 
-    calque compile [OPTIONS] <INPUT> <OUTPUT>
+    wiki compile [OPTIONS] <INPUT> <OUTPUT>
 
 - `--incremental` — брати відбитки рендерингу з `<OUTPUT>/.wiki/cache.json` і пропускати незмінені сторінки.
 - `--no-ignore` — не застосовувати правила `.gitignore`/`.ignore`/прихованих файлів під час обходу
@@ -615,9 +612,9 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 - `--memory <none|DIR>` (можна повторювати) — ще й компілювати теку памʼяті агента як позначені
   сторінки памʼяті. `<INPUT>/.agents/memory` компілюється теж; `--memory none` вимикає всю памʼять,
   зокрема цю теку (`none` разом із `DIR` — помилка використання); `--memory local` — помилка.
-- `CALQUE_TIMINGS=1` (змінна середовища) — друкувати в stderr по одному рядку `timings:` на кожну
+- `WIKI_TIMINGS=1` (змінна середовища) — друкувати в stderr по одному рядку `timings:` на кожну
   компіляцію: загальний час і мілісекунди за етапами, прочитані файли, записані сторінки.
-  `calque serve --source` і `calque setup` його теж враховують; на вивід він не впливає.
+  `wiki serve --source` і `wiki setup` його теж враховують; на вивід він не впливає.
 
 Якщо в `<OUTPUT>` ще лежать сторінки, записані за старою схемою ідентифікаторів (давніша версія або
 перейменовані відтоді джерела), `compile` попереджає в stderr і лишає їх на місці: видаліть їх або
@@ -625,7 +622,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 #### search
 
-    calque search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (усі `code:<lang>`), `docs` (`markdown` і `text`) або один точний тип:
   `text`, `markdown`, `code:<lang>` (наприклад, `code:rust`). Нотатки памʼяті проходять і `code`, і
@@ -667,7 +664,7 @@ Python-функція, визначена в тілі іншої функції,
 
 #### page
 
-    calque page [--full] [--max-tokens N] [--dir DIR] <ID>
+    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` — ідентифікатор сторінки або будь-що, що однозначно називає одну сторінку: її назва (у
 будь-якому регістрі), slug назви, шлях до джерела чи унікальний кінець шляху (`query.rs`) або
@@ -677,10 +674,10 @@ Python-функція, визначена в тілі іншої функції,
 і `callers` розвʼязують `<ID>` так само.
 
 ```
-$ calque page calls.rs --dir .kulman
+$ wiki page calls.rs --dir .kulman
 # Calls (calls)
   └ назва (id)
-crates/calque/src/calls.rs  code:rust
+crates/wiki/src/calls.rs  code:rust
 └ джерело          └ вид
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
@@ -708,7 +705,7 @@ Index:
 
 #### callers
 
-    calque callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
+    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 Функції, що викликають функцію `<SYMBOL>` (`name` або `Owner::name`) на сторінці `<ID>`, по рядку
 `start-end  kind  Owner::name` на кожну, згруповані за файлами; рядок закінчується на
@@ -717,7 +714,7 @@ Index:
 
 #### neighbors
 
-    calque neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
+    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 Пакет контексту для агента в межах бюджету: обхід у ширину від `<ID>` на `--depth` кроків (1).
 `--max-tokens` — жорстка межа оціненого розміру пакета (знаки/4), `--max-nodes` обмежує кількість
@@ -733,7 +730,7 @@ Index:
 
 #### lint
 
-    calque lint [--dir DIR]
+    wiki lint [--dir DIR]
 
 Друкує кількість битих посилань, сторінок-сиріт і завеликих сторінок (понад 4000 токенів: таку
 сторінку пакет `neighbors` за замовчуванням урізав би до опису; сторінки коду не перевіряються), а потім по
@@ -742,7 +739,7 @@ Index:
 
 #### hint
 
-    calque hint [--dir .kulman] [--claude-hook] [TEXT]
+    wiki hint [--dir .kulman] [--claude-hook] [TEXT]
 
 Місця в коді для тексту задачі, як їх вставляє хук запиту: рядок-заголовок, далі до 8 рядків
 `path:start-end  name  signature` (пробіли стиснуто до одного) з найкращих сторінок коду, не більше
@@ -778,7 +775,7 @@ sent a message:`, `(Re-invocation of /`, `[Image: original `, нотатки п�
 
 #### generate
 
-    calque generate [--files 20] [--seed 42] <DIR>
+    wiki generate [--files 20] [--seed 42] <DIR>
 
 Синтетичний корпус: той самий seed і `--files` завжди дають побайтово ті самі файли.
 
@@ -790,7 +787,7 @@ sent a message:`, `(Re-invocation of /`, `[Image: original `, нотатки п�
 ви там напишете, переживає перекомпіляцію.
 
 ```
-$ calque page gradient_descent --full --dir demo_wiki
+$ wiki page gradient_descent --full --dir demo_wiki
 ---
 created: 2026-01-10
 aliases: ["gradient_descent","gradient_descent_notes"]
@@ -801,7 +798,7 @@ source_hash: 66fce8283cb6b5e45c6a3ee6b6c3e34204c9ba9c562f4d3df2dfdd7a3dd33c79
 ---
 # Gradient Descent
 
-<!-- generated by calque — do not edit compiler-owned sections -->
+<!-- generated by nollm-wiki — do not edit compiler-owned sections -->
 
 ## Related
 - [[learning_rate_schedule|Learning Rate Schedule]]
@@ -820,7 +817,7 @@ _(add your own notes here — preserved on recompile)_
 ```
 
 Текст сторінки коду — це її вихідний код; символи з діапазонами рядків лежать в `items.json` і
-показуються через `calque page`.
+показуються через `wiki page`.
 
 ### Файли
 
@@ -898,14 +895,14 @@ _(add your own notes here — preserved on recompile)_
 спостережуваному живому проєкті перед 90–98% читань файл уже названо в завданні, і сильні моделі й
 так читають вузько. Чи типовий цей проєкт, ми не вимірювали.
 
-52 з 52 нижче виміряно з власними інструкціями сервера, що велять агентові користуватися calque перед grep (їх `calque setup` лишає для Claude Code), і з абзацом у `CLAUDE.md` проєкту про те, щоб спершу користуватися ним, — його `calque setup` не пише. Завдання пошуку нічого не казало про інструменти; завдання правки повторювало вказівку. Це
+52 з 52 нижче виміряно з власними інструкціями сервера, що велять агентові користуватися `wiki` перед grep (їх `wiki setup` лишає для Claude Code), і з абзацом у `CLAUDE.md` проєкту про те, щоб спершу користуватися ним, — його `wiki setup` не пише. Завдання пошуку нічого не казало про інструменти; завдання правки повторювало вказівку. Це
 власні виміри авторів їхнього інструмента, на завданнях і дереві коду, які вони обрали. Будемо
-раді, якщо ви долучитеся до вимірювань: запустіть calque на своєму проєкті та
+раді, якщо ви долучитеся до вимірювань: запустіть `wiki` на своєму проєкті та
 [відкрийте issue](https://github.com/bambooplanedev/kulman/issues) з тим, що побачите, — цифри, добрі чи погані.
 
 Кожен блок нижче називає власні умови, і його цифри чинні лише там: що модель зробила на цих
-задачах у цьому дереві, а не що calque зробить у вашому. Головний README набору підсумовує їх у
-розділі [Що заощаджує calque і коли](../../README.uk.md#що-заощаджує-calque-і-коли).
+задачах у цьому дереві, а не що `wiki` зробить у вашому. Головний README набору підсумовує їх у
+розділі [Що заощаджує `wiki` і коли](../../README.uk.md#що-заощаджує-wiki-і-коли).
 
 Пошук без названого файлу, сильні моделі, 2026-11-18. Девʼять питань «де X і яке значення воно
 використовує», написаних для тесту, на фікстурі C++ (файли з відповіддю по
@@ -913,27 +910,27 @@ _(add your own notes here — preserved on recompile)_
 словами предметної області («risk engine», «router»), і жоден не називає файл. Цикл агента —
 власний цикл [llm-harness-builder](https://github.com/bambooplanedev/llm-harness-builder), не
 Claude Code: інструменти, щоб переглянути теку, прочитати файл і запустити bash, а у варіанті з
-calque ще `search`, `page` і `callers` calque 0.8.1 через MCP; кешування промпту ввімкнено; Sonnet
+`wiki` ще `search`, `page` і `callers` `wiki` 0.8.1 через MCP; кешування промпту ввімкнено; Sonnet
 і Opus з адаптивними роздумами на типовому рівні API, Haiku без роздумів. По 5 прогонів на задачу й
 розмір, 135 прогонів на клітинку, усі розміри разом; вартість — долари за прейскурантом з власних
 підрахунків токенів API:
 
 | модель | варіант | правильних | вартість прогону | вхідних токенів на прогін | ходів |
 |---|---|---|---|---|---|
-| Claude Sonnet 5.5 | без calque | 135/135 | $0.0213 | 16 110 | 4.2 |
-| Claude Sonnet 5.5 | calque | 135/135 | $0.0097 | 11 374 | 3.1 |
-| Claude Opus 5.5 | без calque | 135/135 | $0.0454 | 18 078 | 4.3 |
-| Claude Opus 5.5 | calque | 135/135 | $0.0222 | 14 330 | 3.8 |
-| Claude Haiku 5.5 | без calque | 132/135 | $0.0013 | 21 222 | 3.9 |
-| Claude Haiku 5.5 | calque | 135/135 | $0.0006 | 11 983 | 3.1 |
+| Claude Sonnet 5.5 | без `wiki` | 135/135 | $0.0213 | 16 110 | 4.2 |
+| Claude Sonnet 5.5 | `wiki` | 135/135 | $0.0097 | 11 374 | 3.1 |
+| Claude Opus 5.5 | без `wiki` | 135/135 | $0.0454 | 18 078 | 4.3 |
+| Claude Opus 5.5 | `wiki` | 135/135 | $0.0222 | 14 330 | 3.8 |
+| Claude Haiku 5.5 | без `wiki` | 132/135 | $0.0013 | 21 222 | 3.9 |
+| Claude Haiku 5.5 | `wiki` | 135/135 | $0.0006 | 11 983 | 3.1 |
 
-З calque вартість прогону впала на 54% (Sonnet) і 51% (Opus), і 95-відсотковий інтервал за девʼятьма
+З `wiki` вартість прогону впала на 54% (Sonnet) і 51% (Opus), і 95-відсотковий інтервал за девʼятьма
 задачами в обох нижче нуля; вхідні токени впали на 29% і 21%, з інтервалами, що містять нуль.
 Заощадження росло з розміром файлу: −40% / −56% / −63% для Sonnet і −38% / −54% / −59% для Opus на
 початковому розмірі, 1 500 і 5 000 рядках. Воно береться з меншої кількості ходів, меншого нового
 контексту, що записується в кеш на кожному ході (Sonnet 5 219 → 1 286 токенів на прогін, Opus
 5 092 → 1 309), і меншого виводу разом із роздумами (−24% і −25%), а не з меншої кількості
-прочитаних рядків. Без calque ці моделі шукають grep (2.2 раза на прогін), а тоді читають
+прочитаних рядків. Без `wiki` ці моделі шукають grep (2.2 раза на прогін), а тоді читають
 діапазон знахідки: їхні читання цілих файлів (17% і 23% читань коду) майже всі стосуються
 маленьких файлів — файл понад 200 рядків цілком прочитано у 8 з 245 і в 1 з 254 читань. Відносне
 заощадження залежить від кешування: довша спільна преамбула, як у справжній сесії, його зменшує.
@@ -941,63 +938,63 @@ calque ще `search`, `page` і `callers` calque 0.8.1 через MCP; кешу�
 Та сама фікстура й цикл, слабші моделі й раніша версія (0.6.7), 2026-11-10, 135 прогонів на
 клітинку:
 
-| модель | читань коду цілим файлом, без / з calque | вхідні токени, усі розміри | вхідні токени, початковий розмір | правильних, без / з |
+| модель | читань коду цілим файлом, без / з `wiki` | вхідні токени, усі розміри | вхідні токени, початковий розмір | правильних, без / з |
 |---|---|---|---|---|
 | Claude Haiku 5.5 | 17% / 5% | −29% | −8% | 134 / 133 |
 | deepseek-v4.1-flash | 46% / 10% | −36% | −4% | 122 / 117 |
 | qwen3.8-27b | 58% / 4% | −75% | −23% | 131 / 127 |
 
-Вони читають файли цілком, коли не знають, де відповідь, і діапазони calque замінюють ці читання;
+Вони читають файли цілком, коли не знають, де відповідь, і діапазони `wiki` замінюють ці читання;
 більша частина заощадження припадає на доповнені файли, і жодна модель не відповіла правильно
 частіше.
 
 Реальна робота, де файл уже названо, 2026-11-12 — 2026-11-17. Траси агентів з одного проєкту на
 C++/Rust/Python/TypeScript на 894 сторінки: агенти Claude Opus і Sonnet працюють за завданнями, які
-пише агент-оркестратор, першу половину часу з ранішою версією (0.6.13), далі з calque 0.8.1;
+пише агент-оркестратор, першу половину часу з ранішою версією (0.6.13), далі з `wiki` 0.8.1;
 близько 95% пошуків коду припадали на скрипти на Python і shell. 7 773 виклики інструментів,
-2 125 читань коду, 2 170 команд grep, 260 викликів calque.
+2 125 читань коду, 2 170 команд grep, 260 викликів `wiki`.
 
 - Надійність: 1 помилка на 260 викликів (`page` для хук-скрипта без розширення, який 0.8.2 тепер
   індексує), жодного тайм-ауту, медіанний час відповіді 10–12 мс. Жодне з 17 читань, що почалися з
-  рядка, який повернув calque, не натрапило на те, що коду там уже немає.
+  рядка, який повернув `wiki`, не натрапило на те, що коду там уже немає.
 - Файл був відомий перед 90–98% читань коду: його називало завдання або документ, на який воно
   вказувало. Агенти знаходили рядок через `grep -n` у цьому файлі (близько 500 символів на grep
   проти 818 у медіанній відповіді `search`) і читали вікно: 2,0% читань брали весь файл, 0,7% —
   понад половину файлу довшого за 200 рядків, медіанне читання — 31 рядок.
 - З команд grep 16% (вибірка з 330, розмічена вручну, 95-відсотковий інтервал 12,5–20,4%) шукали
-  визначення або структуру символу, який індексує calque; 47% шукали дослівний текст, регулярні
-  вирази, підрахунки або відсутність, і це лишається роботою grep. Якщо рахувати виклики calque
-  проти shell-викликів із grep визначення, через calque йшли 31,6–38,6% пошуків визначень
+  визначення або структуру символу, який індексує `wiki`; 47% шукали дослівний текст, регулярні
+  вирази, підрахунки або відсутність, і це лишається роботою grep. Якщо рахувати виклики `wiki`
+  проти shell-викликів із grep визначення, через `wiki` йшли 31,6–38,6% пошуків визначень
   (14,5–21,5% лише через `search`).
-- 30% читань коду — shell-код поза будь-якою функцією, для якого calque не має діапазону.
-- Що діапазони calque могли б заощадити ще: 0,9–1,9% символів у результатах інструментів, близько
+- 30% читань коду — shell-код поза будь-якою функцією, для якого `wiki` не має діапазону.
+- Що діапазони `wiki` могли б заощадити ще: 0,9–1,9% символів у результатах інструментів, близько
   0,25–0,5% вхідних токенів, якщо врахувати, скільки кожне читання лишається в контексті.
-  Заощадження на реальній роботі не виміряно: агенти, що користувалися calque, мали довші
+  Заощадження на реальній роботі не виміряно: агенти, що користувалися `wiki`, мали довші
   завдання, ніж ті, що не користувалися, тож їх не можна порівняти.
 
-Використання в повному Claude Code, 2026-11-18. Claude Sonnet 5.5, calque 0.8.1, `claude -p` без
+Використання в повному Claude Code, 2026-11-18. Claude Sonnet 5.5, `wiki` 0.8.1, `claude -p` без
 інтерфейсу зі звичайним входом, із завантаженими інструкціями користувача й проєкту, скілами та
 плагіном superpowers і преамбулою приблизно в сім разів більшою, ніж в ізольованому стенді (49 479
 проти 6 689 вхідних токенів на прогін пошуку). Інструменти: Bash, Read, Edit, Agent, Skill і `search`,
-`page`, `callers` з calque. Дерево — знімок проєкту на C++/Rust/Python/TypeScript. Ті самі 13 наборів
+`page`, `callers` з `wiki`. Дерево — знімок проєкту на C++/Rust/Python/TypeScript. Ті самі 13 наборів
 імен функцій у двох формах, по 2 прогони на набір, 26 прогонів на форму: пошук («я працюю в <файл>. Знайди, де визначено кожну з цих функцій») і завдання, що так само називає файл, містить рядок проєкту про те, щоб спершу
-користуватися calque, і просить один коментар над кожною названою функцією. calque був першим
+користуватися `wiki`, і просить один коментар над кожною названою функцією. `wiki` був першим
 пошуком у 26 з 26 прогонів пошуку й у 26 з 26 прогонів правки (95% інтервал 87–100% у кожній формі);
 усі прогони успішні. Той самий набір завдань пошуку в ізольованому стенді (bare-режим Claude Code,
 2026-11-11, ранніша збірка) дав 52 з 52. Різниця між двома формами — 0 пунктів (95% інтервал від −13
 до +13). Жоден прогін не делегував і не викликав скіл. Пошуки визначень через grep були у 3 з 26
-прогонів пошуку і в 15 з 26 прогонів правки; жоден не замінив пошук через calque, а в прогонах
+прогонів пошуку і в 15 з 26 прогонів правки; жоден не замінив пошук через `wiki`, а в прогонах
 правки майже всі йшли після правки, щоб перевірити коментарі.
 
 Вартість у повному Claude Code, 2026-11-18. Прогони вище порівняно з контролем із 26 прогонів на форму
-завдання без calque: без MCP-сервера, без абзацу про пошук коду в інструкціях проєкту (і без дужок,
-що називають `calque page`, в інструкціях теки скриптів) та без рядка про calque в завданні з
+завдання без `wiki`: без MCP-сервера, без абзацу про пошук коду в інструкціях проєкту (і без дужок,
+що називають `wiki page`, в інструкціях теки скриптів) та без рядка про `wiki` в завданні з
 правкою. Та сама модель, інструменти, вхід, плагін і дерево, свіжа копія на прогін; вартість — у
 доларах за прейскурантом з власних підрахунків токенів у прогонах, які точно відтворюють заявлену
-вартість. Прогони з calque зроблено раніше того ж дня, а не вперемішку з контролем. 95% інтервали —
+вартість. Прогони з `wiki` зроблено раніше того ж дня, а не вперемішку з контролем. 95% інтервали —
 бутстреп усередині кожного набору імен:
 
-| завдання | calque | правильно | вартість успішного прогону | ходи | час |
+| завдання | `wiki` | правильно | вартість успішного прогону | ходи | час |
 |---|---|---|---|---|---|
 | пошук за іменами | без | 24/26 | $0,087 | 4,4 | 12,9 с |
 | пошук за іменами | з | 26/26 | $0,064 | 2,4 | 5,1 с |
@@ -1005,37 +1002,37 @@ C++/Rust/Python/TypeScript на 894 сторінки: агенти Claude Opus �
 | невелика правка, файл названо | з | 26/26 | $0,147 | 12,8 | 27,1 с |
 
 Ходи — це власний лічильник Claude Code. На пошуку він збігається із запитами до API (2,4 і 4,4); на
-правці — ні, бо виклики інструментів йдуть паралельно: 5,6 запиту з calque проти 6,6 без нього, на
+правці — ні, бо виклики інструментів йдуть паралельно: 5,6 запиту з `wiki` проти 6,6 без нього, на
 один менше.
 
-З calque вартість успішного прогону впала на 26% на пошуку (інтервал від −37% до −16%) і зросла на
-15% на завданні з правкою (від +10% до +19%); на прогін, з двома хибними відповідями, пошук подешевшав на 20%. З двох хибних відповідей без calque в одній діапазони
-були без шляхів, в іншій названо діапазон у 34 рядки для функції в 11. Визначення інструментів calque
+З `wiki` вартість успішного прогону впала на 26% на пошуку (інтервал від −37% до −16%) і зросла на
+15% на завданні з правкою (від +10% до +19%); на прогін, з двома хибними відповідями, пошук подешевшав на 20%. З двох хибних відповідей без `wiki` в одній діапазони
+були без шляхів, в іншій названо діапазон у 34 рядки для функції в 11. Визначення інструментів `wiki`
 та інструкції додають 1 744 токени до кожного запиту (1 799 у завданні з правкою, де в завданні ще
-є рядок про calque). З 1 744 токенів 1 449 — визначення інструментів, що лежать у кеші, спільному для
-прогонів (перший запит читає 7 195 кешованих токенів з calque і 5 746 без нього, у 25 з 26 пар; один прогін був холодним стартом);
+є рядок про `wiki`). З 1 744 токенів 1 449 — визначення інструментів, що лежать у кеші, спільному для
+прогонів (перший запит читає 7 195 кешованих токенів з `wiki` і 5 746 без нього, у 25 з 26 пар; один прогін був холодним стартом);
 приблизно 295 записуються раз на прогін. За тарифами, які випливають із прогонів, це приблизно
 $0,0016 на прогін пошуку і $0,0024 на прогін правки, 2,4% і 1,6% вартості прогону, і вже враховано в
 цифрах. Перший прогін за годину ще й записує визначення в кеш, приблизно $0,006 одноразово. На пошуку заощадження — це менше ходів (−2,0), менше кешованого контексту,
 прочитаного знову (−36 000 токенів), і менше виводу (−730 токенів): один пошук за всіма іменами
 замінив приблизно два grep і sed. У завданні з правкою ці витрати — близько 13% різниці
 в $0,019. Більша частина решти йде разом з першою відповіддю, за спостереженням (агент сам обирав перший виклик):
-з 78 прогонів з calque на правці (26 вище, друга серія з них і 26 нижче) 37, що почали зі `page` усього
-файлу, коштували $0,161 проти $0,127 за те саме завдання без calque, +27% (інтервал від +23% до +32%);
-41, що почали з `search`, — $0,131 проти $0,129, +1,6% (від −2% до +6%). Правка теж відрізнялася: з calque усі 26 прогонів читали кожен повернутий діапазон і
+з 78 прогонів з `wiki` на правці (26 вище, друга серія з них і 26 нижче) 37, що почали зі `page` усього
+файлу, коштували $0,161 проти $0,127 за те саме завдання без `wiki`, +27% (інтервал від +23% до +32%);
+41, що почали з `search`, — $0,131 проти $0,129, +1,6% (від −2% до +6%). Правка теж відрізнялася: з `wiki` усі 26 прогонів читали кожен повернутий діапазон і
 робили одну правку на функцію; без нього приблизно половина прогонів робила один grep і одну
-правку скриптом. Друга серія прогонів з calque на правці, зроблена пізніше, коштувала $0,140, на 4,6% менше, і тоді
+правку скриптом. Друга серія прогонів з `wiki` на правці, зроблена пізніше, коштувала $0,140, на 4,6% менше, і тоді
 різниця становила б +9% (від +5% до +13%, по наборах, лише опис); вартість правки краще читати як від
-+9% до +17% у трьох групах по 26. Рядок завдання про calque ще й велить читати лише повернуті діапазони, і контроль
-прибирає його разом з інструментом; окрема група з 26 прогонів, що лишила calque без цього рядка,
-коштувала $0,149, на 17% більше за той самий контроль (від +13% до +21%), не менше. Жодна група не читала файл цілим, ні з calque, ні без нього.
++9% до +17% у трьох групах по 26. Рядок завдання про `wiki` ще й велить читати лише повернуті діапазони, і контроль
+прибирає його разом з інструментом; окрема група з 26 прогонів, що лишила `wiki` без цього рядка,
+коштувала $0,149, на 17% більше за той самий контроль (від +13% до +21%), не менше. Жодна група не читала файл цілим, ні з `wiki`, ні без нього.
 Межі: цілями був готовий список точних імен у файлах Python приблизно по 1 900 і 5 200 рядків, які
 індекс охоплює; одне дерево коду й одна модель; завдання написано вручну; короткі прогони, де
 довга сесія платила б щопрогінний запис один раз (тут це близько 2% вартості прогону). Це контрольні
 завдання, а не реальна робота.
 
 Використання в живій роботі, 2026-11-10 — 2026-11-17. Траси того самого проєкту, що й вище, від
-2026-11-10, у сесіях, де головний агент ставить завдання підлеглим. calque був першим
+2026-11-10, у сесіях, де головний агент ставить завдання підлеглим. `wiki` був першим
 пошуком (проти grep, find чи ls у виклику shell) у 29 з 83 головних агентів Opus, 44 зі 142 підлеглих
 Opus і 20 зі 150 підлеглих Sonnet; цифри на агента, а завдання підлеглих Sonnet відрізняються від
 завдань підлеглих Opus. Інструменти не були відкладені за пошуком інструментів, а інструкції сервера
@@ -1043,7 +1040,7 @@ Opus і 20 зі 150 підлеглих Sonnet; цифри на агента, а 
 роблять підлеглі агенти, запущені головним (жоден із 52 контрольних прогонів не делегував, а в живій
 роботі майже всі пошуки робили головні агенти та підлеглі), довгі сесії та цілі, що надходять не як
 список імен. Одне дерево коду, жива робота однієї команди, одна модель у контрольних прогонах: щоб
-казати, як часто агенти користуються calque в реальній роботі, потрібна більша вибірка з незалежних
+казати, як часто агенти користуються `wiki` в реальній роботі, потрібна більша вибірка з незалежних
 проєктів.
 
 Підказка до запиту, 2026-11-17, офлайн на 1 514 і 136 запитах від двох авторів: вона
@@ -1154,8 +1151,8 @@ CLI — тонка обгортка над тим самим API:
 
 ```rust
 use std::path::Path;
-use calque::{compile, CompileOptions};
-use calque::query::{Wiki, PackBudget};
+use wiki::{compile, CompileOptions};
+use wiki::query::{Wiki, PackBudget};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = CompileOptions { incremental: true, ..Default::default() };
@@ -1200,7 +1197,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 З кореня робочого простору:
 
-    cargo build --release      # target/release/calque
+    cargo build --release      # target/release/wiki
     cargo test                 # модульні, інтеграційні, snapshot-тести й оцінка пошуку; потрібен jq
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
@@ -1208,8 +1205,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Самохостинг
 
 Цей репозиторій компілює сам себе. `scripts/selfhost.sh` збирає релізний бінарник, компілює
-репозиторій у `.kulman/` (у gitignore, інкрементально) і запускає на ньому `calque lint`; на битому
-посиланні скрипт завершується з помилкою. Закомічений `.mcp.json` реєструє `calque serve --source .` як сервер `calque`, тож
+репозиторій у `.kulman/` (у gitignore, інкрементально) і запускає на ньому `wiki lint`; на битому
+посиланні скрипт завершується з помилкою. Закомічений `.mcp.json` реєструє `wiki serve --source .` як сервер `wiki`, тож
 агент, запущений тут, може шукати в проєкті; у свіжому клоні запустіть `scripts/selfhost.sh` один
 раз, щоб бінарник зʼявився.
 

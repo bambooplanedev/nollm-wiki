@@ -5,7 +5,7 @@
 **kulman**, said KOOL-mahn (кульман): a design bureau's drawing board — the front door: installs
 the tools, sets up a project.
 
-`kulman` installs, updates and sets up the modules of the kulman set: `calque` (the project wiki for
+`kulman` installs, updates and sets up the modules of the kulman set: `wiki` (the project wiki for
 coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.8.0 is
 the first to carry it; the [repository README](../../README.md) describes the whole set.
 
@@ -34,7 +34,7 @@ By hand, the same: download `kulman-v<version>-<target>.tar.gz`, `SHA256SUMS` an
     mkdir -p ~/.kulman-home/bin && mv kulman ~/.kulman-home/bin/
 
 Adding `~/.kulman-home/bin` to `PATH` is optional, for typing `kulman` in a terminal (agents find
-`calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Then run:
+`wiki` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Then run:
 
     ~/.kulman-home/bin/kulman install       # kulman and the release's default modules
     cd your-project
@@ -116,8 +116,8 @@ directory in place of a binary, or anything but a regular file in place of `mani
 `state.json`, stops it with nothing deleted (exit 1), as does a module that another installed module
 requires (`kulman: cannot remove <a>: <b> requires it`; name both to remove both). `kulman` is not a
 module: `--modules kulman` is a usage error. At a terminal it asks first (default: no); without one
-it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while calque is
-installed also says that projects set up with kulman still name `calque` in their agent configs and
+it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while `wiki` is
+installed also says that projects set up with kulman still name `wiki` in their agent configs and
 need `kulman setup --scope repo --remove` (or `--scope local`) first: before the question at a
 terminal, as the last line otherwise.
 
@@ -127,7 +127,7 @@ terminal, as the last line otherwise.
 Runs each chosen module's own `setup` (`~/.kulman-home/bin/<module> setup …`) in the current
 directory, in the release's order: every chosen module runs, whatever the earlier ones returned.
 Without `--modules` every installed module is set up. `--scope` goes to every module; `--agent`,
-`--hook`/`--no-hook` (calque's prompt hook, off by default) and `--memory`/`--no-memory` are calque's and are a usage error when calque is not
+`--hook`/`--no-hook` (`wiki`'s prompt hook, off by default) and `--memory`/`--no-memory` are `wiki`'s and are a usage error when `wiki` is not
 chosen. Agent memory is on unless `--no-memory` is given (or the release turns it off). `--remove`
 undoes each module's setup. Before the first module runs, every chosen module's binary must be in
 `bin/` and executable; with no module installed there is nothing to set up (exit 1). The modules
@@ -135,7 +135,7 @@ write into the project's `.kulman/`, a folder of its own: setup refuses (exit 1)
 folder is kulman's home (`KULMAN_HOME` set to `<project>/.kulman`). When `bin/` is not on `PATH`,
 the modules run with it put first on their own `PATH` (kulman's own environment and your shell are
 not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is).
-The agent configs calque writes start it from the kulman home, so they need nothing on `PATH`.
+The agent configs `wiki` writes start it from the kulman home, so they need nothing on `PATH`.
 
 ## Asking and not asking
 
@@ -165,7 +165,7 @@ by a signal).
 ## Environment
 
 - `KULMAN_HOME` — the home directory (default `$HOME/.kulman-home`; empty counts as unset; a path containing `"`,
-  `$`, a backtick or `\` is not supported by the agent launch line calque writes).
+  `$`, a backtick or `\` is not supported by the agent launch line `wiki` writes).
 - `KULMAN_RELEASE_URL` — where releases are (default
   `https://github.com/bambooplanedev/kulman/releases`): `https://…` or `file://…`, nothing else.
 
@@ -212,13 +212,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
   "version": "0.8.2",
   "modules": [
     {
-      "name": "calque",
+      "name": "wiki",
       "summary": "the project wiki for coding agents",
       "default": true,
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "calque-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "wiki-v0.8.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],

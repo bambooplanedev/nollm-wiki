@@ -1,16 +1,13 @@
 **English** · [Українська](README.uk.md)
 
-# calque
-
-**calque**, said kahlk (калька): a drafter's tracing paper — an exact tracing of your project that
-agents read.
+# `wiki`
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
-calque is a module of the [kulman set](../../README.md), and this crate is the `calque` binary and
+`wiki` is a module of the [kulman set](../../README.md), and this crate is the `wiki` binary and
 the library it wraps.
 
-`calque` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
+`wiki` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
 with line ranges, then serves it to agents over MCP. An agent asks `search` where something is and
 gets `path:start-end` lines back, asks `callers` who calls a function, and reads mostly those lines
 instead of grepping and opening whole files. No model is called at compile time: the same input
@@ -23,9 +20,9 @@ In the examples, long lines are shortened with `…`, and a `└` line names the
 above it; it is not output.
 
 ```
-$ calque callers calls.rs resolve_calls --dir .kulman
-callers of resolve_calls  crates/calque/src/calls.rs:197-264 — 1 functions in 1 files
-crates/calque/src/lib.rs
+$ wiki callers calls.rs resolve_calls --dir .kulman
+callers of resolve_calls  crates/wiki/src/calls.rs:197-264 — 1 functions in 1 files
+crates/wiki/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
   └ the caller's lines        └ the line of the call
 ```
@@ -36,7 +33,7 @@ crates/calque/src/lib.rs
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
-- [Usage](#usage) — [agents](#agents): [`calque setup`](#calque-setup) ·
+- [Usage](#usage) — [agents](#agents): [`wiki setup`](#wiki-setup) ·
   [Cursor](#cursor) · [Codex](#codex) · [others](#other-mcp-clients) — [MCP server](#mcp-server) ·
   [agent memory](#agent-memory) · [CLI](#cli)
 - [Output](#output) — [a page](#a-page) · [artifacts](#artifacts) · [what agents read](#what-agents-read) ·
@@ -57,11 +54,11 @@ crates/calque/src/lib.rs
 - **Calls both ways.** `callers` lists the functions that call a function, with the lines of each
   call; `neighbors --symbol` (CLI; MCP with `--tools`) lists everything a function
   calls, level by level.
-- **MCP server.** `calque serve --source .` compiles the project, recompiles it on edits and serves
+- **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page` and `callers` (`neighbors` and `lint` with `--tools`) to Claude Code, pi, Cursor,
   Codex or any MCP client.
   Several servers on one `.kulman` are fine: one compiles, the others serve what it wrote.
-- **One-command setup.** `calque setup` installs the server and what tells the agent to use it, for
+- **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and, with `--hook`, a hook that adds the matching code lines
   to each prompt.
 - **Agent memory.** Notes in `.agents/memory/` and in the folders agents already write to (Claude
@@ -79,29 +76,29 @@ crates/calque/src/lib.rs
   the release binary. The Linux build is static and runs on glibc and musl systems alike.
 - Or Rust 1.90 or later to build from source (`cargo test` also needs `git`, `jq` and a
   non-root user). Windows is not tested.
-- For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `calque setup --scope local`
+- For agent use: an MCP client — Claude Code, pi, Cursor, Codex, Claude Desktop or another. `wiki setup --scope local`
   for Claude Code also needs the `claude` CLI on `PATH`.
 
 ## Installation
 
-A release of the kulman set carries `calque` for the two systems above; on any other system, build
+A release of the kulman set carries `wiki` for the two systems above; on any other system, build
 it from source.
 
 ### With kulman
 
-`kulman` installs, updates and sets up `calque` together with the other modules; the steps are in
+`kulman` installs, updates and sets up `wiki` together with the other modules; the steps are in
 the [repository README](../../README.md#install). In short, once `kulman` is on your machine:
 
     kulman install                     # the release's default modules, into ~/.kulman-home/bin
     cd your-project
-    kulman setup --scope local         # runs calque setup and plaz setup here
+    kulman setup --scope local         # runs wiki setup and plaz setup here
     kulman update                      # later: everything to the latest release
 
 Adding `~/.kulman-home/bin` to your `PATH` is optional, for typing `kulman` in a terminal (agents
-find `calque` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
-(`kulman install --modules calque`, `kulman setup --no-memory`). `kulman setup` runs every chosen
+find `wiki` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
+(`kulman install --modules wiki`, `kulman setup --no-memory`). `kulman setup` runs every chosen
 module even when one fails, and names the ones that failed at the end. `kulman remove` deletes what
-kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `calque` in
+kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `wiki` in
 their agent configs, so run `kulman setup --remove` with the same `--scope` in them first.
 Commands, exit codes and the layout of a release: [crates/kulman/README.md](../kulman/README.md).
 
@@ -109,34 +106,34 @@ Commands, exit codes and the layout of a release: [crates/kulman/README.md](../k
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman
-    cargo install --path crates/calque      # into ~/.cargo/bin
+    cargo install --path crates/wiki      # into ~/.cargo/bin
 
 ## Quick start
 
 In the project you want agents to navigate:
 
     cd your-project
-    calque setup --scope local      # compiles .kulman, installs the MCP server and (for pi) a skill
+    wiki setup --scope local      # compiles .kulman, installs the MCP server and (for pi) a skill
 
-Then start Claude Code or pi in that directory: the `calque` tools are there, and the server keeps
+Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
 `.kulman/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
-and `calque setup --remove` with the same `--scope` undoes it. Cursor and Codex:
-`calque setup --agent cursor,codex`; other clients: see [Agents](#agents).
+and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex:
+`wiki setup --agent cursor,codex`; other clients: see [Agents](#agents).
 
 To try the compiler on its own, on a generated corpus:
 
-    calque generate demo_raw --files 12 --seed 42
-    calque compile demo_raw demo_wiki
-    calque search gradient --dir demo_wiki --limit 2
-    calque neighbors gradient_descent --max-tokens 800 --dir demo_wiki
+    wiki generate demo_raw --files 12 --seed 42
+    wiki compile demo_raw demo_wiki
+    wiki search gradient --dir demo_wiki --limit 2
+    wiki neighbors gradient_descent --max-tokens 800 --dir demo_wiki
 
 ```
-$ calque compile demo_raw demo_wiki
+$ wiki compile demo_raw demo_wiki
 Compiled 12 pages (12 written) -> demo_wiki
 Lint: 0 broken links, 1 orphans, 0 large
                       └ a page no other page links to
 
-$ calque search gradient --dir demo_wiki --limit 2
+$ wiki search gradient --dir demo_wiki --limit 2
 gradient_descent  gradient_descent.txt  Gradient Descent — Gradient Descent is often paired with…
 └ id              └ path                └ title — summary
     Gradient Descent is often paired with Learning Rate Schedule in prod…
@@ -148,13 +145,13 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 On code the same search names symbols with line ranges. Against this repository:
 
 ```
-$ calque search "call edges" --dir .kulman --limit 1
-calls  crates/calque/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
+$ wiki search "call edges" --dir .kulman --limit 1
+calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ path             └ title — summary
-  crates/calque/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
+  crates/wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
   └ path:lines               └ name         └ signature                                        └ doc
-  crates/calque/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
-  crates/calque/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
+  crates/wiki/src/calls.rs:343-481  Wiki::call_walk  fn call_walk(&self, …) -> Result<…>  — `calls`, or with…
+  crates/wiki/src/calls.rs:197-264  resolve_calls  pub fn resolve_calls(entities: &mut BTreeMap<…>, graph: &Graph)  — Fills every…
 ```
 
 ## Usage
@@ -165,7 +162,7 @@ The workflow an agent follows is search → page → read lines: `search` finds 
 symbols, `page` lists a file's symbols with line ranges, and the agent reads just those lines with
 its own file tool. `callers` answers "what breaks if this changes". Handed a plan, spec or ledger,
 the agent passes its paths in `search`'s
-`docs` to get a step's line range by its label (`T5k`) or title words (`calque search T5k --docs plan.md`
+`docs` to get a step's line range by its label (`T5k`) or title words (`wiki search T5k --docs plan.md`
 on the command line). Each path is printed once, then `  start-end  label` per hit; `load-profile` and
 `load profile` match alike, after the exact matches. When the limit cuts a label repeated in one
 doc under the same head (`N11: …` in a ledger), both its first and last entries show. Pass the
@@ -180,49 +177,49 @@ leading ID (`11.4`, `T3a`) answer, else labels holding all its words except stop
 and when no label answers at all, the table rows holding the query's words in a row (`| W21 | D12 |`
 for `W21` or `D12`), a match in the first cell first; a first line names the fallback. An empty answer says no label matched and suggests other words or grep.
 
-| agent | `calque setup` writes | what tells it to use the wiki |
+| agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
-| pi | `.pi/mcp.json`, the `calque-navigation` skill | the skill (pi does not show server instructions) |
+| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `.codex/config.toml`, the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
 
-#### `calque setup`
+#### `wiki setup`
 
-`calque setup` makes the agents use the wiki on their own. Run it in the project root:
+`wiki setup` makes the agents use the wiki on their own. Run it in the project root:
 
-    calque setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
+    wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
-It compiles `.` into `.kulman`, then installs the MCP server (`calque serve --source .`) and what tells
-each agent to use it. pi gets the `calque-navigation` skill (how to find code, and the memory
+It compiles `.` into `.kulman`, then installs the MCP server (`wiki serve --source .`) and what tells
+each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory
 rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
 navigation steps, and the server marks its tools to load up front instead of behind a `ToolSearch`
 call; its own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
-in `AGENTS.md`, between `<!-- calque:navigation -->` markers. Agents are detected (`.claude/`,
+in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
 `CLAUDE.md` or `claude` on `PATH`; `.pi/` or `pi` on `PATH`; a `.cursor/` or `.codex/` folder, but
 not a `.codex/` that is Codex's own home) unless `--agent` names them. When none is found and
 `--agent` is not given, setup asks at a terminal which to set up (numbers or names, an empty line
 for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
 ignore lines and the memory folder, sets up no agent, says
-`no agent set up: the wiki is in .kulman/; run calque setup --agent … later` on stderr and exits 0.
+`no agent set up: the wiki is in .kulman/; run wiki setup --agent … later` on stderr and exits 0.
 `--remove` with no agent found and no `--agent` has nothing agent-specific to remove: it says
 `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring` on
 stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/calque-navigation/SKILL.md`, and `.kulman/` in `.gitignore`. For a file it wrote
+  `.agents/skills/wiki-navigation/SKILL.md`, and `.kulman/` in `.gitignore`. For a file it wrote
   that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
-  `claude mcp add-json calque … --scope local`, the other files are written and the ones setup
+  `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
   created are listed in `.git/info/exclude`, `/.agents/memory/` included when memory is on; a
   `.codex/config.toml` that was already there is edited and not listed. A file git already tracks
   is skipped; use `--scope repo` for it.
 - Agent memory is on by default: either scope creates `.agents/memory/`. `--no-memory` creates no
   `.agents/memory/`, compiles without memory and registers the server as
-  `calque serve --source . --memory none`. Running setup again with the other choice switches the
-  registered server; a server added through the `claude` CLI, or a `calque` table in
+  `wiki serve --source . --memory none`. Running setup again with the other choice switches the
+  registered server; a server added through the `claude` CLI, or a `wiki` table in
   `.codex/config.toml`, that carries settings of your own is left alone and reported, for you to
   remove and set up again.
 - Either scope writes Codex's server into the project's own `.codex/config.toml`, and needs no
@@ -230,9 +227,9 @@ stderr and exits 0.
 - Without `--scope`, setup asks on a terminal and fails without one. Setup asks only when stdin and
   stdout are both terminals; `--yes` is the same as having no terminal.
 - The prompt hook (`--hook`, off by default) adds the wiki's code lines for each prompt before the
-  model runs. Claude Code gets a `UserPromptSubmit` entry (`calque hint --claude-hook`) in
+  model runs. Claude Code gets a `UserPromptSubmit` entry (`wiki hint --claude-hook`) in
   `.claude/settings.json` (`settings.local.json` with `--scope local`); pi gets
-  `.pi/extensions/calque-hint/index.ts`. The hook is silent when there is no wiki, it cannot be read
+  `.pi/extensions/wiki-hint/index.ts`. The hook is silent when there is no wiki, it cannot be read
   or nothing matches, and never blocks a prompt. It is off by default because it still fires on
   about a third of chat prompts (see `docs/KNOWN_GAPS.md`). A run without `--hook` (`--no-hook` is
   the same) removes a hook an earlier setup wrote, matched exactly as `--remove` matches it, and
@@ -252,25 +249,25 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-A `calque` installed by kulman (run as `~/.kulman-home/bin/calque`, or from `$KULMAN_HOME/bin`)
-has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/calque"` through `sh -c` (the
+A `wiki` installed by kulman (run as `~/.kulman-home/bin/wiki`, or from `$KULMAN_HOME/bin`)
+has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki"` through `sh -c` (the
 prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
 `PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
 `~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"`,
 `$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
-own and is rewritten to the form this `calque` writes. Any other `calque` (built from source, installed
-elsewhere) has every agent run the server as plain `calque`, so `calque` must be on `PATH`; setup
+own and is rewritten to the form this `wiki` writes. Any other `wiki` (built from source, installed
+elsewhere) has every agent run the server as plain `wiki`, so `wiki` must be on `PATH`; setup
 warns when it is not. Safe to run twice. An entry, file or block at the same place with other content is left alone
 and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
 pretty JSON with its keys and their order kept.
 
 After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
 print mode); `cursor-agent` loads a new server only after it is enabled
-(`cursor-agent mcp enable calque`), and the Cursor editor lists it under Settings → Tools & MCP.
+(`cursor-agent mcp enable wiki`), and the Cursor editor lists it under Settings → Tools & MCP.
 
 #### Claude Code by hand
 
-    claude mcp add-json calque '{"command":"calque","args":["serve","--source","."]}' --scope local
+    claude mcp add-json wiki '{"command":"wiki","args":["serve","--source","."]}' --scope local
 
 or the `mcpServers` entry of [MCP server](#mcp-server) in the project's `.mcp.json`. Claude Code
 shows the server's instructions, which carry the navigation steps, so no skill is needed for
@@ -278,7 +275,7 @@ finding code; the wiki reads Claude Code's own memory, see [Agent memory](#agent
 
 #### pi
 
-`calque setup --agent pi` writes `.pi/mcp.json` and the `calque-navigation` skill; pi loads both
+`wiki setup --agent pi` writes `.pi/mcp.json` and the `wiki-navigation` skill; pi loads both
 after `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server
 instructions for `direct` servers, so all it learns about the wiki is the tool descriptions and the
 skill. Without it, in our runs the model grepped, and when a user-installed extension made pi load a
@@ -288,19 +285,19 @@ skill before it answered (we ran one called skill-first), it picked an unrelated
 By hand, `.pi/mcp.json` in the project:
 
 ```json
-{ "mcpServers": { "calque": { "command":"calque", "args": ["serve", "--source", "."], "exposure": "direct" } } }
+{ "mcpServers": { "wiki": { "command":"wiki", "args": ["serve", "--source", "."], "exposure": "direct" } } }
 ```
 
-and the [navigation rules](#navigation-rules) in `.agents/skills/calque-navigation/SKILL.md`, under
-a front matter with `name: calque-navigation` and a `description:` that says when to use it
-(`calque setup` writes "Find where something is or how it works in this project's code. Use before
+and the [navigation rules](#navigation-rules) in `.agents/skills/wiki-navigation/SKILL.md`, under
+a front matter with `name: wiki-navigation` and a `description:` that says when to use it
+(`wiki setup` writes "Find where something is or how it works in this project's code. Use before
 grep, find or reading whole files, whenever the task needs a function, type, handler or module
 location."); pi finds a skill by them.
 
-Use only the project's server: if `~/.pi/agent/mcp.json` also has a calque server, under any name,
+Use only the project's server: if `~/.pi/agent/mcp.json` also has a `wiki` server, under any name,
 remove it. With both, the model sees every wiki tool twice under two names (pi names them after the
-server: `mcp__calque__search` for this one), and the skill `calque setup` writes names only
-`mcp__calque__*`. To try it without letting pi edit files:
+server: `mcp__wiki__search` for this one), and the skill `wiki setup` writes names only
+`mcp__wiki__*`. To try it without letting pi edit files:
 `pi -p --approve --no-session --exclude-tools edit,write "where is …"`.
 
 Measured once per question with Mellum2.1 12B-A2.5B on llama-server, on three questions about the
@@ -315,7 +312,7 @@ grep.
 `.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` for every project) takes the same entry:
 
 ```json
-{ "mcpServers": { "calque": { "command":"calque", "args": ["serve", "--source", "."] } } }
+{ "mcpServers": { "wiki": { "command":"wiki", "args": ["serve", "--source", "."] } } }
 ```
 
 Cursor starts the server in the project directory, so `--source .` works. In `cursor-agent`, a new
@@ -331,12 +328,12 @@ window reload, also when git ignores the file (local scope).
 
 #### Codex
 
-`calque setup --agent codex` appends this to the project's own `.codex/config.toml`, and creates the
+`wiki setup --agent codex` appends this to the project's own `.codex/config.toml`, and creates the
 file when it is not there; with `--no-memory`, `args` also has `"--memory", "none"`:
 
 ```toml
-[mcp_servers.calque]
-command = "calque"
+[mcp_servers.wiki]
+command = "wiki"
 args = ["serve", "--source", "."]
 ```
 
@@ -352,19 +349,19 @@ treat a `.codex/` that is that folder as a project. Checked with codex-cli 0.169
 version bundled in that app); which earlier version first reads the project file is not checked.
 
 Setup appends the block only to what it can recognise. The block is its own when the header
-`[mcp_servers.calque]` is followed by exactly the `command` line and one of the two `args` lines;
+`[mcp_servers.wiki]` is followed by exactly the `command` line and one of the two `args` lines;
 setup then switches memory by rewriting only `args`, and `--remove` deletes it. Anything else that
 may define the server (extra keys such as `env` or `cwd`, a quoted or dotted key, an inline
 `mcp_servers = { … }`, a file reached through a link, or one git tracks in local scope) is left as
-it is and reported as `skipped .codex/config.toml calque server: …` (exit 1), because a second
+it is and reported as `skipped .codex/config.toml wiki server: …` (exit 1), because a second
 definition would make the file invalid; add the server by hand then. Other tables in the file are
 never changed.
 
 When `codex` is on `PATH`, every setup and `--remove` run that can edit the project's file asks
-Codex for a machine-wide `calque` server (`codex mcp get calque`, run outside any project, so that a
+Codex for a machine-wide `wiki` server (`codex mcp get wiki`, run outside any project, so that a
 parent project's file does not answer). One that exists is another server, and it still runs in
 every other Codex session: setup reports it, with the command that removes it, on the run that finds
-the project without a `calque` server of its own (exit 1); `--remove` notes it on every run, without
+the project without a `wiki` server of its own (exit 1); `--remove` notes it on every run, without
 changing the exit code. Without `codex` on `PATH` setup does not look.
 
 The wiki's tools are marked read-only, so Codex runs them without asking, `codex exec` included.
@@ -381,7 +378,7 @@ not start in the project directory, such as Claude Desktop, needs the project's 
 
 #### Navigation rules
 
-What `calque setup` puts in `AGENTS.md` for Codex, for any agent that needs them in its instructions
+What `wiki setup` puts in `AGENTS.md` for Codex, for any agent that needs them in its instructions
 file:
 
 ```
@@ -403,13 +400,13 @@ file:
 
 ### MCP server
 
-`calque serve` exposes a compiled wiki to MCP clients over stdio. `calque setup` writes this
+`wiki serve` exposes a compiled wiki to MCP clients over stdio. `wiki setup` writes this
 configuration for you; by hand it is:
 
 ```json
 {
   "mcpServers": {
-    "calque": { "command":"calque", "args": ["serve", "--source", "."] }
+    "wiki": { "command":"wiki", "args": ["serve", "--source", "."] }
   }
 }
 ```
@@ -417,7 +414,7 @@ configuration for you; by hand it is:
 `--source .` works for clients that start in the project directory, as Claude Code and pi do; for one
 that does not, such as Claude Desktop, give the project's absolute path.
 
-    calque serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
+    wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — also compile this project and keep the wiki in step with it.
 - `--dir <out>` (`<project>/.kulman` with `--source`, else `.kulman` if that directory exists, else
@@ -447,7 +444,7 @@ turn. `lint` is exposed only when `--tools` names it: it serves the person keepi
 each exposed tool costs schema tokens on every request. `neighbors` is opt-in too: agents almost
 never called it (16 of 11,056 calls in the measurement rig, 0 of 37 on the bench) and its schema
 took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors,callers` brings it
-back. A committed AGENTS.md block or skill that still names it is not updated by `calque setup`, which
+back. A committed AGENTS.md block or skill that still names it is not updated by `wiki setup`, which
 leaves a block that differs from its own alone and reports it: delete the block or the skill file,
 then run setup again.
 
@@ -468,22 +465,22 @@ the server only reads the wiki: it checks `index.json`'s fingerprint before each
 reloads after a recompile; a failed reload keeps the previous snapshot and is retried on the next
 request.
 
-**Replaced binary.** A server that sees its `calque` executable replaced or removed (a new install,
+**Replaced binary.** A server that sees its `wiki` executable replaced or removed (a new install,
 a rebuild, a retargeted symlink) stops compiling and writing to `<dir>` for the rest of its life, so
 an old compiler cannot overwrite a newer wiki. It stays up and keeps answering from `<dir>`,
 reloading it as above. It says so once on stderr, and every result gains a line
-`wiki may be stale: the calque server is out of date, ...`: restart the agent session or reconnect the
+`wiki may be stale: the wiki server is out of date, ...`: restart the agent session or reconnect the
 MCP server.
 
 ### Agent memory
 
-Agents keep notes as Markdown files. calque compiles the folders they write to, and `search` and
-`calque hint` show the matching notes after the code. The sources:
+Agents keep notes as Markdown files. `wiki` compiles the folders they write to, and `search` and
+`wiki hint` show the matching notes after the code. The sources:
 
-- **`.agents/memory/`** in the project. `calque setup` creates it in both scopes unless given `--no-memory`; in `--scope local`
-  it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `calque compile`
+- **`.agents/memory/`** in the project. `wiki setup` creates it in both scopes unless given `--no-memory`; in `--scope local`
+  it also lists `/.agents/memory/` in `.git/info/exclude`, so the notes stay private. `wiki compile`
   includes it unless `--memory none` is given.
-- **The agents' own folders.** `serve --source` and `calque setup` look for them. Today that is Claude
+- **The agents' own folders.** `serve --source` and `wiki setup` look for them. Today that is Claude
   Code's `<config dir>/projects/<slug>/memory/`, where the config dir is `CLAUDE_CONFIG_DIR` or
   `~/.claude` and `<slug>` is the path of the repo's main checkout with every UTF-16 unit that is not
   an ASCII letter or digit written as `-` (so a Cyrillic or accented letter is one `-`, a character
@@ -494,9 +491,9 @@ Agents keep notes as Markdown files. calque compiles the folders they write to, 
   discovery. On `compile` and `serve`, `--memory none` turns off all memory, `.agents/memory`
   included (a behaviour change: it used to keep `.agents/memory`).
 
-A plain `calque compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
-agents' folders, so a published site never carries private notes. So a plain `calque compile . .kulman`
-drops the agents' notes from `.kulman` until the server recompiles, and `calque hint` reads `.kulman`.
+A plain `wiki compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
+agents' folders, so a published site never carries private notes. So a plain `wiki compile . .kulman`
+drops the agents' notes from `.kulman` until the server recompiles, and `wiki hint` reads `.kulman`.
 
 Migration: `compile --memory local` is gone, and notes in the per-user folder of earlier releases
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
@@ -506,7 +503,7 @@ as `memory (<origin>): <path> — <summary>`, each followed, when its body match
 an indented line. A note is listed when a query word of four or more characters is in its title,
 aliases or summary, or the query writes the note's `updated` day, or the note scores at least twice
 the best code hit (the note is scored over project pages plus notes, the code hit over project pages
-only). Notes pass the `code` and `docs` filters, and `calque hint` adds one memory line by the same
+only). Notes pass the `code` and `docs` filters, and `wiki hint` adds one memory line by the same
 rule (see [hint](#hint)). Notes never move a code page's rank: PageRank and the `llms.txt` median
 count project pages only.
 
@@ -519,7 +516,7 @@ commit's author email is your `git config user.email`, ignoring case
 never stored or shown) and `, edited` when the work tree differs from that commit. JSON hits carry
 `"memory": true`, `"origin": "local"` or `"repo"`, `"author"` when known, `"mine": true` for your
 notes and `"edited": true` when edited. The origin is read when the wiki is compiled, by
-`calque compile` and by each recompile of `serve --source`; answering a `search` or a hook never calls
+`wiki compile` and by each recompile of `serve --source`; answering a `search` or a hook never calls
 git. Notes are ordered by trust, the score order kept among equals: local notes first, then your own
 or edited committed notes, then the rest; `search` lists the two most trusted notes that pass, and
 the hook's one memory line is the most trusted.
@@ -529,7 +526,7 @@ A date in a query finds the memory notes dated that day: `12 жовтня`, `Oct
 without a year every year matches). Project pages are never matched by date.
 
 A note can retire an older one with `supersedes:` in its front matter (titles, aliases or ids, in
-`aliases:` syntax). The older note then never appears after the code hits and `calque hint` never shows it; a tag listing prints ` (superseded by <id>)` after
+`aliases:` syntax). The older note then never appears after the code hits and `wiki hint` never shows it; a tag listing prints ` (superseded by <id>)` after
 its line (`"superseded_by"` in JSON). Only memory notes are matched,
 a name that matches nothing is ignored, and with several superseders the smallest id is shown.
 A committed note never retires an uncommitted one.
@@ -542,7 +539,7 @@ block list; tags are lowercased with any `#` stripped. The page's date is read f
 starting `YYYY-MM-DD`. Another grammatical form of a word still matches (`provisioning` finds
 `brew_provision`, `сторінок` finds `Сторінка`): query and field words are compared by their Snowball
 stem, English or Ukrainian by script, below an exact or prefix match in rank. A text page over about
-16,000 characters (4000 tokens) is reported by `calque lint` as `large` (see [lint](#lint)).
+16,000 characters (4000 tokens) is reported by `wiki lint` as `large` (see [lint](#lint)).
 
 pi's skill carries these rules (`<memory-dir>` is `.agents/memory`); copy them into the agent's
 instructions file if it has no skill:
@@ -561,7 +558,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 
 ### CLI
 
-    calque [--jobs N] <command>
+    wiki [--jobs N] <command>
 
 | command | what it does |
 |---|---|
@@ -582,7 +579,7 @@ and never recompile.
 
 #### compile
 
-    calque compile [OPTIONS] <INPUT> <OUTPUT>
+    wiki compile [OPTIONS] <INPUT> <OUTPUT>
 
 - `--incremental` — reuse `<OUTPUT>/.wiki/cache.json` render fingerprints and skip unchanged pages.
 - `--no-ignore` — do not apply `.gitignore`/`.ignore`/hidden-file rules while walking `<INPUT>`,
@@ -602,8 +599,8 @@ for the `.gitignore`/`.ignore`/hidden rules. A file counts once, for its outermo
 - `--memory <none|DIR>` (repeatable) — also compile an agent memory folder as flagged memory pages.
   `<INPUT>/.agents/memory` is compiled too; `--memory none` turns off all memory, that folder
   included (`none` with a `DIR` is a usage error); `--memory local` is an error.
-- `CALQUE_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
-  per-stage milliseconds, files read, pages written. `calque serve --source` and `calque setup`
+- `WIKI_TIMINGS=1` (environment) — print one `timings:` line per compile to stderr: total and
+  per-stage milliseconds, files read, pages written. `wiki serve --source` and `wiki setup`
   honour it too; it never changes the output.
 
 If `<OUTPUT>` still holds pages written under a previous id scheme (an earlier version, or sources
@@ -612,7 +609,7 @@ clean directory.
 
 #### search
 
-    calque search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
+    wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
 - `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
   `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
@@ -652,7 +649,7 @@ and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 #### page
 
-    calque page [--full] [--max-tokens N] [--dir DIR] <ID>
+    wiki page [--full] [--max-tokens N] [--dir DIR] <ID>
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
@@ -661,10 +658,10 @@ skips or a hidden folder gets a note that the folder is not compiled instead, wi
 to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 
 ```
-$ calque page calls.rs --dir .kulman
+$ wiki page calls.rs --dir .kulman
 # Calls (calls)
   └ title (id)
-crates/calque/src/calls.rs  code:rust
+crates/wiki/src/calls.rs  code:rust
 └ source           └ kind
 Call edges between code items: matched by name at compile time (`resolve_calls`), followed…
 imports:
@@ -692,7 +689,7 @@ whole lines.
 
 #### callers
 
-    calque callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
+    wiki callers [--depth N] [--max-tokens N] [--dir DIR] <ID> <SYMBOL>
 
 The functions that call function `<SYMBOL>` (`name` or `Owner::name`) on page `<ID>`, one
 `start-end  kind  Owner::name` line each, grouped by file and ending `calls f at L1, L2` with the
@@ -701,7 +698,7 @@ lines that make the call; test code comes last. `--depth 2` adds the callers' ca
 
 #### neighbors
 
-    calque neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
+    wiki neighbors [--depth N] [--max-tokens N] [--max-nodes N] [--full] [--kind K] [--symbol NAME] [--dir DIR] <ID>
 
 A budgeted context pack for an agent: a breadth-first walk from `<ID>` up to `--depth` hops (1).
 `--max-tokens` is a hard ceiling on the pack's estimated size (chars/4) and `--max-nodes` caps the
@@ -717,7 +714,7 @@ in the centrality order above.
 
 #### lint
 
-    calque lint [--dir DIR]
+    wiki lint [--dir DIR]
 
 Prints the counts of broken links, orphan pages and large pages (over 4000 tokens, which a default
 `neighbors` pack would degrade to a summary; code pages are not checked), then one line per
@@ -726,7 +723,7 @@ counted. Exits 1 when any link is broken, so `lint` can gate a build.
 
 #### hint
 
-    calque hint [--dir .kulman] [--claude-hook] [TEXT]
+    wiki hint [--dir .kulman] [--claude-hook] [TEXT]
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
 `path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the
@@ -762,7 +759,7 @@ prompt's 24 rarest words; past 64 words that needs a code page to beat.
 
 #### generate
 
-    calque generate [--files 20] [--seed 42] <DIR>
+    wiki generate [--files 20] [--seed 42] <DIR>
 
 A synthetic corpus: the same seed and `--files` always give byte-identical files.
 
@@ -774,7 +771,7 @@ Each source file becomes one page. The compiler owns every section but `## Notes
 you write there across recompiles:
 
 ```
-$ calque page gradient_descent --full --dir demo_wiki
+$ wiki page gradient_descent --full --dir demo_wiki
 ---
 created: 2026-01-10
 aliases: ["gradient_descent","gradient_descent_notes"]
@@ -785,7 +782,7 @@ source_hash: 66fce8283cb6b5e45c6a3ee6b6c3e34204c9ba9c562f4d3df2dfdd7a3dd33c79
 ---
 # Gradient Descent
 
-<!-- generated by calque — do not edit compiler-owned sections -->
+<!-- generated by nollm-wiki — do not edit compiler-owned sections -->
 
 ## Related
 - [[learning_rate_schedule|Learning Rate Schedule]]
@@ -803,7 +800,7 @@ Revisit this after the next benchmark run.
 _(add your own notes here — preserved on recompile)_
 ```
 
-A code page's body is its source; its symbols and line ranges are in `items.json` and `calque page`.
+A code page's body is its source; its symbols and line ranges are in `items.json` and `wiki page`.
 
 ### Artifacts
 
@@ -880,39 +877,39 @@ The controlled measurements are synthetic: tasks written for the measurement, no
 one live project observed, briefs name the file before 90–98% of reads, and strong models read
 narrowly anyway. Whether that project is typical has not been measured.
 
-The 52 of 52 below was measured with the server's own instructions, which tell the agent to use calque before grep (what `calque setup` leaves for Claude Code), and with a paragraph in the project's `CLAUDE.md` saying to use it first, which `calque setup` does not write. The lookup prompt said nothing about tools; the edit brief repeated the instruction. These are the authors' measurements of their own tool, on tasks and a code tree they
-chose. You are welcome to join the measuring: run calque on your own project and
+The 52 of 52 below was measured with the server's own instructions, which tell the agent to use `wiki` before grep (what `wiki setup` leaves for Claude Code), and with a paragraph in the project's `CLAUDE.md` saying to use it first, which `wiki setup` does not write. The lookup prompt said nothing about tools; the edit brief repeated the instruction. These are the authors' measurements of their own tool, on tasks and a code tree they
+chose. You are welcome to join the measuring: run `wiki` on your own project and
 [open an issue](https://github.com/bambooplanedev/kulman/issues) with what you see, numbers good or bad.
 
 Every block below names its own setup, and its figures hold only there: what a model did on those
-tasks in that tree, not what calque does in yours. The repository README sums them up under
-[What calque saves, and when](../../README.md#what-calque-saves-and-when).
+tasks in that tree, not what `wiki` does in yours. The repository README sums them up under
+[What `wiki` saves, and when](../../README.md#what-wiki-saves-and-when).
 
 Lookups with no file named, strong models, 2026-11-18. Nine "where is X, and what value does it
 use" questions, written for the test, on a C++ fixture (answer files of 530–645
 lines, and copies padded to 1,500 and 5,000 lines); every prompt names the component in domain words
 ("risk engine", "router") and none names a file. The loop is
 [llm-harness-builder](https://github.com/bambooplanedev/llm-harness-builder)'s own, not Claude Code:
-tools to list a directory, read a file and run bash, plus calque 0.8.1's `search`, `page` and
-`callers` over MCP in the calque arm; prompt caching on; Sonnet and Opus with adaptive thinking at
+tools to list a directory, read a file and run bash, plus `wiki` 0.8.1's `search`, `page` and
+`callers` over MCP in the `wiki` arm; prompt caching on; Sonnet and Opus with adaptive thinking at
 the API's default effort, Haiku without thinking. 5 runs per task and size, 135 runs per cell, all
 sizes pooled; cost is dollars at list price from the API's own token counts:
 
 | model | arm | correct | cost per run | input tokens per run | turns |
 |---|---|---|---|---|---|
-| Claude Sonnet 5.5 | without calque | 135/135 | $0.0213 | 16,110 | 4.2 |
-| Claude Sonnet 5.5 | calque | 135/135 | $0.0097 | 11,374 | 3.1 |
-| Claude Opus 5.5 | without calque | 135/135 | $0.0454 | 18,078 | 4.3 |
-| Claude Opus 5.5 | calque | 135/135 | $0.0222 | 14,330 | 3.8 |
-| Claude Haiku 5.5 | without calque | 132/135 | $0.0013 | 21,222 | 3.9 |
-| Claude Haiku 5.5 | calque | 135/135 | $0.0006 | 11,983 | 3.1 |
+| Claude Sonnet 5.5 | without `wiki` | 135/135 | $0.0213 | 16,110 | 4.2 |
+| Claude Sonnet 5.5 | `wiki` | 135/135 | $0.0097 | 11,374 | 3.1 |
+| Claude Opus 5.5 | without `wiki` | 135/135 | $0.0454 | 18,078 | 4.3 |
+| Claude Opus 5.5 | `wiki` | 135/135 | $0.0222 | 14,330 | 3.8 |
+| Claude Haiku 5.5 | without `wiki` | 132/135 | $0.0013 | 21,222 | 3.9 |
+| Claude Haiku 5.5 | `wiki` | 135/135 | $0.0006 | 11,983 | 3.1 |
 
-With calque the cost per run fell by 54% (Sonnet) and 51% (Opus), with the 95% interval over the
+With `wiki` the cost per run fell by 54% (Sonnet) and 51% (Opus), with the 95% interval over the
 nine tasks below zero for both; input tokens fell by 29% and 21%, with intervals that include zero.
 The cost saving grew with file size: −40% / −56% / −63% for Sonnet and −38% / −54% / −59% for Opus
 at the unpadded size, 1,500 and 5,000 lines. It comes from fewer turns, less new context written to
 the cache each turn (Sonnet 5,219 → 1,286 tokens per run, Opus 5,092 → 1,309) and less output,
-thinking included (−24% and −25%); not from fewer lines read. Without calque these models grep
+thinking included (−24% and −25%); not from fewer lines read. Without `wiki` these models grep
 (2.2 times per run) and then read the hit's range: their whole-file reads (17% and 23% of code
 reads) are almost all of small files, with 8 of 245 and 1 of 254 reads taking a file of more than
 200 lines whole. The relative saving depends on caching: a longer shared preamble, as in a real session,
@@ -921,63 +918,63 @@ makes it smaller.
 The same fixture and loop, with weaker models and an earlier version (0.6.7), 2026-11-10, 135 runs
 per cell:
 
-| model | whole-file code reads, without / with calque | input tokens, all sizes | input tokens, unpadded files | correct, without / with |
+| model | whole-file code reads, without / with `wiki` | input tokens, all sizes | input tokens, unpadded files | correct, without / with |
 |---|---|---|---|---|
 | Claude Haiku 5.5 | 17% / 5% | −29% | −8% | 134 / 133 |
 | deepseek-v4.1-flash | 46% / 10% | −36% | −4% | 122 / 117 |
 | qwen3.8-27b | 58% / 4% | −75% | −23% | 131 / 127 |
 
-They read whole files when they do not know where the answer is, and calque's ranges replace those
+They read whole files when they do not know where the answer is, and `wiki`'s ranges replace those
 reads; most of the saving comes with the padded files, and no model answered more questions
 correctly.
 
 Real work with the file named, 2026-11-12 to 2026-11-17. Agent traces from one
 C++/Rust/Python/TypeScript project of 894 pages: Claude Opus and Sonnet agents working from briefs
-that an orchestrating agent wrote, with an earlier version (0.6.13) for the first half and calque 0.8.1 after it; about 95% of the
+that an orchestrating agent wrote, with an earlier version (0.6.13) for the first half and `wiki` 0.8.1 after it; about 95% of the
 code lookups were in Python and shell scripts. 7,773 tool calls, 2,125 code reads, 2,170 grep
-commands, 260 calque calls.
+commands, 260 `wiki` calls.
 
 - Reliability: 1 error in 260 calls (`page` of a hook script with no extension, which 0.8.2 now
   indexes), no timeouts, median answer time 10–12 ms. None of the 17 reads that started at a line
-  calque returned found the code gone.
+  `wiki` returned found the code gone.
 - The file was known before 90–98% of code reads, named in the brief or in a document it pointed
   to. Agents found the line with `grep -n` in that file (about 500 characters per grep, against
   818 for the median `search` answer) and read a window: 2.0% of reads took the whole file, 0.7%
   more than half of a file over 200 lines and the median read was 31 lines.
 - Of the grep commands, 16% (hand-labelled sample of 330, 95% interval 12.5–20.4%) looked up the
-  definition or outline of a symbol calque indexes; 47% looked for literal text, regular
-  expressions, counts or absence, which stay grep's work. Counting calque calls against shell calls
-  holding a definition grep, 31.6–38.6% of definition lookups went through calque (14.5–21.5%
+  definition or outline of a symbol `wiki` indexes; 47% looked for literal text, regular
+  expressions, counts or absence, which stay grep's work. Counting `wiki` calls against shell calls
+  holding a definition grep, 31.6–38.6% of definition lookups went through `wiki` (14.5–21.5%
   through `search` alone).
-- 30% of code reads were shell code outside any function, for which calque has no range.
-- What calque's ranges could still have saved: 0.9–1.9% of tool-result characters, about
+- 30% of code reads were shell code outside any function, for which `wiki` has no range.
+- What `wiki`'s ranges could still have saved: 0.9–1.9% of tool-result characters, about
   0.25–0.5% of input tokens once the time each read stays in context is counted. No saving on real
-  work has been measured: agents that used calque had longer tasks than those that did not, so the
+  work has been measured: agents that used `wiki` had longer tasks than those that did not, so the
   two cannot be compared.
 
-Use in full Claude Code, 2026-11-18. Claude Sonnet 5.5, calque 0.8.1, `claude -p` headless with the
+Use in full Claude Code, 2026-11-18. Claude Sonnet 5.5, `wiki` 0.8.1, `claude -p` headless with the
 normal login, user and project instructions, skills and the superpowers plugin loaded, and a
 preamble about seven times larger than in the isolated harness (49,479 against 6,689 input tokens
-per lookup run). Tools: Bash, Read, Edit, Agent, Skill and calque's `search`, `page` and `callers`.
+per lookup run). Tools: Bash, Read, Edit, Agent, Skill and `wiki`'s `search`, `page` and `callers`.
 The tree is a C++/Rust/Python/TypeScript project snapshot. The same 13 sets of helper names in two
 shapes, 2 runs per set, 26 runs per shape: a lookup ("I am working in <file>. Find where each of these helpers is defined") and a
-brief that names the file too, carries the project's line about using calque first and asks for one
-comment above each named helper. calque was the first lookup in 26 of 26 lookup runs and 26 of 26
+brief that names the file too, carries the project's line about using `wiki` first and asks for one
+comment above each named helper. `wiki` was the first lookup in 26 of 26 lookup runs and 26 of 26
 edit runs (95% interval 87–100% each); every run succeeded. The same lookup task set in the isolated
 harness (Claude Code's bare mode, 2026-11-11, an earlier build) gave 52 of 52. The difference between
 the two shapes is 0 points (95% interval −13 to +13). No run delegated, and none called a skill.
-Definition greps appeared in 3 of 26 lookup runs and 15 of 26 edit runs; none replaced a calque
+Definition greps appeared in 3 of 26 lookup runs and 15 of 26 edit runs; none replaced a `wiki`
 lookup, and in the edit runs nearly all came after the edit, to check the comments.
 
 Cost in full Claude Code, 2026-11-18. The runs above, compared with a control of 26 runs per task
-shape that has no calque: no MCP server, no "code lookup" paragraph in the project instructions (nor
-the parenthesis naming `calque page` in the scripts folder's), and no calque line in the edit brief.
+shape that has no `wiki`: no MCP server, no "code lookup" paragraph in the project instructions (nor
+the parenthesis naming `wiki page` in the scripts folder's), and no `wiki` line in the edit brief.
 Same model, tools, login, plugin and tree, a fresh copy per run; cost is dollars at list price from
-the runs' own token counts, which reproduce the reported cost exactly. The with-calque runs were made
+the runs' own token counts, which reproduce the reported cost exactly. The with-`wiki` runs were made
 earlier the same day, not interleaved with the control. 95% intervals are bootstrapped within each
 set of names:
 
-| task | calque | correct | cost per successful run | turns | wall clock |
+| task | `wiki` | correct | cost per successful run | turns | wall clock |
 |---|---|---|---|---|---|
 | lookup by name | without | 24/26 | $0.087 | 4.4 | 12.9 s |
 | lookup by name | with | 26/26 | $0.064 | 2.4 | 5.1 s |
@@ -985,38 +982,38 @@ set of names:
 | small edit, file named | with | 26/26 | $0.147 | 12.8 | 27.1 s |
 
 Turns are Claude Code's own count. On lookups it equals the API requests (2.4 and 4.4); on the edit
-task it does not, because tool calls are issued in parallel: 5.6 requests with calque against 6.6
+task it does not, because tool calls are issued in parallel: 5.6 requests with `wiki` against 6.6
 without, one fewer.
 
-With calque the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
-on the edit task (+10% to +19%); per run, counting the two wrong lookups, lookups fell 20%. Of the two wrong lookups without calque, one answered the ranges
-without paths and one gave a range of 34 lines for a function of 11. calque's tool definitions and
+With `wiki` the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
+on the edit task (+10% to +19%); per run, counting the two wrong lookups, lookups fell 20%. Of the two wrong lookups without `wiki`, one answered the ranges
+without paths and one gave a range of 34 lines for a function of 11. `wiki`'s tool definitions and
 instructions add 1,744 tokens to every request (1,799 in the edit task, whose brief also carries a
-calque line). Of the 1,744, 1,449 are the tool definitions, which sit in a cache shared across runs
-(the first request reads 7,195 cached tokens with calque and 5,746 without, in 25 of 26 pairs; one run was a cold start); about
+`wiki` line). Of the 1,744, 1,449 are the tool definitions, which sit in a cache shared across runs
+(the first request reads 7,195 cached tokens with `wiki` and 5,746 without, in 25 of 26 pairs; one run was a cold start); about
 295 are written once per run. At the rates the runs imply that is about $0.0016 per lookup run and
 $0.0024 per edit run, 2.4% and 1.6% of the run's cost, already in the figures. The first run in an
 hour also writes the definitions to the cache, about $0.006 once.
 On lookups the saving is fewer turns (−2.0), less cached context read again (−36,000 tokens) and
 less output (−730 tokens); one search with all the names replaced about two greps and a sed. On the
 edit task that overhead is about 13% of the $0.019 gap. Most of the rest goes with the first answer, an
-observational split (the agent chose its first call): across 78 with-calque edit runs (the 26 above,
+observational split (the agent chose its first call): across 78 with-`wiki` edit runs (the 26 above,
 a second run of them and the 26 below), the 37 that opened with a `page` of the whole file cost
-$0.161 against $0.127 for the same task without calque, +27% (interval +23% to +32%); the 41 that
-opened with a `search` cost $0.131 against $0.129, +1.6% (−2% to +6%). The editing also differed: with calque all
+$0.161 against $0.127 for the same task without `wiki`, +27% (interval +23% to +32%); the 41 that
+opened with a `search` cost $0.131 against $0.129, +1.6% (−2% to +6%). The editing also differed: with `wiki` all
 26 runs read each returned range and made one edit per helper; without it about half the runs did
-one grep and one scripted edit. A second run of the with-calque edit group, made later, cost $0.140, 4.6% less, which would make
+one grep and one scripted edit. A second run of the with-`wiki` edit group, made later, cost $0.140, 4.6% less, which would make
 the gap +9% (+5% to +13%, set-stratified, descriptive only); the edit cost is better read as +9% to +17% across the three groups of 26.
-The brief's calque line also tells the agent to read only the returned line
-ranges, and the control removes it with the tool; a further group of 26 runs that kept calque and
+The brief's `wiki` line also tells the agent to read only the returned line
+ranges, and the control removes it with the tool; a further group of 26 runs that kept `wiki` and
 dropped that line cost $0.149, +17% over the same control (+13% to +21%), not less. No group read a whole
-file, with or without calque. Limits: targets were a ready list of exact names in Python files of
+file, with or without `wiki`. Limits: targets were a ready list of exact names in Python files of
 about 1,900 and 5,200 lines that the index covers; one code tree and one model; hand-written briefs;
 short runs, where a long session would pay the per-run write once (about 2% of run cost here). These are
 controlled tasks, not real work.
 
 Use in live work, 2026-11-10 to 2026-11-17. The same project's traces as above, from 2026-11-10 on, in
-sessions where a lead agent briefs child agents. calque was the
+sessions where a lead agent briefs child agents. `wiki` was the
 first lookup (against a grep, find or ls in a shell call) for 29 of 83 Opus leads, 44 of 142 Opus
 children and 20 of 150 Sonnet children; the figures are per agent, and the tasks of Sonnet children
 differ from those of Opus children. The tools were not deferred behind a tool search and the server's
@@ -1026,7 +1023,7 @@ What is not known: the cause. Not yet tested: lookups done by child agents a lea
 the 52 controlled runs delegated, while in the live work nearly all lookups were made by leads and
 children), long sessions, and targets that do not arrive as a list of names. One code tree, one
 team's live work, one model in the controlled runs: a larger sample from independent projects is
-needed before saying how often agents use calque in real work.
+needed before saying how often agents use `wiki` in real work.
 
 The prompt hint, 2026-11-17, offline over 1,514 and 136 prompts from two writers: it fired on 66.8%
 and 48.5% of them. In 77 hints shown during real work it once plausibly led the agent to a file it
@@ -1131,8 +1128,8 @@ The CLI is a thin wrapper over the same API:
 
 ```rust
 use std::path::Path;
-use calque::{compile, CompileOptions};
-use calque::query::{Wiki, PackBudget};
+use wiki::{compile, CompileOptions};
+use wiki::query::{Wiki, PackBudget};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = CompileOptions { incremental: true, ..Default::default() };
@@ -1175,7 +1172,7 @@ rules that make this hold are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 From the workspace root:
 
-    cargo build --release      # target/release/calque
+    cargo build --release      # target/release/wiki
     cargo test                 # unit, integration, snapshot and retrieval-eval tests; needs jq
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
@@ -1183,8 +1180,8 @@ From the workspace root:
 ### Self-hosting
 
 This repository compiles itself. `scripts/selfhost.sh` builds the release binary, compiles the
-repository into `.kulman/` (gitignored, incremental) and runs `calque lint` on it; a broken link fails
-the script. The checked-in `.mcp.json` registers `calque serve --source .` as the `calque` server,
+repository into `.kulman/` (gitignored, incremental) and runs `wiki lint` on it; a broken link fails
+the script. The checked-in `.mcp.json` registers `wiki serve --source .` as the `wiki` server,
 so an agent session started here can search the project; in a fresh clone, run
 `scripts/selfhost.sh` once so the binary exists.
 
