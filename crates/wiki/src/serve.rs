@@ -10,10 +10,12 @@ use crate::query::Wiki;
 use crate::{CompileOptions, WikiError};
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::{LazyLock, Mutex, OnceLock};
+use std::sync::{LazyLock, Mutex, OnceLock, PoisonError};
 use std::time::{Instant, SystemTime};
 
 mod render;
@@ -638,25 +640,41 @@ pub(crate) const WORKERS: usize = 16;
 /// ends, then wait for the calls in flight; returns whether any message
 /// came. Calls that read the wiki go to `workers` threads; the rest
 /// (`ping`, `initialize`, `tools/list`) are answered by the reader itself,
-/// so they never queue behind a compile.
+/// so they never queue behind a compile. A `notifications/cancelled` for a
+/// call in flight drops it from the queue, or stops its wait for a compile
+/// lock, and its reply is never sent.
 pub(crate) fn serve(
     server: &WikiServer,
     input: impl BufRead,
     workers: usize,
     reply: &(dyn Fn(Value) + Sync),
 ) -> std::io::Result<bool> {
-    let (calls, queue) = std::sync::mpsc::channel::<Value>();
+    let (calls, queue) = std::sync::mpsc::channel::<(Value, Arc<AtomicBool>)>();
     let queue = &Mutex::new(queue);
+    // The queued and running calls' cancel flags, by JSON id.
+    let in_flight = &Mutex::new(HashMap::<String, Arc<AtomicBool>>::new());
+    let in_flight = move || in_flight.lock().unwrap_or_else(PoisonError::into_inner);
     // `calls` moves in: an early return drops it, so the workers end.
     std::thread::scope(move |s| {
         for _ in 0..workers {
             s.spawn(move || loop {
-                let next = queue
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .recv();
-                let Ok(msg) = next else { break };
-                if let Some(r) = server.handle(&msg) {
+                let next = queue.lock().unwrap_or_else(PoisonError::into_inner).recv();
+                let Ok((msg, cancelled)) = next else { break };
+                crate::dirlock::CANCELLED.set(Some(Arc::clone(&cancelled)));
+                let r = if cancelled.load(Ordering::Relaxed) {
+                    None
+                } else {
+                    server.handle(&msg)
+                };
+                crate::dirlock::CANCELLED.set(None);
+                // Ended: a later cancel or a reused id finds nothing.
+                let key = msg["id"].to_string();
+                let mut ids = in_flight();
+                if ids.get(&key).is_some_and(|c| Arc::ptr_eq(c, &cancelled)) {
+                    ids.remove(&key);
+                }
+                drop(ids);
+                if let Some(r) = r.filter(|_| !cancelled.load(Ordering::Relaxed)) {
                     reply(r);
                 }
             });
@@ -669,13 +687,26 @@ pub(crate) fn serve(
             }
             read_any = true;
             match serde_json::from_str::<Value>(&line) {
+                // Unknown and finished ids, and `initialize` (answered at
+                // once), are not in flight: ignored, as the spec allows.
+                Ok(msg) if msg["method"] == "notifications/cancelled" => {
+                    if let Some(c) = in_flight().get(&msg["params"]["requestId"].to_string()) {
+                        c.store(true, Ordering::Relaxed);
+                    }
+                }
                 Ok(msg)
                     if matches!(
                         msg["method"].as_str(),
                         Some("tools/call" | "resources/list" | "resources/read")
                     ) =>
                 {
-                    calls.send(msg).expect("workers outlive the reader");
+                    let cancelled = Arc::new(AtomicBool::new(false));
+                    if let Some(id) = msg.get("id").filter(|id| !id.is_null()) {
+                        in_flight().insert(id.to_string(), Arc::clone(&cancelled));
+                    }
+                    calls
+                        .send((msg, cancelled))
+                        .expect("workers outlive the reader");
                 }
                 Ok(msg) => {
                     if let Some(r) = server.handle(&msg) {

@@ -310,6 +310,82 @@ fn calls_beyond_the_workers_queue_and_ping_does_not() {
     assert!(at(3) > first + Duration::from_secs(1), "{replies:?}");
 }
 
+/// A `tools/call` of `search` with `args`.
+fn search_call(id: u64, args: &Value) -> String {
+    serde_json::json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+        "params": {"name": "search", "arguments": args}})
+    .to_string()
+}
+
+fn cancel(id: u64) -> String {
+    serde_json::json!({"jsonrpc": "2.0", "method": "notifications/cancelled",
+        "params": {"requestId": id, "reason": "test"}})
+    .to_string()
+}
+
+/// A search that reads no wiki (only a `docs` file), so it never waits.
+fn docs_call(id: u64) -> String {
+    search_call(id, &serde_json::json!({"query": "x", "docs": ["none.md"]}))
+}
+
+/// One worker busy waiting on a compile: a call cancelled in the queue
+/// never runs and gets no reply; the rest are answered.
+#[test]
+fn a_call_cancelled_in_the_queue_gets_no_reply() {
+    let (tmp, out) = fixture(3);
+    let server = WikiServer::new(WikiState::load(&out).unwrap(), out.clone(), &["search"]);
+    let (release, cli) = hold(&tmp, &out);
+    let ping = r#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#.to_string();
+    let wait = search_call(1, &serde_json::json!({"query": "x"}));
+    let input = [wait, docs_call(2), cancel(2), ping].join("\n");
+    let replies = Mutex::new(Vec::new());
+    serve(&server, input.as_bytes(), 1, &|r: Value| {
+        replies.lock().unwrap().push(r["id"].as_u64().unwrap());
+    })
+    .unwrap();
+    let _ = release.send(());
+    cli.join().unwrap();
+    let mut ids = replies.into_inner().unwrap();
+    ids.sort_unstable();
+    assert_eq!(ids, [1, 3]);
+}
+
+/// A call cancelled while it waits on a compile's lock gives up the wait,
+/// so the worker frees long before `WAIT`, and it gets no reply.
+#[test]
+fn a_call_cancelled_while_waiting_on_a_compile_frees_its_worker() {
+    let (tmp, out) = fixture(3);
+    let server = WikiServer::new(WikiState::load(&out).unwrap(), out.clone(), &["search"]);
+    let (release, cli) = hold(&tmp, &out);
+    let (input, mut w) = std::io::pipe().unwrap();
+    let t = Instant::now();
+    let replies = Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        let (server, replies) = (&server, &replies);
+        s.spawn(move || {
+            serve(server, std::io::BufReader::new(input), 1, &|r: Value| {
+                replies
+                    .lock()
+                    .unwrap()
+                    .push((r["id"].as_u64().unwrap(), t.elapsed()));
+            })
+            .unwrap()
+        });
+        writeln!(w, "{}", search_call(1, &serde_json::json!({"query": "x"}))).unwrap();
+        // The worker is now waiting on the lock.
+        std::thread::sleep(Duration::from_millis(300));
+        writeln!(w, "{}", cancel(1)).unwrap();
+        writeln!(w, "{}", docs_call(2)).unwrap();
+        drop(w);
+    });
+    let _ = release.send(());
+    cli.join().unwrap();
+    let replies = replies.into_inner().unwrap();
+    assert_eq!(replies.len(), 1, "{replies:?}");
+    assert_eq!(replies[0].0, 2, "{replies:?}");
+    assert!(replies[0].1 < Duration::from_secs(2), "{replies:?}");
+}
+
 /// A sample value of a schema property's type.
 fn sample(schema: &Value) -> Value {
     let ty = match &schema["type"] {

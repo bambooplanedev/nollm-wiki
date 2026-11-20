@@ -1,11 +1,20 @@
 //! Advisory file locks under `<dir>/.serve/`: a load never reads a wiki that a
 //! compile is half way through writing.
 
+use std::cell::RefCell;
 use std::fs::{File, OpenOptions};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub(crate) const SERVE_DIR: &str = ".serve";
+
+thread_local! {
+    /// Set while this thread runs a call its client may cancel:
+    /// [`shared_until`] stops waiting once it turns true.
+    pub(crate) static CANCELLED: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };
+}
 
 /// `<dir>/.serve/<name>`, created if `.serve` exists; `.serve` itself is
 /// never created here, so a dir no server ever used gets none.
@@ -42,14 +51,17 @@ pub fn try_shared<T>(dir: &Path, f: impl FnOnce() -> T) -> Option<T> {
     shared_until(dir, Instant::now(), f)
 }
 
-/// `shared` waiting no later than `until`: tries at least once, then every
-/// 10 ms; `None` if a compile still holds the lock.
+/// `shared` waiting no later than `until`, or until this thread's call is
+/// [`CANCELLED`]: tries at least once, then every 10 ms; `None` if a
+/// compile still holds the lock.
 pub fn shared_until<T>(dir: &Path, until: Instant, f: impl FnOnce() -> T) -> Option<T> {
     let lock = open(dir, "compile.lock").ok();
     if let Some(l) = &lock {
         while let Err(std::fs::TryLockError::WouldBlock) = l.try_lock_shared() {
             let left = until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
+            let cancelled =
+                CANCELLED.with_borrow(|c| c.as_ref().is_some_and(|c| c.load(Ordering::Relaxed)));
+            if left.is_zero() || cancelled {
                 return None;
             }
             std::thread::sleep(left.min(Duration::from_millis(10)));
