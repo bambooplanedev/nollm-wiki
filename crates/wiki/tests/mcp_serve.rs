@@ -1312,8 +1312,8 @@ fn installed_copies() -> (tempfile::TempDir, std::path::PathBuf, std::path::Path
     std::fs::create_dir_all(&a).unwrap();
     std::fs::create_dir_all(&b).unwrap();
     let (a, b) = (a.join("wiki"), b.join("wiki"));
-    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &a).unwrap();
-    std::fs::copy(env!("CARGO_BIN_EXE_wiki"), &b).unwrap();
+    common::copy_wiki(&a);
+    common::copy_wiki(&b);
     (dir, a, b)
 }
 
