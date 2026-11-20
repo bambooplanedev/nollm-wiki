@@ -249,18 +249,19 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-A `wiki` installed by nollm-wiki (run as `~/.nollm-wiki-home/bin/wiki`, or from `$NOLLM_WIKI_HOME/bin`)
-has the agents start it as `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` through `sh -c` (the
-prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
-`PATH` and no one's home path lands in a shared file; with a `NOLLM_WIKI_HOME` other than
-`~/.nollm-wiki-home` setup warns that the agents need that variable too (a home path containing `"`,
-`$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
-own and is rewritten to the form this `wiki` writes. Any other `wiki` (built from source, installed
-elsewhere) has every agent run the server as plain `wiki`, so `wiki` must be on `PATH`; setup
-warns when it is not, or when the `wiki` found first is another program (one whose `--version` does not
-start with `wiki <version>`). Safe to run twice. An entry, file or block at the same place with other content is left alone
-and reported; setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space
-pretty JSON with its keys and their order kept.
+A `wiki` installed by nollm-wiki (run as `~/.nollm-wiki-home/bin/wiki`, or from `$NOLLM_WIKI_HOME/bin`) has the
+agents start it as `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` through `sh -c` (the prompt hook
+runs that line, pi's extension builds the same path itself), so no agent needs it on `PATH` and no
+one's home path lands in a shared file; with a `NOLLM_WIKI_HOME` other than `~/.nollm-wiki-home` setup warns
+that the agents need that variable too (a home path containing `"`, `$`, a backtick or `\` is not
+supported by this line). An entry in either form counts as setup's own and is rewritten to the form
+this `wiki` writes. Any other `wiki` (built from source, installed elsewhere) has every agent run
+the server as plain `wiki`, so `wiki` must be on `PATH`; setup warns when it is not, or when the
+first `wiki` on `PATH` is another program (one whose `--version` does not print `wiki <version>`
+within 2 seconds): agents would start that one, so put this `wiki` earlier on `PATH`. Safe to run
+twice. An entry, file or block at the same place with other content is left alone and reported;
+setup does the rest and exits 1. A JSON config setup edits is rewritten as 2-space pretty JSON with
+its keys and their order kept.
 
 After setup: pi loads project files only after you trust the project (`/trust`, or `--approve` in
 print mode); `cursor-agent` loads a new server only after it is enabled

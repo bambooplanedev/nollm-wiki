@@ -7,9 +7,10 @@ use crate::{compile, memory, CompileOptions, WikiError};
 use clap::ValueEnum;
 use edit::Outcome;
 use serde_json::{json, Value};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 use wiki_code::OUT_DIR;
 
 const SKILL_TEMPLATE: &str = include_str!("SKILL.md");
@@ -118,29 +119,38 @@ fn executable(_: &std::fs::Metadata) -> bool {
     true
 }
 
-/// The executable regular files called `name` on `PATH`, in order.
-fn on_path(name: &str) -> impl Iterator<Item = PathBuf> {
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    std::env::split_paths(&path)
-        .map(|d| d.join(name))
-        .filter(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
-        .collect::<Vec<_>>()
-        .into_iter()
-}
-
 /// First executable regular file called `name` on `PATH`.
 pub fn find_on_path(name: &str) -> Option<PathBuf> {
-    on_path(name).next()
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|d| d.join(name))
+        .find(|p| p.metadata().is_ok_and(|m| m.is_file() && executable(&m)))
 }
 
-/// Whether the program at `p` is this tool: `--version` prints `wiki <digit>…`, as clap does.
-/// Another tool called `wiki` on `PATH` is not.
+/// Whether the program at `p` is this tool: `--version` prints `wiki <digit>…` within 2 seconds,
+/// as clap does. Another tool called `wiki` (or one that stalls) is not.
 fn is_this_tool(p: &Path) -> bool {
-    Command::new(p).arg("--version").output().is_ok_and(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .strip_prefix(&format!("{CMD} "))
-            .is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
-    })
+    let Ok(mut c) = Command::new(p)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return false;
+    };
+    let start = Instant::now();
+    while c.try_wait().is_ok_and(|s| s.is_none()) {
+        if start.elapsed() > Duration::from_secs(2) {
+            let _ = c.kill();
+            let _ = c.wait();
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut out = String::new();
+    let _ = c.stdout.take().map(|mut o| o.read_to_string(&mut out));
+    out.strip_prefix(&format!("{CMD} "))
+        .is_some_and(|v| v.starts_with(|c: char| c.is_ascii_digit()))
 }
 
 #[allow(clippy::struct_excessive_bools)]
@@ -489,10 +499,9 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
         }
     }
 
-    let found: Vec<PathBuf> = on_path(CMD).collect();
-    let warning = match (home, found.first()) {
-        (None, Some(p)) if !found.iter().any(|p| is_this_tool(p)) => format!(
-            "warning: {} is not this wiki; the agents will not find wiki until it is on PATH",
+    let warning = match (home, find_on_path(CMD)) {
+        (None, Some(p)) if !is_this_tool(&p) => format!(
+            "warning: {} is not this wiki; the agents would start it instead: put this wiki earlier on PATH",
             p.display()
         ),
         (None, None) => {
