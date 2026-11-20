@@ -613,8 +613,12 @@ pub fn run(
     };
     let server = WikiServer::new(state, root, &tools);
     let reply = |r: Value| {
-        // A locked write keeps each reply on its own line.
-        let _ = writeln!(std::io::stdout().lock(), "{r}");
+        // A locked write keeps each reply on its own line. A client that
+        // closed our stdout is gone: end rather than answer no one.
+        if writeln!(std::io::stdout().lock(), "{r}").is_err() {
+            eprintln!("serve: stdout closed");
+            std::process::exit(1);
+        }
     };
     if !serve(&server, std::io::stdin().lock(), WORKERS, &reply)? {
         return Err(WikiError::Serve(
