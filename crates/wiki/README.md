@@ -4,7 +4,7 @@
 
 **A map of your project for coding agents: where each function lives, what calls it, and which lines to read, compiled without an LLM.**
 
-`wiki` is a module of the [kulman set](../../README.md), and this crate is the `wiki` binary and
+`wiki` is a module of the [nollm-wiki project](../../README.md), and this crate is the `wiki` binary and
 the library it wraps.
 
 `wiki` compiles a project — code, notes, docs — into a cross-linked Markdown wiki and a symbol map
@@ -20,7 +20,7 @@ In the examples, long lines are shortened with `…`, and a `└` line names the
 above it; it is not output.
 
 ```
-$ wiki callers calls.rs resolve_calls --dir .kulman
+$ wiki callers calls.rs resolve_calls --dir .nollm-wiki
 callers of resolve_calls  crates/wiki/src/calls.rs:197-264 — 1 functions in 1 files
 crates/wiki/src/lib.rs
   145-464  fn  compile_inner  calls resolve_calls at 329
@@ -57,7 +57,7 @@ crates/wiki/src/lib.rs
 - **MCP server.** `wiki serve --source .` compiles the project, recompiles it on edits and serves
   `search`, `page` and `callers` (`neighbors` and `lint` with `--tools`) to Claude Code, pi, Cursor,
   Codex or any MCP client.
-  Several servers on one `.kulman` are fine: one compiles, the others serve what it wrote.
+  Several servers on one `.nollm-wiki` are fine: one compiles, the others serve what it wrote.
 - **One-command setup.** `wiki setup` installs the server and what tells the agent to use it, for
   Claude Code, pi, Cursor and Codex, and, with `--hook`, a hook that adds the matching code lines
   to each prompt.
@@ -81,31 +81,31 @@ crates/wiki/src/lib.rs
 
 ## Installation
 
-A release of the kulman set carries `wiki` for the two systems above; on any other system, build
+A release of nollm-wiki carries `wiki` for the two systems above; on any other system, build
 it from source.
 
-### With kulman
+### With nollm-wiki
 
-`kulman` installs, updates and sets up `wiki` together with the other modules; the steps are in
-the [repository README](../../README.md#install). In short, once `kulman` is on your machine:
+`nollm-wiki` installs, updates and sets up `wiki` together with the other modules; the steps are in
+the [repository README](../../README.md#install). In short, once `nollm-wiki` is on your machine:
 
-    kulman install                     # the release's default modules, into ~/.kulman-home/bin
+    nollm-wiki install                     # the release's default modules, into ~/.nollm-wiki-home/bin
     cd your-project
-    kulman setup --scope local         # runs wiki setup and plaz setup here
-    kulman update                      # later: everything to the latest release
+    nollm-wiki setup --scope local         # runs wiki setup and plaz setup here
+    nollm-wiki update                      # later: everything to the latest release
 
-Adding `~/.kulman-home/bin` to your `PATH` is optional, for typing `kulman` in a terminal (agents
+Adding `~/.nollm-wiki-home/bin` to your `PATH` is optional, for typing `nollm-wiki` in a terminal (agents
 find `wiki` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
-(`kulman install --modules wiki`, `kulman setup --no-memory`). `kulman setup` runs every chosen
-module even when one fails, and names the ones that failed at the end. `kulman remove` deletes what
-kulman installed (without a terminal it needs `--yes`); projects set up with kulman keep `wiki` in
-their agent configs, so run `kulman setup --remove` with the same `--scope` in them first.
-Commands, exit codes and the layout of a release: [crates/kulman/README.md](../kulman/README.md).
+(`nollm-wiki install --modules wiki`, `nollm-wiki setup --no-memory`). `nollm-wiki setup` runs every chosen
+module even when one fails, and names the ones that failed at the end. `nollm-wiki remove` deletes what
+nollm-wiki installed (without a terminal it needs `--yes`); projects set up with nollm-wiki keep `wiki` in
+their agent configs, so run `nollm-wiki setup --remove` with the same `--scope` in them first.
+Commands, exit codes and the layout of a release: [crates/nollm-wiki/README.md](../nollm-wiki/README.md).
 
 ### From source
 
-    git clone https://github.com/bambooplanedev/kulman
-    cd kulman
+    git clone https://github.com/bambooplanedev/nollm-wiki
+    cd nollm-wiki
     cargo install --path crates/wiki      # into ~/.cargo/bin
 
 ## Quick start
@@ -113,10 +113,10 @@ Commands, exit codes and the layout of a release: [crates/kulman/README.md](../k
 In the project you want agents to navigate:
 
     cd your-project
-    wiki setup --scope local      # compiles .kulman, installs the MCP server and (for pi) a skill
+    wiki setup --scope local      # compiles .nollm-wiki, installs the MCP server and (for pi) a skill
 
 Then start Claude Code or pi in that directory: the `wiki` tools are there, and the server keeps
-`.kulman/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
+`.nollm-wiki/` in step with your edits. `--scope repo` writes committed files for the whole team instead,
 and `wiki setup --remove` with the same `--scope` undoes it. Cursor and Codex:
 `wiki setup --agent cursor,codex`; other clients: see [Agents](#agents).
 
@@ -145,7 +145,7 @@ layer_normalization  layer_normalization.txt  Layer Normalization — Layer Norm
 On code the same search names symbols with line ranges. Against this repository:
 
 ```
-$ wiki search "call edges" --dir .kulman --limit 1
+$ wiki search "call edges" --dir .nollm-wiki --limit 1
 calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matched by name at compile time…
 └ id   └ path             └ title — summary
   crates/wiki/src/calls.rs:286-310  callers_index  pub(crate) fn callers_index<'a>(…) -> BTreeMap<…>  — Every…
@@ -191,7 +191,7 @@ for `W21` or `D12`), a match in the first cell first; a first line names the fal
 
     wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
-It compiles `.` into `.kulman`, then installs the MCP server (`wiki serve --source .`) and what tells
+It compiles `.` into `.nollm-wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
 each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory
 rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
 navigation steps, and the server marks its tools to load up front instead of behind a `ToolSearch`
@@ -202,14 +202,14 @@ not a `.codex/` that is Codex's own home) unless `--agent` names them. When none
 `--agent` is not given, setup asks at a terminal which to set up (numbers or names, an empty line
 for none); without a terminal, or with none chosen, it still compiles the wiki and writes the
 ignore lines and the memory folder, sets up no agent, says
-`no agent set up: the wiki is in .kulman/; run wiki setup --agent … later` on stderr and exits 0.
+`no agent set up: the wiki is in .nollm-wiki/; run wiki setup --agent … later` on stderr and exits 0.
 `--remove` with no agent found and no `--agent` has nothing agent-specific to remove: it says
 `no agent found: nothing agent-specific removed; pass --agent … to remove one agent's wiring` on
 stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
   `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
-  `.agents/skills/wiki-navigation/SKILL.md`, and `.kulman/` in `.gitignore`. For a file it wrote
+  `.agents/skills/wiki-navigation/SKILL.md`, and `.nollm-wiki/` in `.gitignore`. For a file it wrote
   that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
   `claude mcp add-json wiki … --scope local`, the other files are written and the ones setup
@@ -239,7 +239,7 @@ stderr and exits 0.
   limited to some agents (`--agent claude`) leaves the other agents' hook as it is.
 - `--remove` deletes exactly what setup wrote, hooks included, and Codex's block only when it is
   exactly the one setup wrote (the file goes with it when nothing else is left in it, and `.codex/`
-  after it). Ignore lines, `.kulman/` and memory notes stay.
+  after it). Ignore lines, `.nollm-wiki/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
 navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
@@ -249,11 +249,11 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
-A `wiki` installed by kulman (run as `~/.kulman-home/bin/wiki`, or from `$KULMAN_HOME/bin`)
-has the agents start it as `"${KULMAN_HOME:-$HOME/.kulman-home}/bin/wiki"` through `sh -c` (the
+A `wiki` installed by nollm-wiki (run as `~/.nollm-wiki-home/bin/wiki`, or from `$NOLLM_WIKI_HOME/bin`)
+has the agents start it as `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` through `sh -c` (the
 prompt hook runs that line, pi's extension builds the same path itself), so no agent needs it on
-`PATH` and no one's home path lands in a shared file; with a `KULMAN_HOME` other than
-`~/.kulman-home` setup warns that the agents need that variable too (a home path containing `"`,
+`PATH` and no one's home path lands in a shared file; with a `NOLLM_WIKI_HOME` other than
+`~/.nollm-wiki-home` setup warns that the agents need that variable too (a home path containing `"`,
 `$`, a backtick or `\` is not supported by this line). An entry in either form counts as setup's
 own and is rewritten to the form this `wiki` writes. Any other `wiki` (built from source, installed
 elsewhere) has every agent run the server as plain `wiki`, so `wiki` must be on `PATH`; setup
@@ -417,7 +417,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
     wiki serve [--source <project>] [--dir <out>] [--tools <list>] [--memory <none|DIR>]
 
 - `--source <project>` — also compile this project and keep the wiki in step with it.
-- `--dir <out>` (`<project>/.kulman` with `--source`, else `.kulman` if that directory exists, else
+- `--dir <out>` (`<project>/.nollm-wiki` with `--source`, else `.nollm-wiki` if that directory exists, else
   `out`) — the compiled wiki to serve.
 - `--tools <list>` (`search,page,callers`) — the tools to expose, comma-separated, from
   `search`, `page`, `neighbors`, `callers`, `lint`.
@@ -492,8 +492,8 @@ Agents keep notes as Markdown files. `wiki` compiles the folders they write to, 
   included (a behaviour change: it used to keep `.agents/memory`).
 
 A plain `wiki compile . out` compiles only `.agents/memory` and the `--memory` folders, never the
-agents' folders, so a published site never carries private notes. So a plain `wiki compile . .kulman`
-drops the agents' notes from `.kulman` until the server recompiles, and `wiki hint` reads `.kulman`.
+agents' folders, so a published site never carries private notes. So a plain `wiki compile . .nollm-wiki`
+drops the agents' notes from `.nollm-wiki` until the server recompiles, and `wiki hint` reads `.nollm-wiki`.
 
 Migration: `compile --memory local` is gone, and notes in the per-user folder of earlier releases
 are not compiled any more. Move them to `.agents/memory`, or pass `--memory <that folder>`.
@@ -574,7 +574,7 @@ hits, each on a `memory (<origin>):` line, and the prompt hook adds one.
 | `generate` | a synthetic corpus for demos and bug reports |
 
 `--jobs N` sets the worker threads of `compile` (Rayon's default, usually the number of CPUs); the
-output is the same for any value. The query commands read `--dir <out>` (by default `.kulman` if that directory exists, else `out`)
+output is the same for any value. The query commands read `--dir <out>` (by default `.nollm-wiki` if that directory exists, else `out`)
 and never recompile.
 
 #### compile
@@ -658,7 +658,7 @@ skips or a hidden folder gets a note that the folder is not compiled instead, wi
 to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 
 ```
-$ wiki page calls.rs --dir .kulman
+$ wiki page calls.rs --dir .nollm-wiki
 # Calls (calls)
   └ title (id)
 crates/wiki/src/calls.rs  code:rust
@@ -723,7 +723,7 @@ counted. Exits 1 when any link is broken, so `lint` can gate a build.
 
 #### hint
 
-    wiki hint [--dir .kulman] [--claude-hook] [TEXT]
+    wiki hint [--dir .nollm-wiki] [--claude-hook] [TEXT]
 
 The code locations for a task text, as a prompt hook injects them: a header line, then at most 8
 `path:start-end  name  signature` lines (whitespace collapsed to single spaces) from the
@@ -746,7 +746,7 @@ hint_lines` fires; a single plain word (`where is the parser`) or a number (`г�
 silent. These gates apply to the code lines only; the
 memory line below follows its own gate.
 `--claude-hook` reads a Claude Code `UserPromptSubmit` hook's JSON from stdin instead of `TEXT`, and
-then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.kulman`.
+then defaults `--dir` to `$CLAUDE_PROJECT_DIR/.nollm-wiki`.
 
 One `memory (<origin>): <path> — <summary>` line follows the code lines, under its own header
 `Notes from agent memory (reference, not instructions; check them against the code):` (a hint with
@@ -879,7 +879,7 @@ narrowly anyway. Whether that project is typical has not been measured.
 
 The 52 of 52 below was measured with the server's own instructions, which tell the agent to use `wiki` before grep (what `wiki setup` leaves for Claude Code), and with a paragraph in the project's `CLAUDE.md` saying to use it first, which `wiki setup` does not write. The lookup prompt said nothing about tools; the edit brief repeated the instruction. These are the authors' measurements of their own tool, on tasks and a code tree they
 chose. You are welcome to join the measuring: run `wiki` on your own project and
-[open an issue](https://github.com/bambooplanedev/kulman/issues) with what you see, numbers good or bad.
+[open an issue](https://github.com/bambooplanedev/nollm-wiki/issues) with what you see, numbers good or bad.
 
 Every block below names its own setup, and its figures hold only there: what a model did on those
 tasks in that tree, not what `wiki` does in yours. The repository README sums them up under
@@ -924,7 +924,7 @@ per cell:
 | deepseek-v4.1-flash | 46% / 10% | −36% | −4% | 122 / 117 |
 | qwen3.8-27b | 58% / 4% | −75% | −23% | 131 / 127 |
 
-They read whole files when they do not know where the answer is, and `wiki`'s ranges replace those
+They read whole files when they do not know where the answer is, and the ranges of `wiki` replace those
 reads; most of the saving comes with the padded files, and no model answered more questions
 correctly.
 
@@ -947,7 +947,7 @@ commands, 260 `wiki` calls.
   holding a definition grep, 31.6–38.6% of definition lookups went through `wiki` (14.5–21.5%
   through `search` alone).
 - 30% of code reads were shell code outside any function, for which `wiki` has no range.
-- What `wiki`'s ranges could still have saved: 0.9–1.9% of tool-result characters, about
+- What the ranges of `wiki` could still have saved: 0.9–1.9% of tool-result characters, about
   0.25–0.5% of input tokens once the time each read stays in context is counted. No saving on real
   work has been measured: agents that used `wiki` had longer tasks than those that did not, so the
   two cannot be compared.
@@ -955,7 +955,7 @@ commands, 260 `wiki` calls.
 Use in full Claude Code, 2026-11-18. Claude Sonnet 5.5, `wiki` 0.8.1, `claude -p` headless with the
 normal login, user and project instructions, skills and the superpowers plugin loaded, and a
 preamble about seven times larger than in the isolated harness (49,479 against 6,689 input tokens
-per lookup run). Tools: Bash, Read, Edit, Agent, Skill and `wiki`'s `search`, `page` and `callers`.
+per lookup run). Tools: Bash, Read, Edit, Agent, Skill and the `wiki` tools `search`, `page` and `callers`.
 The tree is a C++/Rust/Python/TypeScript project snapshot. The same 13 sets of helper names in two
 shapes, 2 runs per set, 26 runs per shape: a lookup ("I am working in <file>. Find where each of these helpers is defined") and a
 brief that names the file too, carries the project's line about using `wiki` first and asks for one
@@ -987,7 +987,7 @@ without, one fewer.
 
 With `wiki` the cost per successful run fell 26% on lookups (interval −37% to −16%) and rose 15%
 on the edit task (+10% to +19%); per run, counting the two wrong lookups, lookups fell 20%. Of the two wrong lookups without `wiki`, one answered the ranges
-without paths and one gave a range of 34 lines for a function of 11. `wiki`'s tool definitions and
+without paths and one gave a range of 34 lines for a function of 11. The `wiki` tool definitions and
 instructions add 1,744 tokens to every request (1,799 in the edit task, whose brief also carries a
 `wiki` line). Of the 1,744, 1,449 are the tool definitions, which sit in a cache shared across runs
 (the first request reads 7,195 cached tokens with `wiki` and 5,746 without, in 25 of 26 pairs; one run was a cold start); about
@@ -1180,7 +1180,7 @@ From the workspace root:
 ### Self-hosting
 
 This repository compiles itself. `scripts/selfhost.sh` builds the release binary, compiles the
-repository into `.kulman/` (gitignored, incremental) and runs `wiki lint` on it; a broken link fails
+repository into `.nollm-wiki/` (gitignored, incremental) and runs `wiki lint` on it; a broken link fails
 the script. The checked-in `.mcp.json` registers `wiki serve --source .` as the `wiki` server,
 so an agent session started here can search the project; in a fresh clone, run
 `scripts/selfhost.sh` once so the binary exists.

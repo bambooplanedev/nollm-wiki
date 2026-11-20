@@ -408,7 +408,7 @@ per question is noise-level: treat single results as anecdotes.
 ## `serve --source`
 
 - Files written only through `mmap` are not seen as changed.
-- Barrier files left by a crashed server stay in `.kulman/.serve/` until a
+- Barrier files left by a crashed server stay in `.nollm-wiki/.serve/` until a
   writer's rescan removes them, 10 s on.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
@@ -457,7 +457,7 @@ per question is noise-level: treat single results as anecdotes.
   says how to trust it. Whether other desktop app versions behave the same is not checked. The
   Cursor editor is not checked, only `cursor-agent`.
 - The `.codex/config.toml` block is recognised as lines of text, not parsed. A multi-line string
-  value that holds exactly `wiki`'s block is treated as `wiki`'s own: setup says it is set up, a
+  value that holds exactly the block `wiki` writes is treated as its own: setup says it is set up, a
   memory switch or `--remove` edits the string. A key spelled with an escape sequence inside quotes
   (`"c\u0061lque"` under `[mcp_servers]`, or `[mcp_servers."c\u0061lque"]`) is not recognised as
   naming the server: setup appends its block, the file then holds two definitions of the same table,
@@ -474,16 +474,16 @@ per question is noise-level: treat single results as anecdotes.
   not atomically, and pretty-printed with serde_json's layout: a hand-made
   indentation or spacing is not kept. A settings file
   that is a symbolic link is followed and the target rewritten.
-- `--remove` leaves `.kulman/` and the ignore lines in place.
+- `--remove` leaves `.nollm-wiki/` and the ignore lines in place.
 - The JSON configs (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `.claude/settings*.json`) and
   `AGENTS.md` are read and written through a symlink, so setup and `--remove` edit the link's target
   wherever it is. Only `.codex/config.toml` refuses a link.
 
 ## Agent memory
 
-- A plain `wiki compile . .kulman` drops the agents' notes until the server
+- A plain `wiki compile . .nollm-wiki` drops the agents' notes until the server
   recompiles, so `wiki hint` loses the memory line meanwhile.
-- `--no-ignore` walks `.kulman/`, whose pages can hold memory text.
+- `--no-ignore` walks `.nollm-wiki/`, whose pages can hold memory text.
 - `supersedes:` is not checked for cycles: two notes that supersede each other are both marked superseded.
 - Claude Code normalises the project path to NFC before slugging; the wiki
   slugs the path as the OS gives it, so a path with decomposed characters may
