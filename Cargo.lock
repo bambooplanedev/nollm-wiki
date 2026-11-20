@@ -893,7 +893,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nollm-wiki"
+name = "nollm-wiki-install"
 version = "0.9.0"
 dependencies = [
  "anyhow",

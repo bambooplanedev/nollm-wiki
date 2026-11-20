@@ -86,21 +86,21 @@ it from source.
 
 ### With nollm-wiki
 
-`nollm-wiki` installs, updates and sets up `wiki` together with the other modules; the steps are in
-the [repository README](../../README.md#install). In short, once `nollm-wiki` is on your machine:
+`nollm-wiki-install` installs, updates and sets up `wiki` together with the other modules; the steps are in
+the [repository README](../../README.md#install). In short, once `nollm-wiki-install` is on your machine:
 
-    nollm-wiki install                     # the release's default modules, into ~/.nollm-wiki-home/bin
+    nollm-wiki-install install                     # the release's default modules, into ~/.nollm-wiki-home/bin
     cd your-project
-    nollm-wiki setup --scope local         # runs wiki setup and plaz setup here
-    nollm-wiki update                      # later: everything to the latest release
+    nollm-wiki-install setup --scope local         # runs wiki setup and plaz setup here
+    nollm-wiki-install update                      # later: everything to the latest release
 
-Adding `~/.nollm-wiki-home/bin` to your `PATH` is optional, for typing `nollm-wiki` in a terminal (agents
+Adding `~/.nollm-wiki-home/bin` to your `PATH` is optional, for typing `nollm-wiki-install` in a terminal (agents
 find `wiki` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Everything is on by default; turn things off with flags
-(`nollm-wiki install --modules wiki`, `nollm-wiki setup --no-memory`). `nollm-wiki setup` runs every chosen
-module even when one fails, and names the ones that failed at the end. `nollm-wiki remove` deletes what
+(`nollm-wiki-install install --modules wiki`, `nollm-wiki-install setup --no-memory`). `nollm-wiki-install setup` runs every chosen
+module even when one fails, and names the ones that failed at the end. `nollm-wiki-install remove` deletes what
 nollm-wiki installed (without a terminal it needs `--yes`); projects set up with nollm-wiki keep `wiki` in
-their agent configs, so run `nollm-wiki setup --remove` with the same `--scope` in them first.
-Commands, exit codes and the layout of a release: [crates/nollm-wiki/README.md](../nollm-wiki/README.md).
+their agent configs, so run `nollm-wiki-install setup --remove` with the same `--scope` in them first.
+Commands, exit codes and the layout of a release: [crates/nollm-wiki-install/README.md](../nollm-wiki-install/README.md).
 
 ### From source
 

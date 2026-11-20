@@ -1,4 +1,4 @@
-//! `nollm-wiki` with no command: what is installed, and whether a newer release exists.
+//! `nollm-wiki-install` with no command: what is installed, and whether a newer release exists.
 
 use anyhow::Result;
 
@@ -6,22 +6,22 @@ use crate::install::release_base;
 use crate::{path_hint, reachable, release, store};
 use store::State;
 
-/// `nollm-wiki` with no command, the release check limited to `wait`. Only reads: home is not created, nor locked.
+/// `nollm-wiki-install` with no command, the release check limited to `wait`. Only reads: home is not created, nor locked.
 pub(super) fn status(wait: release::Wait) -> Result<()> {
     let home = store::home_path()?;
     let Some(state) = State::load(&home)? else {
         println!(
-            "nothing installed in {}; run nollm-wiki install",
+            "nothing installed in {}; run nollm-wiki-install install",
             home.display()
         );
         return Ok(());
     };
-    println!("nollm-wiki {} in {}", state.version, home.display());
+    println!("nollm-wiki-install {} in {}", state.version, home.display());
     for name in &state.modules {
         if home.join("bin").join(name).is_file() {
             println!("{name}");
         } else {
-            println!("{name}  (missing: run nollm-wiki update)");
+            println!("{name}  (missing: run nollm-wiki-install update)");
         }
     }
     let bin = home.join("bin");
@@ -31,7 +31,7 @@ pub(super) fn status(wait: release::Wait) -> Result<()> {
             .modules
             .iter()
             .map(String::as_str)
-            .chain(["nollm-wiki"]),
+            .chain(["nollm-wiki-install"]),
     ) {
         println!("{}", path_hint(&bin));
     }
@@ -43,7 +43,10 @@ pub(super) fn status(wait: release::Wait) -> Result<()> {
     match latest {
         Ok((latest, _)) => {
             if release::version_key(&latest.version) > release::version_key(&state.version) {
-                println!("newer release: {} (nollm-wiki update)", latest.version);
+                println!(
+                    "newer release: {} (nollm-wiki-install update)",
+                    latest.version
+                );
             } else {
                 println!("up to date");
             }

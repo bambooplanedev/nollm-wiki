@@ -92,22 +92,22 @@ crates/wiki/src/lib.rs
 
 ### Через nollm-wiki
 
-`nollm-wiki` встановлює, оновлює й налаштовує `wiki` разом з іншими модулями; кроки описано в
-[README репозиторію](../../README.uk.md#встановлення). Коротко, коли `nollm-wiki` уже є на машині:
+`nollm-wiki-install` встановлює, оновлює й налаштовує `wiki` разом з іншими модулями; кроки описано в
+[README репозиторію](../../README.uk.md#встановлення). Коротко, коли `nollm-wiki-install` уже є на машині:
 
-    nollm-wiki install                     # модулі релізу за замовчуванням, у ~/.nollm-wiki-home/bin
+    nollm-wiki-install install                     # модулі релізу за замовчуванням, у ~/.nollm-wiki-home/bin
     cd your-project
-    nollm-wiki setup --scope local         # запускає тут wiki setup і plaz setup
-    nollm-wiki update                      # згодом: усе до останнього релізу
+    nollm-wiki-install setup --scope local         # запускає тут wiki setup і plaz setup
+    nollm-wiki-install update                      # згодом: усе до останнього релізу
 
-Додати `~/.nollm-wiki-home/bin` у свій `PATH` необов'язково, це для набору `nollm-wiki` у терміналі (агенти
+Додати `~/.nollm-wiki-home/bin` у свій `PATH` необов'язково, це для набору `nollm-wiki-install` у терміналі (агенти
 знаходять `wiki` і без цього; коли `~/.local/bin` у `PATH`, install лінкує туди інструменти). За замовчуванням усе ввімкнено; вимикайте прапорцями
-(`nollm-wiki install --modules wiki`, `nollm-wiki setup --no-memory`). `nollm-wiki setup` запускає кожен
+(`nollm-wiki-install install --modules wiki`, `nollm-wiki-install setup --no-memory`). `nollm-wiki-install setup` запускає кожен
 вибраний модуль, навіть коли якийсь завершився з помилкою, і наприкінці називає ті, що не вдалися.
-`nollm-wiki remove` видаляє те, що встановив nollm-wiki (без термінала потрібен `--yes`); проєкти,
+`nollm-wiki-install remove` видаляє те, що встановив nollm-wiki (без термінала потрібен `--yes`); проєкти,
 налаштовані через nollm-wiki, лишають `wiki` у конфігах агентів, тож спершу запустіть у них
-`nollm-wiki setup --remove` з тим самим `--scope`. Команди, коди виходу й будова релізу:
-[crates/nollm-wiki/README.uk.md](../nollm-wiki/README.uk.md).
+`nollm-wiki-install setup --remove` з тим самим `--scope`. Команди, коди виходу й будова релізу:
+[crates/nollm-wiki-install/README.uk.md](../nollm-wiki-install/README.uk.md).
 
 ### З коду
 

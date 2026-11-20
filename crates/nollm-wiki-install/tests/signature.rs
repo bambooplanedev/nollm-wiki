@@ -5,11 +5,12 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::{nollm_wiki, release, snapshot, stderr, stdout, version_dir};
+use common::{nollm_wiki_install, release, snapshot, stderr, stdout, version_dir};
 
 const WIKI: &[u8] = b"#!/bin/sh\necho wiki\n";
 const UNCHECKED: &str = "signature not checked: local release tree";
-const REFUSED: &str = "nollm-wiki: manifest.json: signature does not verify\nnothing changed\n";
+const REFUSED: &str =
+    "nollm-wiki-install: manifest.json: signature does not verify\nnothing changed\n";
 
 /// A well-formed signature by the TEST key, which is not the release key.
 const TEST_SIGNED: &[u8] = include_bytes!("data/signing/file.txt.minisig");
@@ -44,13 +45,19 @@ fn count(text: &str) -> usize {
 fn an_unsigned_local_tree_installs_and_says_so_once() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    let out = nollm_wiki(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), format!("{UNCHECKED}\n"));
     assert_eq!(count(&stdout(&out)), 0, "{}", stdout(&out));
     // Installed: the latest is checked, then the installed version's manifest is read.
     release(&t.path().join("release"), "0.8.0", &[("wiki", WIKI)]);
-    let out = nollm_wiki(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(count(&stderr(&out)), 1, "{}", stderr(&out));
     assert_eq!(count(&stdout(&out)), 0, "{}", stdout(&out));
@@ -62,7 +69,7 @@ fn a_bad_signature_refuses_install_and_changes_nothing() {
         let (t, base) = tree();
         sign(&t.path().join("release"), "0.7.0", &sig);
         let home = t.path().join("home");
-        let mut cmd = nollm_wiki(&home, &base); // makes the user's home first
+        let mut cmd = nollm_wiki_install(&home, &base); // makes the user's home first
         let before = snapshot(t.path());
         let out = cmd.arg("install").output().unwrap();
         assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
@@ -76,7 +83,10 @@ fn a_bad_signature_refuses_install_and_changes_nothing() {
 fn a_bad_signature_of_the_installed_version_refuses_install() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    nollm_wiki(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let dir = t.path().join("release");
     // The latest (0.8.0) is unsigned and newer; the installed 0.7.0's manifest is badly signed.
     release(&dir, "0.8.0", &[("wiki", WIKI)]);
@@ -86,7 +96,10 @@ fn a_bad_signature_of_the_installed_version_refuses_install() {
     )
     .unwrap();
     let before = snapshot(t.path());
-    let out = nollm_wiki(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert_eq!(stderr(&out), format!("{UNCHECKED}\n{REFUSED}"));
     assert_eq!(stdout(&out), "");
@@ -97,10 +110,16 @@ fn a_bad_signature_of_the_installed_version_refuses_install() {
 fn a_bad_latest_signature_is_only_said_by_an_install_that_has_a_version() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    nollm_wiki(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let dir = t.path().join("release");
     fs::write(dir.join("latest/download/manifest.json.minisig"), "garbage").unwrap();
-    let out = nollm_wiki(&home, &base).arg("install").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("install")
+        .output()
+        .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stderr(&out), format!("{UNCHECKED}\n"));
     assert_eq!(
@@ -116,12 +135,18 @@ fn a_bad_latest_signature_is_only_said_by_an_install_that_has_a_version() {
 fn a_bad_signature_refuses_update_and_changes_nothing() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    nollm_wiki(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let dir = t.path().join("release");
     release(&dir, "0.8.0", &[("wiki", WIKI)]);
     sign(&dir, "0.8.0", TEST_SIGNED);
     let before = snapshot(t.path());
-    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("update")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert_eq!(stderr(&out), REFUSED);
     assert_eq!(stdout(&out), "");
@@ -132,15 +157,18 @@ fn a_bad_signature_refuses_update_and_changes_nothing() {
 fn status_says_a_bad_signature_as_a_failed_check() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    nollm_wiki(&home, &base).arg("install").assert().success();
-    let out = nollm_wiki(&home, &base).output().unwrap();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
+    let out = nollm_wiki_install(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert_eq!(stderr(&out), format!("{UNCHECKED}\n"));
     assert_eq!(text.lines().last(), Some("up to date"), "{text}");
     sign(&t.path().join("release"), "0.7.0", TEST_SIGNED);
     let before = snapshot(t.path());
-    let out = nollm_wiki(&home, &base).output().unwrap();
+    let out = nollm_wiki_install(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     let text = stdout(&out);
     assert_eq!(count(&text), 0, "{text}");
@@ -157,25 +185,31 @@ fn status_says_a_bad_signature_as_a_failed_check() {
 fn a_signature_that_cannot_be_read_is_said_with_its_cause() {
     let (t, base) = tree();
     let home = t.path().join("home");
-    nollm_wiki(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let dir = t.path().join("release");
     // A directory where the signature belongs: there, but not readable as a file.
     for at in [dir.join("latest/download"), version_dir(&dir, "0.7.0")] {
         fs::create_dir(at.join("manifest.json.minisig")).unwrap();
     }
     let cause = "manifest.json: signature could not be fetched: Is a directory (os error 21)";
-    let out = nollm_wiki(&home, &base).output().unwrap();
+    let out = nollm_wiki_install(&home, &base).output().unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(
         stdout(&out).lines().last().unwrap(),
         format!("could not check for a newer release ({base}: {cause})")
     );
     let before = snapshot(t.path());
-    let out = nollm_wiki(&home, &base).arg("update").output().unwrap();
+    let out = nollm_wiki_install(&home, &base)
+        .arg("update")
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     assert_eq!(
         stderr(&out),
-        format!("nollm-wiki: {cause}\nnothing changed\n")
+        format!("nollm-wiki-install: {cause}\nnothing changed\n")
     );
     assert_eq!(snapshot(t.path()), before);
 }

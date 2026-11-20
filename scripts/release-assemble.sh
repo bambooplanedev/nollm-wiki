@@ -18,7 +18,7 @@
 set -eu
 
 targets='aarch64-apple-darwin x86_64-unknown-linux-musl'
-binaries='wiki plaz nollm-wiki'
+binaries='wiki plaz nollm-wiki-install'
 
 die() {
     printf 'release-assemble.sh: %s\n' "$1" >&2
@@ -31,7 +31,7 @@ version=$1
 dir=$2
 tree=${4:-}
 
-# X.Y.Z, each a number with no leading zero (but 0), as nollm-wiki reads it.
+# X.Y.Z, each a number with no leading zero (but 0), as nollm-wiki-install reads it.
 case $version in
     *[!0-9.]*) die "bad version: $version" ;;
 esac
@@ -58,11 +58,11 @@ if [ -n "$tree" ] && { [ -e "$tree" ] || [ -L "$tree" ]; }; then
 fi
 sh -n "$repo/install.sh" || die "install.sh does not parse"
 
-# Every module of modules.json is a binary, and every binary but nollm-wiki is a module.
+# Every module of modules.json is a binary, and every binary but nollm-wiki-install is a module.
 names=$(jq -r 'if type == "array" and all(.[]; type == "object" and (.name | type) == "string")
     then .[].name else error("not an array of named modules") end' "$modules") ||
     die "$modules is not a list of modules"
-want=$(for b in $binaries; do [ "$b" = nollm-wiki ] || printf '%s\n' "$b"; done | sort)
+want=$(for b in $binaries; do [ "$b" = nollm-wiki-install ] || printf '%s\n' "$b"; done | sort)
 [ "$(printf '%s\n' "$names" | sort)" = "$want" ] ||
     die "$modules names $(printf '%s\n' "$names" | tr '\n' ' ')but the binaries are $binaries"
 
@@ -99,7 +99,7 @@ jq --arg v "$version" --rawfile sums "$scratch/SHA256SUMS" '
            | {key: (.file | ltrimstr($p) | rtrimstr(".tar.gz")), value: .}]
         | from_entries;
     {version: $v, modules: map(. + {archives: archives(.name)}),
-     "nollm-wiki": {archives: archives("nollm-wiki")}}
+     "nollm-wiki-install": {archives: archives("nollm-wiki-install")}}
 ' "$modules" >"$scratch/manifest.json"
 
 cp -- "$repo/install.sh" "$scratch/install.sh"

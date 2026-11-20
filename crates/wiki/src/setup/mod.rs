@@ -499,7 +499,8 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             "warning: wiki is not on PATH; the agents will not find it until it is".into()
         }
         (Some(false), _) => {
-            "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment".into()
+            "warning: the agents find wiki through NOLLM_WIKI_HOME; set it in their environment"
+                .into()
         }
         _ => String::new(),
     };

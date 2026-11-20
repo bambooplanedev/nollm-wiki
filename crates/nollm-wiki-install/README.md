@@ -1,10 +1,10 @@
 **English** · [Українська](README.uk.md)
 
-# nollm-wiki
+# `nollm-wiki-install`
 
-**nollm-wiki** is the front door: it installs the tools and sets up a project.
+**Installs, updates and sets up the nollm-wiki tools — `wiki` and `plaz` — in a project.**
 
-`nollm-wiki` installs, updates and sets up the modules of nollm-wiki: `wiki` (the project wiki for
+`nollm-wiki-install` installs, updates and sets up the modules of nollm-wiki: `wiki` (the project wiki for
 coding agents) and `plaz` (decision charts). It is the installer, not a module. Release 0.9.0 is
 the first to carry it; the [repository README](../../README.md) describes the whole set.
 
@@ -13,40 +13,40 @@ the first to carry it; the [repository README](../../README.md) describes the wh
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/nollm-wiki/releases/latest/download/install.sh | sh
 
 `install.sh` reads `SHA256SUMS` of the latest release (and checks its signature when `minisign` is
-installed, see [Signatures](#signatures)), downloads the `nollm-wiki` archive for this machine
+installed, see [Signatures](#signatures)), downloads the `nollm-wiki-install` archive for this machine
 (`aarch64-apple-darwin` or `x86_64-unknown-linux-musl`; any other system gets "no build"), checks it
-against that file and puts the binary at `~/.nollm-wiki-home/bin/nollm-wiki`. It needs `curl`, `tar`,
+against that file and puts the binary at `~/.nollm-wiki-home/bin/nollm-wiki-install`. It needs `curl`, `tar`,
 `mktemp` and `sha256sum` or `shasum`; without a checksum tool it stops rather than skip the check.
 Besides that binary and the folders it goes into, `install.sh` writes nothing and edits no
 shell profile. On any failure it exits non-zero and leaves no temp dir; a first install also leaves
-no `nollm-wiki` in `bin/` (over an installation the old one stays), and a home directory it created is
-removed again if empty. Over an installation (`state.json` present) it ends by saying to run `nollm-wiki
-update`, which brings the modules to the version of the `nollm-wiki` it just put in place. The Linux
+no `nollm-wiki-install` in `bin/` (over an installation the old one stays), and a home directory it created is
+removed again if empty. Over an installation (`state.json` present) it ends by saying to run `nollm-wiki-install
+update`, which brings the modules to the version of the `nollm-wiki-install` it just put in place. The Linux
 build is static and runs on glibc and musl systems alike.
 
-By hand, the same: download `nollm-wiki-v<version>-<target>.tar.gz`, `SHA256SUMS` and
+By hand, the same: download `nollm-wiki-install-v<version>-<target>.tar.gz`, `SHA256SUMS` and
 `SHA256SUMS.minisig` from the release page, then
 
     minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
-    grep nollm-wiki-v<version>-<target>.tar.gz SHA256SUMS | sha256sum -c -   # on macOS: … | shasum -a 256 -c -
-    tar -xzf nollm-wiki-v<version>-<target>.tar.gz nollm-wiki
-    mkdir -p ~/.nollm-wiki-home/bin && mv nollm-wiki ~/.nollm-wiki-home/bin/
+    grep nollm-wiki-install-v<version>-<target>.tar.gz SHA256SUMS | sha256sum -c -   # on macOS: … | shasum -a 256 -c -
+    tar -xzf nollm-wiki-install-v<version>-<target>.tar.gz nollm-wiki-install
+    mkdir -p ~/.nollm-wiki-home/bin && mv nollm-wiki-install ~/.nollm-wiki-home/bin/
 
-Adding `~/.nollm-wiki-home/bin` to `PATH` is optional, for typing `nollm-wiki` in a terminal (agents find
+Adding `~/.nollm-wiki-home/bin` to `PATH` is optional, for typing `nollm-wiki-install` in a terminal (agents find
 `wiki` without it; when `~/.local/bin` is on `PATH`, install links the tools there). Then run:
 
-    ~/.nollm-wiki-home/bin/nollm-wiki install       # nollm-wiki and the release's default modules
+    ~/.nollm-wiki-home/bin/nollm-wiki-install install       # nollm-wiki-install and the release's default modules
     cd your-project
-    nollm-wiki setup --scope local         # each installed module's own setup, in this project
+    nollm-wiki-install setup --scope local         # each installed module's own setup, in this project
 
 ## Where things go
 
 Everything is in `~/.nollm-wiki-home` (`NOLLM_WIKI_HOME` if set):
 
-- `bin/nollm-wiki` and `bin/<module>` for each installed module;
+- `bin/nollm-wiki-install` and `bin/<module>` for each installed module;
 - `manifest.json`, the manifest of the installed release;
 - `state.json`, the installed version and modules, written last (one that is not a state file
-  nollm-wiki wrote stops every command, which names it: fix it, or delete it and run `nollm-wiki install`;
+  nollm-wiki-install wrote stops every command, which names it: fix it, or delete it and run `nollm-wiki-install install`;
   one that cannot be read stops it with the path and the cause);
 - `.lock`, held by the running command; an install that fails where nothing is installed removes
   it again if it made it, and the directory too if it made it: a home it found is left as it was.
@@ -56,42 +56,42 @@ symlink or not a directory is refused. No shell profile is edited.
 
 ## Commands
 
-    nollm-wiki [status]
+    nollm-wiki-install [status]
 
 With no command, or `status`: the installed version and modules (a module whose binary is missing is
-marked `(missing: run nollm-wiki update)`), the two lines `<home>/bin is not on PATH; to type nollm-wiki in
+marked `(missing: run nollm-wiki-install update)`), the two lines `<home>/bin is not on PATH; to type nollm-wiki-install in
 a terminal, add it:` and `export PATH="<home>/bin:$PATH"` (indented) when it is not (a `PATH` entry
 that reaches `bin/` through a symlink counts, and so does a link in a `PATH` folder for each of
-nollm-wiki and the installed modules, when it is the first of its name on `PATH`), and whether a newer
-release exists (`newer release: <X.Y.Z> (nollm-wiki update)`, or `up to date`). It only reads: nothing
+nollm-wiki-install and the installed modules, when it is the first of its name on `PATH`), and whether a newer
+release exists (`newer release: <X.Y.Z> (nollm-wiki-install update)`, or `up to date`). It only reads: nothing
 is created. The release host gets 5 s to connect and 8 s in all; past that, or on any error, the
 last line says what could not be reached, and why.
 
-    nollm-wiki install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
+    nollm-wiki-install install [--modules <MODULES>] [--version <X.Y.Z>] [--yes]
 
-Installs nollm-wiki and the named modules (comma separated; spaces around a name are ignored), with the
+Installs nollm-wiki-install and the named modules (comma separated; spaces around a name are ignored), with the
 modules they require. Without `--modules` it installs the modules the release marks as default; to
 leave one out, name the others. `--version` installs that release instead of the latest. Run again
 with other modules, it adds them at the installed version, and puts back any listed binary missing
-from `bin/`; an installed `bin/nollm-wiki` is then left as it is (`nollm-wiki update` always replaces it). A
+from `bin/`; an installed `bin/nollm-wiki-install` is then left as it is (`nollm-wiki-install update` always replaces it). A
 file at `bin/<module>` that `state.json` does not list is never taken as installed: it is replaced
 by the downloaded, checked module. When a newer release exists, it still installs at the installed
-version and says so (`newer release X.Y.Z: nollm-wiki update`); when the latest release cannot be read,
+version and says so (`newer release X.Y.Z: nollm-wiki-install update`); when the latest release cannot be read,
 it says that instead (`could not check for a newer release (<base>: <reason>)`). The installed
 version is read once `.lock` is held. If the installed version differs from `--version`, or is newer
-than the latest release, it changes nothing and exits 1: an older one gets the advice to run `nollm-wiki
-update`; a newer one, to run `nollm-wiki remove`, then `nollm-wiki install --version <X.Y.Z>`. When
+than the latest release, it changes nothing and exits 1: an older one gets the advice to run `nollm-wiki-install
+update`; a newer one, to run `nollm-wiki-install remove`, then `nollm-wiki-install install --version <X.Y.Z>`. When
 `$HOME/.local/bin` is a directory on `PATH`, install and update link each installed binary there to
-`bin/<name>` (`nollm-wiki: linked <names> into <dir>`); anything there that is not a link into `bin/` is
-left as it is (`nollm-wiki: left <path> as it is (not a nollm-wiki link)`), and `nollm-wiki remove` deletes only
+`bin/<name>` (`nollm-wiki-install: linked <names> into <dir>`); anything there that is not a link into `bin/` is
+left as it is (`nollm-wiki-install: left <path> as it is (not a nollm-wiki-install link)`), and `nollm-wiki-install remove` deletes only
 its own links. A successful install ends with the next steps: the same two lines for `bin/` if it is
-not on `PATH`, then `nollm-wiki setup` in a project (named by its full path in `bin/` while neither
+not on `PATH`, then `nollm-wiki-install setup` in a project (named by its full path in `bin/` while neither
 `bin/` nor every binary is on `PATH`, as above). With nothing to do it writes nothing and says
 `already installed: <names> (<version>)` instead (and, as above, a newer release).
 
-    nollm-wiki update [--yes]
+    nollm-wiki-install update [--yes]
 
-Updates nollm-wiki and every installed module to the latest release, all or none. A release older
+Updates nollm-wiki-install and every installed module to the latest release, all or none. A release older
 than the installed one is not installed: nothing changes. At the installed version with every file
 in place it says `up to date` and does nothing. Each module it moves is named with both
 versions (`updated <name> <old> -> <new>`), a module the new release requires that was not
@@ -100,27 +100,27 @@ installed is named `installed <name> <version>`, and the last line, when the ver
 put back are named `repaired <name> <version>`, with no restart line. An installed module the new
 release no longer holds is removed, with its binary and link, once the rest is in place: when a
 module of the release lists it in `replaces` (a rename), that module is installed instead and the
-line is `removed <old>: renamed <new>; run "nollm-wiki setup --scope repo" (or local) again
+line is `removed <old>: renamed <new>; run "nollm-wiki-install setup --scope repo" (or local) again
 in each project set up with <old>`; otherwise `removed <name>: not in release <version>`. At a
 terminal any removal is asked first, at the installed version too, and the question ends
 `; removes <names>?`.
 
-    nollm-wiki remove [--modules <MODULES>] [--yes]
+    nollm-wiki-install remove [--modules <MODULES>] [--yes]
 
-Removes the named modules; without `--modules`, every module, nollm-wiki itself, its manifest, state and
+Removes the named modules; without `--modules`, every module, nollm-wiki-install itself, its manifest, state and
 lock, then `bin/` and the home directory if they are empty. Only what `state.json` lists is deleted;
-any other file stays (with no `state.json`, nothing at all is, and a `bin/nollm-wiki` that `install.sh`
+any other file stays (with no `state.json`, nothing at all is, and a `bin/nollm-wiki-install` that `install.sh`
 put there is named for you to delete). Every path is checked before the first is deleted: a
 directory in place of a binary, or anything but a regular file in place of `manifest.json` or
 `state.json`, stops it with nothing deleted (exit 1), as does a module that another installed module
-requires (`nollm-wiki: cannot remove <a>: <b> requires it`; name both to remove both). `nollm-wiki` is not a
-module: `--modules nollm-wiki` is a usage error. At a terminal it asks first (default: no); without one
+requires (`nollm-wiki-install: cannot remove <a>: <b> requires it`; name both to remove both). `nollm-wiki-install` is not a
+module: `--modules nollm-wiki-install` is a usage error. At a terminal it asks first (default: no); without one
 it needs `--yes`, and otherwise changes nothing and exits 2. Removing everything while `wiki` is
-installed also says that projects set up with nollm-wiki still name `wiki` in their agent configs and
-need `nollm-wiki setup --scope repo --remove` (or `--scope local`) first: before the question at a
+installed also says that projects set up with nollm-wiki-install still name `wiki` in their agent configs and
+need `nollm-wiki-install setup --scope repo --remove` (or `--scope local`) first: before the question at a
 terminal, as the last line otherwise.
 
-    nollm-wiki setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
+    nollm-wiki-install setup [--modules <MODULES>] [--memory | --no-memory] [--agent <LIST>]
                  [--scope repo|local] [--hook | --no-hook] [--remove] [--yes]
 
 Runs each chosen module's own `setup` (`~/.nollm-wiki-home/bin/<module> setup …`) in the current
@@ -132,7 +132,7 @@ undoes each module's setup. Before the first module runs, every chosen module's 
 `bin/` and executable; with no module installed there is nothing to set up (exit 1). The modules
 write into the project's `.nollm-wiki/`, a folder of its own: setup refuses (exit 1) to run where that
 folder is the nollm-wiki home (`NOLLM_WIKI_HOME` set to `<project>/.nollm-wiki`). When `bin/` is not on `PATH`,
-the modules run with it put first on their own `PATH` (the `nollm-wiki` process's own environment and your shell are
+the modules run with it put first on their own `PATH` (the `nollm-wiki-install` process's own environment and your shell are
 not changed; a `bin/` path holding a `:` cannot be on a `PATH`, so theirs is then left as it is).
 The agent configs `wiki` writes start it from the nollm-wiki home, so they need nothing on `PATH`.
 
@@ -141,7 +141,7 @@ The agent configs `wiki` writes start it from the nollm-wiki home, so they need 
 People and agents get the same commands. A command asks only when stdin and stdout are both
 terminals and `--yes` is absent; otherwise it asks nothing and the defaults apply (`install`: the
 release's defaults; `setup`: every installed module, memory on). A value with no default must then
-be given as a flag: `nollm-wiki setup` without a terminal needs `--scope`. When nollm-wiki does not ask,
+be given as a flag: `nollm-wiki-install setup` without a terminal needs `--scope`. When nollm-wiki-install does not ask,
 the modules it runs get no input, so they ask nothing either. `remove`, whose question
 defaults to no, does nothing without a terminal unless `--yes` is given. A confirmation is asked
 once the command holds `.lock` and has read the state, so what it shows is what it does. Names
@@ -156,8 +156,8 @@ typed at a prompt match in any case.
   does not have, a missing `--scope`, a bad `NOLLM_WIKI_RELEASE_URL`, `remove` without a terminal and
   without `--yes`).
 
-Each module whose setup fails gets the line `nollm-wiki: <module> setup failed (exit N)` (or
-`(signal N)`); the others still run. Then `nollm-wiki setup` prints `nollm-wiki: setup finished with
+Each module whose setup fails gets the line `nollm-wiki-install: <module> setup failed (exit N)` (or
+`(signal N)`); the others still run. Then `nollm-wiki-install setup` prints `nollm-wiki-install: setup finished with
 errors: <modules>` and exits with the status of the first module that failed (1 if it was killed
 by a signal).
 
@@ -171,34 +171,34 @@ by a signal).
 ## One run at a time, and interruptions
 
 A command that changes `~/.nollm-wiki-home` holds `.lock`, questions included; a second one waits for
-it and says so once on stderr: `nollm-wiki: waiting for another nollm-wiki run (<home>/.lock)`.
+it and says so once on stderr: `nollm-wiki-install: waiting for another nollm-wiki-install run (<home>/.lock)`.
 Downloads are checked and unpacked into a temp dir under home (`.tmp-<pid>`) before anything in
-`bin/` changes; then the binaries are renamed into `bin/` (nollm-wiki last), then `manifest.json`, then
+`bin/` changes; then the binaries are renamed into `bin/` (nollm-wiki-install last), then `manifest.json`, then
 `state.json`. `install.sh` takes no lock, and its temp dir (`.tmp-install.…`) is one of the `.tmp-*`
-entries that `nollm-wiki install`, `update` and `remove` delete in a home with a `state.json`: do not
+entries that `nollm-wiki-install install`, `update` and `remove` delete in a home with a `state.json`: do not
 start one of them while `install.sh` runs, or `install.sh` fails.
 
 - Interrupted before that point, an install or update leaves only its temp dir, which the next run
   that finds `state.json` deletes (a home without one is never cleaned).
 - Interrupted while renaming, some binaries are at the new version and `state.json` still names the
-  old one. `nollm-wiki update` installs the whole release again.
+  old one. `nollm-wiki-install update` installs the whole release again.
 - A binary that `state.json` lists but `bin/` lacks (a `remove` interrupted, or a file deleted by
-  hand) is put back by `nollm-wiki update` or `nollm-wiki install`, and a missing `manifest.json` by
-  `nollm-wiki update`; `nollm-wiki setup` says so instead of running.
+  hand) is put back by `nollm-wiki-install update` or `nollm-wiki-install install`, and a missing `manifest.json` by
+  `nollm-wiki-install update`; `nollm-wiki-install setup` says so instead of running.
 
 ## A release
 
 A release holds, under `<base>/download/v<version>/`:
 
-- `manifest.json` — the release's only source of truth for nollm-wiki;
-- `<module>-v<version>-<target>.tar.gz` and `nollm-wiki-v<version>-<target>.tar.gz`, each holding one
+- `manifest.json` — the release's only source of truth for nollm-wiki-install;
+- `<module>-v<version>-<target>.tar.gz` and `nollm-wiki-install-v<version>-<target>.tar.gz`, each holding one
   file named after its binary;
 - `SHA256SUMS` — `<sha256>  <file>` lines, for `install.sh` and for people;
 - `install.sh`;
 - `manifest.json.minisig` and `SHA256SUMS.minisig` — the signatures of those two files (see
   [Signatures](#signatures)).
 
-`<base>/latest/download/` serves the same files of the latest release. nollm-wiki reads the manifest
+`<base>/latest/download/` serves the same files of the latest release. nollm-wiki-install reads the manifest
 from there; from `download/v<version>/` with `--version`; and from `download/v<installed>/` for an
 `install` over an installed version when the latest release is newer or cannot be read. It reads
 every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
@@ -221,9 +221,9 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       }
     }
   ],
-  "nollm-wiki": {
+  "nollm-wiki-install": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "nollm-wiki-v0.9.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "nollm-wiki-install-v0.9.0-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
@@ -244,22 +244,22 @@ untrusted comment: minisign public key 87CC6E990C51AF83
 RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
 ```
 
-`nollm-wiki` has the key compiled in; no flag or variable changes it. With every `manifest.json` it
+`nollm-wiki-install` has the key compiled in; no flag or variable changes it. With every `manifest.json` it
 reads it fetches `manifest.json.minisig` from beside it and checks it before anything in the
 manifest is used. Only the form minisign makes by default (prehashed) is taken, not the legacy one
 (`minisign -S -l`). Over `https://` the signature is required, and a manifest without a good one is
-not used: `install` and `update` stop with `nollm-wiki: manifest.json: signature is missing` (the
-release host answers 404), `nollm-wiki: manifest.json: signature could not be fetched: <cause>` (any
+not used: `install` and `update` stop with `nollm-wiki-install: manifest.json: signature is missing` (the
+release host answers 404), `nollm-wiki-install: manifest.json: signature could not be fetched: <cause>` (any
 other failure: a timeout, TLS, a server error; in a `file://` tree, a `.minisig` that cannot be
-read) or `nollm-wiki: manifest.json: signature does not verify`, then `nothing changed`, exit 1. Where a
-command only looks at the latest release for a newer one (`nollm-wiki status`, and `install` over an
+read) or `nollm-wiki-install: manifest.json: signature does not verify`, then `nothing changed`, exit 1. Where a
+command only looks at the latest release for a newer one (`nollm-wiki-install status`, and `install` over an
 installed version), its `could not check for a newer release (…)` line gives the reason instead. In
 a `file://` tree a signature that is there must verify too; one that is absent is allowed, and
-`nollm-wiki` says `signature not checked: local release tree` once, on stderr: it is a notice, not a
+`nollm-wiki-install` says `signature not checked: local release tree` once, on stderr: it is a notice, not a
 result.
 
 `install.sh` carries the same key. With `minisign` on `PATH` it downloads `SHA256SUMS.minisig` and
-checks `SHA256SUMS` with it (`minisign -VHm`: like `nollm-wiki`, only the prehashed form) before it
+checks `SHA256SUMS` with it (`minisign -VHm`: like `nollm-wiki-install`, only the prehashed form) before it
 reads a line of it; it stops (exit 1) with `install.sh: SHA256SUMS: signature is missing` (over
 `https://`, nothing was downloaded: no signature, no answer, or a server that announces one past 4
 KiB) or `install.sh: SHA256SUMS: signature does not verify` (also for a signature past 4 KiB that
@@ -267,7 +267,7 @@ was partly downloaded, as from a local tree or a server that sends no length). T
 minisign that knows `-H`; 0.11 and 0.12 do, and with one that does not, the check fails and
 `install.sh` stops. In a `file://` tree an absent signature is allowed, with the line `install.sh:
 signature not checked: local release tree`. Without `minisign` it goes on by SHA-256 alone and says
-so: `install.sh: signature not checked (minisign not found); nollm-wiki checks it on every install and
+so: `install.sh: signature not checked (minisign not found); nollm-wiki-install checks it on every install and
 update`. When the signature verified, it prints `install.sh: signature checked`. All three lines
 go to stderr, so a script that captures the output does not get them.
 
@@ -276,7 +276,7 @@ By hand, with each file and its `.minisig` in one folder:
     minisign -Vm manifest.json -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
     minisign -Vm SHA256SUMS -P RWSDr1EMmW7Mh0fB1YXLI+poqKnCnGO9UTdaKQ8QmEm/t4rE6kY1dvZr
 
-Signatures came before any release of `nollm-wiki` was published: every published `nollm-wiki` checks
+Signatures came before any release of `nollm-wiki-install` was published: every published `nollm-wiki-install` checks
 them, so every release must be signed, or `install` and `update` refuse it.
 
 Signing a release: a pushed `v*` tag makes a draft release with the 9 files (the release
@@ -286,14 +286,14 @@ checkout that has the tag:
     # with --key <secret key file> if the key is not minisign's default
     sh scripts/release-sign.sh <version>
 
-It checks the draft (this repository's: under the releases address `nollm-wiki` uses; it prints the
+It checks the draft (this repository's: under the releases address `nollm-wiki-install` uses; it prints the
 repository and the release's address before signing; exactly the 9 files; each archive's SHA-256 as
 `SHA256SUMS` and `manifest.json` state it; the version; `install.sh` as at the tag), signs the two
 files (minisign asks for the key's password, once per file), verifies both with `release/nollm-wiki.pub`
 (a signature by any other key stops it, with nothing uploaded) and uploads the two `.minisig` files
 to the draft; `--replace` signs a draft that has them again. It does not publish: it ends with the
 command that does, `gh release edit v<version> --draft=false`. Once published, the release is the
-latest one, the one `install.sh` and `nollm-wiki update` take.
+latest one, the one `install.sh` and `nollm-wiki-install update` take.
 
 To try a signed draft before publishing it, download it into `$dl` (`gh release download v$v --dir
 "$dl"`, with `v` the version) and lay it out as a release tree at `$out`:
@@ -303,19 +303,19 @@ To try a signed draft before publishing it, download it into `$dl` (`gh release 
     cp "$dl"/SHA256SUMS "$dl"/SHA256SUMS.minisig "$dl"/manifest.json "$dl"/manifest.json.minisig \
         "$dl"/install.sh "$out/latest/download/"
 
-Then `NOLLM_WIKI_RELEASE_URL=file://$out` makes `install.sh` and `nollm-wiki` install the candidate, with
+Then `NOLLM_WIKI_RELEASE_URL=file://$out` makes `install.sh` and `nollm-wiki-install` install the candidate, with
 its signatures checked. Do not run `release-assemble.sh` on the downloaded files: it rewrites the
 two signed files.
 
 Limits:
 
 - One key, no rotation yet. A new key can reach users only in a release signed by the old one, so
-  losing the secret key (or its password) leaves no way to make a release `nollm-wiki` accepts: keep a
+  losing the secret key (or its password) leaves no way to make a release `nollm-wiki-install` accepts: keep a
   backup of it.
 - A signature shows that the files are the owner's, not that they are the newest. Whoever controls
-  the release host could serve an older signed release as the latest: `nollm-wiki update` refuses to go
+  the release host could serve an older signed release as the latest: `nollm-wiki-install update` refuses to go
   back to an older version, but a fresh install would take it.
 - `install.sh` itself comes over HTTPS and is not signed: whoever controls the place it is
   downloaded from controls that first step, with or without `minisign`. The signatures protect
-  what `install.sh` and `nollm-wiki` download after it. To trust no download host, check by hand (see
+  what `install.sh` and `nollm-wiki-install` download after it. To trust no download host, check by hand (see
   [Getting it](#getting-it)).

@@ -1,11 +1,11 @@
 #!/bin/sh
-# install.sh: puts the nollm-wiki binary of the latest release into ~/.nollm-wiki-home/bin.
+# install.sh: puts the nollm-wiki-install binary of the latest release into ~/.nollm-wiki-home/bin.
 #
 #   curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/nollm-wiki/releases/latest/download/install.sh | sh
 #
-# It reads SHA256SUMS of the latest release, downloads the nollm-wiki archive for this machine,
-# checks it against that file, and moves the one binary to <home>/bin/nollm-wiki. It writes nothing
-# else and edits no shell profile; `nollm-wiki install` then installs the modules. With minisign
+# It reads SHA256SUMS of the latest release, downloads the nollm-wiki-install archive for this machine,
+# checks it against that file, and moves the one binary to <home>/bin/nollm-wiki-install. It writes nothing
+# else and edits no shell profile; `nollm-wiki-install install` then installs the modules. With minisign
 # installed it first checks SHA256SUMS.minisig against the release key (release/nollm-wiki.pub).
 #
 # NOLLM_WIKI_HOME     the home directory (default: $HOME/.nollm-wiki-home)
@@ -80,9 +80,9 @@ main() {
     ki_parent=$(dirname -- "$ki_home")
     [ -d "$ki_parent" ] || die "$ki_parent does not exist"
     ki_bin=$ki_home/bin
-    ki_dest=$ki_bin/nollm-wiki
+    ki_dest=$ki_bin/nollm-wiki-install
     if [ -L "$ki_bin" ] || { [ -e "$ki_bin" ] && [ ! -d "$ki_bin" ]; }; then
-        die "$ki_bin is not a directory nollm-wiki can use"
+        die "$ki_bin is not a directory nollm-wiki-install can use"
     fi
     # mv onto a directory would move the binary into it.
     [ ! -d "$ki_dest" ] || die "$ki_dest is not a file"
@@ -110,7 +110,7 @@ main() {
         ki_sig=$ki_tmp/SHA256SUMS.minisig
         # In a subshell: fetch exits on failure, and in a local tree no signature is allowed.
         if (fetch "$ki_base/latest/download/SHA256SUMS.minisig" "$ki_sig" 4096) 2>/dev/null; then
-            # -H: only the prehashed form minisign makes by default, as nollm-wiki takes it.
+            # -H: only the prehashed form minisign makes by default, as nollm-wiki-install takes it.
             minisign -VHm "$ki_tmp/SHA256SUMS" -x "$ki_sig" -P "$ki_key" >/dev/null 2>&1 ||
                 die "SHA256SUMS: signature does not verify"
             printf 'install.sh: signature checked\n' >&2
@@ -125,29 +125,29 @@ main() {
             printf 'install.sh: signature not checked: local release tree\n' >&2
         fi
     else
-        printf '%s %s\n' 'install.sh: signature not checked (minisign not found); nollm-wiki checks it' \
+        printf '%s %s\n' 'install.sh: signature not checked (minisign not found); nollm-wiki-install checks it' \
             'on every install and update' >&2
     fi
     # Without a carriage return at the end of each line, so a CRLF file reads the same.
     ki_cr=$(printf '\r')
     ki_sums=$ki_tmp/SHA256SUMS.lf
     sed "s/$ki_cr\$//" "$ki_tmp/SHA256SUMS" >"$ki_sums"
-    ki_name='nollm-wiki-v[0-9]+\.[0-9]+\.[0-9]+-'$ki_target'\.tar\.gz'
+    ki_name='nollm-wiki-install-v[0-9]+\.[0-9]+\.[0-9]+-'$ki_target'\.tar\.gz'
     ki_count=$(grep -Ec "[ *]$ki_name\$" "$ki_sums" || :)
     [ "$ki_count" = 1 ] ||
-        die "SHA256SUMS: $ki_count lines name a nollm-wiki archive for $ki_target; expected 1"
+        die "SHA256SUMS: $ki_count lines name a nollm-wiki-install archive for $ki_target; expected 1"
     ki_line=$(grep -E "[ *]$ki_name\$" "$ki_sums")
     printf '%s\n' "$ki_line" | grep -Eq "^[0-9a-fA-F]{64} [ *]$ki_name\$" ||
-        die "SHA256SUMS: bad line for nollm-wiki on $ki_target"
+        die "SHA256SUMS: bad line for nollm-wiki-install on $ki_target"
     ki_want=$(printf '%s\n' "${ki_line%% *}" | tr 'A-F' 'a-f')
     ki_file=${ki_line##*[ *]}
-    ki_version=${ki_file#nollm-wiki-v}
+    ki_version=${ki_file#nollm-wiki-install-v}
     ki_version=${ki_version%%-*}
     case $ki_version in
         '' | *[!0-9.]*) die "SHA256SUMS: bad version in $ki_file" ;;
     esac
 
-    ki_archive=$ki_tmp/nollm-wiki.tar.gz
+    ki_archive=$ki_tmp/nollm-wiki-install.tar.gz
     fetch "$ki_base/download/v$ki_version/$ki_file" "$ki_archive" 268435456
     # From stdin: given a path holding `\` or a newline, both tools put a `\` before the hash.
     if [ "$ki_sha" = sha256sum ]; then
@@ -159,24 +159,24 @@ main() {
 
     ki_unpack=$ki_tmp/unpack
     mkdir -- "$ki_unpack"
-    tar -xzf "$ki_archive" -C "$ki_unpack" --no-same-owner nollm-wiki ||
-        die "$ki_file: cannot unpack nollm-wiki"
-    if [ ! -f "$ki_unpack/nollm-wiki" ] || [ -L "$ki_unpack/nollm-wiki" ]; then
-        die "$ki_file: archive holds no regular file nollm-wiki"
+    tar -xzf "$ki_archive" -C "$ki_unpack" --no-same-owner nollm-wiki-install ||
+        die "$ki_file: cannot unpack nollm-wiki-install"
+    if [ ! -f "$ki_unpack/nollm-wiki-install" ] || [ -L "$ki_unpack/nollm-wiki-install" ]; then
+        die "$ki_file: archive holds no regular file nollm-wiki-install"
     fi
-    chmod 755 "$ki_unpack/nollm-wiki"
+    chmod 755 "$ki_unpack/nollm-wiki-install"
     if [ ! -d "$ki_bin" ]; then
         mkdir -- "$ki_bin"
         ki_made_bin=yes
     fi
-    mv -f -- "$ki_unpack/nollm-wiki" "$ki_dest"
+    mv -f -- "$ki_unpack/nollm-wiki-install" "$ki_dest"
 
-    printf 'nollm-wiki installed in %s\n' "$ki_bin"
+    printf 'nollm-wiki-install installed in %s\n' "$ki_bin"
     if [ -e "$ki_home/state.json" ]; then
-        printf 'nollm-wiki replaced; run "%s/nollm-wiki update" to bring the modules to the same version\n' \
+        printf 'nollm-wiki-install replaced; run "%s/nollm-wiki-install update" to bring the modules to the same version\n' \
             "$ki_bin"
     else
-        printf 'next: %s/nollm-wiki install\n' "$ki_bin"
+        printf 'next: %s/nollm-wiki-install install\n' "$ki_bin"
     fi
 }
 

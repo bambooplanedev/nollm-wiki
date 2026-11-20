@@ -178,7 +178,7 @@ consumer that depends on it by git does not use this lock file. `techlog`
 (`crates/techlog`) holds where agent memory lives, and the `Origin` of a
 memory note. `plaz` (`crates/plaz`) is the second tool of the set: it draws per-function decision charts and call
 targets from the code layer in `wiki-code`, depends on nothing of `wiki`, and writes its pages to `.nollm-wiki/map/`, which
-`compile` leaves alone. `nollm-wiki` (`crates/nollm-wiki`) is the installer of the set: it installs, updates and
+`compile` leaves alone. `nollm-wiki-install` (`crates/nollm-wiki-install`) is the installer of the set: it installs, updates and
 removes the modules' release binaries in `~/.nollm-wiki-home` and runs each module's own `setup`; it depends on no other
 crate of the workspace, and `install.sh` at the repository root fetches it. Paths below that start with `src/` or `tests/` are in
 `crates/wiki`.

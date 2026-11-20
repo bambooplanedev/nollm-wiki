@@ -12,7 +12,7 @@ use serde_json::json;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const VERSION: &str = "0.7.0";
-const BINARIES: [&str; 3] = ["wiki", "plaz", "nollm-wiki"];
+const BINARIES: [&str; 3] = ["wiki", "plaz", "nollm-wiki-install"];
 /// What the script runs, linked from this `PATH`; `gh` and `minisign` are fakes.
 const TOOLS: [&str; 22] = [
     "sh",
@@ -42,7 +42,8 @@ const TOOLS: [&str; 22] = [
 /// The releases address of `install.rs`, which the script must take as this repository's.
 fn releases() -> String {
     let source =
-        fs::read_to_string(Path::new(ROOT).join("crates/nollm-wiki/src/install.rs")).unwrap();
+        fs::read_to_string(Path::new(ROOT).join("crates/nollm-wiki-install/src/install.rs"))
+            .unwrap();
     let start = source.find("const RELEASES: &str = \"").unwrap() + 24;
     let len = source[start..].find('"').unwrap();
     source[start..start + len].to_string()
@@ -105,7 +106,7 @@ impl Fixture {
             "scripts/release-sign.sh",
             "install.sh",
             "release/nollm-wiki.pub",
-            "crates/nollm-wiki/src/install.rs",
+            "crates/nollm-wiki-install/src/install.rs",
         ] {
             fs::create_dir_all(repo.join(rel).parent().unwrap()).unwrap();
             fs::copy(Path::new(ROOT).join(rel), repo.join(rel)).unwrap();
@@ -145,7 +146,7 @@ impl Fixture {
         let manifest = json!({
             "version": VERSION,
             "modules": modules,
-            "nollm-wiki": {"archives": entries("nollm-wiki")},
+            "nollm-wiki-install": {"archives": entries("nollm-wiki-install")},
         });
         fs::write(assets.join("SHA256SUMS"), sums).unwrap();
         fs::write(
@@ -300,7 +301,7 @@ fn assert_signed(f: &Fixture, key: Option<&str>) {
             "-m".into(),
             at(name),
             "-t".into(),
-            format!("nollm-wiki {VERSION} {name}"),
+            format!("nollm-wiki-install {VERSION} {name}"),
         ]);
         assert_eq!(call, &want);
     }
@@ -515,13 +516,13 @@ fn a_manifest_hash_that_differs_is_refused() {
     let f = Fixture::new();
     let path = f.asset("manifest.json");
     let mut m: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    m["nollm-wiki"]["archives"][TARGETS[1]]["sha256"] = json!("0".repeat(64));
+    m["nollm-wiki-install"]["archives"][TARGETS[1]]["sha256"] = json!("0".repeat(64));
     fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
     f.refused_unsigned(
         &f.sign(&[VERSION]),
         &format!(
             "release-sign.sh: {}: its SHA-256 is not the one in manifest.json\n",
-            archive("nollm-wiki", TARGETS[1])
+            archive("nollm-wiki-install", TARGETS[1])
         ),
     );
 }

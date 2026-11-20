@@ -18,8 +18,8 @@ pub struct Manifest {
     pub version: String,
     pub modules: Vec<Module>,
     /// The installer itself: not a module, always installed.
-    #[serde(rename = "nollm-wiki")]
-    pub nollm_wiki: Installer,
+    #[serde(rename = "nollm-wiki-install")]
+    pub nollm_wiki_install: Installer,
 }
 
 #[derive(Deserialize)]
@@ -69,9 +69,9 @@ impl Manifest {
         }
         for module in &m.modules {
             check_name(&module.name, "manifest")?;
-            // nollm-wiki is the installer, never a module.
-            if module.name == "nollm-wiki" {
-                bail!("bad name in manifest: nollm-wiki");
+            // nollm-wiki-install is the installer, never a module.
+            if module.name == "nollm-wiki-install" {
+                bail!("bad name in manifest: nollm-wiki-install");
             }
             for name in module.requires.iter().chain(&module.replaces) {
                 check_name(name, "manifest")?;
@@ -96,7 +96,7 @@ impl Manifest {
             }
         }
         let archives = m.modules.iter().flat_map(|x| x.archives.values());
-        for archive in archives.chain(m.nollm_wiki.archives.values()) {
+        for archive in archives.chain(m.nollm_wiki_install.archives.values()) {
             check_file(&archive.file, "manifest")?;
             let hex = archive.sha256.bytes().all(|b| b.is_ascii_hexdigit());
             if archive.sha256.len() != 64 || !hex {
@@ -111,10 +111,10 @@ impl Manifest {
         self.modules.iter().find(|m| m.name == name)
     }
 
-    /// The archive of `name` (a module, or `nollm-wiki`) for `target`.
+    /// The archive of `name` (a module, or `nollm-wiki-install`) for `target`.
     pub fn archive(&self, name: &str, target: &str) -> Result<&Archive> {
-        let archives = if name == "nollm-wiki" {
-            &self.nollm_wiki.archives
+        let archives = if name == "nollm-wiki-install" {
+            &self.nollm_wiki_install.archives
         } else {
             &self
                 .module(name)
@@ -213,7 +213,7 @@ pub const WAIT: Wait = Wait {
     whole: Duration::from_secs(20),
 };
 
-/// For `nollm-wiki` with no command, which must not hang on a release host that does not answer.
+/// For `nollm-wiki-install` with no command, which must not hang on a release host that does not answer.
 pub const STATUS_WAIT: Wait = Wait {
     connect: Duration::from_secs(5),
     whole: Duration::from_secs(8),
@@ -468,7 +468,7 @@ mod tests {
     fn a_manifest_without_summary_or_options_parses() {
         let m = Manifest::parse(
             br#"{"version": "0.1.0", "modules": [{"name": "wiki"}],
-            "nollm-wiki": {"archives": {}}, "later": 1}"#,
+            "nollm-wiki-install": {"archives": {}}, "later": 1}"#,
         )
         .unwrap();
         assert_eq!(m.modules[0].summary, "");
@@ -479,7 +479,7 @@ mod tests {
     fn replaces_names_a_gone_module_only_one_module_claims() {
         let parse = |modules: &str| {
             let text = format!(
-                r#"{{"version": "0.1.0", "modules": {modules}, "nollm-wiki": {{"archives": {{}}}}}}"#
+                r#"{{"version": "0.1.0", "modules": {modules}, "nollm-wiki-install": {{"archives": {{}}}}}}"#
             );
             Manifest::parse(text.as_bytes()).map_err(|e| e.to_string())
         };

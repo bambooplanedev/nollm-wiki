@@ -25,19 +25,19 @@ bin=$NOLLM_WIKI_HOME/bin
 
 # shellcheck disable=SC2002 # piped, as the one-line install does
 cat "$tree/latest/download/install.sh" | sh
-out=$("$bin/nollm-wiki" install --yes) || fail "nollm-wiki install --yes failed"
+out=$("$bin/nollm-wiki-install" install --yes) || fail "nollm-wiki-install install --yes failed"
 printf '%s\n' "$out"
-printf '%s\n' "$out" | grep -qxF "$bin is not on PATH; to type nollm-wiki in a terminal, add it:" || fail "no 'is not on PATH' line"
+printf '%s\n' "$out" | grep -qxF "$bin is not on PATH; to type nollm-wiki-install in a terminal, add it:" || fail "no 'is not on PATH' line"
 printf '%s\n' "$out" | grep -qxF "    export PATH=\"$bin:\$PATH\"" || fail "no 'export PATH' line"
-case $("$bin/nollm-wiki") in "nollm-wiki $version in "*) ;; *) fail "nollm-wiki does not show $version" ;; esac
-for b in nollm-wiki wiki plaz; do
+case $("$bin/nollm-wiki-install") in "nollm-wiki-install $version in "*) ;; *) fail "nollm-wiki-install does not show $version" ;; esac
+for b in nollm-wiki-install wiki plaz; do
     [ "$("$bin/$b" --version)" = "$b $version" ] || fail "$b --version is not $b $version"
 done
 cd -- "$tmp/project" && git init -q
 printf 'def f(x):\n    if x:\n        return 1\n    return 2\n' >f.py
-code=0 && "$bin/nollm-wiki" setup </dev/null || code=$?
-[ "$code" = 2 ] || fail "nollm-wiki setup without --scope and a terminal exited $code, not 2"
-"$bin/nollm-wiki" setup --scope repo --yes </dev/null || fail "nollm-wiki setup --scope repo failed"
+code=0 && "$bin/nollm-wiki-install" setup </dev/null || code=$?
+[ "$code" = 2 ] || fail "nollm-wiki-install setup without --scope and a terminal exited $code, not 2"
+"$bin/nollm-wiki-install" setup --scope repo --yes </dev/null || fail "nollm-wiki-install setup --scope repo failed"
 [ -f .nollm-wiki/index.md ] || fail "setup made no .nollm-wiki/index.md"
 [ -d .nollm-wiki/map ] || fail "setup made no .nollm-wiki/map/"
 printf 'install-check.sh: %s on %s/%s: ok\n' "$version" "$(uname -s)" "$(uname -m)"

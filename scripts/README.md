@@ -108,25 +108,25 @@ For detailed hosting setup, see [Quartz: Hosting](https://quartz.jzhao.xyz/hosti
 [the `wiki` module's README](../crates/wiki/README.md#self-hosting).
 
 `release-assemble.sh <version> <dir> [--tree <out>]` — checks that `<dir>` holds the six release
-archives (`wiki`, `plaz`, `nollm-wiki` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`,
+archives (`wiki`, `plaz`, `nollm-wiki-install` for `aarch64-apple-darwin` and `x86_64-unknown-linux-musl`,
 each with the bare binary as its one member), then writes `SHA256SUMS`, `manifest.json` (modules
 from [`release/modules.json`](../release/modules.json)) and a copy of `install.sh` into it; `--tree`
 also lays out the `latest/download/` and `download/v<version>/` paths a `file://`
 `NOLLM_WIKI_RELEASE_URL` reads. Needs `jq`, `tar` and `sha256sum` or `shasum`; tested in
-`crates/nollm-wiki/tests/release_assemble.rs`.
+`crates/nollm-wiki-install/tests/release_assemble.rs`.
 
 `release-sign.sh <version> [--key <secret key file>] [--replace]` — the owner's signing step, run
 in a terminal in this checkout: checks that the draft release `v<version>` is this repository's
-(under the releases address in `crates/nollm-wiki/src/install.rs`), holds the 9 files the release
+(under the releases address in `crates/nollm-wiki-install/src/install.rs`), holds the 9 files the release
 workflow uploads and that they agree (each archive's SHA-256 in `SHA256SUMS` and
 `manifest.json`, the version, `install.sh` as at the tag), signs `manifest.json` and `SHA256SUMS`
 with minisign, verifies both with `release/nollm-wiki.pub` and uploads the two `.minisig` files to the
 draft. It does not publish; it prints the command that does. Needs `gh`, `minisign`, `jq`, `git`
 and `sha256sum` or `shasum`; tested with a fake `gh` and `minisign` in
-`crates/nollm-wiki/tests/release_sign.rs`.
+`crates/nollm-wiki-install/tests/release_sign.rs`.
 
 `install-check.sh <version> [<tree>]` — installs the release laid out at `<tree>` (default `/release`)
-the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `nollm-wiki install --yes`,
+the way a user does, in a temp `HOME`: pipes its `install.sh` to `sh`, runs `nollm-wiki-install install --yes`,
 checks each binary's `--version` and sets up a throwaway git project. The release workflow runs it
 in Alpine and Debian containers and on macOS.
 

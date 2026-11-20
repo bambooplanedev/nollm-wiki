@@ -11,7 +11,7 @@ The map is for the person who owns the code, to read the business logic and set 
 
 It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. Its version is the workspace's.
 
-**Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `nollm-wiki install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
+**Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `nollm-wiki-install install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
 
 ## Build
 

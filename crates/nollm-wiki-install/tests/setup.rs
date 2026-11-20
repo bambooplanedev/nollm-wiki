@@ -3,7 +3,7 @@ mod common;
 use std::fs;
 use std::path::PathBuf;
 
-use common::{nollm_wiki, release, stderr};
+use common::{nollm_wiki_install, release, stderr};
 use serde_json::{json, Value};
 
 /// A module that appends `<name> <args>` to `$NOLLM_WIKI_TEST_LOG`.
@@ -30,7 +30,7 @@ fn installed(wiki: &[u8], modules: &str) -> Fixture {
         &[("wiki", wiki), ("plaz", LOGS)],
     );
     let home = t.path().join("home");
-    nollm_wiki(&home, &base)
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", modules])
         .assert()
         .success();
@@ -43,9 +43,9 @@ impl Fixture {
         self.t.path().join("log")
     }
 
-    /// `nollm-wiki setup <args>` in the project dir, stdin closed.
+    /// `nollm-wiki-install setup <args>` in the project dir, stdin closed.
     fn setup(&self, args: &[&str]) -> std::process::Output {
-        nollm_wiki(&self.home, &self.base)
+        nollm_wiki_install(&self.home, &self.base)
             .arg("setup")
             .args(args)
             .current_dir(self.t.path().join("project"))
@@ -147,7 +147,7 @@ fn setup_without_scope_is_usage() {
     for args in [&[][..], &["--yes"], &["--modules", "plaz"]] {
         usage(
             &f.setup(args),
-            "nollm-wiki: --scope is required (repo or local)",
+            "nollm-wiki-install: --scope is required (repo or local)",
         );
     }
     assert_eq!(f.logged(), NONE);
@@ -159,7 +159,7 @@ fn setup_remove_without_scope_is_usage_when_wiki_is_chosen() {
     for args in [&["--remove"][..], &["--remove", "--modules", "wiki"]] {
         usage(
             &f.setup(args),
-            "nollm-wiki: --scope is required (repo or local)",
+            "nollm-wiki-install: --scope is required (repo or local)",
         );
     }
     assert_eq!(f.logged(), NONE);
@@ -192,22 +192,23 @@ fn setup_of_a_module_not_installed_says_how() {
     let f = installed(LOGS, "plaz");
     let out = f.setup(&["--modules", "wiki", "--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = "nollm-wiki: wiki is not installed; run nollm-wiki install --modules wiki";
+    let expect =
+        "nollm-wiki-install: wiki is not installed; run nollm-wiki-install install --modules wiki";
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
     usage(
-        &f.setup(&["--modules", "nollm-wiki", "--scope", "repo"]),
-        "nollm-wiki: nollm-wiki is not a module",
+        &f.setup(&["--modules", "nollm-wiki-install", "--scope", "repo"]),
+        "nollm-wiki-install: nollm-wiki-install is not a module",
     );
     // Not in the release either: no install hint, which would fail.
     let out = f.setup(&["--modules", "nope", "--scope", "repo"]);
     usage(
         &out,
-        "nollm-wiki: --modules: unknown module \"nope\" (known: wiki, plaz)",
+        "nollm-wiki-install: --modules: unknown module \"nope\" (known: wiki, plaz)",
     );
-    assert!(!stderr(&out).contains("install"), "{}", stderr(&out));
+    assert!(!stderr(&out).contains("; run"), "{}", stderr(&out));
     usage(
         &f.setup(&["--modules", "plaz,", "--scope", "repo"]),
-        "nollm-wiki: --modules: bad name \"\"",
+        "nollm-wiki-install: --modules: bad name \"\"",
     );
     assert_eq!(f.logged(), NONE);
     let out = f.setup(&["--modules", " plaz ", "--scope", "repo"]);
@@ -222,9 +223,12 @@ fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
     let project = t.path().join("project");
     let home = project.join(".nollm-wiki");
     fs::create_dir(&project).unwrap();
-    nollm_wiki(&home, &base).arg("install").assert().success();
+    nollm_wiki_install(&home, &base)
+        .arg("install")
+        .assert()
+        .success();
     let log = t.path().join("log");
-    let out = nollm_wiki(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["setup", "--scope", "repo"])
         .current_dir(&project)
         .env("NOLLM_WIKI_TEST_LOG", &log)
@@ -232,7 +236,7 @@ fn setup_refuses_a_project_whose_folder_is_the_installer_home() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let expect = format!(
-        "nollm-wiki: {} is nollm-wiki's own folder; set the project up from another directory or move \
+        "nollm-wiki-install: {} is nollm-wiki-install's own folder; set the project up from another directory or move \
          NOLLM_WIKI_HOME",
         home.display()
     );
@@ -248,7 +252,7 @@ fn setup_in_home_dir_does_not_collide_with_installer_home() {
     fs::create_dir_all(user.join(".nollm-wiki")).unwrap();
     let run = |args: &[&str]| {
         // HOME is the project; the installer home is its `.nollm-wiki-home`, the data dir `.nollm-wiki`.
-        let mut cmd = nollm_wiki(&t.path().join("unused"), &base);
+        let mut cmd = nollm_wiki_install(&t.path().join("unused"), &base);
         cmd.env_remove("NOLLM_WIKI_HOME")
             .env("HOME", &user)
             .env("NOLLM_WIKI_TEST_LOG", t.path().join("log"))
@@ -267,13 +271,13 @@ fn setup_with_nothing_installed_says_so() {
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("wiki", LOGS)]);
     let home = t.path().join("home");
-    let out = nollm_wiki(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["setup", "--scope", "repo"])
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let expect = format!(
-        "nollm-wiki: nothing installed in {}; run nollm-wiki install",
+        "nollm-wiki-install: nothing installed in {}; run nollm-wiki-install install",
         home.display()
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -288,7 +292,7 @@ fn setup_with_a_missing_binary_says_update() {
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
     let expect = format!(
-        "nollm-wiki: plaz is installed but {} is missing; run nollm-wiki update",
+        "nollm-wiki-install: plaz is installed but {} is missing; run nollm-wiki-install update",
         plaz.display()
     );
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
@@ -302,7 +306,7 @@ fn setup_memory_without_wiki_is_usage() {
         let out = f.setup(&["--modules", "plaz", "--scope", "repo", flag]);
         usage(
             &out,
-            &format!("nollm-wiki: {flag} applies to wiki, which is not chosen"),
+            &format!("nollm-wiki-install: {flag} applies to wiki, which is not chosen"),
         );
     }
     usage(
@@ -340,15 +344,15 @@ fn setup_with_a_colon_in_the_home_path_runs_the_modules_with_path_unchanged() {
     let logs_path: &[u8] = b"#!/bin/sh\necho \"$PATH\" >> \"$NOLLM_WIKI_TEST_LOG\"\n";
     let t = tempfile::tempdir().unwrap();
     let base = release(&t.path().join("release"), "0.7.0", &[("wiki", logs_path)]);
-    let home = t.path().join("nollm-wiki:home");
-    nollm_wiki(&home, &base)
+    let home = t.path().join("nollm-wiki-install:home");
+    nollm_wiki_install(&home, &base)
         .args(["install", "--modules", "wiki"])
         .assert()
         .success();
     let project = t.path().join("project");
     fs::create_dir(&project).unwrap();
     let log = t.path().join("log");
-    let out = nollm_wiki(&home, &base)
+    let out = nollm_wiki_install(&home, &base)
         .args(["setup", "--scope", "repo"])
         .current_dir(&project)
         .env("NOLLM_WIKI_TEST_LOG", &log)
@@ -367,7 +371,7 @@ fn setup_without_asking_gives_the_modules_no_input() {
     let reads: &[u8] =
         b"#!/bin/sh\nread -r line; echo \"read [$line]\" >> \"$NOLLM_WIKI_TEST_LOG\"\n";
     let f = installed(reads, "wiki");
-    let out = nollm_wiki(&f.home, &f.base)
+    let out = nollm_wiki_install(&f.home, &f.base)
         .args(["setup", "--scope", "repo", "--yes"])
         .current_dir(f.t.path().join("project"))
         .env("NOLLM_WIKI_TEST_LOG", f.log())
@@ -384,22 +388,22 @@ fn setup_agent_without_wiki_is_usage() {
     let out = f.setup(&["--scope", "repo", "--agent", "claude"]);
     usage(
         &out,
-        "nollm-wiki: --agent applies to wiki, which is not chosen",
+        "nollm-wiki-install: --agent applies to wiki, which is not chosen",
     );
     assert_eq!(f.logged(), NONE);
 }
 
-/// `out`'s stderr contains the line `nollm-wiki: <failed> setup failed (<how>)` for each failure and
+/// `out`'s stderr contains the line `nollm-wiki-install: <failed> setup failed (<how>)` for each failure and
 /// ends with the summary naming them all.
 fn failed(out: &std::process::Output, failures: &[(&str, &str)]) {
     let err = stderr(out);
     for (name, how) in failures {
-        let line = format!("nollm-wiki: {name} setup failed ({how})");
+        let line = format!("nollm-wiki-install: {name} setup failed ({how})");
         assert!(err.lines().any(|l| l == line), "{err}");
     }
     let names: Vec<&str> = failures.iter().map(|f| f.0).collect();
     let last = format!(
-        "nollm-wiki: setup finished with errors: {}",
+        "nollm-wiki-install: setup finished with errors: {}",
         names.join(", ")
     );
     assert_eq!(err.lines().last(), Some(last.as_str()), "{err}");
@@ -439,7 +443,7 @@ fn setup_runs_no_module_when_one_is_not_executable() {
     fs::set_permissions(&plaz, fs::Permissions::from_mode(0o644)).unwrap();
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = format!("nollm-wiki: {} is not executable", plaz.display());
+    let expect = format!("nollm-wiki-install: {} is not executable", plaz.display());
     assert!(stderr(&out).contains(&expect), "{}", stderr(&out));
     assert_eq!(f.logged(), NONE);
 }
@@ -447,13 +451,13 @@ fn setup_runs_no_module_when_one_is_not_executable() {
 #[test]
 fn setup_with_no_module_installed_says_so() {
     let f = installed(LOGS, "plaz");
-    nollm_wiki(&f.home, &f.base)
+    nollm_wiki_install(&f.home, &f.base)
         .args(["remove", "--modules", "plaz", "--yes"])
         .assert()
         .success();
     let out = f.setup(&["--scope", "repo"]);
     assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
-    let expect = "nollm-wiki: nothing to set up: no module is installed (nollm-wiki install)";
+    let expect = "nollm-wiki-install: nothing to set up: no module is installed (nollm-wiki-install install)";
     assert!(stderr(&out).contains(expect), "{}", stderr(&out));
 }
 
