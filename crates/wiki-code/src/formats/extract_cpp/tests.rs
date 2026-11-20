@@ -664,3 +664,62 @@ fn a_conversion_operator_read_as_a_function_of_the_type_operator_is_its_classs_m
         ]
     );
 }
+
+// A type's body inside a signature span is elided to `{…}`, so the signature
+// still stops at the body. Two shapes put one there: a declaration that
+// defines a type in place (`typedef struct … {…} name;`, `static struct
+// {…} config;`), and a grammar misparse. `-> decltype(a, b)` derails
+// tree-sitter-cpp, which then closes the class early and reads the whole
+// class as the return type of the next member, so `m`'s signature was the
+// class body (9K characters in nlohmann/json's `json_pointer.hpp`).
+#[test]
+fn a_type_body_inside_a_signature_is_elided() {
+    let src = "template<typename R>\nclass P\n{\n    template<typename B>\n    static auto m(B& o) -> decltype(o.f(), std::declval<B&>())\n    {\n        if (o.x) { return o; }\n        return o;\n    }\n\n    template<typename B>\n    static B& m(B& o)\n    {\n        return o;\n    }\n};\n";
+    let e = crate::extract("p.hpp", src);
+    let sigs: Vec<&str> = e.items.iter().map(|i| i.signature.as_str()).collect();
+    assert!(
+        sigs.iter().all(|s| !s.contains("return")),
+        "body leaked into a signature: {sigs:?}"
+    );
+
+    let src = "typedef struct client {\n  int id;\n  char *name;\n} client;\nstatic struct config {\n  int port;\n} config;\nenum { A, B } mode;\n";
+    let sigs: Vec<String> = crate::extract("s.h", src)
+        .items
+        .into_iter()
+        .map(|i| i.signature)
+        .collect();
+    assert_eq!(
+        sigs,
+        [
+            "struct client",
+            "typedef struct client {…} client",
+            "struct config",
+            "static struct config {…} config",
+            "enum {…} mode",
+        ],
+        "{sigs:?}"
+    );
+}
+
+#[test]
+fn a_signature_never_reads_back_a_skipped_branch_or_a_broken_declarator() {
+    // A first-branch item reads the copy it was parsed from: the `#else`
+    // branch, blank there, once rendered into `sleep`'s signature (reduced
+    // from jemalloc's `background_thread.c`, 19K characters).
+    let src = "#ifndef X\nbool a(int t) STUB\nvoid b(int t) STUB\n#else\n\tint skipped;\n#  ifndef Y\n#endif\n#endif\nsleep(int t,\n\treturn false;\n";
+    // A declaration that runs on into an ERROR stops at its declarator: the
+    // class's closing brace once ended the macro's signature.
+    let broken = "class B : public A\n{\n    MACRO(B, A, x)\n};\nint main()\n";
+    for (path, src) in [("bt.c", src), ("m.cpp", broken)] {
+        let sigs: Vec<String> = crate::extract(path, src)
+            .items
+            .into_iter()
+            .map(|i| i.signature)
+            .collect();
+        assert!(
+            sigs.iter()
+                .all(|s| !s.contains("#else") && !s.ends_with('}')),
+            "{sigs:?}"
+        );
+    }
+}

@@ -40,8 +40,8 @@ pub(crate) fn is_comment_kind(kind: &str) -> bool {
     kind.contains("comment")
 }
 
-/// Byte ranges of `root`'s descendants that satisfy `want`, clipped to
-/// `[start, end)`, in source order and non-overlapping.
+/// Byte ranges of `root`'s descendants that `want` classifies, clipped to
+/// `[start, end)`, in source order and non-overlapping, each with its class.
 ///
 /// Only the outermost match is reported: descending into a matched node would
 /// report a nested string inside a comment twice, and the caller treats a whole
@@ -50,17 +50,18 @@ fn descendant_spans(
     root: Node,
     start: usize,
     end: usize,
-    want: fn(&str) -> bool,
-) -> Vec<(usize, usize)> {
+    want: impl Fn(&str) -> Option<Seg>,
+) -> Vec<(usize, usize, Seg)> {
     let mut out = Vec::new();
     let mut cursor = root.walk();
     let mut descend = true;
     loop {
         let node = cursor.node();
         let (a, b) = (node.start_byte(), node.end_byte());
-        let matched = want(node.kind()) && b > start && a < end;
-        if matched {
-            out.push((a.max(start), b.min(end)));
+        let seg = want(node.kind()).filter(|_| b > start && a < end);
+        let matched = seg.is_some();
+        if let Some(seg) = seg {
+            out.push((a.max(start), b.min(end), seg));
         }
         // Skip the subtree of a match, and any subtree that cannot overlap.
         if descend && !matched && a < end && b > start && cursor.goto_first_child() {
@@ -79,9 +80,18 @@ fn descendant_spans(
     }
 }
 
+/// A segment of a signature span that `render_span` does not render as plain
+/// text. See `render_span`.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Seg {
+    Comment,
+    Body,
+    Literal,
+}
+
 /// Render one fragment of a signature from source, with the parse tree in hand.
 ///
-/// Three segment kinds, decided structurally rather than by searching the text:
+/// Four segment kinds, decided structurally rather than by searching the text:
 ///
 ///   * a **comment** is dropped. A `///` on a field inside an enum variant's
 ///     body would otherwise collapse into the signature
@@ -90,9 +100,14 @@ fn descendant_spans(
 ///     everything after it for anyone who copied it. This also covers a
 ///     comment between a decorator and its definition, and one inside a
 ///     retained value.
+///   * a **type body** the language elides (`LangSpec::elide_body`) becomes
+///     `{…}`, whatever comments or literals it holds.
 ///   * a **string literal** is collapsed but never tidied, so a `" , "` stays
 ///     `" , "` instead of being rewritten to `", "`.
 ///   * everything else is collapsed and tidied.
+///
+/// One walk finds all three special kinds, outermost first, so a comment or
+/// literal inside an elided body is never reported on its own.
 ///
 /// Order is load-bearing. Segmentation reads node offsets, so it must happen
 /// on the *raw* span: `join_continuations` is a `replace` that changes length
@@ -107,15 +122,21 @@ fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec
     if start >= end {
         return String::new();
     }
-    let comments = descendant_spans(root, start, end, is_comment_kind);
-    let literals = descendant_spans(root, start, end, |k| {
-        k.contains("string") || k.ends_with("char_literal") || k.ends_with("rune_literal")
+    let spans = descendant_spans(root, start, end, |k| {
+        if is_comment_kind(k) {
+            Some(Seg::Comment)
+        } else if (spec.elide_body)(k) {
+            Some(Seg::Body)
+        } else if k.contains("string") || k.ends_with("char_literal") || k.ends_with("rune_literal")
+        {
+            Some(Seg::Literal)
+        } else {
+            None
+        }
     });
 
     let mut out = String::with_capacity(end - start);
     let mut pos = start;
-    // Comments and literals never overlap, so one merged walk over both is
-    // enough: at each step take whichever boundary comes first.
     let push_plain = |out: &mut String, a: usize, b: usize| {
         if a < b {
             if let Some(s) = text.get(a..b) {
@@ -123,30 +144,22 @@ fn render_span(text: &str, root: Node, start: usize, end: usize, spec: &LangSpec
             }
         }
     };
-    while pos < end {
-        let next_comment = comments.iter().find(|(a, b)| *b > pos && *a < end);
-        let next_literal = literals.iter().find(|(a, b)| *b > pos && *a < end);
-        let next = match (next_comment, next_literal) {
-            (Some(c), Some(l)) => Some(if c.0 <= l.0 { (*c, true) } else { (*l, false) }),
-            (Some(c), None) => Some((*c, true)),
-            (None, Some(l)) => Some((*l, false)),
-            (None, None) => None,
-        };
-        if let Some(((a, b), is_comment)) = next {
-            push_plain(&mut out, pos, a.max(pos));
-            if !is_comment {
-                // Collapsed so a multi-line literal cannot break the
-                // one-line invariant, but never tidied.
-                if let Some(s) = text.get(a.max(pos)..b) {
+    for (a, b, seg) in spans {
+        push_plain(&mut out, pos, a);
+        match seg {
+            Seg::Comment => {}
+            Seg::Body => out.push_str("{…}"),
+            // Collapsed so a multi-line literal cannot break the one-line
+            // invariant, but never tidied.
+            Seg::Literal => {
+                if let Some(s) = text.get(a..b) {
                     out.push_str(&collapse_runs(s));
                 }
             }
-            pos = b.max(pos + 1);
-        } else {
-            push_plain(&mut out, pos, end);
-            break;
         }
+        pos = b;
     }
+    push_plain(&mut out, pos, end);
     // Dropping a comment leaves the whitespace on either side of it in two
     // different segments, each collapsed to its own space — `pub /* c */ fn`
     // would render `pub  fn`. One final pass merges runs that a segment

@@ -168,6 +168,7 @@ pub(crate) fn cpp_spec() -> LangSpec {
         owner_anchor: cpp_owner_anchor,
         item_lead: cpp_lead,
         shape: cpp_shape,
+        elide_body: |k| matches!(k, "field_declaration_list" | "enumerator_list"),
         ..LangSpec::base("cpp", tree_sitter_cpp::LANGUAGE.into(), QUERY)
     }
 }
@@ -476,8 +477,17 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
         .children(&mut cursor)
         .find(|c| c.kind() == "field_initializer_list")
         .or_else(|| default_cut(def));
+    // A definition in a broken class body can parse as a `declaration` with
+    // no `body`, its body an ERROR after the declarator: stop there.
+    let broken = declarator.and_then(|d| {
+        def.children(&mut def.walk())
+            .find(|c| c.is_error() && c.start_byte() >= d.end_byte())
+    });
     Shape {
-        cut,
+        cut: [cut, broken]
+            .into_iter()
+            .flatten()
+            .min_by_key(Node::start_byte),
         ..default_shape(def)
     }
 }
@@ -675,16 +685,21 @@ pub(crate) fn params_of(def: Node, name: &str, src: &str) -> Option<String> {
 }
 
 /// For a tree with errors: the tree of `first_branch(text)` when it is less
-/// damaged. Braces split across `#if`/`#else` branches otherwise make a
-/// definition run to the end of the file or vanish. The copy has the same
-/// bytes and newlines, so its nodes index `text` itself.
-pub(crate) fn reparse(parser: &mut Parser, text: &str, tree: &Tree) -> Option<Tree> {
+/// damaged, with that copy. Braces split across `#if`/`#else` branches
+/// otherwise make a definition run to the end of the file or vanish. The copy
+/// has the same length and newlines, so its nodes index `text` too, but a
+/// node can span bytes the copy blanked: text read through such a node (a
+/// signature) must come from the copy, or a skipped `#else` branch reads back
+/// in whole.
+pub(crate) fn reparse(parser: &mut Parser, text: &str, tree: &Tree) -> Option<(Tree, String)> {
     if !tree.root_node().has_error() {
         return None;
     }
+    let copy = first_branch(text);
     parser
-        .parse(first_branch(text), None)
+        .parse(&copy, None)
         .filter(|t| damage(t.root_node()) < damage(tree.root_node()))
+        .map(|t| (t, copy))
 }
 
 /// Lines under the outermost ERROR nodes plus one per MISSING node.

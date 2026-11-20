@@ -584,7 +584,9 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             _ => tree,
         }
     };
-    // The first-branch tree comes first, as its items do. Both index `text`.
+    // The first-branch tree comes first, as its items do. Both index `text`;
+    // the first-branch tree's items read the copy it was parsed from.
+    let (first_branch, branch_text) = first_branch.unzip();
     let family = Family::of(Some(spec.lang_name));
     let sources: Vec<Source> = first_branch
         .into_iter()
@@ -621,6 +623,10 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // @item (the declaration) share one name node.
     let mut items: BTreeMap<usize, (CodeItem, Option<Def>)> = BTreeMap::new();
     for (source, t) in sources.iter().enumerate() {
+        let text = match &branch_text {
+            Some(copy) if source != main => copy.as_str(),
+            _ => text,
+        };
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(query, t.tree().root_node(), text.as_bytes());
         while let Some(m) = matches.next() {
