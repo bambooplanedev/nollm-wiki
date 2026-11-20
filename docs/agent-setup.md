@@ -23,7 +23,7 @@ not, it prints `install.sh: signature not checked (minisign not found); kulman c
 install and update` (or `... not checked: local release tree`); tell the user that. Set `Installed:` to the version `kulman --version` now prints.
 
 **Installed.** Run `kulman` (no arguments). If it prints `nothing installed in <home>; run kulman
-install`, kulman is there but no modules are: say you will install ``wiki`` and `plaz`, and after
+install`, kulman is there but no modules are: say you will install `wiki` and `plaz`, and after
 the user agrees run `kulman install --yes`. Otherwise the first line is `kulman <installed> in
 <home>`. The last line is `newer release: <newest> (kulman update)`, `up to date`, or `could not
 check for a newer release (...)`; in that case show the line to the user and do not update. If a

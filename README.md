@@ -160,7 +160,7 @@ non-root user.
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman
-    cargo install --path crates/wiki      # into ~/.cargo/bin
+    cargo install --path crates/wiki        # into ~/.cargo/bin
     cargo install --path crates/plaz
     cargo install --path crates/kulman
 

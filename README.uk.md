@@ -158,7 +158,7 @@ Python, C і C++; інші мови отримують примітку «not co
 
     git clone https://github.com/bambooplanedev/kulman
     cd kulman
-    cargo install --path crates/wiki      # у ~/.cargo/bin
+    cargo install --path crates/wiki        # у ~/.cargo/bin
     cargo install --path crates/plaz
     cargo install --path crates/kulman
 
