@@ -2,19 +2,21 @@
 
 # nollm-wiki
 
-**nollm-wiki** is the front door of this set: it installs the tools and sets up a project.
+**A project map for coding agents and a clear view of the business logic for people, compiled from the code without an LLM.**
 
 [![CI](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/nollm-wiki)](https://github.com/bambooplanedev/nollm-wiki/releases)
 [![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-nollm-wiki is a set of tools for coding agents and the people who work with them, with names from an
-aircraft design bureau (`plaz` is its full-size drawing floor). `wiki` compiles a project into a map an
-agent can search — where each function lives, what calls it, which lines to read — and `plaz` draws
-the real decisions of each function for people to read. Neither calls a model: the same sources give
-byte-identical output, and `nollm-wiki` installs both and sets them up in a project with one command
-each.
+nollm-wiki turns a project into a map an agent can search — where each function lives, what calls
+it, which lines to read — and into decision charts that show people the business logic of each
+function. Nothing calls a model: the same sources give byte-identical output.
+
+- `wiki` compiles the map and serves it to agents over MCP;
+- `plaz` draws the business logic of each function — its real decisions — as charts people can read;
+- `nollm-wiki-install` installs both, checks the release signature and sets them up in a project with
+  one command.
 
 ## Why
 
@@ -26,8 +28,6 @@ model, to the same precision: down to the line and the condition.
 
 `wiki` gives the agent search across the project; `plaz` draws a decision chart for each function
 for the person. What was measured: [What `wiki` saves, and when](#what-wiki-saves-and-when).
-
-`nollm-wiki` installs and updates both with one command and verifies the release signature.
 
 ## What `wiki` saves, and when
 
@@ -59,7 +59,8 @@ issue](https://github.com/bambooplanedev/nollm-wiki/issues).
 
 | Name | Say it | The word |
 |---|---|---|
-| nollm-wiki | the project's name | the front door: installs the tools, sets up a project |
+| nollm-wiki | the project's name | the project: the map for agents and the business-logic charts for people |
+| `nollm-wiki-install` | nollm-wiki install | plain name: the installer of the tools |
 | `wiki` | wiki | plain name: the module that compiles the project wiki and serves it to agents |
 | plaz | plahz (плаз) | the loft floor where a bureau draws the airframe's real lines full size — the real decisions of each function |
 | techlog | TEK-log | an aircraft's technical log — the agent's memory of the project |
@@ -67,28 +68,28 @@ issue](https://github.com/bambooplanedev/nollm-wiki/issues).
 
 ## Install
 
-One line fetches `nollm-wiki` itself:
+One line fetches `nollm-wiki-install` itself:
 
     curl --proto '=https' --tlsv1.2 -sSfL https://github.com/bambooplanedev/nollm-wiki/releases/latest/download/install.sh | sh
 
-The script downloads the `nollm-wiki` archive for your system, checks it against the release's
+The script downloads the `nollm-wiki-install` archive for your system, checks it against the release's
 `SHA256SUMS` (it stops if neither `sha256sum` nor `shasum` is there) and puts the binary at
-`~/.nollm-wiki-home/bin/nollm-wiki`. It writes nothing else and edits no shell profile. Add
-`~/.nollm-wiki-home/bin` to your `PATH` yourself if you want to type `nollm-wiki` in a terminal; agents
-find `wiki` without it, and when `~/.local/bin` is already on your `PATH`, `nollm-wiki install` links
-the tools there. Releases are signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `nollm-wiki`
+`~/.nollm-wiki-home/bin/nollm-wiki-install`. It writes nothing else and edits no shell profile. Add
+`~/.nollm-wiki-home/bin` to your `PATH` yourself if you want to type `nollm-wiki-install` in a terminal; agents
+find `wiki` without it, and when `~/.local/bin` is already on your `PATH`, `nollm-wiki-install install` links
+the tools there. Releases are signed: `install.sh` checks the signature of `SHA256SUMS` when `minisign` is installed, and `nollm-wiki-install`
 checks every release it reads (see [Checking a release](#checking-a-release)).
 
 Then install the modules:
 
-    nollm-wiki install
+    nollm-wiki-install install
 
 This puts `wiki` and `plaz` (the release's default modules) into `~/.nollm-wiki-home/bin`, next to
-`nollm-wiki`, with the release's `manifest.json` and a `state.json` in `~/.nollm-wiki-home`. Nothing is
+`nollm-wiki-install`, with the release's `manifest.json` and a `state.json` in `~/.nollm-wiki-home`. Nothing is
 written outside that folder. Then, in each project:
 
     cd your-project
-    nollm-wiki setup --scope repo
+    nollm-wiki-install setup --scope repo
 
 This runs `wiki setup` and `plaz setup` there. They write into the project's `.nollm-wiki/` folder,
 add the agent configs for the agents they find (Claude Code, pi, Cursor, Codex; the prompt hook only with `--hook`), create
@@ -96,10 +97,10 @@ add the agent configs for the agents they find (Claude Code, pi, Cursor, Codex; 
 whole team; `--scope local` writes them for this checkout only and lists them in `.git/info/exclude` (what each scope writes, and for which
 agent: [the `wiki` module's setup](crates/wiki/README.md#wiki-setup)).
 
-Later, `nollm-wiki update` brings everything to the latest release, `nollm-wiki setup --scope repo --remove`
-undoes a project's setup (with the scope it was set up with) and `nollm-wiki remove` deletes what nollm-wiki
+Later, `nollm-wiki-install update` brings everything to the latest release, `nollm-wiki-install setup --scope repo --remove`
+undoes a project's setup (with the scope it was set up with) and `nollm-wiki-install remove` deletes what nollm-wiki
 installed. Commands, flags, exit codes and the layout of a release:
-[crates/nollm-wiki/README.md](crates/nollm-wiki/README.md).
+[crates/nollm-wiki-install/README.md](crates/nollm-wiki-install/README.md).
 
 ### Let your agent do it
 
@@ -115,14 +116,14 @@ Read [docs/agent-setup.md](docs/agent-setup.md) first to see what the agent will
 
 A release's `manifest.json` and `SHA256SUMS` are signed with minisign by the release key,
 [`release/nollm-wiki.pub`](release/nollm-wiki.pub); each archive is checked against the SHA-256 sums in
-them. `nollm-wiki` refuses a release whose signature does not verify, or is missing over `https://`;
+them. `nollm-wiki-install` refuses a release whose signature does not verify, or is missing over `https://`;
 `install.sh` checks the signature when `minisign` is installed and otherwise says it did not. The
 key, the commands to check a release by hand, how a release is signed and the limits:
-[Signatures](crates/nollm-wiki/README.md#signatures).
+[Signatures](crates/nollm-wiki-install/README.md#signatures).
 
 ## Modules
 
-**[nollm-wiki](crates/nollm-wiki/README.md)** installs, updates and removes the modules and runs their
+**[nollm-wiki-install](crates/nollm-wiki-install/README.md)** installs, updates and removes the modules and runs their
 setup in a project. It is the installer, not a module.
 
 **[`wiki`](crates/wiki/README.md)** compiles a project — code, notes, docs — into a cross-linked
@@ -161,21 +162,21 @@ non-root user.
     cd nollm-wiki
     cargo install --path crates/wiki      # into ~/.cargo/bin
     cargo install --path crates/plaz
-    cargo install --path crates/nollm-wiki
+    cargo install --path crates/nollm-wiki-install
 
     cargo test
     cargo clippy --all-targets -- -D warnings
     cargo fmt --check
 
-`cargo install` puts the binaries in `~/.cargo/bin`. On the two release systems a `nollm-wiki` built
+`cargo install` puts the binaries in `~/.cargo/bin`. On the two release systems a `nollm-wiki-install` built
 this way installs the modules of a published release. On any other system it cannot: there is no
-build for that system, and `nollm-wiki install` stops with `no build for <os>/<arch>`. There, use the
+build for that system, and `nollm-wiki-install install` stops with `no build for <os>/<arch>`. There, use the
 `wiki` and `plaz` built here and run their own setup in each project (`wiki setup --scope repo`,
-`plaz setup --scope repo`). The `nollm-wiki` tests install a release, which also needs one of the two
+`plaz setup --scope repo`). The `nollm-wiki-install` tests install a release, which also needs one of the two
 release systems. Pushing a `v*` tag that equals the workspace version builds the macOS and Linux
 archives, checks that they install, and makes a draft GitHub Release with their `SHA256SUMS`; the
 owner signs the draft with `scripts/release-sign.sh` and then publishes it
-([Signatures](crates/nollm-wiki/README.md#signatures)).
+([Signatures](crates/nollm-wiki-install/README.md#signatures)).
 
 ## License
 
