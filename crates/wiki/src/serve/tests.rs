@@ -270,3 +270,42 @@ fn snapshot_survives_the_index_of_another_version() {
     std::fs::write(out.join("index.json"), value.to_string()).unwrap();
     assert_eq!(pages(&state), 3);
 }
+
+/// With two workers and a compile holding the lock, two calls share one
+/// wait, the third starts only when a worker frees, and a ping answers at
+/// once.
+#[test]
+fn calls_beyond_the_workers_queue_and_ping_does_not() {
+    let (tmp, out) = fixture(3);
+    let state = WikiState::load(&out).unwrap();
+    let server = WikiServer::new(state, out.clone(), &["search"]);
+    let (release, cli) = hold(&tmp, &out);
+    let call = |id: u64| {
+        serde_json::json!({"jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": {"name": "search", "arguments": {"query": "x"}}})
+        .to_string()
+    };
+    let ping = r#"{"jsonrpc":"2.0","id":4,"method":"ping"}"#.to_string();
+    let input = [call(1), call(2), call(3), ping].join("\n");
+    let t = Instant::now();
+    let replies = Mutex::new(Vec::new());
+    let read = serve(&server, input.as_bytes(), 2, &|r: Value| {
+        replies
+            .lock()
+            .unwrap()
+            .push((r["id"].as_u64().unwrap(), t.elapsed()));
+    })
+    .unwrap();
+    let _ = release.send(());
+    cli.join().unwrap();
+    assert!(read);
+    let replies = replies.into_inner().unwrap();
+    let at = |id| replies.iter().find(|r| r.0 == id).unwrap().1;
+    assert!(at(4) < Duration::from_secs(1), "{replies:?}");
+    let first = at(1).max(at(2));
+    assert!(
+        first < crate::live::WAIT + Duration::from_secs(1),
+        "{replies:?}"
+    );
+    assert!(at(3) > first + Duration::from_secs(1), "{replies:?}");
+}

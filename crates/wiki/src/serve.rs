@@ -288,10 +288,7 @@ impl WikiServer {
 
     /// The reply to one message from the client: `None` for a notification
     /// or a response.
-    fn handle(&self, line: &str) -> Option<Value> {
-        let Ok(msg) = serde_json::from_str::<Value>(line) else {
-            return Some(reply(None, Err((-32700, "Parse error".into()))));
-        };
+    fn handle(&self, msg: &Value) -> Option<Value> {
         if msg["jsonrpc"] != "2.0" {
             return Some(reply(None, Err((-32600, "Invalid request".into()))));
         }
@@ -611,33 +608,80 @@ pub fn run(
         None => std::env::current_dir()?,
     };
     let server = WikiServer::new(state, root, &tools);
-    // Newline-delimited JSON-RPC, one thread per message: a call waiting
-    // on a compile holds up nothing else. Closing stdin waits for the
-    // calls in flight, then returns.
-    let read_any = std::thread::scope(|s| -> std::io::Result<bool> {
-        let mut read_any = false;
-        for line in std::io::stdin().lock().lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            read_any = true;
-            let server = &server;
-            s.spawn(move || {
-                if let Some(reply) = server.handle(&line) {
-                    // A locked write keeps each reply on its own line.
-                    let _ = writeln!(std::io::stdout().lock(), "{reply}");
-                }
-            });
-        }
-        Ok(read_any)
-    })?;
-    if !read_any {
+    let reply = |r: Value| {
+        // A locked write keeps each reply on its own line.
+        let _ = writeln!(std::io::stdout().lock(), "{r}");
+    };
+    if !serve(&server, std::io::stdin().lock(), WORKERS, &reply)? {
         return Err(WikiError::Serve(
             "connection closed: initialize request".into(),
         ));
     }
     Ok(())
+}
+
+/// Threads for the calls that may wait up to `WAIT` on a compile: a burst
+/// of them runs this many at a time and the rest queue, instead of one
+/// thread each. Agents issue a few calls per turn, so 16 is never the limit
+/// in practice.
+pub(crate) const WORKERS: usize = 16;
+
+/// Answer newline-delimited JSON-RPC from `input` through `reply` until it
+/// ends, then wait for the calls in flight; returns whether any message
+/// came. Calls that read the wiki go to `workers` threads; the rest
+/// (`ping`, `initialize`, `tools/list`) are answered by the reader itself,
+/// so they never queue behind a compile.
+pub(crate) fn serve(
+    server: &WikiServer,
+    input: impl BufRead,
+    workers: usize,
+    reply: &(dyn Fn(Value) + Sync),
+) -> std::io::Result<bool> {
+    let (calls, queue) = std::sync::mpsc::channel::<Value>();
+    let queue = &Mutex::new(queue);
+    // `calls` moves in: an early return drops it, so the workers end.
+    std::thread::scope(move |s| {
+        for _ in 0..workers {
+            s.spawn(move || loop {
+                let next = queue
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .recv();
+                let Ok(msg) = next else { break };
+                if let Some(r) = server.handle(&msg) {
+                    reply(r);
+                }
+            });
+        }
+        let mut read_any = false;
+        for line in input.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            read_any = true;
+            match serde_json::from_str::<Value>(&line) {
+                Ok(msg)
+                    if matches!(
+                        msg["method"].as_str(),
+                        Some("tools/call" | "resources/list" | "resources/read")
+                    ) =>
+                {
+                    calls.send(msg).expect("workers outlive the reader");
+                }
+                Ok(msg) => {
+                    if let Some(r) = server.handle(&msg) {
+                        reply(r);
+                    }
+                }
+                Err(_) => reply(json!({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32700, "message": "Parse error"},
+                })),
+            }
+        }
+        Ok(read_any)
+    })
 }
 
 #[cfg(test)]
