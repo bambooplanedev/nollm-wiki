@@ -81,16 +81,33 @@ fn tests_is_a_kind_argument() {
 }
 
 #[test]
-fn code_says_when_a_test_page_was_in_its_top() {
+fn code_says_when_a_test_page_would_come_first() {
     let (_d, w) = fixture();
-    for q in ["ledger balance", "post balance", "unrelated", "ledger"] {
+    // Only when a test page would have been the first page.
+    let mut seen = (false, false);
+    for q in [
+        "ledger balance",
+        "post balance",
+        "unrelated",
+        "ledger",
+        "round trip",
+    ] {
         for limit in 1..=5 {
             let unsplit = w.search(q, None, limit);
             let (hits, cut) = w.search_answer(q, Some(&KindFilter::Code), None, Some(limit));
-            assert_eq!(cut, unsplit.iter().any(is_test), "{q:?} limit {limit}");
+            assert_eq!(
+                cut,
+                unsplit.first().is_some_and(is_test),
+                "{q:?} limit {limit}"
+            );
             assert!(!hits.iter().any(is_test));
+            if !cut && unsplit.iter().any(is_test) {
+                seen.0 = true;
+            }
+            seen.1 |= cut;
         }
     }
+    assert_eq!(seen, (true, true), "both cases occur");
     // Only `code` says it.
     for kind in [None, Some(KindFilter::Tests)] {
         let (_, cut) = w.search_answer("ledger balance", kind.as_ref(), None, Some(5));
@@ -200,9 +217,13 @@ fn cli(out: &std::path::Path, args: &[&str]) -> String {
 fn cli_search_splits_tests() {
     let (_d, _, out) = common::compiled(FILES);
     let pointer = "tests also match; use kind \"tests\"\n";
-    let code = cli(&out, &["ledger balance", "--kind", "code"]);
+    let code = cli(&out, &["round trip", "--kind", "code"]);
     assert!(code.ends_with(pointer), "{code}");
-    assert!(!code.contains("tests/"), "{code}");
+    let code = cli(&out, &["ledger balance", "--kind", "code"]);
+    assert!(
+        !code.contains(pointer) && !code.contains("tests/"),
+        "{code}"
+    );
     let tests = cli(&out, &["ledger balance", "--kind", "tests"]);
     assert!(tests.contains("tests/ledger_flow.rs"), "{tests}");
     assert!(

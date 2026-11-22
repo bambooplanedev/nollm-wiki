@@ -738,10 +738,11 @@ matching:
   `code` and `tests`, scores, sorts, and only then drops the other side, so a
   page's score is the one it had before the split; filtering before the
   statistics moved 31 of 1,350 ranks on a generated sweep and none after.
-  When a test page was in the unsplit top `limit` of a `code` search,
+  When a test page ranked first before a `code` search dropped it,
   `PassStats::tests_cut` is set, `Wiki::search_answer` returns it, and the
-  line output ends `tests also match; use kind "tests"`. Printed whenever any
-  test page matched, that line would fire on nearly every query. For a
+  line output ends `tests also match; use kind "tests"`. Printed for a test
+  page anywhere in the top `limit`, the line came on most queries of a large
+  tree and said little. For a
   query of names alone, `Wiki::in_tests_only` picks the `not_found` names a
   `tests` search would find (a definition on, or the module stem of, a test
   page), and the line output opens with `<name>: in test pages only; use

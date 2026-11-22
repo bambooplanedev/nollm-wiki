@@ -631,8 +631,9 @@ clean directory.
   A test page is a code file under a `tests` folder or named `test_*`, `*_test.*` or `*_tests.*`;
   other layouts (a `test` folder, `*.test.*` and `*.spec.*` files, a Rust `tests.rs` module, inline
   `#[cfg(test)]` code) stay under `code`. `code` and `tests` split the hits after scoring, so a page
-  scores the same under either as in an unsplit search. When a test page would have been among the
-  top `--limit` of a `code` search, a last line says `tests also match; use kind "tests"`.
+  scores the same under either as in an unsplit search. When a test page would have been the first
+  page of a `code` search, a last line says `tests also match; use kind "tests"` (not after a
+  `in test pages only` line).
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
   no query, lists every such page. A query, `--tag` or `--docs` is required.
 - `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead

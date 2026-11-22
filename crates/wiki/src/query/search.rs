@@ -69,8 +69,8 @@ impl Wiki {
         self.search_answer(q, kind, tag, limit).0
     }
 
-    /// `search_tagged`, and whether a `code` search left a test page out of
-    /// its top `limit` (so `tests` would list it).
+    /// `search_tagged`, and whether a `code` search left out the test page
+    /// that ranked first (so `tests` would list it).
     pub fn search_answer(
         &self,
         q: &str,
@@ -648,8 +648,10 @@ impl Wiki {
         if prompt_terms.is_some() {
             ranked.retain(|(h, _, _)| h.score > 0.0);
         }
+        // Only a test page that would have come first: one anywhere in the
+        // top `limit` is there on most queries.
         stats.tests_cut = kind.is_some_and(KindFilter::drops_tests)
-            && ranked.iter().take(limit).any(|(_, _, shown)| !shown);
+            && ranked.first().is_some_and(|(_, _, shown)| !shown);
         ranked.retain(|(_, _, shown)| *shown);
         ranked.truncate(limit);
         let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _, _)| hit).collect();
