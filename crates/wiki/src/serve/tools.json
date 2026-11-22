@@ -3,7 +3,6 @@
     "name": "callers",
     "description": "List the functions that call a function, as `start-end  kind  name` lines grouped by file, test code last: read a caller's lines with your file tool instead of grepping for the name; use it, not grep, to find who calls a function. Calls are matched by name and argument count, not by type. `depth` goes up more levels.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "required": [
         "id",
         "symbol"
@@ -20,20 +19,7 @@
         },
         "depth": {
           "description": "Caller levels (default 1: the direct callers).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
-          "minimum": 0
-        },
-        "max_tokens": {
-          "description": "Token budget (default 4000).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
+          "type": "integer",
           "minimum": 0
         }
       }
@@ -132,9 +118,8 @@
   },
   {
     "name": "page",
-    "description": "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool. `full: true` returns the whole page, which can be large.",
+    "description": "Show a module's outline: one `start-end  kind  signature` line per symbol, or a docs page's headings; a memory note's `page` is its text. Then read only the lines you need with your file tool.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "required": [
         "id"
       ],
@@ -144,20 +129,9 @@
           "description": "Page id, title, or source path.",
           "type": "string"
         },
-        "full": {
-          "description": "The whole page instead of the outline.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
         "max_tokens": {
           "description": "Token budget (default 4000 for the outline, none with `full`).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
+          "type": "integer",
           "minimum": 0
         }
       }
@@ -173,7 +147,6 @@
     "name": "search",
     "description": "Find where code or docs live in this project. Use it before grep or reading files, and read its answer before any grep. Returns one line per page (`id  path  title`) and indented `path:start-end  name  signature` lines for matching symbols: read only those lines with your file tool. A query of identifiers alone (`_ack`, `OrderBook`) lists each one's definition, or a first line `no symbol named <name>`. Paths are relative to the project root; line ranges are inclusive. When you were handed a plan, spec or ledger, pass its paths in `docs` to get a step's line range (`T5k`, `NULL-FLUSH`, or its title words; several labels in one query each come back); each path is printed once, then `  start-end  label` lines. Pass the plan, spec and ledger together; only labels are searched, so use grep for text inside a doc.",
     "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "required": [
         "query"
       ],
@@ -185,40 +158,16 @@
         },
         "kind": {
           "description": "`code`, `docs`, or one kind such as `code:rust` or `markdown`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "tag": {
-          "description": "Only pages with this tag (`a` also matches `a/b`); an empty query lists them.",
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "limit": {
           "description": "Maximum pages (default 5; with `docs` default 10, and an empty query lists the first 200 labels).",
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint",
+          "type": "integer",
           "minimum": 0
-        },
-        "format": {
-          "description": "Output format: `lines` (default) or `json`.",
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "docs": {
           "description": "Markdown files to search instead of the code: the plan, spec or ledger\nyou were handed. Returns each path on its own line, then `  start-end  label` for\nmatching headings and bold step labels (`-` and spaces match alike); an empty query lists the first 200 (pass `limit` for more).\nPass the plan, spec and ledger together: an ID is often a label in only one of\nthem. When no label matches, table rows holding the query (`| W21 | D12 |`) answer.\nOther body text is not searched; use grep for it.",
-          "type": [
-            "array",
-            "null"
-          ],
+          "type": "array",
           "items": {
             "type": "string"
           }

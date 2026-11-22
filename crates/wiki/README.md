@@ -441,6 +441,10 @@ that does not, such as Claude Desktop, give the project's absolute path.
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
 
+`search`'s `tag` and `format`, `page`'s `full` and `callers`' `max_tokens` are accepted but left out
+of the tool schemas: agents did not pass them, and every schema field costs tokens on every request.
+A `page` or `callers` result cut short by its budget names `max_tokens` itself.
+
 The tools mirror the CLI with smaller defaults: `max_tokens` is 4000 where the CLI is unbounded, and
 `search` returns 5 hits where the CLI returns 10, because every hit line is re-read on each later
 turn. `lint` is exposed only when `--tools` names it: it serves the person keeping the wiki, and

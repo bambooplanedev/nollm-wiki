@@ -91,6 +91,11 @@ per question is noise-level: treat single results as anecdotes.
   names; the skill `wiki setup` writes names only `mcp__wiki__*`.
 - **pi loads project files only after trust**: `.pi/mcp.json` and project
   skills need `/trust`, or `--approve` in print mode.
+- **Parameters left out of the tool schemas** (`search` `tag` and `format`,
+  `page` `full`, `callers` `max_tokens`) are still accepted, but a model
+  learns of them only from a cut-short result (`pass max_tokens: N`) or
+  the docs. A client that checks arguments against the schema would
+  reject them; pi and Claude Code do not.
 - **Agents edit despite "do not edit".** Seen twice in field runs, once
   applied. Run evaluations with edit tools excluded
   (`pi --exclude-tools edit,write`) and check `git status` after.
