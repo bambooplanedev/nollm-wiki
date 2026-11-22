@@ -6,7 +6,7 @@
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::calls::{callers_index, Caller};
-use crate::model::{CodeItem, KindFilter, Origin, SourceKind};
+use crate::model::{is_test_path, CodeItem, KindFilter, Origin, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -83,9 +83,11 @@ impl Entry {
         }
     }
 
-    /// Whether the page's source kind passes `f`.
+    /// Whether the page's source kind passes `f`; `tests` also needs a test
+    /// path (`is_test_path`).
     fn is_kind(&self, f: &KindFilter) -> bool {
         SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
+            && (*f != KindFilter::Tests || is_test_path(&self.path))
     }
 
     /// Whether the page passes a search's `kind` (a memory note passes the
@@ -99,6 +101,16 @@ impl Entry {
                 .iter()
                 .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
         })
+    }
+
+    /// `passes`, and not a test page when `kind` drops them
+    /// (`KindFilter::drops_tests`): what a `search` lists. A memory note is
+    /// never a test page.
+    fn shown(&self, kind: Option<&KindFilter>, tag: Option<&str>) -> bool {
+        self.passes(kind, tag)
+            && (self.memory
+                || !kind.is_some_and(KindFilter::drops_tests)
+                || !is_test_path(&self.path))
     }
 }
 
@@ -365,6 +377,8 @@ pub(crate) struct PassStats {
     available: f64,
     /// For a prompt: the words that count.
     terms: Vec<String>,
+    /// A `code` search left a test page out of its top `limit`.
+    tests_cut: bool,
 }
 
 /// `Default` is the empty wiki: what `serve --source` holds before its first compile.

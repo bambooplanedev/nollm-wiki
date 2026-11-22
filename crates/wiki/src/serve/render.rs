@@ -184,19 +184,48 @@ pub fn search_lines(hits: &[Hit]) -> String {
     out
 }
 
+/// The line that sends a `code` search to `tests`.
+const USE_TESTS: &str = "use kind \"tests\"";
+
 /// A first line naming the `missing` names (`Wiki::not_found`) that no item
 /// defines, then `search_lines` of `hits`. The line says the pages below, if
-/// any, only mention the names.
-pub fn search_lines_missing(hits: &[Hit], missing: &[String]) -> String {
-    if missing.is_empty() {
-        return search_lines(hits);
+/// any, only mention the names. Names in `tests_only`
+/// (`Wiki::in_tests_only`) get their own line instead, sending them to
+/// `tests`; else `tests_cut` (`Wiki::search_answer`) adds a last line that
+/// test pages also match.
+pub fn search_lines_missing(
+    hits: &[Hit],
+    missing: &[String],
+    tests_only: &[String],
+    tests_cut: bool,
+) -> String {
+    let mut out = String::new();
+    let plain: Vec<&str> = missing
+        .iter()
+        .filter(|n| !tests_only.contains(n))
+        .map(String::as_str)
+        .collect();
+    if !plain.is_empty() {
+        let names = plain.join(", ");
+        out += &if hits.is_empty() {
+            format!("no symbol named {names}\n")
+        } else {
+            format!("no symbol named {names}; the pages below only mention it\n")
+        };
     }
-    let names = missing.join(", ");
-    if hits.is_empty() {
-        return format!("no symbol named {names}\n");
+    if !tests_only.is_empty() {
+        out += &format!(
+            "{}: in test pages only; {USE_TESTS}\n",
+            tests_only.join(", ")
+        );
     }
-    let body = search_lines(hits);
-    format!("no symbol named {names}; the pages below only mention it\n{body}")
+    if !hits.is_empty() || missing.is_empty() {
+        out += &search_lines(hits);
+    }
+    if tests_cut && tests_only.is_empty() {
+        out += &format!("tests also match; {USE_TESTS}\n");
+    }
+    out
 }
 
 #[cfg(test)]
@@ -205,7 +234,7 @@ mod missing_tests {
 
     #[test]
     fn missing_names_come_first() {
-        let out = search_lines_missing(&[], &["a_b".into(), "c_d".into()]);
+        let out = search_lines_missing(&[], &["a_b".into(), "c_d".into()], &[], false);
         assert_eq!(out, "no symbol named a_b, c_d\n");
     }
 }

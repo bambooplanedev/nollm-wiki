@@ -529,3 +529,39 @@ fn hidden_parameters_still_work() {
     );
     assert!(callers.contains("alpha"), "{callers}");
 }
+
+/// The `search` tool splits `code` and `tests` and says so, as the CLI does.
+#[test]
+fn search_tool_points_code_at_tests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, out) = (tmp.path().join("raw"), tmp.path().join("out"));
+    std::fs::create_dir_all(raw.join("tests")).unwrap();
+    std::fs::write(raw.join("lib.rs"), "pub fn post_ledger() {}\n").unwrap();
+    std::fs::write(raw.join("tests/ledger.rs"), "fn only_in_tests() {}\n").unwrap();
+    compile(&raw, &out, &CompileOptions::default()).unwrap();
+    let server = WikiServer::new(WikiState::load(&out).unwrap(), raw, &DEFAULT_TOOLS);
+    let search = |args: Value| {
+        let msg = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "search", "arguments": args}});
+        let r = server.handle(&msg).unwrap();
+        r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let code = search(serde_json::json!({"query": "ledger", "kind": "code"}));
+    assert!(
+        code.ends_with("tests also match; use kind \"tests\"\n"),
+        "{code}"
+    );
+    let names = search(serde_json::json!({"query": "only_in_tests", "kind": "code"}));
+    assert!(
+        names.starts_with("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        "{names}"
+    );
+    let tests = search(serde_json::json!({"query": "only_in_tests", "kind": "tests"}));
+    assert!(
+        tests.contains("tests/ledger.rs:1-1  only_in_tests"),
+        "{tests}"
+    );
+}

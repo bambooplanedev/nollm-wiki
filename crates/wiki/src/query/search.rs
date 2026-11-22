@@ -29,7 +29,9 @@ impl Wiki {
     ///
     /// `N`, `df`, `avglen` are taken over the pages that pass `kind`, so a
     /// page's `score` differs between filtered and unfiltered calls: it is a
-    /// ranking key, not a stable property. Field weights are not length-
+    /// ranking key, not a stable property. `code` and `tests` both count
+    /// every code page and split the hits after scoring
+    /// (`KindFilter::drops_tests`). Field weights are not length-
     /// normalised, and `tf'` saturates below `W_NAME`, so a title hit beats
     /// any volume of body text on the same token. Sorted by score desc,
     /// then pagerank desc, then id asc; truncated to `limit`.
@@ -64,10 +66,21 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
+        self.search_answer(q, kind, tag, limit).0
+    }
+
+    /// `search_tagged`, and whether a `code` search left a test page out of
+    /// its top `limit` (so `tests` would list it).
+    pub fn search_answer(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+    ) -> (Vec<Hit>, bool) {
         if Self::tokenize(q).is_empty() {
-            return self
-                .search_terms(q, kind, tag, limit, MemoryScope::With, None, None)
-                .0;
+            let hits = self.search_terms(q, kind, tag, limit, MemoryScope::With, None, None);
+            return (hits.0, false);
         }
         let (mut hits, stats) =
             self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
@@ -77,7 +90,7 @@ impl Wiki {
         // The tail counts pages of every kind, so the code pass's statistics
         // are its own only when `kind` narrowed nothing.
         hits.extend(self.memory_tail(q, tag, best, kind.is_none().then_some(&stats)));
-        hits
+        (hits, stats.tests_cut)
     }
 
     /// Most definitions of one name that `lift_names` lists.
@@ -129,7 +142,7 @@ impl Wiki {
         self.items
             .iter()
             .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
-            .filter(|(e, _)| e.passes(kind, tag))
+            .filter(|(e, _)| e.shown(kind, tag))
             .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
             .filter(|(_, i)| {
                 !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
@@ -160,6 +173,29 @@ impl Wiki {
             .collect()
     }
 
+    /// Of `names` (`not_found` for a `code` search), those a `tests` search
+    /// would find: defined only on test pages, or the file stem of one.
+    /// Empty for any other kind.
+    pub fn in_tests_only(
+        &self,
+        names: &[String],
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Vec<String> {
+        if !kind.is_some_and(KindFilter::drops_tests) {
+            return Vec::new();
+        }
+        let tests = Some(&KindFilter::Tests);
+        names
+            .iter()
+            .filter(|n| {
+                !self.definitions(n, tests, tag).is_empty()
+                    || !self.stem_pages(n, tests, tag).is_empty()
+            })
+            .cloned()
+            .collect()
+    }
+
     /// The pages passing `kind` and `tag` whose file is known by `name`
     /// (`module_stem`, any case): `auto_refill` names `auto_refill.rs`, which
     /// is no item. Never a memory note.
@@ -167,7 +203,7 @@ impl Wiki {
         let name = name.to_lowercase();
         self.entries
             .values()
-            .filter(|e| !e.memory && e.passes(kind, tag))
+            .filter(|e| !e.memory && e.shown(kind, tag))
             .filter(|e| crate::formats::code::module_stem(&e.path).to_lowercase() == name)
             .collect()
     }
@@ -416,13 +452,26 @@ impl Wiki {
             MemoryScope::Without => !e.memory,
             MemoryScope::Only => e.memory,
         };
-        let filtered = |e: &Entry| e.passes(kind, tag);
+        // `tests` counts every code page, as `code` does, and both narrow
+        // their hits after scoring: a page scores as in a search that splits
+        // nothing. Statistics over the narrowed pages cost 31 of 1,350 ranks
+        // on the critic sweep of 2026-11-22. A prompt never splits.
+        let counted_kind = match kind {
+            Some(KindFilter::Tests) => Some(&KindFilter::Code),
+            k => k,
+        };
+        let shown = |e: &Entry| prompt_terms.is_some() || e.shown(kind, tag);
+        let filtered = |e: &Entry| e.passes(counted_kind, tag);
         let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
                 return (Vec::new(), PassStats::default());
             };
-            let mut listed: Vec<&Entry> = self.entries.values().filter(|e| passes(e)).collect();
+            let mut listed: Vec<&Entry> = self
+                .entries
+                .values()
+                .filter(|e| in_scope(e) && shown(e))
+                .collect();
             listed.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.id.cmp(&b.id)));
             listed.truncate(limit.unwrap_or(usize::MAX));
             let listed = listed.into_iter().map(|e| Hit::from_entry(e, 0.0, None));
@@ -508,7 +557,7 @@ impl Wiki {
                 .map(|&i| tokens[i].clone())
                 .collect();
         }
-        let mut ranked: Vec<(Hit, f64)> = candidates
+        let mut ranked: Vec<(Hit, f64, bool)> = candidates
             .into_iter()
             .map(|c| {
                 let norm = c.len as f64 / avglen;
@@ -531,10 +580,10 @@ impl Wiki {
                     .map(|&i| idf_of(named[i]) / (named[i] as f64).sqrt())
                     .sum();
                 let hit = Hit::from_entry(c.entry, base + Self::W_FILE * file, c.snippet);
-                (hit, c.entry.pagerank)
+                (hit, c.entry.pagerank, shown(c.entry))
             })
             .collect();
-        ranked.sort_by(|(a, a_pr), (b, b_pr)| {
+        ranked.sort_by(|(a, a_pr, _), (b, b_pr, _)| {
             b.score
                 .total_cmp(&a.score)
                 .then_with(|| {
@@ -549,10 +598,13 @@ impl Wiki {
                 .then_with(|| a.id.cmp(&b.id))
         });
         if prompt_terms.is_some() {
-            ranked.retain(|(h, _)| h.score > 0.0);
+            ranked.retain(|(h, _, _)| h.score > 0.0);
         }
+        stats.tests_cut = kind.is_some_and(KindFilter::drops_tests)
+            && ranked.iter().take(limit).any(|(_, _, shown)| !shown);
+        ranked.retain(|(_, _, shown)| *shown);
         ranked.truncate(limit);
-        let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
+        let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _, _)| hit).collect();
         self.expand(&mut hits, &tokens, &query_words, &idf[..tokens.len()]);
         (hits, stats)
     }

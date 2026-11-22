@@ -714,9 +714,24 @@ matching:
   `#[tokio::test]`). It is stored in `items.json`. Test items stay visible
   as symbol lines but contribute no page fields, so their names cannot
   lift their page; body text still counts.
-- **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `docs`
-  (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
-  share it and its error text.
+- **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `tests`
+  (code pages on an `is_test_path` path), `docs` (`markdown` and `text`) or
+  an exact kind; the MCP `kind` and CLI `--kind` share it and its error
+  text. In `search`, `code` and `code:<lang>` also leave out test pages
+  (`KindFilter::drops_tests`, `Entry::shown`), and only there: `neighbors`
+  with `code` and the prompt hint's internal `Code` filter keep them.
+  `search_terms` counts `N`, `df` and `avglen` over every code page for both
+  `code` and `tests`, scores, sorts, and only then drops the other side, so a
+  page's score is the one it had before the split; filtering before the
+  statistics moved 31 of 1,350 ranks on a generated sweep and none after.
+  When a test page was in the unsplit top `limit` of a `code` search,
+  `PassStats::tests_cut` is set, `Wiki::search_answer` returns it, and the
+  line output ends `tests also match; use kind "tests"`. Printed whenever any
+  test page matched, that line would fire on nearly every query. For a
+  query of names alone, `Wiki::in_tests_only` picks the `not_found` names a
+  `tests` search would find (a definition on, or the module stem of, a test
+  page), and the line output gives each `<name>: in test pages only; use
+  kind "tests"` in place of `no symbol named`.
 - **Output.** `serve::search_lines` renders the default line format (page
   line `id  path  [date  ]title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page

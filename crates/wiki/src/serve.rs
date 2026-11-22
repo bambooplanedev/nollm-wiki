@@ -381,13 +381,14 @@ impl WikiServer {
         // A tag-only listing (no query words) stays unbounded by default.
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
-        let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), limit);
+        let (hits, tests_cut) = wiki.search_answer(&p.query, kind.as_ref(), tag.as_deref(), limit);
 
         let text = if json {
             search_json(hits)
         } else {
             let missing = wiki.not_found(&p.query, kind.as_ref(), tag.as_deref());
-            search_lines_missing(&hits, &missing)
+            let tests_only = wiki.in_tests_only(&missing, kind.as_ref(), tag.as_deref());
+            search_lines_missing(&hits, &missing, &tests_only, tests_cut)
         };
         Ok(tool_result(Ok(text), stale.as_deref()))
     }

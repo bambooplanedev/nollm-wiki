@@ -117,6 +117,14 @@ per question is noise-level: treat single results as anecdotes.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
+- **Test pages are known by path only.** `code` leaves out, and `tests`
+  lists, files under a `tests` folder or named `test_*`, `*_test.*` or
+  `*_tests.*`. A `test` folder, `*.test.*` and `*.spec.*` files, a Rust
+  `tests.rs` module and inline `#[cfg(test)]` code count as source and stay
+  under `code` (on one C++ project with a `test` folder no page counted as a
+  test page). Widening the rule waits on its own measurement. The gain of the
+  split is small: on 173 recorded agent queries re-sent with `kind: code`, one more
+  answer reached the top 5 and none left it.
 - **Doc labels match words, not meaning.** `search` with `docs` first wants
   the query words in a row; when none match, a query naming several labels
   one after another lists each, else labels opened (first or second word) by

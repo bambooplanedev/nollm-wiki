@@ -157,7 +157,7 @@
           "type": "string"
         },
         "kind": {
-          "description": "`code`, `docs`, or one kind such as `code:rust` or `markdown`.",
+          "description": "`code` (no tests), `tests`, `docs`, or one kind such as `code:rust` or `markdown`.",
           "type": "string"
         },
         "limit": {

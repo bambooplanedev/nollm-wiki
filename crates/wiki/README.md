@@ -443,7 +443,7 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code` without test pages, `tests`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` (with `--tools`) | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
@@ -624,9 +624,15 @@ clean directory.
 
     wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
-- `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
-  `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
+- `--kind <k>` — `code` (every `code:<lang>` except test pages), `tests` (test pages only), `docs`
+  (`markdown` and `text`), or one exact kind: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`;
+  test pages left out as with `code`). Memory notes pass both `code` and `docs`, never `tests`; up to two that pass the gate follow the hits as
   `memory (<origin>):` lines, each with its snippet line (see [Agent memory](#agent-memory)).
+  A test page is a code file under a `tests` folder or named `test_*`, `*_test.*` or `*_tests.*`;
+  other layouts (a `test` folder, `*.test.*` and `*.spec.*` files, a Rust `tests.rs` module, inline
+  `#[cfg(test)]` code) stay under `code`. `code` and `tests` split the hits after scoring, so a page
+  scores the same under either as in an unsplit search. When a test page would have been among the
+  top `--limit` of a `code` search, a last line says `tests also match; use kind "tests"`.
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
   no query, lists every such page. A query, `--tag` or `--docs` is required.
 - `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead
@@ -649,7 +655,9 @@ A query of identifiers alone lists each one's definitions (up to 3 and `--limit`
 however many sit in one file; a name that is a file's module name in any case (`auto_refill` for
 `auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. A first line
 `no symbol named <name>; the pages below only mention it` lists each name that nothing defines and
-no file is named after (just `no symbol named <name>` when no page follows); the definitions of the
+no file is named after (just `no symbol named <name>` when no page follows); with `code`, a name
+defined only on test pages, or the module name of a test file only, gets
+`<name>: in test pages only; use kind "tests"` instead. The definitions of the
 other names and any ranked hits come after it. In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
 definition included), and has no note when N is 0. In any other query a definition the ranking missed
