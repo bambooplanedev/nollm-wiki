@@ -53,7 +53,15 @@ pub struct CodeFile {
     pub methods: Vec<String>,
     /// Every item with its lines, doc and call sites, in line order.
     pub items: Vec<CodeItem>,
+    /// The C/C++ data members left out because there are more than
+    /// `MEMBERS_PER_FILE`; 0 when every one is an item.
+    pub members_unindexed: usize,
 }
+
+/// Most C/C++ data members one file indexes; past it, none are. Hand-written
+/// headers measured up to 1,322 (one server's main header); a generated
+/// register header holds tens of thousands.
+pub const MEMBERS_PER_FILE: usize = 2_000;
 
 /// A source file as the cross-file passes (`pair_declarations`, `Index`,
 /// `Imports`) see it.
@@ -212,6 +220,7 @@ pub(crate) fn extract_file(rel_path: &str, text: &str) -> (CodeFile, Option<Foun
         defined: info.defined,
         methods: info.methods,
         items,
+        members_unindexed: info.members_unindexed,
     };
     (file, grammar.then_some((sources, defs)))
 }
@@ -232,6 +241,8 @@ struct CodeInfo {
     /// The trees `items` came from, and each item's node in them.
     sources: Vec<Source>,
     defs: Vec<Option<Def>>,
+    /// `CodeFile::members_unindexed`.
+    members_unindexed: usize,
 }
 
 /// The shape a captured definition has, recorded at the point of capture
@@ -410,6 +421,15 @@ fn split_captures<'a>(
             if let Some(raw) = text.get(cap.node.byte_range()) {
                 imports.push(raw.trim().trim_matches(['"', '\'']).to_string());
             }
+        }
+    }
+    // A C/C++ data member's `@name` is its whole declarator: walk it to the
+    // name, and to none for a declarator that is no data member.
+    if let (Some(item), Some(d)) = (parts.item, parts.name) {
+        if item.kind() == "field_declaration" {
+            parts.name = super::extract_cpp::is_data_declarator(d)
+                .then(|| super::extract_cpp::declared_name(d))
+                .flatten();
         }
     }
     parts
@@ -621,12 +641,21 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // and an @item pattern, and a JS @def (the `export_statement`) and its
     // @item (the declaration) share one name node.
     let mut items: BTreeMap<usize, (CodeItem, Option<Def>)> = BTreeMap::new();
+    // C/C++ data member declarators seen; past `MEMBERS_PER_FILE` none is
+    // built, since none will be kept.
+    let mut members = 0;
     for (source, t) in sources.iter().enumerate() {
         let text = t.text();
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(query, t.tree().root_node(), text.as_bytes());
         while let Some(m) = matches.next() {
             let parts = split_captures(m, &idx, text, &mut imports);
+            if parts.name.is_some() && parts.item.is_some_and(|i| i.kind() == "field_declaration") {
+                members += 1;
+                if members > MEMBERS_PER_FILE {
+                    continue;
+                }
+            }
             let Some(def) = parts.def.or(parts.item) else {
                 continue;
             };
@@ -682,7 +711,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 &shape,
             );
             let item = item.map(|(key, mut it, node)| {
-                it.nested = nested;
+                it.nested |= nested;
                 let def = Def {
                     source,
                     start_byte: node.start_byte(),
@@ -695,6 +724,20 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     }
     let (mut items, mut defs): (Vec<CodeItem>, Vec<Option<Def>>) = items.into_values().unzip();
     sort_items(&mut items, &mut defs);
+    // Data members are nested values only in C/C++.
+    let members_unindexed = if spec.lang_name == "cpp" && members > MEMBERS_PER_FILE {
+        let keep: Vec<bool> = items
+            .iter()
+            .map(|i| !(i.nested && i.kind == CodeItemKind::Value))
+            .collect();
+        let mut k = keep.iter();
+        items.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        defs.retain(|_| *k.next().unwrap());
+        members
+    } else {
+        0
+    };
     if spec.lang_name == "shell" && tree.root_node().has_error() {
         let missed = super::extract_shell::missed_functions(text, &items);
         for it in &missed {
@@ -769,6 +812,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         summary_fallback,
         sources,
         defs,
+        members_unindexed,
     })
 }
 
@@ -827,7 +871,8 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 
 /// One definition as an item, keyed by its `@name` node's start byte, or
 /// `None` when it is not an item: no `@name` (an impl header), rejected by
-/// kind (a field, a variant, an associated const), or an empty signature.
+/// kind (a field outside C/C++, a variant, an associated const), or an
+/// empty signature.
 ///
 /// The range climbs from the signature's start node over the contiguous
 /// leads above it; a blank line, a lead trailing other code on its line, or
@@ -851,7 +896,20 @@ fn code_item<'t>(
         .child_by_field_name("declaration")
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
+    // A C/C++ data member: a value `search` finds by its exact name only.
+    let member = spec.lang_name == "cpp" && super::extract_cpp::names_data_member(def, name);
+    // An error after the name means the grammar misread it: `int Box::* pm;`
+    // names `Box`, `int *RESTRICT slots;` names `RESTRICT`. One before it
+    // (`ATOMIC int ticks;`, a macro the grammar cannot know) leaves it right.
+    if member
+        && def
+            .children(&mut def.walk())
+            .any(|c| c.is_error() && c.start_byte() >= name.end_byte())
+    {
+        return None;
+    }
     let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
+        _ if member => CodeItemKind::Value,
         (ItemKind::Member, true) => CodeItemKind::Method,
         (ItemKind::FreeDef, true) => CodeItemKind::Fn,
         (ItemKind::FreeDef, false) => CodeItemKind::Type,
@@ -945,7 +1003,7 @@ fn code_item<'t>(
     };
 
     let mut item = CodeItem {
-        nested: false,
+        nested: member,
         kind,
         name: name_text.to_string(),
         owner: owner.map(str::to_string),
@@ -954,7 +1012,7 @@ fn code_item<'t>(
         end_line: last_row(top) + 1,
         doc: raw_doc.as_deref().and_then(item_doc_line),
         doc_text: None,
-        public,
+        public: public && !member,
         twin: None,
         test: false,
         calls: Vec::new(),

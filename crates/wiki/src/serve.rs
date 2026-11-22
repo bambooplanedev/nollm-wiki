@@ -1,6 +1,6 @@
 //! MCP server for a compiled wiki (`wiki serve`): exposes
-//! search/page/callers (and, on request, neighbors and lint) as tools and
-//! pages as resources over stdio.
+//! search/page/callers (and, on request, neighbors and lint) as tools over
+//! stdio.
 
 use crate::lint::{lint, load_compiled_pages};
 use crate::live::{Live, EXE, OUTDATED, RUNNING, WAIT};
@@ -21,7 +21,9 @@ use std::time::{Instant, SystemTime};
 mod render;
 
 pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
-pub use render::{doc_json, memory_prefix, search_json, search_lines, search_lines_missing};
+pub use render::{
+    doc_json, memory_prefix, search_json, search_json_text, search_lines, search_text,
+};
 
 /// Hits the `search` tool returns when the caller omits `limit` (the CLI
 /// keeps 10): every hit line is re-read on every later turn of the agent.
@@ -43,7 +45,7 @@ or handled, `callers` for who calls a function, grep for every occurrence of a \
 literal string (an env var, a message, a config key). If search finds \
 nothing relevant, try other words (a name, an abbreviation) before grep. \
 Paths are relative to the project root; line ranges are 1-based and \
-inclusive. Pages are also resources under wiki://page/<id>.";
+inclusive.";
 
 /// Every tool the server has.
 pub const TOOLS: [&str; 5] = ["search", "page", "neighbors", "callers", "lint"];
@@ -197,7 +199,6 @@ pub(crate) type RpcError = (i64, String);
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 const INTERNAL_ERROR: i64 = -32603;
-const RESOURCE_NOT_FOUND: i64 = -32002;
 
 /// Versions `initialize` agrees to, oldest first: the client's own if
 /// listed, else the newest (what rmcp 3.10 answered).
@@ -311,7 +312,7 @@ impl WikiServer {
                     .unwrap_or(PROTOCOL_VERSIONS[3]);
                 Ok(json!({
                     "protocolVersion": version,
-                    "capabilities": {"resources": {}, "tools": {}},
+                    "capabilities": {"tools": {}},
                     "serverInfo": {"name": "wiki", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": INSTRUCTIONS,
                 }))
@@ -319,13 +320,6 @@ impl WikiServer {
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({"tools": self.tools})),
             "tools/call" => self.call_tool(params),
-            "resources/list" => Ok(self.list_resources()),
-            // Clients with the resources capability may ask; rmcp answered.
-            "resources/templates/list" => Ok(json!({"resourceTemplates": []})),
-            "resources/read" => match params["uri"].as_str() {
-                Some(uri) => self.read_resource(uri),
-                None => Err(invalid_params("missing uri")),
-            },
             _ => Err((METHOD_NOT_FOUND, method.to_string())),
         };
         Some(reply(Some(id), r))
@@ -389,13 +383,10 @@ impl WikiServer {
         // A tag-only listing (no query words) stays unbounded by default.
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
-        let hits = wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), limit);
-
         let text = if json {
-            search_json(hits)
+            search_json_text(&wiki, &p.query, kind.as_ref(), tag.as_deref(), limit)
         } else {
-            let missing = wiki.not_found(&p.query, kind.as_ref(), tag.as_deref());
-            search_lines_missing(&hits, &missing)
+            search_text(&wiki, &p.query, kind.as_ref(), tag.as_deref(), limit)
         };
         Ok(tool_result(Ok(text), stale.as_deref()))
     }
@@ -419,7 +410,7 @@ impl WikiServer {
             None => wiki
                 .neighbors(&id, p.depth.unwrap_or(1), &budget)
                 .map(|pack| pack.text)
-                .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
+                .ok_or_else(|| crate::query::unknown_page(&p.id, &[], &[])),
         });
         Ok(tool_result(r, stale.as_deref()))
     }
@@ -469,75 +460,6 @@ impl WikiServer {
             "large": r.large,
         });
         Ok(tool_result(Ok(report.to_string()), stale.as_deref()))
-    }
-
-    fn list_resources(&self) -> Value {
-        let resource = |uri: String, name: &str, mime: &str| json!({"uri": uri, "name": name, "mimeType": mime});
-        let mut resources = vec![
-            resource(
-                "wiki://index".into(),
-                "index.json (machine catalog)",
-                "application/json",
-            ),
-            resource(
-                "wiki://llms.txt".into(),
-                "llms.txt (compact LLM index)",
-                "text/plain",
-            ),
-        ];
-        let (wiki, _) = self.state.snapshot();
-        for (id, title) in wiki.list_pages() {
-            resources.push(resource(
-                format!("wiki://page/{id}"),
-                &title,
-                "text/markdown",
-            ));
-        }
-        json!({"resources": resources})
-    }
-
-    fn read_resource(&self, uri: &str) -> Result<Value, RpcError> {
-        let deadline = Instant::now() + WAIT;
-        let (wiki, stale) = self.state.snapshot();
-        let not_found = || (RESOURCE_NOT_FOUND, format!("no such resource: {uri}"));
-        // Only a missing file is "no such resource"; a permission or read
-        // error on a file that exists is the server's problem, not the
-        // client's.
-        let read_file = |name: &str| {
-            let dir = self.state.dir();
-            crate::dirlock::shared_until(dir, deadline, || std::fs::read_to_string(dir.join(name)))
-                .ok_or_else(|| (INTERNAL_ERROR, format!("read {name}: {RUNNING}")))?
-                .map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::NotFound {
-                        not_found()
-                    } else {
-                        (INTERNAL_ERROR, format!("read {name}: {e}"))
-                    }
-                })
-        };
-        let (text, mime_type) = match uri {
-            "wiki://index" => (read_file("index.json")?, "application/json"),
-            "wiki://llms.txt" => (read_file("llms.txt")?, "text/plain"),
-            _ => {
-                let id = uri.strip_prefix("wiki://page/").ok_or_else(not_found)?;
-                // Served from memory, keyed by the index's own ids: an id
-                // with a traversal sequence is simply not found.
-                let page = match wiki.page(id) {
-                    Some(page) => page,
-                    None if wiki.has_page(id) => {
-                        return Err((RESOURCE_NOT_FOUND, wiki.page_error(id, id)))
-                    }
-                    None => return Err(not_found()),
-                };
-                (page, "text/markdown")
-            }
-        };
-        let mut contents = vec![json!({"uri": uri, "mimeType": mime_type, "text": text})];
-        if let Some(reason) = stale {
-            contents
-                .push(json!({"uri": uri, "mimeType": "text/plain", "text": stale_line(&reason)}));
-        }
-        Ok(json!({"contents": contents}))
     }
 }
 
@@ -709,12 +631,7 @@ pub(crate) fn serve(
                         eprintln!("serve: request {id} cancelled{reason}");
                     }
                 }
-                Ok(msg)
-                    if matches!(
-                        msg["method"].as_str(),
-                        Some("tools/call" | "resources/list" | "resources/read")
-                    ) =>
-                {
+                Ok(msg) if msg["method"] == "tools/call" => {
                     let cancelled = Arc::new(AtomicBool::new(false));
                     if let Some(id) = msg.get("id").filter(|id| !id.is_null()) {
                         in_flight().insert(id.to_string(), Arc::clone(&cancelled));

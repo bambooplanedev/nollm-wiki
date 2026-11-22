@@ -50,6 +50,7 @@ impl Fixture {
             .env("PATH", self.bin())
             .env("HOME", self.home())
             .env_remove("NOLLM_WIKI_HOME")
+            .env_remove("PI_CODING_AGENT_DIR")
             .env("XDG_DATA_HOME", self.home())
             .env("LOCALAPPDATA", self.home())
             .env("CLAUDE_CONFIG_DIR", self.claude_config());
@@ -554,6 +555,7 @@ fn setup_local_finds_the_exclude_file_in_a_worktree_and_a_subdirectory() {
             .current_dir(root)
             .env("PATH", f.bin())
             .env("HOME", f.home())
+            .env_remove("PI_CODING_AGENT_DIR")
             .env("XDG_DATA_HOME", f.home())
             .env("LOCALAPPDATA", f.home())
             .assert()
@@ -1171,7 +1173,8 @@ fn setup_at_home(
         .current_dir(f.root())
         .env("PATH", f.bin())
         .env("HOME", home)
-        .env_remove("CODEX_HOME");
+        .env_remove("CODEX_HOME")
+        .env_remove("PI_CODING_AGENT_DIR");
     for (k, v) in env {
         c.env(k, v);
     }
@@ -1523,12 +1526,12 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     let f = fixture(true, false);
     codex_stub(&f);
     fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
-    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(!f.root().join("AGENTS.md").exists());
     assert_eq!(read(&f.root().join("CLAUDE.md")), "# Project rules\n");
     let o = out(&a);
     assert!(
-        o.contains("skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
+        o.contains("warning: skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
         "{o}"
     );
     assert!(o.contains("wrote .codex/config.toml wiki server"), "{o}");
@@ -1536,7 +1539,7 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     // An AGENTS.md an earlier setup created beside CLAUDE.md goes.
     let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
     fs::write(f.root().join("AGENTS.md"), &block).unwrap();
-    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
     assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
 
@@ -2283,4 +2286,163 @@ fn setup_repo_makes_no_claude_call_at_all() {
     f.setup(&args).success();
     f.setup(&[&["--remove"], &args[..]].concat()).success();
     assert!(!f.tmp.path().join("claude.log").exists());
+}
+
+/// The steps setup writes into `.pi/APPEND_SYSTEM.md`, markers included.
+const PI_BLOCK: &str = "<!-- wiki:navigation -->
+Code lookup:
+- Where is X defined or handled: `mcp__wiki__search` with `kind: \"code\"`, first.
+- Read only the line ranges it returns.
+- Who calls X: `mcp__wiki__callers`.
+- grep only literal strings (messages, env vars, config keys), never in the same turn as a search.
+<!-- /wiki:navigation -->
+";
+
+const PI_ONLY: [&str; 4] = ["--agent", "pi", "--scope", "repo"];
+
+/// pi's agent dir under the fixture's home, where pi looks without `PI_CODING_AGENT_DIR`.
+fn pi_agent_dir(f: &Fixture) -> PathBuf {
+    let d = f.home().join(".pi/agent");
+    fs::create_dir_all(&d).unwrap();
+    d
+}
+
+#[test]
+fn setup_pi_writes_the_navigation_steps_into_append_system_md() {
+    let f = fixture(true, false);
+    let a = f.setup(&PI_ONLY).success();
+    let o = out(&a);
+    assert!(
+        o.contains("wrote .pi/APPEND_SYSTEM.md wiki navigation steps\n"),
+        "{o}"
+    );
+    assert_eq!(read(&f.root().join(".pi/APPEND_SYSTEM.md")), PI_BLOCK);
+}
+
+#[test]
+fn setup_pi_does_not_hide_a_global_append_system_md() {
+    let f = fixture(true, false);
+    let agent = f.tmp.path().join("pi-agent");
+    fs::create_dir_all(&agent).unwrap();
+    fs::write(agent.join("APPEND_SYSTEM.md"), "global\n").unwrap();
+    let mut c = f.run(Path::new(env!("CARGO_BIN_EXE_wiki")), &PI_ONLY);
+    // The server and skill are in place: a warning, and the command succeeds.
+    let a = c.env("PI_CODING_AGENT_DIR", &agent).assert().success();
+    let o = out(&a);
+    let skips: Vec<&str> = o.lines().filter(|l| l.contains("skipped")).collect();
+    assert_eq!(
+        skips,
+        ["warning: skipped .pi/APPEND_SYSTEM.md wiki navigation steps: a project .pi/APPEND_SYSTEM.md would replace pi's global APPEND_SYSTEM.md in this project; copy the global one to .pi/APPEND_SYSTEM.md and run setup again"],
+        "{o}"
+    );
+    assert!(!f.root().join(".pi/APPEND_SYSTEM.md").exists());
+    assert!(f.root().join(".pi/mcp.json").exists());
+    assert_eq!(read(&agent.join("APPEND_SYSTEM.md")), "global\n");
+
+    // A project file of its own already replaces the global one: the steps go in.
+    fs::write(f.root().join(".pi/APPEND_SYSTEM.md"), "# Ours\n").unwrap();
+    let mut c = f.run(Path::new(env!("CARGO_BIN_EXE_wiki")), &PI_ONLY);
+    c.env("PI_CODING_AGENT_DIR", &agent).assert().success();
+    assert_eq!(
+        read(&f.root().join(".pi/APPEND_SYSTEM.md")),
+        format!("# Ours\n\n{PI_BLOCK}")
+    );
+}
+
+#[test]
+fn setup_pi_warns_about_a_navigation_block_in_the_global_agents_md() {
+    let f = fixture(true, false);
+    let agents = pi_agent_dir(&f).join("AGENTS.md");
+    let global = "# Mine\n<!-- wiki:navigation -->\nold steps\n<!-- /wiki:navigation -->\n";
+    fs::write(&agents, global).unwrap();
+    let a = f.setup(&PI_ONLY).success();
+    let o = out(&a);
+    let warn = format!(
+        "warning: {} holds an older wiki navigation block, loaded in every pi project; remove it",
+        agents.display()
+    );
+    assert_eq!(o.lines().filter(|l| *l == warn).count(), 1, "{o}");
+    assert_eq!(read(&agents), global);
+    // Without the block, nothing is said.
+    fs::write(&agents, "# Mine\n").unwrap();
+    let a = f.setup(&PI_ONLY).success();
+    assert!(!out(&a).contains("AGENTS.md"), "{}", out(&a));
+}
+
+#[test]
+fn setup_pi_navigation_steps_rerun_and_remove() {
+    let f = fixture(true, false);
+    let path = f.root().join(".pi/APPEND_SYSTEM.md");
+    f.setup(&PI_ONLY).success();
+    let a = f.setup(&PI_ONLY).success();
+    assert!(
+        out(&a).contains("already set up: .pi/APPEND_SYSTEM.md wiki navigation steps\n"),
+        "{}",
+        out(&a)
+    );
+    assert_eq!(read(&path), PI_BLOCK);
+    // The user's own text beside the block stays on removal.
+    fs::write(&path, format!("# Ours\n\n{PI_BLOCK}")).unwrap();
+    let a = f.setup(&[&["--remove"], &PI_ONLY[..]].concat()).success();
+    assert!(
+        out(&a).contains("removed .pi/APPEND_SYSTEM.md wiki navigation steps\n"),
+        "{}",
+        out(&a)
+    );
+    assert_eq!(read(&path), "# Ours\n");
+    // Alone, the file goes, and `.pi/` with it.
+    fs::remove_file(&path).unwrap();
+    f.setup(&PI_ONLY).success();
+    f.setup(&[&["--remove"], &PI_ONLY[..]].concat()).success();
+    assert!(!f.root().join(".pi").exists());
+}
+
+#[test]
+fn setup_pi_local_excludes_append_system_md_only_when_it_created_it() {
+    let f = fixture(true, false);
+    f.setup(&["--agent", "pi", "--scope", "local"]).success();
+    assert_eq!(read(&f.root().join(".pi/APPEND_SYSTEM.md")), PI_BLOCK);
+    let ex = read(&f.root().join(".git/info/exclude"));
+    assert!(ex.lines().any(|l| l == "/.pi/APPEND_SYSTEM.md"), "{ex}");
+
+    let g = fixture(true, false);
+    fs::create_dir_all(g.root().join(".pi")).unwrap();
+    fs::write(g.root().join(".pi/APPEND_SYSTEM.md"), "# Ours\n").unwrap();
+    g.setup(&["--agent", "pi", "--scope", "local"]).success();
+    let ex = read(&g.root().join(".git/info/exclude"));
+    assert!(!ex.contains("APPEND_SYSTEM"), "{ex}");
+}
+
+#[test]
+fn setup_pi_local_skips_an_append_system_md_git_tracks() {
+    let f = fixture(true, false);
+    real_git(&f);
+    let r = f.root();
+    fs::create_dir_all(r.join(".pi")).unwrap();
+    fs::write(r.join(".pi/APPEND_SYSTEM.md"), "# Ours\n").unwrap();
+    git(&r, &["add", ".pi/APPEND_SYSTEM.md"]);
+    let a = f.setup(&["--agent", "pi", "--scope", "local"]).code(1);
+    assert!(
+        out(&a).contains(
+            "skipped .pi/APPEND_SYSTEM.md wiki navigation steps: tracked by git; use --scope repo"
+        ),
+        "{}",
+        out(&a)
+    );
+    assert_eq!(read(&r.join(".pi/APPEND_SYSTEM.md")), "# Ours\n");
+}
+
+#[test]
+fn codex_keeps_its_own_steps_beside_pi() {
+    let f = fixture(true, false);
+    codex_stub(&f);
+    f.setup(&["--agent", "codex", "--scope", "repo"]).success();
+    assert!(!f.root().join(".pi").exists());
+    f.setup(&["--agent", "codex,pi", "--scope", "repo"])
+        .success();
+    assert_eq!(
+        read(&f.root().join("AGENTS.md")),
+        format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n")
+    );
+    assert_eq!(read(&f.root().join(".pi/APPEND_SYSTEM.md")), PI_BLOCK);
 }

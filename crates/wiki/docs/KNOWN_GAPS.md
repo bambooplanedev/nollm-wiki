@@ -91,6 +91,11 @@ per question is noise-level: treat single results as anecdotes.
   names; the skill `wiki setup` writes names only `mcp__wiki__*`.
 - **pi loads project files only after trust**: `.pi/mcp.json` and project
   skills need `/trust`, or `--approve` in print mode.
+- **Parameters left out of the tool schemas** (`search` `tag` and `format`,
+  `page` `full`, `callers` `max_tokens`) are still accepted, but a model
+  learns of them only from a cut-short result (`pass max_tokens: N`) or
+  the docs. A client that checks arguments against the schema would
+  reject them; pi and Claude Code do not.
 - **Agents edit despite "do not edit".** Seen twice in field runs, once
   applied. Run evaluations with edit tools excluded
   (`pi --exclude-tools edit,write`) and check `git status` after.
@@ -109,9 +114,25 @@ per question is noise-level: treat single results as anecdotes.
   unrelated word that shares it, and two forms with different stems still
   miss: "decision" does not find `decide`. Body text is matched by
   substring, not by stem. Doc text helps only when the comment uses the user's word.
+- **Name words split at `_` and case changes only.** Digits are no
+  boundary (`base64Encode` is one word, `base64encode`), and an acronym
+  with a lower-case tail splits oddly (`GPUs` → `gp`, `us`; `OAuth2Token` →
+  `o`, `auth2token`). Two adjacent words of at most 2 characters also match
+  joined (`QoS` → `qos`), nothing longer: `qos` now finds `clampQoSLevel`,
+  but on one project the page with such a name still ranked 12th for a two-word query.
+  A digit split, tried together with the wider join, cost a top-5 answer on
+  a generated sweep and is not built.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
+- **Test pages are known by path only.** `code` leaves out, and `tests`
+  lists, files under a `tests` folder or named `test_*`, `*_test.*` or
+  `*_tests.*`. A `test` folder, `*.test.*` and `*.spec.*` files, a Rust
+  `tests.rs` module and inline `#[cfg(test)]` code count as source and stay
+  under `code` (on one C++ project with a `test` folder no page counted as a
+  test page). Widening the rule waits on its own measurement. The gain of the
+  split is small: on 173 recorded agent queries re-sent with `kind: code`, one more
+  answer reached the top 5 and none left it.
 - **Doc labels match words, not meaning.** `search` with `docs` first wants
   the query words in a row; when none match, a query naming several labels
   one after another lists each, else labels opened (first or second word) by
@@ -145,11 +166,27 @@ per question is noise-level: treat single results as anecdotes.
   `Order`) is ranked like any word even when a function has exactly that
   name, and a query mixing words with identifiers keeps the ranked order
   (the definition is added, not moved first). A name defined by no item, such
-  as a lambda, a variable, a function nested in another outside Python, or a
-  Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
-  A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
-  A name defined on more than 3 pages shows 3 definitions and no "+N more" marker.
-  `--format json` has no `not found` entries. On the 2026-11-11 bench replay
+  as a lambda, a local variable, a field outside C/C++, a function nested in
+  another outside Python, or a
+  Python function in a shell heredoc (`python3 - <<'PY'`), gets `no symbol named`.
+  A C/C++ file with more than 2,000 data members indexes none of them
+  (its other items stay); a query for one names the file instead of
+  `no symbol named`, but only when the file holds the name as a word.
+  C/C++ data members are items through any nesting of pointers, arrays,
+  references and function pointers (`void (*on[4])(int)`); not a member a
+  macro declares (`FIELD(int, x)`, which does not parse as a declaration) or
+  a pointer to member (`int Box::* pm`, which the grammar misreads; a member
+  whose declarator is followed by a parse error is left out). A pointer to a
+  function returning a pointer (`int *(*make)(int)`) is still read as a
+  method named `(*make)`, as before members were indexed. A namespace is in no owner chain: `ns::Class::name` finds an
+  owned `Class::name` only when no item matches the whole qualified name, and
+  any namespace prefix is accepted then; `ns::f` does not find a free `f`.
+  A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.
+  A name with more than 3 definitions shows 3, one per page first, and a
+  `+N more named …` line that counts the rest but does not list them.
+  `--format json` stays an array of hits, so the answer-level fields
+  (`no_symbol`, `tests_only`, `tests_also_match`) ride on its first hit and
+  an answer with no hit (`[]`) loses them. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);
   each of the 14 distinct names one search per name still missed was a plain
@@ -413,9 +450,8 @@ per question is noise-level: treat single results as anecdotes.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
-- `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
-  not the live snapshot; `lint` falls back to the snapshot when that read
-  would outrun the call.
+- `lint` reads disk, not the live snapshot; it falls back to the snapshot
+  when that read would outrun the call.
 - A generated file ignored at file level still triggers a recompile when
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
@@ -430,8 +466,7 @@ per question is noise-level: treat single results as anecdotes.
 - Servers on one `--dir` are assumed to share inputs (`--source`,
   `--memory`). If they differ, the writer's inputs win.
 - A call that meets a compile holding `compile.lock` past its 5 s answers
-  from the snapshot it has, with `recompile still running`; `wiki://index`
-  and `wiki://llms.txt` return an error instead.
+  from the snapshot it has, with `recompile still running`.
 - A reader can load the output of a later compile that failed part way,
   under the earlier ack's empty stale reason. The window is narrow; a plain
   `serve` without `--source` has the same exposure.
@@ -462,6 +497,10 @@ per question is noise-level: treat single results as anecdotes.
   (`"c\u0061lque"` under `[mcp_servers]`, or `[mcp_servers."c\u0061lque"]`) is not recognised as
   naming the server: setup appends its block, the file then holds two definitions of the same table,
   and it no longer parses until one of them is removed by hand.
+- pi's steps in `.pi/APPEND_SYSTEM.md` hide an `APPEND_SYSTEM.md` the user puts in pi's agent dir
+  after setup ran: setup checks only when it runs.
+- With `--agent codex,pi` in a project whose `AGENTS.md` has Codex's block, pi reads both sets of
+  steps.
 - With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
   not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
   one an earlier setup created there with only the steps is removed. Seen
@@ -538,6 +577,6 @@ per question is noise-level: treat single results as anecdotes.
 - The ratio branch of the gate (a note scoring twice the best code hit) can
   be gamed by a note whose summary is stuffed with common code words; the
   origin label on the row is the defence, nothing filters such a note.
-- A name asked in the wrong case (`orderBook` for `OrderBook`) is `not found` as a definition; the ranked list still shows it.
+- A name asked in the wrong case (`orderBook` for `OrderBook`) gets `no symbol named` as a definition; the ranked list still shows it.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
 - A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.

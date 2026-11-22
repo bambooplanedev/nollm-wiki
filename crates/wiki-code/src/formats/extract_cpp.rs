@@ -46,10 +46,16 @@ pub use pairs::pair_declarations;
 /// what admit constructors (an `identifier` declarator, because the grammar
 /// cannot know the name is the class's), destructors and operators.
 ///
-/// Types and functions are indexed; DATA is not — no member variables, no
-/// file-scope globals or constants. The one exception is the `@item` pattern
-/// at the end: a namespace- or file-scope variable is an item (kind `value`),
-/// never an export. `field_declaration.declarator` is
+/// Types and functions are exports and items. Data is an item only, never an
+/// export, through the two `@item` patterns at the end: a namespace- or
+/// file-scope variable is a `value` item, and a class, struct or union data
+/// member (`int n_ = 0;`, `static constexpr int kMax = 4;`, a bitfield, any
+/// nesting of pointers, arrays, references and function pointers, named
+/// through `declared_name`) is a
+/// nested `value` owned by its class (by its typedef name for
+/// `typedef struct { … } Name;`),
+/// which `search` finds by exact name and nothing else shows (see
+/// `code_item`). `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
 /// `default_cut` finds no `body` field. An item's signature is then the
 /// declaration's specifiers plus that declarator's own text (`int a`, `int *b`,
@@ -144,6 +150,8 @@ const QUERY: &str = r"
     (pointer_declarator declarator: (identifier) @name)
     (reference_declarator (identifier) @name)
     (array_declarator declarator: (identifier) @name)])]) @item
+
+(field_declaration declarator: (_) @name) @item
 
 (preproc_include path: (_) @import)
 ";
@@ -351,11 +359,20 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 
     let mut chain = Vec::new();
     let mut node = def;
+    // A data member of `typedef struct { … } Name;` is owned by `Name`.
+    let data = is_data_member(def);
     while let Some(parent) = node.parent() {
         if parent.kind() == "field_declaration_list" {
             if let Some(name) = parent
                 .parent()
-                .and_then(|ty| ty.child_by_field_name("name"))
+                .and_then(|ty| {
+                    ty.child_by_field_name("name").or_else(|| {
+                        ty.parent()
+                            .filter(|t| data && t.kind() == "type_definition")
+                            .and_then(|t| t.child_by_field_name("declarator"))
+                            .filter(|d| d.kind() == "type_identifier")
+                    })
+                })
                 .and_then(|name| text.get(name.byte_range()))
             {
                 chain.push(name.to_string());
@@ -460,6 +477,17 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
     let declarator = def.child_by_field_name("declarator");
+    // Only a declaration of data alone: a function it also declares (a
+    // constructor an `#if` split parses so) keeps the default shape, and
+    // with it the signature it had before members were items.
+    if is_data_member(def)
+        && def
+            .children_by_field_name("declarator", &mut def.walk())
+            .all(is_data_declarator)
+    {
+        let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+        return value_shape(eq, def.child_by_field_name("default_value"), true);
+    }
     if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
         let single = def
             .children_by_field_name("declarator", &mut def.walk())
@@ -522,6 +550,65 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
     // spell both without a field name for the same reason), so scan children.
     d.named_children(&mut d.walk())
         .any(|c| c.kind() == "function_declarator")
+}
+
+/// The name a data member's declarator declares, through any nesting of
+/// pointer, array, reference, parenthesized and function-pointer
+/// declarators (`void (*on[4])(int)` names `on`). `None` for a declarator
+/// that names no field (a method, a qualified name).
+pub(crate) fn declared_name(d: Node) -> Option<Node> {
+    match d.kind() {
+        // A name error recovery inserted has no text.
+        "field_identifier" => (!d.is_missing()).then_some(d),
+        // A function, unless it is `(*name)(…)`, a pointer to one.
+        "function_declarator" if !is_data_declarator(d) => None,
+        // `(*p)` or `(&r)`: a bare `(name)` is a macro call the grammar
+        // misread (`LIST_HEAD(entry_type) link;`), not a declarator.
+        "parenthesized_declarator" => d
+            .named_children(&mut d.walk())
+            .find(|c| matches!(c.kind(), "pointer_declarator" | "reference_declarator"))
+            .and_then(declared_name),
+        "pointer_declarator"
+        | "array_declarator"
+        | "reference_declarator"
+        | "function_declarator"
+        | "attributed_declarator" => d
+            .child_by_field_name("declarator")
+            .or_else(|| {
+                d.named_children(&mut d.walk())
+                    .find(|c| c.kind() == "field_identifier" || c.kind().ends_with("_declarator"))
+            })
+            .and_then(declared_name),
+        _ => None,
+    }
+}
+
+/// True when `def` is a class, struct or union data member: a
+/// `field_declaration` whose first declarator declares no function, a
+/// function pointer (`int (*open_fn)(const char*)`) being data.
+pub(crate) fn is_data_member(def: Node) -> bool {
+    def.kind() == "field_declaration"
+        && def
+            .child_by_field_name("declarator")
+            .is_none_or(is_data_declarator)
+}
+
+/// True when declarator `d` declares data: no function, or a pointer to one.
+pub(crate) fn is_data_declarator(d: Node) -> bool {
+    let pointer = d.kind() == "function_declarator"
+        && d.child_by_field_name("declarator")
+            .is_some_and(|p| p.kind() == "parenthesized_declarator");
+    !is_function_declarator(d) || pointer
+}
+
+/// True when `name` names a data member of `def`: the declarator holding it
+/// declares data, so `peek` in `int spare_, peek();` is no member.
+pub(crate) fn names_data_member(def: Node, name: Node) -> bool {
+    def.kind() == "field_declaration"
+        && def
+            .children_by_field_name("declarator", &mut def.walk())
+            .find(|d| d.byte_range().contains(&name.start_byte()))
+            .is_some_and(is_data_declarator)
 }
 
 /// The number of parameters in the list right after `name(` in a signature:

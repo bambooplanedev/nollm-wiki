@@ -495,6 +495,8 @@ fn namespace_scope_variables_are_value_items_but_not_exports() {
             "6-6 value kName pub",
             "7-7 value table pub",
             "9-12 type B pub",
+            "10-10 value B::a priv",
+            "11-11 value B::M priv",
             "13-15 fn f pub",
         ]
     );
@@ -548,14 +550,18 @@ fn a_trailing_member_doc_never_documents_the_next_item() {
         item_lines(&e.items),
         vec![
             "1-10 type Book pub",
+            "2-2 value Book::size_ priv",
             "3-3 method Book::apply pub",
+            "4-4 value Book::count priv",
             "5-6 method Book::reset pub",
+            "7-7 value Book::x priv",
             "9-9 method Book::clear pub",
         ]
     );
-    assert_eq!(e.items[1].doc, None);
-    assert_eq!(e.items[2].doc.as_deref(), Some("Resets everything."));
-    assert_eq!(e.items[3].doc, None);
+    let doc = |n: usize| e.items[n].doc.as_deref();
+    assert_eq!([doc(1), doc(2), doc(3)], [None, None, None]);
+    assert_eq!(doc(4), Some("Resets everything."));
+    assert_eq!([doc(5), doc(6)], [None, None]);
 }
 
 #[test]
@@ -699,8 +705,11 @@ fn a_type_body_inside_a_signature_is_elided() {
         [
             "struct client",
             "typedef struct client {…} client",
+            "int id",
+            "char *name",
             "struct config",
             "static struct config {…} config",
+            "int port",
             "enum {…} mode",
         ],
         "{sigs:?}"
@@ -747,4 +756,261 @@ fn a_signature_never_reads_back_a_skipped_branch_or_a_broken_declarator() {
             .collect();
         assert_eq!(sigs, want, "{path}");
     }
+}
+
+/// `(owner::name, start-end, signature)` of every nested value item; each one
+/// is private.
+fn members(path: &str, src: &str) -> Vec<(String, String, String)> {
+    let e = crate::extract(path, src);
+    e.items
+        .iter()
+        .filter(|i| i.nested && i.kind == crate::model::CodeItemKind::Value)
+        .map(|i| {
+            assert!(!i.public, "{} is public", i.name);
+            let owner = i
+                .owner
+                .as_deref()
+                .map_or(String::new(), |o| format!("{o}::"));
+            (
+                format!("{owner}{}", i.name),
+                format!("{}-{}", i.start_line, i.end_line),
+                i.signature.clone(),
+            )
+        })
+        .collect()
+}
+
+fn m(name: &str, lines: &str, sig: &str) -> (String, String, String) {
+    (name.to_string(), lines.to_string(), sig.to_string())
+}
+
+const WIDGET_H: &str = "\
+class Widget {
+public:
+  void step();
+  int count() const { return n_; }
+private:
+  std::array<uint8_t, 4> pane_border_width_{};
+  int n_ = 0;
+  double zoom_;
+  static constexpr int kMaxPanes = 4;
+  static const int kMin = 1;
+  Order* head_;
+};
+";
+
+#[test]
+fn class_data_members_are_nested_values_owned_by_the_class() {
+    assert_eq!(
+        members("widget.h", WIDGET_H),
+        vec![
+            m(
+                "Widget::pane_border_width_",
+                "6-6",
+                "std::array<uint8_t, 4> pane_border_width_"
+            ),
+            m("Widget::n_", "7-7", "int n_ = 0"),
+            m("Widget::zoom_", "8-8", "double zoom_"),
+            m(
+                "Widget::kMaxPanes",
+                "9-9",
+                "static constexpr int kMaxPanes = 4"
+            ),
+            m("Widget::kMin", "10-10", "static const int kMin = 1"),
+            m("Widget::head_", "11-11", "Order* head_"),
+        ]
+    );
+}
+
+#[test]
+fn data_members_leave_methods_exports_and_defined_names_as_they_were() {
+    let e = crate::extract("widget.h", WIDGET_H);
+    let shown: Vec<&String> = e
+        .items
+        .iter()
+        .filter(|i| !i.nested)
+        .map(|i| &i.name)
+        .collect();
+    assert_eq!(shown, ["Widget", "step", "count"]);
+    assert_eq!(e.items.iter().filter(|i| i.name == "step").count(), 1);
+    assert_eq!(
+        e.symbols,
+        [
+            "class Widget",
+            "int Widget::count() const",
+            "void Widget::step()"
+        ]
+    );
+    assert_eq!(e.methods, ["count", "step"]);
+    assert_eq!(e.defined, ["Widget"]);
+}
+
+#[test]
+fn plain_struct_fields_are_nested_values_too() {
+    let src =
+        "struct Cell {\n  int row;\n  double width, height;\n  struct Cell* next;\n  char tag[8];\n};\n";
+    assert_eq!(
+        members("cell.c", src),
+        vec![
+            m("Cell::row", "2-2", "int row"),
+            m("Cell::height", "3-3", "double height"),
+            m("Cell::width", "3-3", "double width"),
+            m("Cell::next", "4-4", "struct Cell* next"),
+            m("Cell::tag", "5-5", "char tag[8]"),
+        ]
+    );
+}
+
+#[test]
+fn anonymous_members_and_bitfields_do_not_panic() {
+    let src = "struct P {\n  union { int i; float f; };\n  struct { int a; } s;\n  unsigned flag : 1;\n  class Inner { int deep_; };\n};\nvoid g() { struct T { int local; }; }\n";
+    assert_eq!(
+        members("p.h", src),
+        vec![
+            m("P::f", "2-2", "float f"),
+            m("P::i", "2-2", "int i"),
+            m("P::a", "3-3", "int a"),
+            m("P::s", "3-3", "struct {…} s"),
+            m("P::flag", "4-4", "unsigned flag : 1"),
+            m("P::Inner::deep_", "5-5", "int deep_"),
+        ]
+    );
+}
+
+#[test]
+fn pointer_array_and_function_pointer_members_are_nested_values() {
+    let src = "struct Ops {
+  int (*open_fn)(const char*);
+  void (*cb)(int);
+  char **argv_list;
+  int const* const* pp;
+  int grid[3][3];
+  char *names[4];
+  unsigned bits : 3, more : 2;
+  int Box::* pm;
+  ATOMIC int ticks;
+  int *RESTRICT slots;
+  char ***triple;
+  void (*handlers[4])(int);
+  int (*rows)[3];
+  LIST_HEAD(entry_type) link;
+};
+typedef struct { int anon_field; } Anon;
+";
+    assert_eq!(
+        members("ops.h", src),
+        vec![
+            m("Ops::open_fn", "2-2", "int (*open_fn)(const char*)"),
+            m("Ops::cb", "3-3", "void (*cb)(int)"),
+            m("Ops::argv_list", "4-4", "char **argv_list"),
+            m("Ops::pp", "5-5", "int const* const* pp"),
+            m("Ops::grid", "6-6", "int grid[3][3]"),
+            m("Ops::names", "7-7", "char *names[4]"),
+            m("Ops::bits", "8-8", "unsigned bits : 3"),
+            m("Ops::more", "8-8", "unsigned more : 2"),
+            m("Ops::ticks", "10-10", "ATOMIC int ticks"),
+            m("Ops::triple", "12-12", "char ***triple"),
+            m("Ops::handlers", "13-13", "void (*handlers[4])(int)"),
+            m("Ops::rows", "14-14", "int (*rows)[3]"),
+            m("Anon::anon_field", "17-17", "int anon_field"),
+        ]
+    );
+}
+
+#[test]
+fn methods_constructors_operators_and_aliases_add_no_member() {
+    let src = "class Gadget {
+public:
+  Gadget();
+  ~Gadget();
+  Gadget& operator=(const Gadget&);
+  friend void swap(Gadget&, Gadget&);
+  virtual void draw() = 0;
+  static Gadget* make();
+  enum Mode { kIdle, kBusy };
+  using Id = int;
+  typedef int Num;
+private:
+  int (*hook_)(int);
+  int spare_, peek();
+};
+";
+    let e = crate::extract("gadget.h", src);
+    assert_eq!(
+        members("gadget.h", src),
+        vec![
+            m("Gadget::hook_", "13-13", "int (*hook_)(int)"),
+            m("Gadget::spare_", "14-14", "int spare_"),
+        ]
+    );
+    assert!(!e.methods.iter().any(|n| n == "hook_"), "{:?}", e.methods);
+    assert!(
+        !e.symbols.iter().any(|s| s.contains("hook_")),
+        "{:?}",
+        e.symbols
+    );
+}
+
+/// A header of `structs` structs with `fields` bitfields each.
+fn generated_header(structs: usize, fields: usize) -> String {
+    let mut s = String::new();
+    for r in 0..structs {
+        s += &format!("struct Block{r} {{\n");
+        for b in 0..fields {
+            s += &format!("  unsigned slot{r}_{b} : 1;\n");
+        }
+        s += "};\n";
+    }
+    s
+}
+
+#[test]
+fn a_file_past_the_member_cap_indexes_none_of_its_members() {
+    let cap = crate::formats::code::MEMBERS_PER_FILE;
+    let at = crate::extract("blocks.h", &generated_header(cap / 10, 10));
+    assert_eq!(at.items.iter().filter(|i| i.nested).count(), cap);
+    assert_eq!(at.members_unindexed, 0);
+    let past = crate::extract("blocks.h", &generated_header(cap / 10 + 1, 10));
+    assert_eq!(past.items.iter().filter(|i| i.nested).count(), 0);
+    assert_eq!(past.members_unindexed, cap + 10);
+    // The types stay.
+    assert_eq!(past.items.len(), cap / 10 + 1);
+}
+
+/// A constructor whose initializer list an `#if` splits parses as a field
+/// declaration that also declares a function: its export keeps the shape it
+/// had before data members were items.
+#[test]
+fn a_split_initializer_keeps_its_export_signature() {
+    let src = "class Gate {\n public:\n  Gate(int cap)\n      :\n#if !defined(NDEBUG)\n        cap_(cap),\n#endif\n        left_(cap) {\n  }\n private:\n  int cap_;\n  int left_;\n};\n";
+    let e = crate::extract("gate.cc", src);
+    assert!(
+        !e.symbols.iter().any(|s| s.contains("#endif")),
+        "{:?}",
+        e.symbols
+    );
+}
+
+/// A constructor behind an unknown macro parses as a field declaration whose
+/// initializer list reads as a bitfield width; its item keeps the signature
+/// it had before members were items.
+#[test]
+fn a_macro_led_constructor_keeps_its_item_signature() {
+    let src = "template <typename T> struct Knob : Base {\n  const T& ref;\n  tone_t tone;\n  CONSTEXPR_IF Knob(const T& v, tone_t s) : ref(v), tone(s) {}\n};\n";
+    let e = crate::extract("knob.h", src);
+    let sigs: Vec<&str> = e
+        .items
+        .iter()
+        .filter(|i| !i.nested)
+        .map(|i| i.signature.as_str())
+        .collect();
+    assert!(!sigs.iter().any(|s| s.contains(": ref(v)")), "{sigs:?}");
+}
+
+/// Error recovery can insert a field name with no text; it is no member.
+#[test]
+fn a_name_the_parser_inserted_is_no_item() {
+    let src = "#ifndef TINT_H_\n#define TINT_H_\n\n#include \"base.h\"\n\nNS_OPEN\nNS_EXPORT\n\nenum class tint : uint32_t {\n  pale = 0xF0F8FF,\n  dark = 0x000000\n};  // enum class tint\n\nenum class shade : uint8_t {\n  low = 30,\n  high,\n};\n";
+    let e = crate::extract("tint.h", src);
+    assert!(e.items.iter().all(|i| !i.name.is_empty()), "{:?}", e.items);
 }

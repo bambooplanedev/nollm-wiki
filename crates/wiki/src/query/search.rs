@@ -1,8 +1,8 @@
 //! Ranked search: `search` and its tagged, scoped and prompt forms, lifting and expansion.
 
 use super::{
-    gate_len, query_dates, unfence, Candidate, Entry, Hit, MemoryScope, PassStats, SymbolLine,
-    Wiki, MEMORY_GATE_RATIO, MEMORY_TAIL,
+    gate_len, query_dates, unfence, Candidate, Entry, Hidden, Hit, MemoryScope, PassStats,
+    SymbolLine, Wiki, MEMORY_GATE_RATIO, MEMORY_TAIL,
 };
 use crate::model::{CodeItem, CodeItemKind, KindFilter};
 use aho_corasick::AhoCorasick;
@@ -29,7 +29,9 @@ impl Wiki {
     ///
     /// `N`, `df`, `avglen` are taken over the pages that pass `kind`, so a
     /// page's `score` differs between filtered and unfiltered calls: it is a
-    /// ranking key, not a stable property. Field weights are not length-
+    /// ranking key, not a stable property. `code` and `tests` both count
+    /// every code page and split the hits after scoring
+    /// (`KindFilter::drops_tests`). Field weights are not length-
     /// normalised, and `tf'` saturates below `W_NAME`, so a title hit beats
     /// any volume of body text on the same token. Sorted by score desc,
     /// then pagerank desc, then id asc; truncated to `limit`.
@@ -64,10 +66,21 @@ impl Wiki {
         tag: Option<&str>,
         limit: Option<usize>,
     ) -> Vec<Hit> {
+        self.search_answer(q, kind, tag, limit).0
+    }
+
+    /// `search_tagged`, and whether a `code` search left out the test page
+    /// that ranked first (so `tests` would list it).
+    pub fn search_answer(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+        limit: Option<usize>,
+    ) -> (Vec<Hit>, bool) {
         if Self::tokenize(q).is_empty() {
-            return self
-                .search_terms(q, kind, tag, limit, MemoryScope::With, None, None)
-                .0;
+            let hits = self.search_terms(q, kind, tag, limit, MemoryScope::With, None, None);
+            return (hits.0, false);
         }
         let (mut hits, stats) =
             self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
@@ -77,7 +90,7 @@ impl Wiki {
         // The tail counts pages of every kind, so the code pass's statistics
         // are its own only when `kind` narrowed nothing.
         hits.extend(self.memory_tail(q, tag, best, kind.is_none().then_some(&stats)));
-        hits
+        (hits, stats.tests_cut)
     }
 
     /// Most definitions of one name that `lift_names` lists.
@@ -100,7 +113,7 @@ impl Wiki {
 
     /// The identifiers of `q` in order, deduplicated, and whether `q` is
     /// made of them alone.
-    fn query_names(q: &str) -> (Vec<&str>, bool) {
+    pub(crate) fn query_names(q: &str) -> (Vec<&str>, bool) {
         let words: Vec<&str> = q
             .split_whitespace()
             .filter(|w| w.chars().any(char::is_alphanumeric))
@@ -118,7 +131,9 @@ impl Wiki {
     /// The items called `name` (or `owner::name`) on pages that pass `kind`
     /// and `tag`, matched case-sensitively: a name in another case is another
     /// item (`max_weekly_fee_usd` is a field, `MAX_WEEKLY_FEE_USD` a
-    /// constant). Module and top-level items never.
+    /// constant). Module and top-level items never. `Inner::f` also names
+    /// `Outer::Inner::f`; when nothing matches so, `ns::Inner::f` names an
+    /// owned `Inner::f`, since an owner chain holds no namespace.
     fn definitions(
         &self,
         name: &str,
@@ -126,18 +141,30 @@ impl Wiki {
         tag: Option<&str>,
     ) -> Vec<(&Entry, &CodeItem)> {
         let qualified = name.contains("::");
-        self.items
-            .iter()
-            .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
-            .filter(|(e, _)| e.passes(kind, tag))
-            .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+        let all = || {
+            self.items
+                .iter()
+                .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
+                .filter(|(e, _)| e.shown(kind, tag))
+                .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+                .filter(|(_, i)| !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+        };
+        let found: Vec<_> = all()
             .filter(|(_, i)| {
-                !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
-                    && if qualified {
-                        i.qualified_name() == name
-                    } else {
-                        i.name == name
-                    }
+                if qualified {
+                    let q = i.qualified_name();
+                    q == name || q.ends_with(&format!("::{name}"))
+                } else {
+                    i.name == name
+                }
+            })
+            .collect();
+        if !found.is_empty() || !qualified {
+            return found;
+        }
+        all()
+            .filter(|(_, i)| {
+                i.owner.is_some() && name.ends_with(&format!("::{}", i.qualified_name()))
             })
             .collect()
     }
@@ -160,6 +187,74 @@ impl Wiki {
             .collect()
     }
 
+    /// Of `names` (`not_found` for a `code` search), those a `tests` search
+    /// would find: defined only on test pages, or the file stem of one.
+    /// Empty for any other kind.
+    pub fn in_tests_only(
+        &self,
+        names: &[String],
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Vec<String> {
+        if !kind.is_some_and(KindFilter::drops_tests) {
+            return Vec::new();
+        }
+        let tests = Some(&KindFilter::Tests);
+        names
+            .iter()
+            .filter(|n| {
+                !self.definitions(n, tests, tag).is_empty()
+                    || !self.stem_pages(n, tests, tag).is_empty()
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// The answer a `tests` search gives a query of `names` alone: their
+    /// definitions (and module pages) on test pages, as `lift_names` lists
+    /// them, with no ranked pages.
+    pub fn test_definitions(&self, names: &[String], tag: Option<&str>, limit: usize) -> Vec<Hit> {
+        let mut hits = Vec::new();
+        self.lift_names(
+            &mut hits,
+            &names.join(" "),
+            Some(&KindFilter::Tests),
+            tag,
+            limit,
+        );
+        hits
+    }
+
+    /// Of `names` (`not_found`), each one a page whose C/C++ members were
+    /// not indexed (`members_unindexed`) holds as a whole word:
+    /// `(name, path, members)`, the first such page by path.
+    pub fn in_unindexed_members(
+        &self,
+        names: &[String],
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Vec<(String, String, usize)> {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let holds = |body: &str, n: &str| {
+            body.match_indices(n).any(|(at, _)| {
+                !body[..at].ends_with(word) && !body[at + n.len()..].starts_with(word)
+            })
+        };
+        let mut pages: Vec<&Entry> = self
+            .entries
+            .values()
+            .filter(|e| e.members_unindexed > 0 && e.shown(kind, tag))
+            .collect();
+        pages.sort_by(|a, b| a.path.cmp(&b.path));
+        names
+            .iter()
+            .filter_map(|n| {
+                let e = pages.iter().find(|e| holds(self.body(&e.id), n))?;
+                Some((n.clone(), e.path.clone(), e.members_unindexed))
+            })
+            .collect()
+    }
+
     /// The pages passing `kind` and `tag` whose file is known by `name`
     /// (`module_stem`, any case): `auto_refill` names `auto_refill.rs`, which
     /// is no item. Never a memory note.
@@ -167,7 +262,7 @@ impl Wiki {
         let name = name.to_lowercase();
         self.entries
             .values()
-            .filter(|e| !e.memory && e.passes(kind, tag))
+            .filter(|e| !e.memory && e.shown(kind, tag))
             .filter(|e| crate::formats::code::module_stem(&e.path).to_lowercase() == name)
             .collect()
     }
@@ -227,27 +322,58 @@ impl Wiki {
                     .then_with(|| a.path.cmp(&b.path))
                     .then_with(|| x.start_line.cmp(&y.start_line))
             });
-            defs.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
-            for (e, i) in defs {
+            // One per page first: a page's second definition after every
+            // page's first (a stable sort keeps the order otherwise).
+            let mut nth: HashMap<&str, usize> = HashMap::new();
+            defs.sort_by_cached_key(|(e, _)| {
+                let n = nth.entry(e.id.as_str()).or_default();
+                *n += 1;
+                *n
+            });
+            let cut = Self::DEFINITIONS_PER_NAME.min(limit).min(defs.len());
+            let left_out = defs.split_off(cut);
+            // Marked only past the cap: a smaller `limit` is the caller's.
+            let capped = defs.len() + left_out.len() > Self::DEFINITIONS_PER_NAME;
+            let hidden = capped.then(|| Hidden {
+                name: name.to_string(),
+                count: left_out.len(),
+                pages: left_out
+                    .iter()
+                    .map(|(e, _)| &e.id)
+                    .filter(|id| !defs.iter().any(|(s, _)| s.id == **id))
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                owned: left_out.iter().any(|(_, i)| i.owner.is_some()),
+            });
+            let last = defs.len().saturating_sub(1);
+            for (k, (e, i)) in defs.into_iter().enumerate() {
                 let mut line = self.symbol_line(&e.path, i);
+                if k == last {
+                    line.hidden.clone_from(&hidden);
+                }
                 if only && matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.nested {
                     let n = self.caller_count(&e.path, i);
                     line.called_by = (n > 0).then_some(n);
                 }
-                let same = |s: &SymbolLine| {
-                    (s.start_line, s.end_line, &s.name)
-                        == (line.start_line, line.end_line, &line.name)
-                };
                 let at = hits.iter().position(|h| h.id == e.id).unwrap_or_else(|| {
                     hits.push(Hit::from_entry(e, 0.0, None));
                     hits.len() - 1
                 });
-                if !hits[at].symbols.iter().any(same) {
-                    hits[at].symbols.push(line.clone());
-                }
+                // A line already shown takes the marker; else it is added.
+                let put = |lines: &mut Vec<SymbolLine>, line: SymbolLine| {
+                    let key = (line.start_line, line.end_line, &line.name);
+                    match lines
+                        .iter()
+                        .position(|s| (s.start_line, s.end_line, &s.name) == key)
+                    {
+                        Some(n) if line.hidden.is_some() => lines[n].hidden = line.hidden,
+                        Some(_) => {}
+                        None => lines.push(line),
+                    }
+                };
+                put(&mut hits[at].symbols, line.clone());
                 match by_page.iter_mut().find(|(id, _)| *id == e.id) {
-                    Some((_, lines)) if lines.iter().any(same) => {}
-                    Some((_, lines)) => lines.push(line),
+                    Some((_, lines)) => put(lines, line),
                     None => by_page.push((e.id.clone(), vec![line])),
                 }
             }
@@ -368,7 +494,7 @@ impl Wiki {
             .iter()
             .map(|w| w.trim_matches('_').to_lowercase())
             .collect();
-        let words: BTreeSet<String> = idents.iter().flat_map(|w| Self::name_words(w)).collect();
+        let words: BTreeSet<String> = idents.iter().flat_map(|w| Self::match_words(w)).collect();
         let stems: BTreeSet<String> = words.iter().map(|w| Self::stem(w)).collect();
         terms
             .iter()
@@ -416,13 +542,26 @@ impl Wiki {
             MemoryScope::Without => !e.memory,
             MemoryScope::Only => e.memory,
         };
-        let filtered = |e: &Entry| e.passes(kind, tag);
+        // `tests` counts every code page, as `code` does, and both narrow
+        // their hits after scoring: a page scores as in a search that splits
+        // nothing. Statistics over the narrowed pages moved ranks on a
+        // generated sweep. A prompt never splits.
+        let counted_kind = match kind {
+            Some(KindFilter::Tests) => Some(&KindFilter::Code),
+            k => k,
+        };
+        let shown = |e: &Entry| prompt_terms.is_some() || e.shown(kind, tag);
+        let filtered = |e: &Entry| e.passes(counted_kind, tag);
         let passes = |e: &Entry| in_scope(e) && filtered(e);
         if tokens.is_empty() {
             let Some(_) = tag else {
                 return (Vec::new(), PassStats::default());
             };
-            let mut listed: Vec<&Entry> = self.entries.values().filter(|e| passes(e)).collect();
+            let mut listed: Vec<&Entry> = self
+                .entries
+                .values()
+                .filter(|e| in_scope(e) && shown(e))
+                .collect();
             listed.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.id.cmp(&b.id)));
             listed.truncate(limit.unwrap_or(usize::MAX));
             let listed = listed.into_iter().map(|e| Hit::from_entry(e, 0.0, None));
@@ -508,7 +647,7 @@ impl Wiki {
                 .map(|&i| tokens[i].clone())
                 .collect();
         }
-        let mut ranked: Vec<(Hit, f64)> = candidates
+        let mut ranked: Vec<(Hit, f64, bool)> = candidates
             .into_iter()
             .map(|c| {
                 let norm = c.len as f64 / avglen;
@@ -531,10 +670,10 @@ impl Wiki {
                     .map(|&i| idf_of(named[i]) / (named[i] as f64).sqrt())
                     .sum();
                 let hit = Hit::from_entry(c.entry, base + Self::W_FILE * file, c.snippet);
-                (hit, c.entry.pagerank)
+                (hit, c.entry.pagerank, shown(c.entry))
             })
             .collect();
-        ranked.sort_by(|(a, a_pr), (b, b_pr)| {
+        ranked.sort_by(|(a, a_pr, _), (b, b_pr, _)| {
             b.score
                 .total_cmp(&a.score)
                 .then_with(|| {
@@ -549,10 +688,15 @@ impl Wiki {
                 .then_with(|| a.id.cmp(&b.id))
         });
         if prompt_terms.is_some() {
-            ranked.retain(|(h, _)| h.score > 0.0);
+            ranked.retain(|(h, _, _)| h.score > 0.0);
         }
+        // Only a test page that would have come first: one anywhere in the
+        // top `limit` is there on most queries.
+        stats.tests_cut = kind.is_some_and(KindFilter::drops_tests)
+            && ranked.first().is_some_and(|(_, _, shown)| !shown);
+        ranked.retain(|(_, _, shown)| *shown);
         ranked.truncate(limit);
-        let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _)| hit).collect();
+        let mut hits: Vec<Hit> = ranked.into_iter().map(|(hit, _, _)| hit).collect();
         self.expand(&mut hits, &tokens, &query_words, &idf[..tokens.len()]);
         (hits, stats)
     }

@@ -24,6 +24,7 @@ impl Extractor for CodeExtractor {
             defined: f.defined,
             methods: f.methods,
             items: f.items,
+            members_unindexed: f.members_unindexed,
             ..Entity::default()
         }
     }

@@ -195,7 +195,16 @@ pub(super) fn shared_declaration_signature(
         declarators[0].start_byte(),
         spec,
     );
-    let tail = render_span(text, root, own.start_byte(), own.end_byte(), spec);
+    // A bitfield's width follows its declarator: `unsigned bits : 3, more : 2`.
+    // Not a function's: a constructor behind a macro parses its initializer
+    // list as one (`API Knob(int v) : ref(v), …`).
+    let end = own
+        .next_sibling()
+        .filter(|s| {
+            s.kind() == "bitfield_clause" && crate::formats::extract_cpp::is_data_declarator(*own)
+        })
+        .map_or(own.end_byte(), |s| s.end_byte());
+    let tail = render_span(text, root, own.start_byte(), end, spec);
     Some(bounded(format!("{head}{tail}").trim().to_string()))
 }
 

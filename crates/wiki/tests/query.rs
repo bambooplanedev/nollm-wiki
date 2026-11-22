@@ -307,7 +307,7 @@ fn oversized_target_degrades_to_summary_and_keeps_neighborhood() {
         pack.text
     );
     assert!(
-        pack.text.contains("wiki://page/hub"),
+        pack.text.contains("call page with full: true"),
         "pack must point at the full page: {}",
         pack.text
     );
@@ -830,6 +830,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
             nested: false,
             also: None,
             called_by: None,
+            hidden: None,
         }],
     };
     let out = wiki::serve::search_lines(&[hit]);
@@ -2720,6 +2721,177 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
 }
 
+const LAYOUT_H: &str = "\
+#pragma once
+/// Lays out the panes of one window.
+class PaneLayout {
+public:
+  bool hasPaneBorder(int pane) const { return pane_border_width_[pane] != 0; }
+private:
+  std::array<uint8_t, 4> pane_border_width_{};
+  static constexpr int kMaxPanes = 4;
+};
+";
+
+#[test]
+fn a_cpp_data_member_is_found_by_its_exact_name() {
+    let (_d, w) = code_fixture(&[("src/layout.h", LAYOUT_H)]);
+    let out = wiki::serve::search_lines(&w.search("pane_border_width_", None, 10));
+    assert!(
+        out.contains(
+            "  src/layout.h:7-7  PaneLayout::pane_border_width_  std::array<uint8_t, 4> pane_border_width_\n"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("[called by"), "{out}");
+    assert_eq!(
+        w.not_found("pane_border_width_ kMaxPanes", None, None),
+        Vec::<String>::new()
+    );
+    // Exact case only, as for shell globals.
+    assert_eq!(
+        w.not_found("KMAXPANES", None, None),
+        vec!["KMAXPANES".to_string()]
+    );
+}
+
+#[test]
+fn a_cpp_data_member_stays_out_of_word_queries_page_graph_and_hint() {
+    let (_d, w) = code_fixture(&[("src/layout.h", LAYOUT_H)]);
+    for q in ["pane border width", "max panes", "pane layout"] {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        assert!(!out.contains("::pane_border_width_"), "{q}: {out}");
+        assert!(!out.contains("::kMaxPanes"), "{q}: {out}");
+    }
+    let outline = w.outline("layout", None).unwrap();
+    assert!(!outline.contains("kMaxPanes"), "{outline}");
+    assert!(!outline.contains("pane_border_width_ "), "{outline}");
+    assert!(w.callers("layout", "kMaxPanes", None, None).is_err());
+    let pack = w
+        .neighbors("layout", 1, &PackBudget::default())
+        .unwrap()
+        .text;
+    assert!(!pack.contains("::kMaxPanes"), "{pack}");
+    let hint = wiki::hint::hint_lines(&w, "where is the pane border width of the pane layout");
+    assert!(!hint.contains("::pane_border_width_"), "{hint}");
+}
+
+const ORDER_ID_FILES: [(&str, &str); 3] = [
+    (
+        "src/shop.h",
+        "struct Shop {\n  struct Cart { unsigned order_id; };\n  struct Invoice { unsigned order_id; };\n  struct Refund { unsigned order_id; };\n};\n",
+    ),
+    (
+        "src/fill.h",
+        "#include \"shop.h\"\nstruct Fill { unsigned order_id; };\n",
+    ),
+    (
+        "src/ack.h",
+        "#include \"shop.h\"\nstruct Ack { unsigned order_id; };\n",
+    ),
+];
+
+#[test]
+fn a_capped_name_spreads_over_pages_and_says_how_many_are_hidden() {
+    let (_d, w) = code_fixture(&ORDER_ID_FILES);
+    let out = wiki::serve::search_lines(&w.search("order_id", None, 10));
+    let shown: Vec<&str> = out
+        .lines()
+        .filter(|l| l.contains("::order_id  "))
+        .map(|l| l.split("  ").nth(1).unwrap())
+        .collect();
+    assert_eq!(shown.len(), 3, "{out}");
+    let files: std::collections::BTreeSet<&str> =
+        shown.iter().map(|l| l.split(':').next().unwrap()).collect();
+    assert_eq!(files.len(), 3, "one per page first: {out}");
+    assert!(
+        out.contains(
+            "\n    +2 more named order_id on the pages shown; narrow with Class::order_id or a path word\n"
+        ),
+        "{out}"
+    );
+    // The marker follows the name's last shown line, the answer ends there.
+    assert!(out.trim_end().ends_with("or a path word"), "{out}");
+    // JSON gives it on the same symbol.
+    let v: serde_json::Value =
+        serde_json::from_str(&wiki::serve::search_json(w.search("order_id", None, 10))).unwrap();
+    let more: Vec<&serde_json::Value> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|h| h["symbols"].as_array().unwrap())
+        .filter_map(|s| s.get("more"))
+        .collect();
+    assert_eq!(
+        more,
+        [&serde_json::json!({"count": 2, "pages": 0, "owned": true})]
+    );
+}
+
+#[test]
+fn a_qualified_name_returns_that_one_definition_and_no_marker() {
+    let (_d, w) = code_fixture(&ORDER_ID_FILES);
+    for (q, want) in [
+        ("Fill::order_id", "src/fill.h:2-2  Fill::order_id"),
+        ("Cart::order_id", "src/shop.h:2-2  Shop::Cart::order_id"),
+        (
+            "Shop::Refund::order_id",
+            "src/shop.h:4-4  Shop::Refund::order_id",
+        ),
+    ] {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        assert_eq!(out.matches("order_id  ").count(), 1, "{q}: {out}");
+        assert!(out.contains(want), "{q}: {out}");
+        assert!(!out.contains("more named"), "{q}: {out}");
+    }
+}
+
+#[test]
+fn a_namespace_qualified_member_or_method_finds_its_class_member() {
+    let src = "namespace geo {\nstruct Tile {\n  int edge_len;\n  void redraw();\n};\n}\nstruct Sheet {\n  int edge_len;\n};\nstruct Frame {\n  struct Tile { int edge_len; };\n};\n";
+    let (_d, w) = code_fixture(&[("src/geo.h", src)]);
+    let found = |q: &str| {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        out.lines()
+            .filter(|l| l.starts_with("  src/"))
+            .map(|l| l.split("  ").nth(1).unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(found("geo::Tile::edge_len"), ["src/geo.h:3-3"]);
+    assert_eq!(found("geo::Tile::redraw"), ["src/geo.h:4-4"]);
+    // An exact owner chain wins over the namespace reading.
+    assert_eq!(found("Frame::Tile::edge_len"), ["src/geo.h:11-11"]);
+    // No class of that name, or a namespace without the class: nothing.
+    for q in [
+        "geo::Zone::edge_len",
+        "geo::edge_len",
+        "geo::Sheet2::edge_len",
+    ] {
+        assert_eq!(found(q), Vec::<String>::new(), "{q}");
+    }
+}
+
+#[test]
+fn a_capped_function_name_gets_the_marker_without_the_class_advice() {
+    let files: Vec<(String, String)> = (1..=5)
+        .map(|n| (format!("src/m{n}.rs"), "pub fn run_step() {}\n".to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, t)| (p.as_str(), t.as_str()))
+        .collect();
+    let (_d, w) = code_fixture(&refs);
+    let out = wiki::serve::search_lines(&w.search("run_step", None, 10));
+    assert!(
+        out.contains("\n    +2 more named run_step on 2 other pages; narrow with a path word\n"),
+        "{out}"
+    );
+    // At or under the cap, no marker.
+    let (_e, few) = code_fixture(&refs[..3]);
+    let out = wiki::serve::search_lines(&few.search("run_step", None, 10));
+    assert!(!out.contains("more named"), "{out}");
+}
+
 const CALLED_RS: &str = "\
 pub const MAX_DEPTH: usize = 3;
 pub struct OrderBook;
@@ -2837,4 +3009,91 @@ fn the_note_counts_what_callers_lists_twin_included() {
             .count(),
         2
     );
+}
+
+fn thumbnail_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        (
+            "app/media/images.py",
+            "def thumbnail(image):\n    return image\n",
+        ),
+        (
+            "tests/test_thumbnail.py",
+            "def test_thumbnail():\n    assert True\n",
+        ),
+    ])
+}
+
+#[test]
+fn unknown_page_names_where_the_stem_is_defined() {
+    let (_t, w) = thumbnail_fixture();
+    for arg in ["thumbnail.py", "src/thumbnail.py"] {
+        let e = w.resolve(arg).unwrap_err();
+        assert_eq!(
+            e,
+            format!("unknown page {arg:?}; closest: test_thumbnail; defined in: app/media/images.py:1-2 thumbnail — use search to find ids")
+        );
+    }
+}
+
+#[test]
+fn unknown_page_defined_in_lists_non_test_first_and_at_most_three() {
+    // The test page sorts first by path: only the rule puts it last.
+    let (_t, w) = code_fixture(&[
+        ("aa/tests/test_a.py", "def zed():\n    pass\n"),
+        ("b.py", "def zed():\n    pass\n"),
+        ("c.py", "def zed():\n    pass\n"),
+        ("d.py", "def zed():\n    pass\n"),
+    ]);
+    let e = w.resolve("zed.py").unwrap_err();
+    assert!(
+        e.contains("defined in: b.py:1-2 zed, c.py:1-2 zed, d.py:1-2 zed —"),
+        "{e}"
+    );
+}
+
+const PANE_FILES: [(&str, &str); 3] = [
+    (
+        "src/layout.h",
+        "struct Frame {\n  int pane;\n};\nstruct Grid {\n  int pane;\n};\n",
+    ),
+    ("src/view.cpp", "int pane(int x) { return x; }\n"),
+    (
+        "src/dock.h",
+        "class Dock {\n  void pane();\n  void pane(int);\n};\nconst int pane = 1;\n",
+    ),
+];
+
+#[test]
+fn unknown_page_defined_in_prefers_functions_one_per_file_qualified() {
+    let (_t, w) = code_fixture(&PANE_FILES);
+    let e = w.resolve("pane.h").unwrap_err();
+    assert!(
+        e.contains("defined in: src/dock.h:2-2 Dock::pane, src/view.cpp:1-1 pane —"),
+        "{e}"
+    );
+    // Fields only when nothing else is named so.
+    let (_u, w) = code_fixture(&PANE_FILES[..1]);
+    let e = w.resolve("pane.h").unwrap_err();
+    assert!(
+        e.contains("defined in: src/layout.h:2-2 Frame::pane —"),
+        "{e}"
+    );
+}
+
+#[test]
+fn unknown_page_without_a_defining_item_keeps_the_old_text() {
+    let (_t, w) = thumbnail_fixture();
+    let e = w.resolve("nothing.py").unwrap_err();
+    assert_eq!(e, "unknown page \"nothing.py\" — use search to find ids");
+}
+
+#[test]
+fn unknown_page_closest_lists_non_test_pages_first() {
+    let (_t, w) = code_fixture(&[
+        ("tests/a_thumbnail.py", "def t():\n    pass\n"),
+        ("zz/thumbnail_notes.py", "def n():\n    pass\n"),
+    ]);
+    let near = w.resolve_id("thumbnail.py").unwrap_err();
+    assert_eq!(near, ["thumbnail_notes", "a_thumbnail"]);
 }

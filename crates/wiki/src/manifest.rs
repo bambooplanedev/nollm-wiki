@@ -44,10 +44,18 @@ pub struct ManifestEntry {
     pub imports_in: Vec<String>,
     /// Top-level definition names of the page (see `Entity::defined`).
     pub defined: Vec<String>,
-    /// Method names of the page (see `Entity::methods`). Declared last so
-    /// it is the last key of every `index.json` entry: serde emits fields
+    /// Method names of the page (see `Entity::methods`). The last key of
+    /// every `index.json` entry but the rare one below: serde emits fields
     /// in declaration order.
     pub methods: Vec<String>,
+    /// `Entity::members_unindexed`; absent when 0, as on nearly every page.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub members_unindexed: usize,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's `skip_serializing_if` passes a reference
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Serialize)]
@@ -130,6 +138,7 @@ pub fn build_manifest(
                 imports_in,
                 defined: e.defined.clone(),
                 methods: e.methods.clone(),
+                members_unindexed: e.members_unindexed,
             }
         })
         .collect();
@@ -147,8 +156,8 @@ pub fn render_index_json(m: &Manifest) -> String {
 /// `items.json`: each code page's items (see `Entity::items`) keyed by page
 /// id, in id order, pages without items left out. A sidecar rather than a
 /// field of `index.json` entries, because items outweigh the rest of the
-/// catalog several times over and `index.json` is served whole as
-/// `wiki://index`. Compact, as only tools read it.
+/// catalog several times over and `index.json` is read whole. Compact, as
+/// only tools read it.
 pub fn render_items_json(entities: &BTreeMap<String, Entity>) -> String {
     let items: BTreeMap<&str, &[CodeItem]> = entities
         .iter()

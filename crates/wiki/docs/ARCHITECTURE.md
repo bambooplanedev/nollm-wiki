@@ -137,7 +137,7 @@ SourceFile     →      Entity        →         BTreeMap<id,        →  Graph
    `index.json`, whose change triggers a plain `serve`'s reload; with
    `--source`, `serve` reloads after its own compile instead). Items live
    beside the catalog, not in it, because they outweigh it several times over and
-   `index.json` is served whole as `wiki://index`. `items.json` is one
+   `index.json` is read whole. `items.json` is one
    compact object keyed by page id, in id order, holding only code pages
    with at least one item; each value lists that page's items, one object
    per item, keys in this order — `kind` (`fn`, `method`, `type` for a
@@ -207,7 +207,7 @@ crate of the workspace, and `install.sh` at the repository root fetches it. Path
 | `crates/wiki-code/src/formats/extract_svelte.rs` | Svelte components — the same blank-in-place view over the instance and `context="module"`/`module` scripts; every top-level element but `<style>` is nested markup (so a `<script>` in `<svelte:head>` is not the component's), void elements and `{...}` expressions are skipped. |
 | `crates/wiki-code/src/formats/extract_shell.rs` | Shell (`.sh`, `.bash`, or no extension and a `sh`/`bash` shebang, `shell_shebang`): functions, listed as `name()`, and the first top-level `NAME=` of each UPPERCASE name as a nested `value` item that only `search` finds by exact name; doc from the `#` run above; `source`/`.` arguments as imports; a file the grammar rejects is reparsed from a blanked copy, then a line regex adds functions still missing; calls outside every function hang off a `top_level` item that only `callers` shows. |
 | `crates/wiki-code/src/summary.rs` | `summarize()` — deterministic, no-LLM one-line summary via a fallback chain (front-matter desc → docstring → first sentence of body → first signature). The sentence is cut from the whole opening paragraph (consecutive non-empty lines joined by a space), so a sentence wrapped at 80 columns in a `//!` block or README prose is not truncated at the line break. A sentence ends only at `.`/`!`/`?` followed by whitespace or end of line (so `index.json` does not end one), and lines opening "This document/page/module/file/note" are skipped as boilerplate. A list item ends the paragraph, and a page that opens with a list is summarised by its first item. |
-| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`docs`/exact-kind search filter), re-exported from `wiki_code`: `CodeItem` (with the `test` flag) and `is_test_path()` (`wiki_code::model`), `title_case()` — the one casing rule every name-deriving path shares — and `normalize_path()` (`wiki_code::support`); `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold. |
+| `src/model.rs` | Core types: `Entity`, `Edges`, `Graph`, `LintReport`, `SourceKind`, `KindFilter` (the `code`/`tests`/`docs`/exact-kind search filter), re-exported from `wiki_code`: `CodeItem` (with the `test` flag) and `is_test_path()` (`wiki_code::model`), `title_case()` — the one casing rule every name-deriving path shares — and `normalize_path()` (`wiki_code::support`); `slugify()` — folds a name to an id matching `[a-z0-9_]+` in a single pass (Unicode-lowercase; Cyrillic transliterated, Ukrainian KMU 2010 plus Russian letters; Latin-1/Extended-A diacritics folded to the base letter; apostrophes between Cyrillic letters and combining marks dropped; alphanumeric kept, any run of other characters collapsed to one `_`), falling back to an anonymous `page_<hash>` id if nothing alphanumeric survives the fold. |
 | `src/calls.rs` | `resolve_calls()` — call edges between code items, matched by name and argument count after the graph is built; `Wiki::calls` — what `neighbors --symbol` prints; `Wiki::callers` — what `callers` prints. |
 | `src/graph.rs` | `build_graph()` — mention edges (phrase index, filtered by `refers_to_module` for code targets), import edges (`wiki_code::imports::Imports`: stem and `defined`-name segments under local roots), markdown-link edges (`resolve_link`), and PageRank. |
 | `src/hash.rs` | BLAKE3-based `hash_bytes`/`hash_str`/`combine`/`to_hex` used for content hashes and render fingerprints. |
@@ -215,20 +215,21 @@ crate of the workspace, and `install.sh` at the repository root fetches it. Path
 | `src/cache.rs` | `.wiki/cache.json` — versioned incremental-render cache (`Cache`, `load`, `save`). |
 | `src/manifest.rs` | Builds `Manifest` and renders `index.json`, `items.json`, `index.md`, `llms.txt` (summaries in `index.md` and `llms.txt` clipped to `LINE_CHARS`; pages at or above the median PageRank under `## Docs`, the rest under `## Optional`), `AGENTS.md`, `graph.json`. |
 | `src/lint.rs` | `lint()` — in-memory broken-link, orphan-page and too-large-page checks over rendered pages. |
-| `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (in `query/search.rs`; page hits with symbol lines; one Aho-Corasick automaton over the query's tokens, built once per search, counts every token in a page body in one pass) and `neighbors()` (context-pack) queries (both in `query/resolve.rs`), with `resolve_id()` mapping an id, title or path to a page (on a miss, pages of the same file name are suggested first), plus `page()`/`has_page()`/`list_pages()` for the MCP resources; used by the CLI, the MCP server, and as a library API. Children: `query/dates.rs` (dates written in a query), `query/tokens.rs` (tokenizing, stemming, field-word matching), `query/score.rs` (scoring a page against a query), `query/search.rs`, `query/resolve.rs`. See [Query internals](#query-internals). |
+| `src/query.rs` | `Wiki` — loads a compiled output dir (`index.json`, `items.json`) for `search()` (in `query/search.rs`; page hits with symbol lines; one Aho-Corasick automaton over the query's tokens, built once per search, counts every token in a page body in one pass) and `neighbors()` (context-pack) queries (both in `query/resolve.rs`), with `resolve_id()` mapping an id, title or path to a page (on a miss, pages of the same file name are suggested first), plus `page()`/`has_page()`/`list_pages()`; used by the CLI, the MCP server, and as a library API. Children: `query/dates.rs` (dates written in a query), `query/tokens.rs` (tokenizing, stemming, field-word matching), `query/score.rs` (scoring a page against a query), `query/search.rs`, `query/resolve.rs`. See [Query internals](#query-internals). |
 | `src/outline.rs` | `Wiki::outline` / `Wiki::page_text` — what `wiki page` and the MCP `page` tool print: a header, imports and one line per `items.json` item (`start-end  kind  signature`), or a markdown page's headings. Under `max_tokens` it cuts test items, docs and imports in that order, then trailing items, and ends with a `… dropped: … — pass max_tokens: N for all` marker. `page_text` with `full` returns the page, or its outline / a whole-line prefix when over budget. See [Query internals](#query-internals). |
 | `src/labels.rs` | `labels()` — a Markdown file's ATX headings and bold step lines with the line range each covers; `doc_search()`/`doc_lines()` — `search` with `docs` (CLI `--docs`): labels holding the query's words in a row, else (named on a first line) labels opened by its leading ID, else labels holding all its words but `STOP_WORDS` in any order, else the table rows (`rows()`) holding its words in a row (an empty answer is `DOC_NO_MATCH`), read from the named files at call time, 10 hits by default (`DOC_LIMIT`), an empty query listing the first 200 (`DOC_LIST_LIMIT`); a label repeated under one head keeps its first and last entries when the limit cuts it. |
-| `src/serve.rs` | `wiki serve` — MCP server over stdio (newline-delimited JSON-RPC; calls that read the wiki run on `WORKERS` threads, `ping` and the rest on the reader; `notifications/cancelled` drops a queued call or ends its lock wait (`dirlock::CANCELLED`) and sends no reply; tool schemas in `serve/tools.json`): `search` (`format`: `lines`/`json`; `search_lines`, `search_json`, in `serve/render.rs`; `limit` 5 by default; `docs` goes to `labels::doc_search`)/`page`/`callers` tools, plus `neighbors` and `lint` when `--tools` names them (`TOOLS`, `DEFAULT_TOOLS`), and `wiki://page/<id>`, `wiki://index`, `wiki://llms.txt` resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot, and so does one that would wait past the call's 5 s (`WAIT`) for a compile's `compile.lock`, adding `recompile still running` (`lint` then lints the snapshot, `wiki://index`/`wiki://llms.txt` return an error); stale snapshots add a `wiki may be stale: <reason>` line to tool results and resource reads. |
+| `src/serve.rs` | `wiki serve` — MCP server over stdio (newline-delimited JSON-RPC; calls that read the wiki run on `WORKERS` threads, `ping` and the rest on the reader; `notifications/cancelled` drops a queued call or ends its lock wait (`dirlock::CANCELLED`) and sends no reply; tool schemas in `serve/tools.json`, written by hand: the default tools' have no `$schema`, `null` types or `format`, `neighbors`' still does; `search`'s `tag` and `format`, `page`'s `full` and `callers`' `max_tokens` are parsed but not in the schema, which `tool_schemas_match_the_params_structs` lists by name): `search` (`format`: `lines`/`json`; `search_text`, `search_json_text`, in `serve/render.rs`; `limit` 5 by default; `docs` goes to `labels::doc_search`)/`page`/`callers` tools, plus `neighbors` and `lint` when `--tools` names them (`TOOLS`, `DEFAULT_TOOLS`); no resources. Without `--source`, `WikiState` lazily reloads the compiled wiki when `index.json`'s fingerprint (mtime, len) changes; with it, `WikiState` takes snapshots from `Live`. A failed reload keeps the last good snapshot, and so does one that would wait past the call's 5 s (`WAIT`) for a compile's `compile.lock`, adding `recompile still running` (`lint` then lints the snapshot); stale snapshots add a `wiki may be stale: <reason>` line to tool results. |
 | `src/live.rs` | `Live` — `serve --source`: watches the project, recompiles in a background thread until the compiled generation catches up with the event generation (the worker compiles once events have paused for 150 ms (`watch::DEBOUNCE`), at most 2 s after it first sees an edit, which is after any running compile ends), and holds the current `Wiki` snapshot plus the stale reason. Each tool call writes a barrier file in `<dir>/.serve/`, waits for its event, then waits for the compile (both within one 5 s bound); while the start-up compile of an existing wiki runs, a call waits at most 1 s for it and then answers from the old wiki. Several servers may share one `--dir`: only the one holding `.serve/writer.lock` compiles; the others are readers that wait for the writer's `ack-*` file and reload (bounded by the call's deadline: a compile still holding `compile.lock` then leaves the old snapshot with `recompile still running`), and take the lock over when the writer exits. Once its binary is replaced, a server stops compiling and gives the lock up (the check is in `live/exe.rs`; the barrier and ack protocol in `live/barrier.rs`). At start-up the one that becomes the writer prints one stderr line, `wiki: this wiki was compiled by <old>; compiling it again with <new>`, when the output on disk was made by another version. |
 | `src/dirlock.rs` | Advisory locks under `<dir>/.serve/` (`SERVE_DIR`): `try_writer` for `writer.lock` (one writer per `--dir`), and `compile.lock`, held `exclusive` while a compile writes (`serve`, `wiki compile` and `wiki setup` alike) and `shared`/`try_shared`/`shared_until` (polls until a deadline, so a call's wait stays bounded) while a load reads, so a load never sees half a wiki. |
 | `src/hint.rs` | `hint_lines()` — `wiki hint`: code-only search plus, when the prompt passes the shared memory gate (`Wiki::passes_gate`, the one `search`'s tail uses), `MEMORY_HEADER` and one `memory (<origin>): <path> — <summary>` line (`serve::memory_prefix`) for the most trusted passing note (`Origin::trust`; the best scored of equals), the code `HEADER` only when there are code lines; pages scoring at least half the best kept, symbol lines deduplicated by `path:start-end`, capped at `HINT_LINES` and `LINE_CHARS`; no code lines when the best page scores below `HINT_MIN_SHARE` (0.5) of the prompt's available score (`PassStats::available`, the summed idf of its counted words), when fewer than `HINT_MIN_TOKENS` of its counted words occur in the project (document frequency above 0), or when `rests_on_function_words` finds that the prompt without its `FUNCTION_WORDS` (Ukrainian and English) has too few tokens, no hit, or a best page under `HINT_MIN_SHARE` (a second search, run only when the hint would otherwise fire); these two gates only silence, a kept hint is unchanged; empty when nothing matches, on a harness-written turn (`is_harness_prompt`: text opening with a tag or one of Claude Code's own notes, `HARNESS_OPENINGS`) and on a prompt with fewer than `HINT_MIN_TOKENS` (2) words of two or more characters (`Wiki::prompt_tokens` drops one-character words from every prompt search). `prompt_from_hook_json()` reads Claude Code's `UserPromptSubmit` input. |
 | `src/generator.rs` | `generate_corpus()` — deterministic synthetic-corpus generator (SplitMix64 PRNG) used by `wiki generate` and tests. |
-| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.nollm-wiki` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`) unless `--no-memory` (`SetupOptions::memory` off: no folder, no memory compiled, the server registered as `serve --source . --memory none` by `entry`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or, for Codex, a block in the project's `.codex/config.toml` (`codex.rs`)) in the chosen memory variant, either variant counting as its own; when this `wiki` is the nollm-wiki home's `bin/wiki` (`nollm_wiki_home`), every entry, the Claude Code hook and the pi extension start it through `LAUNCH` (`sh -c 'exec "${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki" …'`; pi builds the same path itself), and an entry that starts it by name counts as its own too and is rewritten; otherwise they start `wiki` by name; Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's `wiki-navigation` skill (`skill_text`: its Memory section, naming `.agents/memory`, only with memory) and the ignore lines; Claude Code gets no skill. With no agent (`SetupOptions::agents` empty: none detected and none named or chosen) it still compiles, writes the ignore lines and (unless `--no-memory`) the memory folder, and exits 0; `main.rs` says that no agent was set up (or, with `--remove`, that nothing agent-specific was removed); `--remove` undoes only what it wrote. The prompt hook (Claude Code's `UserPromptSubmit` entry, pi's `wiki-hint` extension) is written only with `SetupOptions::hook` (`--hook`); a run without it removes one an earlier setup wrote, matched as `--remove` matches it (the pi extension also in its pre-opt-in text, `pi_hook(cmd, true)`), skips a file git tracks in local scope, leaves a file it cannot read with a `left <file> as it is: …` line without failing the run, and prints one `removed …: the prompt hint is off by default now` line per hook removed. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`; `detect()` finds the agents of a project, and `parse_agents()` reads the answer when none is found and setup asks. |
+| `src/setup/mod.rs` | `run()` — `wiki setup`: compiles `.` into `.nollm-wiki` (with the agents' memory folders it finds, each reported), creates `.agents/memory` in both scopes (in local scope also listed in `.git/info/exclude`) unless `--no-memory` (`SetupOptions::memory` off: no folder, no memory compiled, the server registered as `serve --source . --memory none` by `entry`), then per agent (Claude Code, pi, Cursor, Codex) writes the MCP entry (`.mcp.json`, `.pi/mcp.json`, `.cursor/mcp.json`, `claude mcp add-json … --scope local`, or, for Codex, a block in the project's `.codex/config.toml` (`codex.rs`)) in the chosen memory variant, either variant counting as its own; when this `wiki` is the nollm-wiki home's `bin/wiki` (`nollm_wiki_home`), every entry, the Claude Code hook and the pi extension start it through `LAUNCH` (`sh -c 'exec "${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki" …'`; pi builds the same path itself), and an entry that starts it by name counts as its own too and is rewritten; otherwise they start `wiki` by name; Codex's navigation steps as a marked block in `AGENTS.md` (`navigation.md`), pi's shorter steps as the same marked block in `.pi/APPEND_SYSTEM.md` (`navigation-pi.md`, `pi_navigation`: skipped while pi's agent dir, `PI_CODING_AGENT_DIR` or `~/.pi/agent`, has an `APPEND_SYSTEM.md` and the project has none, and a warning when that dir's `AGENTS.md` holds a navigation block; the agent dir is only read), pi's `wiki-navigation` skill (`skill_text`: its Memory section, naming `.agents/memory`, only with memory) and the ignore lines; Claude Code gets no skill. With no agent (`SetupOptions::agents` empty: none detected and none named or chosen) it still compiles, writes the ignore lines and (unless `--no-memory`) the memory folder, and exits 0; `main.rs` says that no agent was set up (or, with `--remove`, that nothing agent-specific was removed); `--remove` undoes only what it wrote. The prompt hook (Claude Code's `UserPromptSubmit` entry, pi's `wiki-hint` extension) is written only with `SetupOptions::hook` (`--hook`); a run without it removes one an earlier setup wrote, matched as `--remove` matches it (the pi extension also in its pre-opt-in text, `pi_hook(cmd, true)`), skips a file git tracks in local scope, leaves a file it cannot read with a `left <file> as it is: …` line without failing the run, and prints one `removed …: the prompt hint is off by default now` line per hook removed. Reports one line per item and returns `false` when anything was skipped. `find_on_path()` looks binaries up on `PATH`; `detect()` finds the agents of a project, and `parse_agents()` reads the answer when none is found and setup asks. |
 | `src/setup/edit.rs` | Owned edits: JSON entries, files, marked text blocks and ignore lines recognised by exact value or content, so they can be added, left alone when foreign, and removed. |
 | `src/setup/codex.rs` | `run()` — Codex's server in the project's own `.codex/config.toml` (no `codex` CLI needed for it): reads the file through the guards (inside the project, no link, one name, UTF-8, not Codex's own home: `CODEX_HOME`, else `~/.codex`), writes, switches or removes the block through `Report::file_item`, then looks for a machine-wide `wiki` server: on every run that may edit the file it asks `codex mcp get wiki` from the temp dir (so a trusted parent project's entry is not seen) and, once the block is in place (or, with `--remove`, gone), reports one it finds as another server (never changed): setup on the run that found the file without a `wiki` of its own (exit 1), `--remove` as a note on every run. `codex_home()` is also used by `detect()`, so a `.codex/` that is Codex's home is no project. |
 | `src/setup/codex/toml.rs` | The text side of the block, with no TOML library: `state()` calls the block its own only when the header `[mcp_servers.wiki]` is followed by exactly the `command` and `args` lines of one of the entries `wiki` itself writes (`Ours` for this run's, else `OursOther`); anything else that may define the server (extra keys, quoted or dotted spellings, an inline `mcp_servers`, a byte order mark) is `Other` and left and reported, an `mcp_servers` it cannot join is refused too, so a second definition is never appended. `with_block`, `with_body` and `without_block` keep every other line byte for byte, and the line ending of the file. |
 | `src/setup/SKILL.md` | The skill text, embedded with `include_str!`. |
 | `src/setup/navigation.md` | The navigation steps `setup` writes into `AGENTS.md` for Codex. |
+| `src/setup/navigation-pi.md` | The shorter navigation steps `setup` writes into `.pi/APPEND_SYSTEM.md` for pi, with the `mcp__wiki__*` tool names of the server it writes into `.pi/mcp.json`. |
 | `src/watch.rs` | What `live.rs` watches with: `start()` — the watch setup, with an event hook; `is_change()` — rejects reads (`Access` events: inotify reports every open, the compile's own walk included); `WatchSet` — judges a path by the compile's ignore rules; `DEBOUNCE` — the 150 ms quiet window. |
 | `src/main.rs` | CLI entry point (`clap`): `compile`, `neighbors`, `callers`, `page` (`--full`, `--max-tokens`), `search` (`--kind`, `--tag`, `--docs`, `--format lines|json`), `lint`, `serve`, `hint`, `setup`, `generate`. |
 
@@ -590,7 +591,13 @@ matching:
   `provisioning` finds `provision` below an exact or prefix hit. The
   body hits by substring, never by stem. Item names (`items.json`, lowercased, or one of
   their snake/CamelCase words) hit by whole term only, so `to` does not hit
-  `token_estimate`. Fuller
+  `token_estimate`. Two adjacent name words of at most 2 characters each
+  also hit joined (`Wiki::match_words`: `QoS` is `qo`, `s` and `qos`); the
+  join is a match word only, and the spelled-name check (`W_SYMBOL` for a
+  query of exactly an item's words) and `name_sets` keep `name_words`.
+  Joining when either word is short (`ofin`, `byid`) changed 16–44% of a
+  tree's names and cost 2 ranks on a 1,350-query sweep; the narrow rule
+  changed none there. Fuller
   matches are not forced above partial ones by a sort key; IDF does that
   where it matters, by making a rare missing token expensive and a common
   one nearly free.
@@ -689,15 +696,23 @@ matching:
   (`search_tagged`), not in `hint`. A query word with `_` or `::`, or an
   upper-case letter after the first, is an identifier (`identifier`: outer
   punctuation trimmed, `_` kept). Its definitions are the items named so,
-  or `owner::name` so, case-sensitively only (a name in another case is another item); modules and
+  or `owner::name` so (`Inner::f` also names `Outer::Inner::f`),
+  case-sensitively only (a name in another case is another item); modules and
   top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
-  pages ranked higher first, then by pagerank. In a query of identifiers
+  pages ranked higher first, then by pagerank, one per page before any
+  page's second. A name with more than 3 marks its last shown line
+  (`SymbolLine::hidden`), which the line output follows with
+  `+N more named <name> on M other pages; narrow with Class::<name> or a
+  path word` (`Class::` only when a hidden one has an owner; `--format
+  json` has no marker). In a query of identifiers
   alone a name equal, in any case, to a page's `module_stem` puts that page
   (`stem_pages`, same cap and order) before its definitions, as a page with
   no lines: a module is no item. Such a query with any defined or stem page
   gets just those lines, page by page in the order names first land, with no
   per-page cap; `not_found` lists the names with neither and
-  the line output prints `not found: <name>` after the hits. There each
+  `serve::search_text` prints `no symbol named <name>` before the hits,
+  ending `; the pages below match its words` (`their` for several) only
+  when no name is defined, so the hits are the ranked pages. There each
   non-nested function or method line carries `called_by`
   (`Wiki::caller_count`: the distinct callers of the item and its twin, as
   `callers` lists them one level up, `None` at 0), which the line output
@@ -713,14 +728,47 @@ matching:
   `#[tokio::test]`). It is stored in `items.json`. Test items stay visible
   as symbol lines but contribute no page fields, so their names cannot
   lift their page; body text still counts.
-- **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `docs`
-  (`markdown` and `text`) or an exact kind; the MCP `kind` and CLI `--kind`
-  share it and its error text.
+- **Kind filter.** `KindFilter` accepts `code` (any `code:<lang>`), `tests`
+  (code pages on an `is_test_path` path, in every language: there is no
+  `tests:<lang>`, so the `use kind "tests"` lines of a `code:<lang>` search
+  widen it to all languages), `docs` (`markdown` and `text`) or
+  an exact kind; the MCP `kind` and CLI `--kind` share it and its error
+  text. In `search`, `code` and `code:<lang>` also leave out test pages
+  (`KindFilter::drops_tests`, `Entry::shown`), and only there: `neighbors`
+  with `code` and the prompt hint's internal `Code` filter keep them.
+  `search_terms` counts `N`, `df` and `avglen` over every code page for both
+  `code` and `tests`, scores, sorts, and only then drops the other side, so a
+  page's score is the one it had before the split; filtering before the
+  statistics moved 31 of 1,350 ranks on a generated sweep and none after.
+  When a test page ranked first before a `code` search dropped it,
+  `PassStats::tests_cut` is set, `Wiki::search_answer` returns it, and the
+  line output ends `tests also match; use kind "tests"`. Printed for a test
+  page anywhere in the top `limit`, the line came on most queries of a large
+  tree and said little. For a
+  query of names alone, `Wiki::in_tests_only` picks the `not_found` names a
+  `tests` search would find (a definition on, or the module stem of, a test
+  page), and the line output opens with `<name>: in test pages only; use
+  kind "tests"` in place of `no symbol named`, then those names' test
+  definitions (`Wiki::test_definitions`: `lift_names` under `tests`, so the
+  same cap and marker) and no ranked pages for them; the other names are
+  answered as a query of their own, so one call gives the definition.
 - **Output.** `serve::search_lines` renders the default line format (page
   line `id  path  [date  ]title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page
   without symbols; `no matches` when nothing hit); `serve::search_json`
-  renders the JSON form. The MCP `format` parameter and the CLI
+  renders the JSON form. `serve::search_text` and `serve::search_json_text`
+  render one `Answer` (`render::answer`: the tests-only names and their
+  definitions, the other missing names, whether the hits are the ranked
+  pages, the hits, the pointer); the JSON array keeps its fields and order
+  and adds `more` to a capped symbol and `no_symbol`, `tests_only`,
+  `unindexed`, `tests_also_match` to its first hit. A file past
+  `wiki_code::MEMBERS_PER_FILE` (2,000) C/C++ data members keeps none of
+  them as items and records the count (`CodeFile::members_unindexed`,
+  `index.json`'s `members_unindexed`, absent at 0); a missing name such a
+  page's body holds as a word (`Wiki::in_unindexed_members`) gets
+  `<name>: members of <path> are not indexed` instead of `no symbol named`.
+  The largest hand-written count on nine C/C++ trees was 1,322 members in
+  one file; a generated register header held 64,000. The MCP `format` parameter and the CLI
   `--format` choose between them; `lines` is the default for both.
 
 **Neighbors** (`Wiki::neighbors`) takes a page id; both the CLI and the
@@ -728,7 +776,12 @@ MCP tool first pass what the caller typed through `Wiki::resolve_id`, which
 accepts an exact id, a title (ignoring case), the slug of the argument, or
 the one page whose source path equals it or ends with `/<arg>`. A failure
 lists up to 5 closest ids (the pages an ambiguous path matched, else ids
-or titles sharing a word). On a failure `Wiki::resolve` first asks
+or titles sharing a word, non-test pages first). When the ids came from the
+shared word or from nothing, the error also gives up to 3 `defined in:` places
+of items named like the argument's file stem (`Wiki::defined_as_stem`:
+one per file, non-test files first, then types and functions before
+values, nested values only when nothing else has the name, each as
+`Owner::name`). On a failure `Wiki::resolve` first asks
 `Wiki::skipped_path`: a relative path whose outermost pruned directory
 (`walk::pruned_dir`, the `SKIPPED_DIRS` and hidden-folder rule) is not at or
 above the compile input's name (`root`), and under which no indexed page
@@ -741,7 +794,7 @@ lives, gets a note that the folder is not compiled. `neighbors` then BFS-collect
   pack can't overshoot the ceiling.
 - The target page comes first. A code page is its outline, cut to the
   budget; another page is in full when it fits, otherwise degraded to a
-  title + summary block pointing at `wiki://page/<id>`. The outline's
+  title + summary block pointing at `page` with `full: true`. The outline's
   header and `…` line, or the degraded block, are the one floor
   exception: always emitted, even when a pathologically small budget
   cannot contain them.
@@ -941,10 +994,16 @@ doc), and JS/TS top-level variables that hold no function. C++, Go and JS/TS
 values are `@item`-only, so `## Exports`, `defined` and `methods` never see
 them; Rust `const`/`static` and Python module assignments are `@def`s.
 Fields, variants, associated consts and types, impl headers and
-function-local definitions are not items, except a Python `def` directly in
-a function body (`Placement::Nested`; one in a class defined there stays
-out): an item with `nested` set, never public, owner-less, found by
-`search` only. Outlines (`Keep::items`), the hint, `also defined`
+function-local definitions are not items, with three exceptions, each an
+item with `nested` set, never public and found by `search` only: a Python
+`def` directly in a function body (`Placement::Nested`, owner-less; one in a
+class defined there stays out), a shell file's first top-level `NAME=` of
+each UPPERCASE name, and a C/C++ class, struct or union data member (a
+`value` owned by its class, or by the typedef name of `typedef struct { … }
+Name;`; `static constexpr` ones and function pointers included, see
+`extract_cpp`'s query for the declarator shapes). A nested
+value matches its exact name only: word scoring and the any-case fallback
+skip it. Outlines (`Keep::items`), the hint, `also defined`
 (`same_name`) and the call graph skip it: it is no call target and owns no
 call sites (`attach_call_sites`), so calls in its body stay its enclosing
 function's. As targets, same-named helpers nested in different test
@@ -1032,11 +1091,9 @@ unknown; and the names of one multi-declarator statement share its range.
     in-test fixtures: the 2026-07-14 dogfood checklist queries, and the
     2026-09-02 scoring cycle's partial matching, occurrence monotonicity,
     heading field, and IDF-over-volume cases.
-  - `tests/query_list_pages.rs` — `Wiki::list_pages` id/title ordering
-    (backs the MCP server's `resources/list`).
+  - `tests/query_list_pages.rs` — `Wiki::list_pages` id/title ordering.
   - `tests/mcp_serve.rs` — end-to-end MCP: spawns `wiki serve` and speaks
-    raw newline-delimited JSON-RPC over stdio, covering tools and
-    resources.
+    raw newline-delimited JSON-RPC over stdio, covering the tools.
   - `tests/eval.rs` — the retrieval eval harness. Compiles the frozen
     17-page corpus in `tests/.eval_corpus/` and scores 22 labelled queries
     through `Wiki::search`, gating on `top1` and `mrr@10` floors before

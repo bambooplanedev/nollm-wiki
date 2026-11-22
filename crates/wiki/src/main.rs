@@ -124,7 +124,7 @@ enum Command {
         /// Only pages carrying this tag; `a` also matches `a/b`. Alone, lists every such page.
         #[arg(long)]
         tag: Option<String>,
-        /// Only pages of this kind: code, docs, text, markdown, or code:<lang>.
+        /// Only pages of this kind: code (no tests), tests, docs, text, markdown, or code:<lang>.
         #[arg(long)]
         kind: Option<String>,
         /// Maximum hits (default 10 with a query; unbounded for a bare `--tag`).
@@ -465,13 +465,13 @@ fn main() -> Result<()> {
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             let q = query.as_deref().unwrap_or("");
-            let hits = w.search_tagged(q, kind.as_ref(), tag.as_deref(), limit);
-
             if format == "json" {
-                println!("{}", wiki::serve::search_json(hits));
+                let text =
+                    wiki::serve::search_json_text(&w, q, kind.as_ref(), tag.as_deref(), limit);
+                println!("{text}");
             } else {
-                let missing = w.not_found(q, kind.as_ref(), tag.as_deref());
-                print!("{}", wiki::serve::search_lines_missing(&hits, &missing));
+                let text = wiki::serve::search_text(&w, q, kind.as_ref(), tag.as_deref(), limit);
+                print!("{text}");
             }
         }
         Command::Lint { dir } => {

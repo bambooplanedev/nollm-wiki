@@ -29,6 +29,22 @@ const PI_LAUNCH: &str = r#"path.join(process.env.NOLLM_WIKI_HOME || path.join(os
 const NAV_RULES: &str = include_str!("navigation.md");
 const NAV_BEGIN: &str = "<!-- wiki:navigation -->";
 const NAV_END: &str = "<!-- /wiki:navigation -->";
+/// The steps for pi, short: its addendum is in every request of a small context window. The tool
+/// names follow the server name setup writes into `.pi/mcp.json`.
+const PI_NAV_RULES: &str = include_str!("navigation-pi.md");
+/// pi's addendum to its system prompt: the project's file replaces the agent dir's own.
+const PI_APPEND: &str = ".pi/APPEND_SYSTEM.md";
+
+/// pi's agent dir: `PI_CODING_AGENT_DIR`, else `~/.pi/agent`.
+fn pi_agent_dir() -> Option<PathBuf> {
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    match std::env::var("PI_CODING_AGENT_DIR") {
+        Ok(d) if d == "~" => home(),
+        Ok(d) if d.starts_with("~/") => home().map(|h| h.join(&d[2..])),
+        Ok(d) if !d.is_empty() => Some(d.into()),
+        _ => home().map(|h| h.join(".pi/agent")),
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum Agent {
@@ -201,6 +217,12 @@ impl Report<'_> {
     fn skip(&mut self, what: &str, why: &str) -> Result<(), WikiError> {
         self.ok = false;
         self.line(&format!("skipped {what}: {why}"))
+    }
+
+    /// A navigation block left out so as not to hide another instruction
+    /// file: the server and skill are in place, so the run still succeeds.
+    fn skip_steps(&mut self, what: &str, why: &str) -> Result<(), WikiError> {
+        self.line(&format!("warning: skipped {what}: {why}"))
     }
 
     /// `item` for a file in `root`, except that a local-scope install skips a file git tracks:
@@ -419,6 +441,53 @@ pub fn parse_agents(line: &str) -> Result<Vec<Agent>, String> {
     Ok(chosen)
 }
 
+/// pi's navigation steps in [`PI_APPEND`]. Never in a new project file while the agent dir has an
+/// `APPEND_SYSTEM.md`: the project's would replace it.
+fn pi_navigation(
+    root: &Path,
+    r: &mut Report,
+    remove: bool,
+    ignore: &mut Vec<String>,
+) -> Result<(), WikiError> {
+    let path = root.join(PI_APPEND);
+    let block = format!("{NAV_BEGIN}\n{PI_NAV_RULES}{NAV_END}\n");
+    let what = format!("{PI_APPEND} wiki navigation steps");
+    let agent = pi_agent_dir();
+    if !remove {
+        if let Some(agents) = agent.as_ref().map(|d| d.join("AGENTS.md")) {
+            if std::fs::read_to_string(&agents).is_ok_and(|t| t.lines().any(|l| l == NAV_BEGIN)) {
+                r.line(&format!(
+                    "warning: {} holds an older wiki navigation block, loaded in every pi \
+                     project; remove it",
+                    agents.display()
+                ))?;
+            }
+        }
+        let global = agent.is_some_and(|d| d.join("APPEND_SYSTEM.md").is_file());
+        if global && !path.exists() {
+            return r.skip_steps(
+                &what,
+                &format!(
+                    "a project {PI_APPEND} would replace pi's global APPEND_SYSTEM.md in this \
+                     project; copy the global one to {PI_APPEND} and run setup again"
+                ),
+            );
+        }
+    }
+    let res = || {
+        if remove {
+            edit::remove_block(root, &path, &block)
+        } else {
+            edit::upsert_block(&path, NAV_BEGIN, &block)
+        }
+    };
+    let before = path.exists();
+    if r.file_item(root, PI_APPEND, &what, res)? && !before {
+        ignore.push(format!("/{PI_APPEND}"));
+    }
+    Ok(())
+}
+
 /// Installs (or with `remove`, undoes) what `opts` asks for in `root`.
 /// `Ok(false)`: something was skipped.
 pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool, WikiError> {
@@ -576,7 +645,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                         edit::remove_block(root, &path, &block)?;
                         r.line("removed AGENTS.md: it held only the wiki steps and hid CLAUDE.md from pi")?;
                     }
-                    r.skip(
+                    r.skip_steps(
                         what,
                         "an AGENTS.md beside CLAUDE.md hides CLAUDE.md from pi; rename CLAUDE.md \
                          to AGENTS.md, put `@AGENTS.md` in a new CLAUDE.md for Claude Code, and \
@@ -633,6 +702,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
             if r.file_item(root, &file.to_string_lossy(), &what, res)? {
                 ignore.push(format!("/{}/", skill.display()));
             }
+            pi_navigation(root, &mut r, opts.remove, &mut ignore)?;
         }
 
         // Hook: only with `--hook`. `--remove`, and a run without `--hook`, take out one an

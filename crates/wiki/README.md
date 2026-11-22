@@ -180,7 +180,7 @@ for `W21` or `D12`), a match in the first cell first; a first line names the fal
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
-| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
+| pi | `.pi/mcp.json`, navigation steps in `.pi/APPEND_SYSTEM.md`, the `wiki-navigation` skill | the steps and the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `.codex/config.toml`, the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
@@ -192,8 +192,8 @@ for `W21` or `D12`), a match in the first cell first; a first line names the fal
     wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 It compiles `.` into `.nollm-wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
-each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory
-rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
+each agent to use it. pi gets short navigation steps in `.pi/APPEND_SYSTEM.md`, which pi adds to
+its system prompt, and the `wiki-navigation` skill (how to find code, and the memory rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
 navigation steps, and the server marks its tools to load up front instead of behind a `ToolSearch`
 call; its own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
@@ -208,7 +208,7 @@ ignore lines and the memory folder, sets up no agent, says
 stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
+  `.pi/APPEND_SYSTEM.md`, `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
   `.agents/skills/wiki-navigation/SKILL.md`, and `.nollm-wiki/` in `.gitignore`. For a file it wrote
   that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
@@ -242,12 +242,20 @@ stderr and exits 0.
   after it). Ignore lines, `.nollm-wiki/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
-navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
+navigation steps with a warning (exit 0) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
 exist, so it would stop seeing `CLAUDE.md`. An `AGENTS.md` an earlier setup created there, holding
 nothing but the steps, is removed for the same reason. To get them, rename `CLAUDE.md` to `AGENTS.md`, create a
 new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, and run setup again;
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
+
+pi's steps go in a marked block (`<!-- wiki:navigation -->`) in `.pi/APPEND_SYSTEM.md`; `--remove`
+takes out the block, and the file when nothing else is left. pi uses a project `.pi/APPEND_SYSTEM.md`
+instead of the one in its agent dir (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), never both. So when
+the agent dir has an `APPEND_SYSTEM.md` and the project has none, setup skips the steps with a warning (exit 0)
+rather than hide yours in this project; copy it to `.pi/APPEND_SYSTEM.md` and run setup again to get
+both. When the agent dir's `AGENTS.md` holds a `<!-- wiki:navigation -->` block, an older copy placed
+by hand that pi loads in every project, setup warns; it never edits the agent dir.
 
 A `wiki` installed by nollm-wiki (run as `~/.nollm-wiki-home/bin/wiki`, or from `$NOLLM_WIKI_HOME/bin`) has the
 agents start it as `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` through `sh -c` (the prompt hook
@@ -277,8 +285,8 @@ finding code; the wiki reads Claude Code's own memory, see [Agent memory](#agent
 
 #### pi
 
-`wiki setup --agent pi` writes `.pi/mcp.json` and the `wiki-navigation` skill; pi loads both
-after `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server
+`wiki setup --agent pi` writes `.pi/mcp.json`, the navigation steps in `.pi/APPEND_SYSTEM.md` and
+the `wiki-navigation` skill; pi loads them after `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server
 instructions for `direct` servers, so all it learns about the wiki is the tool descriptions and the
 skill. Without it, in our runs the model grepped, and when a user-installed extension made pi load a
 skill before it answered (we ran one called skill-first), it picked an unrelated one
@@ -435,11 +443,15 @@ that does not, such as Claude Desktop, give the project's absolute path.
 
 | Tool | Parameters | Returns |
 |---|---|---|
-| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
+| `search` | `query` (empty with `tag` lists the tagged pages), `tag?`, `kind?` (`code` without test pages, `tests`, `docs`, `text`, `markdown`, `code:<lang>`), `docs?` (markdown paths, relative to `--source` or else the server's working directory; searches heading and bold-step labels instead, then table rows when no label matches, not with `kind` or `tag`), `limit?` (5 with a query, 10 with `docs`; none for a tag-only listing), `format?` (`lines`, default, or `json`) | The `lines` text described under [search](#search), or `[{id, title, summary, updated, score, snippet, path, symbols}]` with `json` |
 | `page` | `id` (id, title, or path), `full?` (false), `max_tokens?` (4000 for the outline) | The outline, or the whole page; a memory note's page is its text |
 | `neighbors` (with `--tools`) | `id`, `depth?` (1; with `symbol`, no limit), `max_tokens?` (4000), `max_nodes?`, `full?`, `kind?`, `symbol?` | The context pack, or with `symbol` the functions it calls |
 | `callers` | `id`, `symbol`, `depth?` (1), `max_tokens?` (4000) | The functions that call `symbol`, with the lines of each call |
 | `lint` (with `--tools`) | — | JSON `{total_pages, broken_links, orphans, large}` |
+
+`search`'s `tag` and `format`, `page`'s `full` and `callers`' `max_tokens` are accepted but left out
+of the tool schemas: agents did not pass them, and every schema field costs tokens on every request.
+A `page` or `callers` result cut short by its budget names `max_tokens` itself.
 
 The tools mirror the CLI with smaller defaults: `max_tokens` is 4000 where the CLI is unbounded, and
 `search` returns 5 hits where the CLI returns 10, because every hit line is re-read on each later
@@ -450,9 +462,6 @@ took about a quarter of the per-turn tool tokens. `--tools search,page,neighbors
 back. A committed AGENTS.md block or skill that still names it is not updated by `wiki setup`, which
 leaves a block that differs from its own alone and reports it: delete the block or the skill file,
 then run setup again.
-
-**Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
-`wiki://llms.txt`.
 
 **Freshness.** With `--source` the server compiles the project itself. An existing wiki is served
 at once while the compile runs in the background, and a call waits at most 1 s for that first
@@ -615,9 +624,16 @@ clean directory.
 
     wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
-- `--kind <k>` — `code` (every `code:<lang>`), `docs` (`markdown` and `text`), or one exact kind:
-  `text`, `markdown`, `code:<lang>` (e.g. `code:rust`). Memory notes pass both `code` and `docs`; up to two that pass the gate follow the hits as
+- `--kind <k>` — `code` (every `code:<lang>` except test pages), `tests` (test pages only, of every
+  language: there is no `tests:<lang>`), `docs` (`markdown` and `text`), or one exact kind: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`;
+  test pages left out as with `code`). Memory notes pass both `code` and `docs`, never `tests`; up to two that pass the gate follow the hits as
   `memory (<origin>):` lines, each with its snippet line (see [Agent memory](#agent-memory)).
+  A test page is a code file under a `tests` folder or named `test_*`, `*_test.*` or `*_tests.*`;
+  other layouts (a `test` folder, `*.test.*` and `*.spec.*` files, a Rust `tests.rs` module, inline
+  `#[cfg(test)]` code) stay under `code`. `code` and `tests` split the hits after scoring, so a page
+  scores the same under either as in an unsplit search. When a test page would have been the first
+  page of a `code` search, a last line says `tests also match; use kind "tests"` (not after a
+  `in test pages only` line).
 - `--tag <tag>` — only pages carrying this tag (`#` and case ignored; `a` also matches `a/b`). With
   no query, lists every such page. A query, `--tag` or `--docs` is required.
 - `--docs <FILE>` (repeatable) — search the heading and bold-step labels of these Markdown files instead
@@ -627,7 +643,9 @@ clean directory.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
-inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30%
+inclusive range; `name` is `Owner::name` for methods). An item matches by its whole name or by one
+of its `_` and case-change words (`clampQoSLevel`: `clamp`, `qo`, `s`, `level`); two adjacent words
+of at most two characters also match joined (`qos`). A symbol is shown when it scores at least 30%
 of the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
 one, and test code ranks at half score. A function whose name has exactly one other
 non-test definition in another file gets a four-space-indented line under it,
@@ -638,9 +656,18 @@ the first (`_ack`, `Router::slice_cap_for`, `OrderBook`), is an identifier: its 
 counts and its definitions are items named exactly so, in the same case (`max_weekly_fee_usd` is not `MAX_WEEKLY_FEE_USD`).
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
 however many sit in one file; a name that is a file's module name in any case (`auto_refill` for
-`auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. Then `not found: <name>`
-for each name that nothing defines and no file is named after (when no name is
-defined, the ranked hits come before those lines). In such a query a function or method line ends its signature with
+`auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. A first line
+`no symbol named <name>` lists each name that nothing defines and no file is named after. When no
+name of the query is defined, the ranked pages follow and the line ends
+`; the pages below match its words` (`their words` for several names): they match the name's words,
+not the name. With `code`, a name
+defined only on test pages, or the module name of a test file only, gets
+`<name>: in test pages only; use kind "tests"` first instead, followed by those test definitions
+(the lines `tests` would give) and no ranked pages for it. The answer for the other names comes
+after it, as if they were the whole query. A C/C++ file with more than 2,000 data members (a
+generated register header) indexes none of them, and a name such a file holds gets
+`<name>: members of <path> are not indexed (<N> there, more than 2000)` instead of
+`no symbol named`. In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
 definition included), and has no note when N is 0. In any other query a definition the ranking missed
 is added after its page's lines, or as a page after the hits; the order does not change. A Python
@@ -649,7 +676,12 @@ no hint line, no call edge (its calls are its enclosing function's). A summary,
 snippet or doc longer than 160 characters is cut with
 `…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
 symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
-and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
+and, when they apply, `author`, `mine`, `edited` and `superseded_by`. The JSON answer is the line
+answer's: test definitions of a name only tests define come first, a symbol past the per-name cap
+adds `more: {count, pages, owned}` (the `+N more` line), and the first hit adds `no_symbol` and
+`tests_only` (lists of names), `unindexed` (`[{name, path}]`) and `tests_also_match: true` when
+the line answer has those lines.
+An answer with no hit is `[]` and carries none of them.
 
 #### page
 
@@ -657,7 +689,11 @@ and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 
 `<ID>` is a page id, or anything that names exactly one page: its title (any case), a slug of a
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
-directory. If nothing matches, the error lists the closest ids. A path under a folder the compile
+directory. If nothing matches, the error lists the closest ids (pages that are not tests first) and,
+when the argument's file name without extension (`thumbnail` for `thumbnail.py`) is the name of an item, up
+to 3 places that define it (`defined in: app/images.py:1-3 thumbnail`, `Owner::name` for a member),
+one per file, non-test files first, types and functions before values, and a C/C++ field only when
+nothing else has the name. A path under a folder the compile
 skips or a hidden folder gets a note that the folder is not compiled instead, with the `docs` search
 to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 
@@ -1155,7 +1191,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `CompileOptions.project` (the CLI's `--project`) sets the project name written to `index.json`,
 `llms.txt` and `AGENTS.md`; it defaults to the input directory's basename. Besides `search` and
 `neighbors`, `Wiki` exposes `page(id)` (a rendered page's Markdown), `has_page(id)` and
-`list_pages()` (`(id, title)` pairs, ascending by id) — the calls the MCP server's resources use.
+`list_pages()` (`(id, title)` pairs, ascending by id).
 
 ## Determinism
 

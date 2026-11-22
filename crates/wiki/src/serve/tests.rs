@@ -402,9 +402,10 @@ fn sample(schema: &Value) -> Value {
 }
 
 /// `tool`'s schema in `tools.json` and the struct `T` its arguments
-/// deserialize into name the same fields, and the required ones are
+/// deserialize into name the same fields, save `hidden`: struct fields
+/// the server accepts but the schema leaves out. The required ones are
 /// exactly those without a default.
-fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str) {
+fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str, hidden: &[&str]) {
     let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
     let schema = &tools.iter().find(|t| t["name"] == tool).unwrap()["inputSchema"];
     let props = schema["properties"].as_object().unwrap();
@@ -412,11 +413,29 @@ fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str)
         props.iter().map(|(k, v)| (k.clone(), sample(v))).collect();
     let parsed: T = serde_json::from_value(Value::Object(full.clone())).unwrap();
     let back = serde_json::to_value(parsed).unwrap();
-    let mut fields: Vec<&String> = back.as_object().unwrap().keys().collect();
-    let mut names: Vec<&String> = props.keys().collect();
-    fields.sort();
-    names.sort();
-    assert_eq!(fields, names, "{tool}: struct fields vs schema properties");
+    let mut fields: Vec<&str> = back
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    let mut names: Vec<&str> = props
+        .keys()
+        .map(String::as_str)
+        .chain(hidden.iter().copied())
+        .collect();
+    fields.sort_unstable();
+    names.sort_unstable();
+    assert_eq!(
+        fields, names,
+        "{tool}: struct fields vs schema properties and hidden"
+    );
+    for name in hidden {
+        assert!(
+            !props.contains_key(*name),
+            "{tool}.{name}: hidden yet in the schema"
+        );
+    }
     let required = schema["required"].as_array().cloned().unwrap_or_default();
     for name in props.keys() {
         let mut without = full.clone();
@@ -431,10 +450,10 @@ fn schema_matches<T: serde::de::DeserializeOwned + serde::Serialize>(tool: &str)
 
 #[test]
 fn tool_schemas_match_the_params_structs() {
-    schema_matches::<SearchParams>("search");
-    schema_matches::<NeighborsParams>("neighbors");
-    schema_matches::<CallersParams>("callers");
-    schema_matches::<PageParams>("page");
+    schema_matches::<SearchParams>("search", &["tag", "format"]);
+    schema_matches::<NeighborsParams>("neighbors", &[]);
+    schema_matches::<CallersParams>("callers", &["max_tokens"]);
+    schema_matches::<PageParams>("page", &["full"]);
     let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
     let lint = tools.iter().find(|t| t["name"] == "lint").unwrap();
     assert_eq!(lint["inputSchema"]["properties"], serde_json::json!({}));
@@ -442,4 +461,107 @@ fn tool_schemas_match_the_params_structs() {
     let mut all = TOOLS.to_vec();
     all.sort_unstable();
     assert_eq!(names, all);
+}
+
+/// The default tools' schemas carry no `$schema`, `null` type or `format`:
+/// none means anything to a model, and every request pays for them.
+#[test]
+fn default_tool_schemas_have_no_generator_leftovers() {
+    let tools: Vec<Value> = serde_json::from_str(TOOLS_JSON).unwrap();
+    for tool in tools
+        .iter()
+        .filter(|t| DEFAULT_TOOLS.contains(&t["name"].as_str().unwrap()))
+    {
+        let schema = &tool["inputSchema"];
+        assert!(schema.get("$schema").is_none(), "{}", tool["name"]);
+        for (name, prop) in schema["properties"].as_object().unwrap() {
+            assert!(prop["type"].is_string(), "{}.{name}: {prop}", tool["name"]);
+            assert!(
+                prop.get("format").is_none(),
+                "{}.{name}: {prop}",
+                tool["name"]
+            );
+        }
+    }
+}
+
+/// Parameters left out of the schema still work when a caller passes them.
+#[test]
+fn hidden_parameters_still_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let raw = tmp.path().join("raw");
+    let out = tmp.path().join("out");
+    std::fs::create_dir_all(&raw).unwrap();
+    std::fs::write(
+        raw.join("lib.rs"),
+        "pub fn alpha() {\n    beta();\n}\n\npub fn beta() {}\n",
+    )
+    .unwrap();
+    compile(&raw, &out, &CompileOptions::default()).unwrap();
+    let server = WikiServer::new(WikiState::load(&out).unwrap(), raw, &DEFAULT_TOOLS);
+    let call = |name: &str, args: Value| {
+        let msg = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": name, "arguments": args}});
+        let r = server.handle(&msg).unwrap();
+        assert_eq!(r["result"]["isError"], false, "{name}: {r}");
+        r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let json = call(
+        "search",
+        serde_json::json!({"query": "beta", "format": "json"}),
+    );
+    assert!(serde_json::from_str::<Value>(&json).is_ok(), "{json}");
+    let tagged = call(
+        "search",
+        serde_json::json!({"query": "beta", "tag": "no-such-tag"}),
+    );
+    let plain = call("search", serde_json::json!({"query": "beta"}));
+    assert_ne!(tagged, plain);
+    let full = call("page", serde_json::json!({"id": "lib.rs", "full": true}));
+    let outline = call("page", serde_json::json!({"id": "lib.rs"}));
+    assert_ne!(full, outline);
+    let callers = call(
+        "callers",
+        serde_json::json!({"id": "lib.rs", "symbol": "beta", "max_tokens": 4000}),
+    );
+    assert!(callers.contains("alpha"), "{callers}");
+}
+
+/// The `search` tool splits `code` and `tests` and says so, as the CLI does.
+#[test]
+fn search_tool_points_code_at_tests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (raw, out) = (tmp.path().join("raw"), tmp.path().join("out"));
+    std::fs::create_dir_all(raw.join("tests")).unwrap();
+    std::fs::write(raw.join("lib.rs"), "pub fn post_ledger() {}\n").unwrap();
+    std::fs::write(raw.join("tests/ledger.rs"), "fn only_in_tests() {}\n").unwrap();
+    compile(&raw, &out, &CompileOptions::default()).unwrap();
+    let server = WikiServer::new(WikiState::load(&out).unwrap(), raw, &DEFAULT_TOOLS);
+    let search = |args: Value| {
+        let msg = serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "search", "arguments": args}});
+        let r = server.handle(&msg).unwrap();
+        r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let code = search(serde_json::json!({"query": "ledger", "kind": "code"}));
+    assert!(
+        code.ends_with("tests also match; use kind \"tests\"\n"),
+        "{code}"
+    );
+    let names = search(serde_json::json!({"query": "only_in_tests", "kind": "code"}));
+    assert!(
+        names.starts_with("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        "{names}"
+    );
+    let tests = search(serde_json::json!({"query": "only_in_tests", "kind": "tests"}));
+    assert!(
+        tests.contains("tests/ledger.rs:1-1  only_in_tests"),
+        "{tests}"
+    );
 }

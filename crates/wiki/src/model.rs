@@ -42,7 +42,8 @@ impl SourceKind {
 }
 
 /// What `search` and the CLI/MCP `kind` key accept: one exact kind, or the
-/// `code` / `docs` groups.
+/// `code` / `tests` / `docs` groups. In `search`, `code` and `code:<lang>`
+/// leave out test pages (`is_test_path`), which `tests` lists.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum KindFilter {
     Exact(SourceKind),
@@ -50,16 +51,19 @@ pub enum KindFilter {
     Code,
     /// `markdown` and `text`.
     Docs,
+    /// Code pages whose path `is_test_path` passes.
+    Tests,
 }
 
 impl KindFilter {
     /// The values `parse` accepts, for user-facing error text.
-    pub const EXPECTED: &'static str = "code, docs, text, markdown, or code:<lang>";
+    pub const EXPECTED: &'static str = "code, tests, docs, text, markdown, or code:<lang>";
 
     pub fn parse(s: &str) -> Option<KindFilter> {
         match s {
             "code" => Some(KindFilter::Code),
             "docs" => Some(KindFilter::Docs),
+            "tests" => Some(KindFilter::Tests),
             other => SourceKind::parse(other).map(KindFilter::Exact),
         }
     }
@@ -72,9 +76,19 @@ impl KindFilter {
     pub fn matches(&self, k: &SourceKind) -> bool {
         match self {
             KindFilter::Exact(x) => x == k,
-            KindFilter::Code => matches!(k, SourceKind::Code { .. }),
+            // `Tests` also needs the page's path, see `Entry::is_kind`.
+            KindFilter::Code | KindFilter::Tests => matches!(k, SourceKind::Code { .. }),
             KindFilter::Docs => matches!(k, SourceKind::Text | SourceKind::Markdown),
         }
+    }
+
+    /// Whether a `search` of this kind leaves out test pages: `code` and
+    /// `code:<lang>`.
+    pub fn drops_tests(&self) -> bool {
+        matches!(
+            self,
+            KindFilter::Code | KindFilter::Exact(SourceKind::Code { .. })
+        )
     }
 }
 
@@ -153,6 +167,9 @@ pub struct Entity {
     /// anonymous-class method is a free `fn`, its owner unknown. The names
     /// of one multi-declarator statement (`int a = 1, b;`) share its range.
     pub items: Vec<CodeItem>,
+    /// C/C++ data members left out of `items`
+    /// (`wiki_code::CodeFile::members_unindexed`).
+    pub members_unindexed: usize,
 }
 
 impl wiki_code::CodeUnit for Entity {

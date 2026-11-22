@@ -6,7 +6,7 @@
 //! token ceiling, degrading an oversized target to a title-and-summary block.
 
 use crate::calls::{callers_index, Caller};
-use crate::model::{CodeItem, KindFilter, Origin, SourceKind};
+use crate::model::{is_test_path, CodeItem, KindFilter, Origin, SourceKind};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
@@ -60,6 +60,9 @@ pub(crate) struct Entry {
     pub(crate) imports_out: Vec<String>,
     #[serde(default)]
     pub(crate) imports_in: Vec<String>,
+    /// C/C++ data members the compile left out of `items.json`.
+    #[serde(default)]
+    pub(crate) members_unindexed: usize,
 }
 
 impl Entry {
@@ -83,9 +86,11 @@ impl Entry {
         }
     }
 
-    /// Whether the page's source kind passes `f`.
+    /// Whether the page's source kind passes `f`; `tests` also needs a test
+    /// path (`is_test_path`).
     fn is_kind(&self, f: &KindFilter) -> bool {
         SourceKind::parse(&self.kind).is_some_and(|k| f.matches(&k))
+            && (*f != KindFilter::Tests || is_test_path(&self.path))
     }
 
     /// Whether the page passes a search's `kind` (a memory note passes the
@@ -99,6 +104,16 @@ impl Entry {
                 .iter()
                 .any(|g| g == t || g.strip_prefix(t).is_some_and(|r| r.starts_with('/')))
         })
+    }
+
+    /// `passes`, and not a test page when `kind` drops them
+    /// (`KindFilter::drops_tests`): what a `search` lists. A memory note is
+    /// never a test page.
+    fn shown(&self, kind: Option<&KindFilter>, tag: Option<&str>) -> bool {
+        self.passes(kind, tag)
+            && (self.memory
+                || !kind.is_some_and(KindFilter::drops_tests)
+                || !is_test_path(&self.path))
     }
 }
 
@@ -116,14 +131,18 @@ fn norm_path(arg: &str) -> String {
     norm.strip_prefix("./").unwrap_or(&norm).to_string()
 }
 
-/// The error for an id `resolve_id` could not place; `near` are its candidates.
-pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
-    let closest = if near.is_empty() {
-        String::new()
-    } else {
-        format!("; closest: {}", near.join(", "))
-    };
-    format!("unknown page {arg:?}{closest} — use search to find ids")
+/// The error for an id `resolve_id` could not place; `near` are its
+/// candidates and `defined` the places that define an item named like the
+/// argument's file stem.
+pub(crate) fn unknown_page(arg: &str, near: &[String], defined: &[String]) -> String {
+    let mut parts = String::new();
+    if !near.is_empty() {
+        parts += &format!("; closest: {}", near.join(", "));
+    }
+    if !defined.is_empty() {
+        parts += &format!("; defined in: {}", defined.join(", "));
+    }
+    format!("unknown page {arg:?}{parts} — use search to find ids")
 }
 
 /// A code page's `## Body` without the fence lines `render_page` wraps it in,
@@ -151,7 +170,7 @@ impl Wiki {
         if self.has_page(id) && self.page(id).is_none() {
             format!("page {id:?} is in the index but its file {id}.md is missing from the wiki folder — recompile the wiki")
         } else {
-            unknown_page(arg, &[])
+            unknown_page(arg, &[], &[])
         }
     }
 }
@@ -268,6 +287,21 @@ pub struct SymbolLine {
     /// How many functions call it, as `callers` lists them one level up;
     /// set on a function's line in a query of names alone, when any does.
     pub called_by: Option<usize>,
+    /// On the last line shown for a queried name: the definitions of that
+    /// name `DEFINITIONS_PER_NAME` left out.
+    pub hidden: Option<Hidden>,
+}
+
+/// The definitions of a queried name past `DEFINITIONS_PER_NAME`.
+#[derive(Clone)]
+pub struct Hidden {
+    /// The name as queried.
+    pub name: String,
+    pub count: usize,
+    /// Pages holding them that show none of the name's lines.
+    pub pages: usize,
+    /// Whether any has an owner, so `Owner::name` narrows to it.
+    pub owned: bool,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,
@@ -361,6 +395,8 @@ pub(crate) struct PassStats {
     available: f64,
     /// For a prompt: the words that count.
     terms: Vec<String>,
+    /// A `code` search left a test page out of its top `limit`.
+    tests_cut: bool,
 }
 
 /// `Default` is the empty wiki: what `serve --source` holds before its first compile.
@@ -493,7 +529,6 @@ impl Wiki {
     }
 
     /// All pages as `(id, title)` pairs, ascending by id (`BTreeMap` order).
-    /// Used by the MCP server's `resources/list`.
     pub fn list_pages(&self) -> Vec<(String, String)> {
         self.entries
             .values()
