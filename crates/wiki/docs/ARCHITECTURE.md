@@ -761,7 +761,14 @@ matching:
   definitions, the other missing names, whether the hits are the ranked
   pages, the hits, the pointer); the JSON array keeps its fields and order
   and adds `more` to a capped symbol and `no_symbol`, `tests_only`,
-  `tests_also_match` to its first hit. The MCP `format` parameter and the CLI
+  `unindexed`, `tests_also_match` to its first hit. A file past
+  `wiki_code::MEMBERS_PER_FILE` (2,000) C/C++ data members keeps none of
+  them as items and records the count (`CodeFile::members_unindexed`,
+  `index.json`'s `members_unindexed`, absent at 0); a missing name such a
+  page's body holds as a word (`Wiki::in_unindexed_members`) gets
+  `<name>: members of <path> are not indexed` instead of `no symbol named`.
+  The largest hand-written count on nine C/C++ trees was 1,322 members in
+  one file; a generated register header held 64,000. The MCP `format` parameter and the CLI
   `--format` choose between them; `lines` is the default for both.
 
 **Neighbors** (`Wiki::neighbors`) takes a page id; both the CLI and the

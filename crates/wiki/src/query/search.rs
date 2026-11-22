@@ -225,6 +225,36 @@ impl Wiki {
         hits
     }
 
+    /// Of `names` (`not_found`), each one a page whose C/C++ members were
+    /// not indexed (`members_unindexed`) holds as a whole word:
+    /// `(name, path, members)`, the first such page by path.
+    pub fn in_unindexed_members(
+        &self,
+        names: &[String],
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Vec<(String, String, usize)> {
+        let word = |c: char| c.is_alphanumeric() || c == '_';
+        let holds = |body: &str, n: &str| {
+            body.match_indices(n).any(|(at, _)| {
+                !body[..at].ends_with(word) && !body[at + n.len()..].starts_with(word)
+            })
+        };
+        let mut pages: Vec<&Entry> = self
+            .entries
+            .values()
+            .filter(|e| e.members_unindexed > 0 && e.shown(kind, tag))
+            .collect();
+        pages.sort_by(|a, b| a.path.cmp(&b.path));
+        names
+            .iter()
+            .filter_map(|n| {
+                let e = pages.iter().find(|e| holds(self.body(&e.id), n))?;
+                Some((n.clone(), e.path.clone(), e.members_unindexed))
+            })
+            .collect()
+    }
+
     /// The pages passing `kind` and `tag` whose file is known by `name`
     /// (`module_stem`, any case): `auto_refill` names `auto_refill.rs`, which
     /// is no item. Never a memory note.

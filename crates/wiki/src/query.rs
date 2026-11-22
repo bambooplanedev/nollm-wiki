@@ -60,6 +60,9 @@ pub(crate) struct Entry {
     pub(crate) imports_out: Vec<String>,
     #[serde(default)]
     pub(crate) imports_in: Vec<String>,
+    /// C/C++ data members the compile left out of `items.json`.
+    #[serde(default)]
+    pub(crate) members_unindexed: usize,
 }
 
 impl Entry {

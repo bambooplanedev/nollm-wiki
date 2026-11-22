@@ -664,7 +664,10 @@ not the name. With `code`, a name
 defined only on test pages, or the module name of a test file only, gets
 `<name>: in test pages only; use kind "tests"` first instead, followed by those test definitions
 (the lines `tests` would give) and no ranked pages for it. The answer for the other names comes
-after it, as if they were the whole query. In such a query a function or method line ends its signature with
+after it, as if they were the whole query. A C/C++ file with more than 2,000 data members (a
+generated register header) indexes none of them, and a name such a file holds gets
+`<name>: members of <path> are not indexed (<N> there, more than 2000)` instead of
+`no symbol named`. In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
 definition included), and has no note when N is 0. In any other query a definition the ranking missed
 is added after its page's lines, or as a page after the hits; the order does not change. A Python
@@ -676,7 +679,8 @@ symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds 
 and, when they apply, `author`, `mine`, `edited` and `superseded_by`. The JSON answer is the line
 answer's: test definitions of a name only tests define come first, a symbol past the per-name cap
 adds `more: {count, pages, owned}` (the `+N more` line), and the first hit adds `no_symbol` and
-`tests_only` (lists of names) and `tests_also_match: true` when the line answer has those lines.
+`tests_only` (lists of names), `unindexed` (`[{name, path}]`) and `tests_also_match: true` when
+the line answer has those lines.
 An answer with no hit is `[]` and carries none of them.
 
 #### page

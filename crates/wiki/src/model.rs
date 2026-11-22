@@ -167,6 +167,9 @@ pub struct Entity {
     /// anonymous-class method is a free `fn`, its owner unknown. The names
     /// of one multi-declarator statement (`int a = 1, b;`) share its range.
     pub items: Vec<CodeItem>,
+    /// C/C++ data members left out of `items`
+    /// (`wiki_code::CodeFile::members_unindexed`).
+    pub members_unindexed: usize,
 }
 
 impl wiki_code::CodeUnit for Entity {

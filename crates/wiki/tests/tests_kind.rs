@@ -303,3 +303,42 @@ fn page_callers_and_hint_keep_test_pages() {
     let hint = wiki::hint::hint_lines(&w, "fix the ledger balance round trip twice case");
     assert!(hint.contains("tests/ledger_"), "{hint}");
 }
+
+/// A header past the member cap: its members are no items, and a query for
+/// one says so instead of "no symbol named".
+#[test]
+fn a_member_of_a_file_past_the_cap_is_not_called_missing() {
+    let cap = wiki_code::MEMBERS_PER_FILE;
+    let mut header = String::new();
+    for r in 0..=cap / 10 {
+        header += &format!("struct Block{r} {{\n");
+        for b in 0..10 {
+            header += &format!("  unsigned slot{r}_{b} : 1;\n");
+        }
+        header += "};\n";
+    }
+    let (_d, w) = common::compiled_wiki(&[
+        ("src/blocks.h", header.as_str()),
+        ("src/pane.h", "struct Pane {\n  int pane_width;\n};\n"),
+    ]);
+    let n = cap + 10;
+    let t = text(&w, "slot3_4", None);
+    assert!(
+        t.starts_with(&format!(
+            "slot3_4: members of src/blocks.h are not indexed ({n} there, more than {cap})\n"
+        )),
+        "{t}"
+    );
+    assert!(!t.contains("no symbol named"), "{t}");
+    let v = json(&w, "slot3_4", None);
+    assert_eq!(
+        v[0]["unindexed"],
+        serde_json::json!([{"name": "slot3_4", "path": "src/blocks.h"}])
+    );
+    // A name the file does not hold is still missing; other files index theirs.
+    for q in ["slot_nowhere", "lot3_4", "slot3_"] {
+        let t = text(&w, q, None);
+        assert!(t.starts_with(&format!("no symbol named {q}")), "{t}");
+    }
+    assert!(text(&w, "pane_width", None).contains("src/pane.h:2-2  Pane::pane_width"));
+}

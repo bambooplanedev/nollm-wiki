@@ -951,6 +951,32 @@ private:
     );
 }
 
+/// A header of `structs` structs with `fields` bitfields each.
+fn generated_header(structs: usize, fields: usize) -> String {
+    let mut s = String::new();
+    for r in 0..structs {
+        s += &format!("struct Block{r} {{\n");
+        for b in 0..fields {
+            s += &format!("  unsigned slot{r}_{b} : 1;\n");
+        }
+        s += "};\n";
+    }
+    s
+}
+
+#[test]
+fn a_file_past_the_member_cap_indexes_none_of_its_members() {
+    let cap = crate::formats::code::MEMBERS_PER_FILE;
+    let at = crate::extract("blocks.h", &generated_header(cap / 10, 10));
+    assert_eq!(at.items.iter().filter(|i| i.nested).count(), cap);
+    assert_eq!(at.members_unindexed, 0);
+    let past = crate::extract("blocks.h", &generated_header(cap / 10 + 1, 10));
+    assert_eq!(past.items.iter().filter(|i| i.nested).count(), 0);
+    assert_eq!(past.members_unindexed, cap + 10);
+    // The types stay.
+    assert_eq!(past.items.len(), cap / 10 + 1);
+}
+
 /// A constructor whose initializer list an `#if` splits parses as a field
 /// declaration that also declares a function: its export keeps the shape it
 /// had before data members were items.

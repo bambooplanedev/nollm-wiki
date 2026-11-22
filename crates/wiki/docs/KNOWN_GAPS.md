@@ -169,6 +169,9 @@ per question is noise-level: treat single results as anecdotes.
   as a lambda, a local variable, a field outside C/C++, a function nested in
   another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `no symbol named`.
+  A C/C++ file with more than 2,000 data members indexes none of them
+  (its other items stay); a query for one names the file instead of
+  `no symbol named`, but only when the file holds the name as a word.
   C/C++ data members are items through any nesting of pointers, arrays,
   references and function pointers (`void (*on[4])(int)`); not a member a
   macro declares (`FIELD(int, x)`, which does not parse as a declaration) or

@@ -219,6 +219,9 @@ const USE_TESTS: &str = "use kind \"tests\"";
 
 /// What a `search` answers, which its line and JSON renderings share.
 struct Answer {
+    /// Names a page whose members were not indexed holds, with that page's
+    /// path and member count (`Wiki::in_unindexed_members`).
+    unindexed: Vec<(String, String, usize)>,
     /// Names defined only on test pages (`Wiki::in_tests_only`).
     tests_only: Vec<String>,
     /// Their test definitions (`Wiki::test_definitions`).
@@ -243,6 +246,11 @@ fn answer(
     limit: Option<usize>,
 ) -> Answer {
     let missing = w.not_found(q, kind, tag);
+    let unindexed = w.in_unindexed_members(&missing, kind, tag);
+    let missing: Vec<String> = missing
+        .into_iter()
+        .filter(|n| !unindexed.iter().any(|(u, _, _)| u == n))
+        .collect();
     let tests_only = w.in_tests_only(&missing, kind, tag);
     let test_hits = if tests_only.is_empty() {
         Vec::new()
@@ -267,6 +275,7 @@ fn answer(
     };
     let ranked = !missing.is_empty() && missing.len() == Wiki::query_names(q).0.len();
     Answer {
+        unindexed,
         tests_cut: tests_cut && tests_only.is_empty(),
         tests_only,
         test_hits,
@@ -291,6 +300,12 @@ pub fn search_text(
 ) -> String {
     let a = answer(w, q, kind, tag, limit);
     let mut out = String::new();
+    for (name, path, n) in &a.unindexed {
+        out += &format!(
+            "{name}: members of {path} are not indexed ({n} there, more than {})\n",
+            wiki_code::MEMBERS_PER_FILE
+        );
+    }
     if !a.tests_only.is_empty() {
         out += &format!(
             "{}: in test pages only; {USE_TESTS}\n",
@@ -329,6 +344,14 @@ pub fn search_json_text(
     let a = answer(w, q, kind, tag, limit);
     let mut hits = hit_values(a.test_hits.into_iter().chain(a.hits).collect());
     if let Some(first) = hits.first_mut() {
+        if !a.unindexed.is_empty() {
+            let u: Vec<_> = a
+                .unindexed
+                .iter()
+                .map(|(name, path, _)| serde_json::json!({"name": name, "path": path}))
+                .collect();
+            first["unindexed"] = u.into();
+        }
         if !a.missing.is_empty() {
             first["no_symbol"] = a.missing.into();
         }

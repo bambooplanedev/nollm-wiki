@@ -53,7 +53,15 @@ pub struct CodeFile {
     pub methods: Vec<String>,
     /// Every item with its lines, doc and call sites, in line order.
     pub items: Vec<CodeItem>,
+    /// The C/C++ data members left out because there are more than
+    /// `MEMBERS_PER_FILE`; 0 when every one is an item.
+    pub members_unindexed: usize,
 }
+
+/// Most C/C++ data members one file indexes; past it, none are. Hand-written
+/// headers measured up to 1,322 (one server's main header); a generated
+/// register header holds tens of thousands.
+pub const MEMBERS_PER_FILE: usize = 2_000;
 
 /// A source file as the cross-file passes (`pair_declarations`, `Index`,
 /// `Imports`) see it.
@@ -212,6 +220,7 @@ pub(crate) fn extract_file(rel_path: &str, text: &str) -> (CodeFile, Option<Foun
         defined: info.defined,
         methods: info.methods,
         items,
+        members_unindexed: info.members_unindexed,
     };
     (file, grammar.then_some((sources, defs)))
 }
@@ -232,6 +241,8 @@ struct CodeInfo {
     /// The trees `items` came from, and each item's node in them.
     sources: Vec<Source>,
     defs: Vec<Option<Def>>,
+    /// `CodeFile::members_unindexed`.
+    members_unindexed: usize,
 }
 
 /// The shape a captured definition has, recorded at the point of capture
@@ -630,12 +641,21 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // and an @item pattern, and a JS @def (the `export_statement`) and its
     // @item (the declaration) share one name node.
     let mut items: BTreeMap<usize, (CodeItem, Option<Def>)> = BTreeMap::new();
+    // C/C++ data member declarators seen; past `MEMBERS_PER_FILE` none is
+    // built, since none will be kept.
+    let mut members = 0;
     for (source, t) in sources.iter().enumerate() {
         let text = t.text();
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(query, t.tree().root_node(), text.as_bytes());
         while let Some(m) = matches.next() {
             let parts = split_captures(m, &idx, text, &mut imports);
+            if parts.name.is_some() && parts.item.is_some_and(|i| i.kind() == "field_declaration") {
+                members += 1;
+                if members > MEMBERS_PER_FILE {
+                    continue;
+                }
+            }
             let Some(def) = parts.def.or(parts.item) else {
                 continue;
             };
@@ -704,6 +724,20 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     }
     let (mut items, mut defs): (Vec<CodeItem>, Vec<Option<Def>>) = items.into_values().unzip();
     sort_items(&mut items, &mut defs);
+    // Data members are nested values only in C/C++.
+    let members_unindexed = if spec.lang_name == "cpp" && members > MEMBERS_PER_FILE {
+        let keep: Vec<bool> = items
+            .iter()
+            .map(|i| !(i.nested && i.kind == CodeItemKind::Value))
+            .collect();
+        let mut k = keep.iter();
+        items.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        defs.retain(|_| *k.next().unwrap());
+        members
+    } else {
+        0
+    };
     if spec.lang_name == "shell" && tree.root_node().has_error() {
         let missed = super::extract_shell::missed_functions(text, &items);
         for it in &missed {
@@ -778,6 +812,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
         summary_fallback,
         sources,
         defs,
+        members_unindexed,
     })
 }
 
