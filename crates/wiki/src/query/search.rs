@@ -113,7 +113,7 @@ impl Wiki {
 
     /// The identifiers of `q` in order, deduplicated, and whether `q` is
     /// made of them alone.
-    fn query_names(q: &str) -> (Vec<&str>, bool) {
+    pub(crate) fn query_names(q: &str) -> (Vec<&str>, bool) {
         let words: Vec<&str> = q
             .split_whitespace()
             .filter(|w| w.chars().any(char::is_alphanumeric))

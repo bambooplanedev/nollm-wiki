@@ -21,7 +21,7 @@ use std::time::{Instant, SystemTime};
 mod render;
 
 pub use crate::query::DEFAULT_NEIGHBORS_MAX_TOKENS;
-pub use render::{doc_json, memory_prefix, search_json, search_lines, search_lines_missing};
+pub use render::{doc_json, memory_prefix, search_json, search_lines, search_text};
 
 /// Hits the `search` tool returns when the caller omits `limit` (the CLI
 /// keeps 10): every hit line is re-read on every later turn of the agent.
@@ -381,14 +381,10 @@ impl WikiServer {
         // A tag-only listing (no query words) stays unbounded by default.
         let has_words = p.query.chars().any(char::is_alphanumeric);
         let limit = p.limit.or(has_words.then_some(DEFAULT_SEARCH_LIMIT));
-        let (hits, tests_cut) = wiki.search_answer(&p.query, kind.as_ref(), tag.as_deref(), limit);
-
         let text = if json {
-            search_json(hits)
+            search_json(wiki.search_tagged(&p.query, kind.as_ref(), tag.as_deref(), limit))
         } else {
-            let missing = wiki.not_found(&p.query, kind.as_ref(), tag.as_deref());
-            let tests_only = wiki.in_tests_only(&missing, kind.as_ref(), tag.as_deref());
-            search_lines_missing(&hits, &missing, &tests_only, tests_cut)
+            search_text(&wiki, &p.query, kind.as_ref(), tag.as_deref(), limit)
         };
         Ok(tool_result(Ok(text), stale.as_deref()))
     }

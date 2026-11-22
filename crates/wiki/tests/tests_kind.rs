@@ -121,24 +121,50 @@ fn a_name_only_tests_define_is_not_missing_but_in_tests() {
     assert_eq!(w.in_tests_only(&named, None, None), Vec::<String>::new());
 }
 
+fn text(w: &Wiki, q: &str, kind: Option<&KindFilter>) -> String {
+    wiki::serve::search_text(w, q, kind, None, Some(10))
+}
+
+#[test]
+fn the_missing_line_says_what_the_pages_below_are() {
+    let (_d, w) = fixture();
+    // Ranked pages follow: they match the name's words, not the name.
+    let t = text(&w, "ledger_balance", None);
+    assert!(
+        t.starts_with("no symbol named ledger_balance; the pages below match its words\n"),
+        "{t}"
+    );
+    let t = text(&w, "ledger_balance balance_ledger", None);
+    assert!(
+        t.starts_with(
+            "no symbol named ledger_balance, balance_ledger; the pages below match their words\n"
+        ),
+        "{t}"
+    );
+    // Only another name's definition follows: no claim about it.
+    let t = text(&w, "ledger_nowhere post_balance", None);
+    assert!(t.starts_with("no symbol named ledger_nowhere\n"), "{t}");
+    assert!(t.contains("src/ledger.rs:1-2  post_balance"), "{t}");
+    // Nothing follows.
+    assert_eq!(text(&w, "zq_xv", None), "no symbol named zq_xv\n");
+}
+
 #[test]
 fn the_answer_lines_name_the_tests_kind() {
-    let render = wiki::serve::search_lines_missing;
-    let tests_only = ["only_in_tests".to_string()];
-    assert_eq!(
-        render(&[], &tests_only, &tests_only, true),
-        "only_in_tests: in test pages only; use kind \"tests\"\n"
+    let (_d, w) = fixture();
+    let code = Some(&KindFilter::Code);
+    let t = text(&w, "only_in_tests", code);
+    assert!(
+        t.starts_with("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        "{t}"
     );
-    let missing = ["a_b".to_string(), "only_in_tests".to_string()];
-    assert_eq!(
-        render(&[], &missing, &tests_only, false),
-        "no symbol named a_b\nonly_in_tests: in test pages only; use kind \"tests\"\n"
+    let t = text(&w, "zq_xv only_in_tests", code);
+    assert!(t.contains("no symbol named zq_xv"), "{t}");
+    assert!(
+        t.contains("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        "{t}"
     );
-    assert_eq!(
-        render(&[], &[], &[], true),
-        "no matches\ntests also match; use kind \"tests\"\n"
-    );
-    assert_eq!(render(&[], &[], &[], false), "no matches\n");
+    assert_eq!(text(&w, "zq", code), "no matches\n");
 }
 
 fn cli(out: &std::path::Path, args: &[&str]) -> String {

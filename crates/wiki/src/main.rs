@@ -465,17 +465,12 @@ fn main() -> Result<()> {
                 .transpose()
                 .map_err(anyhow::Error::msg)?;
             let q = query.as_deref().unwrap_or("");
-            let (hits, tests_cut) = w.search_answer(q, kind.as_ref(), tag.as_deref(), limit);
-
             if format == "json" {
+                let hits = w.search_tagged(q, kind.as_ref(), tag.as_deref(), limit);
                 println!("{}", wiki::serve::search_json(hits));
             } else {
-                let missing = w.not_found(q, kind.as_ref(), tag.as_deref());
-                let tests_only = w.in_tests_only(&missing, kind.as_ref(), tag.as_deref());
-                print!(
-                    "{}",
-                    wiki::serve::search_lines_missing(&hits, &missing, &tests_only, tests_cut)
-                );
+                let text = wiki::serve::search_text(&w, q, kind.as_ref(), tag.as_deref(), limit);
+                print!("{text}");
             }
         }
         Command::Lint { dir } => {

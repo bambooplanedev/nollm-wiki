@@ -1,7 +1,8 @@
 //! Output formatting for `search`/`docs` results: the JSON and plain-line renderings and the memory-note prefix.
 
+use crate::model::KindFilter;
 use crate::model::{clip, one_line, Origin, LINE_CHARS};
-use crate::query::Hit;
+use crate::query::{Hit, Wiki};
 
 /// `docs` hits as JSON: `{"hits": [{path, start_line, end_line, label}], "errors": [..]}`, plus `"more": n` when the limit (or an empty query's default cap) cut n labels and `"fallback": line` when a fallback answered.
 pub fn doc_json(
@@ -204,18 +205,23 @@ pub fn search_lines(hits: &[Hit]) -> String {
 /// The line that sends a `code` search to `tests`.
 const USE_TESTS: &str = "use kind \"tests\"";
 
-/// A first line naming the `missing` names (`Wiki::not_found`) that no item
-/// defines, then `search_lines` of `hits`. The line says the pages below, if
-/// any, only mention the names. Names in `tests_only`
+/// The default line answer to a `search` (`search_answer`, then
+/// `search_lines`), after a first line naming the identifiers of a query of
+/// names alone that no item defines (`Wiki::not_found`). The line says the
+/// pages below match the names' words only when they are the ranked pages,
+/// that is when no name of the query has a definition. Names in `tests_only`
 /// (`Wiki::in_tests_only`) get their own line instead, sending them to
-/// `tests`; else `tests_cut` (`Wiki::search_answer`) adds a last line that
-/// test pages also match.
-pub fn search_lines_missing(
-    hits: &[Hit],
-    missing: &[String],
-    tests_only: &[String],
-    tests_cut: bool,
+/// `tests`; else `tests_cut` adds a last line that test pages also match.
+pub fn search_text(
+    w: &Wiki,
+    q: &str,
+    kind: Option<&KindFilter>,
+    tag: Option<&str>,
+    limit: Option<usize>,
 ) -> String {
+    let (hits, tests_cut) = w.search_answer(q, kind, tag, limit);
+    let missing = w.not_found(q, kind, tag);
+    let tests_only = w.in_tests_only(&missing, kind, tag);
     let mut out = String::new();
     let plain: Vec<&str> = missing
         .iter()
@@ -224,10 +230,12 @@ pub fn search_lines_missing(
         .collect();
     if !plain.is_empty() {
         let names = plain.join(", ");
-        out += &if hits.is_empty() {
-            format!("no symbol named {names}\n")
-        } else {
-            format!("no symbol named {names}; the pages below only mention it\n")
+        // Pages ranked by the words, unless another name's definitions replaced them.
+        let ranked = missing.len() == Wiki::query_names(q).0.len();
+        out += &match (hits.is_empty() || !ranked, plain.len()) {
+            (true, _) => format!("no symbol named {names}\n"),
+            (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
+            (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
         };
     }
     if !tests_only.is_empty() {
@@ -237,21 +245,10 @@ pub fn search_lines_missing(
         );
     }
     if !hits.is_empty() || missing.is_empty() {
-        out += &search_lines(hits);
+        out += &search_lines(&hits);
     }
     if tests_cut && tests_only.is_empty() {
         out += &format!("tests also match; {USE_TESTS}\n");
     }
     out
-}
-
-#[cfg(test)]
-mod missing_tests {
-    use super::*;
-
-    #[test]
-    fn missing_names_come_first() {
-        let out = search_lines_missing(&[], &["a_b".into(), "c_d".into()], &[], false);
-        assert_eq!(out, "no symbol named a_b, c_d\n");
-    }
 }

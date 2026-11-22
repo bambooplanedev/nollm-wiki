@@ -656,8 +656,10 @@ counts and its definitions are items named exactly so, in the same case (`max_we
 A query of identifiers alone lists each one's definitions (up to 3 and `--limit`) and nothing else,
 however many sit in one file; a name that is a file's module name in any case (`auto_refill` for
 `auto_refill.rs`, a folder for `mod.rs`) first lists that file as a page line. A first line
-`no symbol named <name>; the pages below only mention it` lists each name that nothing defines and
-no file is named after (just `no symbol named <name>` when no page follows); with `code`, a name
+`no symbol named <name>` lists each name that nothing defines and no file is named after. When no
+name of the query is defined, the ranked pages follow and the line ends
+`; the pages below match its words` (`their words` for several names): they match the name's words,
+not the name. With `code`, a name
 defined only on test pages, or the module name of a test file only, gets
 `<name>: in test pages only; use kind "tests"` instead. The definitions of the
 other names and any ranked hits come after it. In such a query a function or method line ends its signature with
