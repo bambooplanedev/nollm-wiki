@@ -219,6 +219,12 @@ impl Report<'_> {
         self.line(&format!("skipped {what}: {why}"))
     }
 
+    /// A navigation block left out so as not to hide another instruction
+    /// file: the server and skill are in place, so the run still succeeds.
+    fn skip_steps(&mut self, what: &str, why: &str) -> Result<(), WikiError> {
+        self.line(&format!("warning: skipped {what}: {why}"))
+    }
+
     /// `item` for a file in `root`, except that a local-scope install skips a file git tracks:
     /// an exclude line does nothing for it, so the "local" change would become a diff.
     fn file_item(
@@ -459,7 +465,7 @@ fn pi_navigation(
         }
         let global = agent.is_some_and(|d| d.join("APPEND_SYSTEM.md").is_file());
         if global && !path.exists() {
-            return r.skip(
+            return r.skip_steps(
                 &what,
                 &format!(
                     "a project {PI_APPEND} would replace pi's global APPEND_SYSTEM.md in this \
@@ -639,7 +645,7 @@ pub fn run(root: &Path, opts: &SetupOptions, out: &mut dyn Write) -> Result<bool
                         edit::remove_block(root, &path, &block)?;
                         r.line("removed AGENTS.md: it held only the wiki steps and hid CLAUDE.md from pi")?;
                     }
-                    r.skip(
+                    r.skip_steps(
                         what,
                         "an AGENTS.md beside CLAUDE.md hides CLAUDE.md from pi; rename CLAUDE.md \
                          to AGENTS.md, put `@AGENTS.md` in a new CLAUDE.md for Claude Code, and \

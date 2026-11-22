@@ -242,7 +242,7 @@ stderr and exits 0.
   after it). Ignore lines, `.nollm-wiki/` and memory notes stay.
 
 In a project with `CLAUDE.md` and no `AGENTS.md`, `--agent codex` adds Codex's server but skips the
-navigation steps (exit 1) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
+navigation steps with a warning (exit 0) instead of creating `AGENTS.md`: pi reads only `AGENTS.md` when both
 exist, so it would stop seeing `CLAUDE.md`. An `AGENTS.md` an earlier setup created there, holding
 nothing but the steps, is removed for the same reason. To get them, rename `CLAUDE.md` to `AGENTS.md`, create a
 new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, and run setup again;
@@ -252,7 +252,7 @@ run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 pi's steps go in a marked block (`<!-- wiki:navigation -->`) in `.pi/APPEND_SYSTEM.md`; `--remove`
 takes out the block, and the file when nothing else is left. pi uses a project `.pi/APPEND_SYSTEM.md`
 instead of the one in its agent dir (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), never both. So when
-the agent dir has an `APPEND_SYSTEM.md` and the project has none, setup skips the steps (exit 1)
+the agent dir has an `APPEND_SYSTEM.md` and the project has none, setup skips the steps with a warning (exit 0)
 rather than hide yours in this project; copy it to `.pi/APPEND_SYSTEM.md` and run setup again to get
 both. When the agent dir's `AGENTS.md` holds a `<!-- wiki:navigation -->` block, an older copy placed
 by hand that pi loads in every project, setup warns; it never edits the agent dir.

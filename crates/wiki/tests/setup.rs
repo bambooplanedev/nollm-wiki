@@ -1526,12 +1526,12 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     let f = fixture(true, false);
     codex_stub(&f);
     fs::write(f.root().join("CLAUDE.md"), "# Project rules\n").unwrap();
-    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(!f.root().join("AGENTS.md").exists());
     assert_eq!(read(&f.root().join("CLAUDE.md")), "# Project rules\n");
     let o = out(&a);
     assert!(
-        o.contains("skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
+        o.contains("warning: skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md"),
         "{o}"
     );
     assert!(o.contains("wrote .codex/config.toml wiki server"), "{o}");
@@ -1539,7 +1539,7 @@ fn setup_codex_does_not_create_agents_md_beside_a_lone_claude_md() {
     // An AGENTS.md an earlier setup created beside CLAUDE.md goes.
     let block = format!("<!-- wiki:navigation -->\n{NAV}<!-- /wiki:navigation -->\n");
     fs::write(f.root().join("AGENTS.md"), &block).unwrap();
-    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).code(1);
+    let a = f.setup(&["--agent", "codex", "--scope", "repo"]).success();
     assert!(!f.root().join("AGENTS.md").exists(), "{}", out(&a));
     assert!(out(&a).contains("removed AGENTS.md"), "{}", out(&a));
 
@@ -2326,12 +2326,13 @@ fn setup_pi_does_not_hide_a_global_append_system_md() {
     fs::create_dir_all(&agent).unwrap();
     fs::write(agent.join("APPEND_SYSTEM.md"), "global\n").unwrap();
     let mut c = f.run(Path::new(env!("CARGO_BIN_EXE_wiki")), &PI_ONLY);
-    let a = c.env("PI_CODING_AGENT_DIR", &agent).assert().code(1);
+    // The server and skill are in place: a warning, and the command succeeds.
+    let a = c.env("PI_CODING_AGENT_DIR", &agent).assert().success();
     let o = out(&a);
-    let skips: Vec<&str> = o.lines().filter(|l| l.starts_with("skipped")).collect();
+    let skips: Vec<&str> = o.lines().filter(|l| l.contains("skipped")).collect();
     assert_eq!(
         skips,
-        ["skipped .pi/APPEND_SYSTEM.md wiki navigation steps: a project .pi/APPEND_SYSTEM.md would replace pi's global APPEND_SYSTEM.md in this project; copy the global one to .pi/APPEND_SYSTEM.md and run setup again"],
+        ["warning: skipped .pi/APPEND_SYSTEM.md wiki navigation steps: a project .pi/APPEND_SYSTEM.md would replace pi's global APPEND_SYSTEM.md in this project; copy the global one to .pi/APPEND_SYSTEM.md and run setup again"],
         "{o}"
     );
     assert!(!f.root().join(".pi/APPEND_SYSTEM.md").exists());
