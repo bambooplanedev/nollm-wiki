@@ -2812,6 +2812,20 @@ fn a_capped_name_spreads_over_pages_and_says_how_many_are_hidden() {
     );
     // The marker follows the name's last shown line, the answer ends there.
     assert!(out.trim_end().ends_with("or a path word"), "{out}");
+    // JSON gives it on the same symbol.
+    let v: serde_json::Value =
+        serde_json::from_str(&wiki::serve::search_json(w.search("order_id", None, 10))).unwrap();
+    let more: Vec<&serde_json::Value> = v
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|h| h["symbols"].as_array().unwrap())
+        .filter_map(|s| s.get("more"))
+        .collect();
+    assert_eq!(
+        more,
+        [&serde_json::json!({"count": 2, "pages": 0, "owned": true})]
+    );
 }
 
 #[test]

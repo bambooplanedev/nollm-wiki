@@ -38,21 +38,34 @@ pub fn doc_json(
 /// `memory: true` and `origin` (`local` or `repo`), plus `author` when known
 /// and `edited: true` when the file differs from its last commit.
 pub fn search_json(hits: Vec<Hit>) -> String {
-    let hits = hits
-        .into_iter()
+    serde_json::Value::Array(hit_values(hits)).to_string()
+}
+
+/// `search_json`'s objects, one per hit. A symbol past the per-name cap
+/// adds `more: {count, pages, owned}` (`SymbolLine::hidden`).
+fn hit_values(hits: Vec<Hit>) -> Vec<serde_json::Value> {
+    hits.into_iter()
         .map(|h| {
             let symbols: Vec<_> = h
                 .symbols
                 .iter()
                 .map(|s| {
-                    serde_json::json!({
+                    let mut sym = serde_json::json!({
                         "path": s.path,
                         "start_line": s.start_line,
                         "end_line": s.end_line,
                         "name": s.name,
                         "signature": s.signature,
                         "doc": s.doc,
-                    })
+                    });
+                    if let Some(m) = &s.hidden {
+                        sym["more"] = serde_json::json!({
+                            "count": m.count,
+                            "pages": m.pages,
+                            "owned": m.owned,
+                        });
+                    }
+                    sym
                 })
                 .collect();
             let mut hit = serde_json::json!({
@@ -94,8 +107,7 @@ pub fn search_json(hits: Vec<Hit>) -> String {
             }
             hit
         })
-        .collect();
-    serde_json::Value::Array(hits).to_string()
+        .collect()
 }
 
 /// `memory (local)`, `memory (repo, Jane Doe)`: how a note row opens in
@@ -205,15 +217,71 @@ pub fn search_lines(hits: &[Hit]) -> String {
 /// The line that sends a `code` search to `tests`.
 const USE_TESTS: &str = "use kind \"tests\"";
 
-/// The default line answer to a `search` (`search_answer`, then
-/// `search_lines`), after a first line naming the identifiers of a query of
-/// names alone that no item defines (`Wiki::not_found`). The line says the
-/// pages below match the names' words only when they are the ranked pages,
-/// that is when no name of the query has a definition. Names in `tests_only`
-/// (`Wiki::in_tests_only`) come first instead, on a line sending them to
-/// `tests` and with their test definitions (`Wiki::test_definitions`); the
-/// rest of the query is answered without them. Else `tests_cut` adds a last
-/// line that test pages also match.
+/// What a `search` answers, which its line and JSON renderings share.
+struct Answer {
+    /// Names defined only on test pages (`Wiki::in_tests_only`).
+    tests_only: Vec<String>,
+    /// Their test definitions (`Wiki::test_definitions`).
+    test_hits: Vec<Hit>,
+    /// The other names no item defines (`Wiki::not_found`).
+    missing: Vec<String>,
+    /// The hits are the ranked pages: no name of the query is defined.
+    ranked: bool,
+    hits: Vec<Hit>,
+    /// A test page ranked first and `code` dropped it.
+    tests_cut: bool,
+}
+
+/// A query of names alone that names something only tests define is
+/// answered with those test definitions, and the rest of the query without
+/// those names.
+fn answer(
+    w: &Wiki,
+    q: &str,
+    kind: Option<&KindFilter>,
+    tag: Option<&str>,
+    limit: Option<usize>,
+) -> Answer {
+    let missing = w.not_found(q, kind, tag);
+    let tests_only = w.in_tests_only(&missing, kind, tag);
+    let test_hits = if tests_only.is_empty() {
+        Vec::new()
+    } else {
+        w.test_definitions(&tests_only, tag, limit.unwrap_or(10))
+    };
+    let missing: Vec<String> = missing
+        .into_iter()
+        .filter(|n| !tests_only.contains(n))
+        .collect();
+    let (names, _) = Wiki::query_names(q);
+    let rest = names
+        .into_iter()
+        .filter(|n| !tests_only.iter().any(|t| t == n))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let q = if tests_only.is_empty() { q } else { &rest };
+    let (hits, tests_cut) = if !tests_only.is_empty() && rest.is_empty() {
+        (Vec::new(), false)
+    } else {
+        w.search_answer(q, kind, tag, limit)
+    };
+    let ranked = !missing.is_empty() && missing.len() == Wiki::query_names(q).0.len();
+    Answer {
+        tests_cut: tests_cut && tests_only.is_empty(),
+        tests_only,
+        test_hits,
+        missing,
+        ranked,
+        hits,
+    }
+}
+
+/// The default line answer to a `search`: for a query of names alone, a
+/// line sending names only tests define to `tests`, with their test
+/// definitions, then a line naming the names no item defines, saying the
+/// pages below match their words when they are the ranked pages; then
+/// `search_lines` of the hits, and a last line when a test page ranked
+/// first under `code`.
 pub fn search_text(
     w: &Wiki,
     q: &str,
@@ -221,50 +289,55 @@ pub fn search_text(
     tag: Option<&str>,
     limit: Option<usize>,
 ) -> String {
-    let missing = w.not_found(q, kind, tag);
-    let tests_only = w.in_tests_only(&missing, kind, tag);
+    let a = answer(w, q, kind, tag, limit);
     let mut out = String::new();
-    let rest: String;
-    let q = if tests_only.is_empty() {
-        q
-    } else {
+    if !a.tests_only.is_empty() {
         out += &format!(
             "{}: in test pages only; {USE_TESTS}\n",
-            tests_only.join(", ")
+            a.tests_only.join(", ")
         );
-        out += &search_lines(&w.test_definitions(&tests_only, tag, limit.unwrap_or(10)));
-        let (names, _) = Wiki::query_names(q);
-        rest = names
-            .into_iter()
-            .filter(|n| !tests_only.iter().any(|t| t == n))
-            .collect::<Vec<_>>()
-            .join(" ");
-        if rest.is_empty() {
-            return out;
-        }
-        &rest
-    };
-    let (hits, tests_cut) = w.search_answer(q, kind, tag, limit);
-    let missing: Vec<&str> = missing
-        .iter()
-        .filter(|n| !tests_only.contains(n))
-        .map(String::as_str)
-        .collect();
-    if !missing.is_empty() {
-        let names = missing.join(", ");
-        // Pages ranked by the words, unless another name's definitions replaced them.
-        let ranked = missing.len() == Wiki::query_names(q).0.len();
-        out += &match (hits.is_empty() || !ranked, missing.len()) {
+        out += &search_lines(&a.test_hits);
+    }
+    if !a.missing.is_empty() {
+        let names = a.missing.join(", ");
+        out += &match (a.hits.is_empty() || !a.ranked, a.missing.len()) {
             (true, _) => format!("no symbol named {names}\n"),
             (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
             (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
         };
     }
-    if !hits.is_empty() || missing.is_empty() {
-        out += &search_lines(&hits);
+    if !a.hits.is_empty() || (a.missing.is_empty() && a.tests_only.is_empty()) {
+        out += &search_lines(&a.hits);
     }
-    if tests_cut && tests_only.is_empty() {
+    if a.tests_cut {
         out += &format!("tests also match; {USE_TESTS}\n");
     }
     out
+}
+
+/// `search_text`'s answer as `search_json`: the test definitions, then the
+/// hits. The first hit adds `no_symbol` and `tests_only` (name lists) and
+/// `tests_also_match: true` when the line answer has those lines; an answer
+/// with no hit has nowhere to put them.
+pub fn search_json_text(
+    w: &Wiki,
+    q: &str,
+    kind: Option<&KindFilter>,
+    tag: Option<&str>,
+    limit: Option<usize>,
+) -> String {
+    let a = answer(w, q, kind, tag, limit);
+    let mut hits = hit_values(a.test_hits.into_iter().chain(a.hits).collect());
+    if let Some(first) = hits.first_mut() {
+        if !a.missing.is_empty() {
+            first["no_symbol"] = a.missing.into();
+        }
+        if !a.tests_only.is_empty() {
+            first["tests_only"] = a.tests_only.into();
+        }
+        if a.tests_cut {
+            first["tests_also_match"] = true.into();
+        }
+    }
+    serde_json::Value::Array(hits).to_string()
 }

@@ -689,7 +689,11 @@ Python-функція, визначена в тілі іншої функції,
 уривок чи doc довші за 160 символів обрізаються з `…`. `--format json` друкує
 `[{id, title, summary, updated, score, snippet, path, symbols}]`, кожен символ —
 `{path, start_line, end_line, name, signature, doc}`; нотатка памʼяті додає `memory`, `origin` і,
-коли застосовно, `author`, `mine`, `edited`, `superseded_by`.
+коли застосовно, `author`, `mine`, `edited`, `superseded_by`. Відповідь JSON та сама, що й рядкова:
+тестові визначення назви, яку визначають лише тести, ідуть першими, символ понад обмеження на назву
+додає `more: {count, pages, owned}` (рядок `+N more`), а перший збіг додає `no_symbol` і `tests_only`
+(списки назв) та `tests_also_match: true`, коли рядкова відповідь має ці рядки. Відповідь без збігів —
+це `[]`, і жодного з них вона не несе.
 
 #### page
 

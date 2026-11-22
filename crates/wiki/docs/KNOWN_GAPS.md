@@ -179,10 +179,10 @@ per question is noise-level: treat single results as anecdotes.
   any namespace prefix is accepted then; `ns::f` does not find a free `f`.
   A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.
   A name with more than 3 definitions shows 3, one per page first, and a
-  `+N more named …` line that counts the rest but does not list them; the
-  JSON output has no such count.
-  `--format json` has no `no symbol named`, `in test pages only` or `tests also match` entries, and
-  under `code` it drops test pages without saying so. On the 2026-11-11 bench replay
+  `+N more named …` line that counts the rest but does not list them.
+  `--format json` stays an array of hits, so the answer-level fields
+  (`no_symbol`, `tests_only`, `tests_also_match`) ride on its first hit and
+  an answer with no hit (`[]`) loses them. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);
   each of the 14 distinct names one search per name still missed was a plain

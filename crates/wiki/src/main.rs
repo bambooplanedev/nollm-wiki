@@ -466,8 +466,9 @@ fn main() -> Result<()> {
                 .map_err(anyhow::Error::msg)?;
             let q = query.as_deref().unwrap_or("");
             if format == "json" {
-                let hits = w.search_tagged(q, kind.as_ref(), tag.as_deref(), limit);
-                println!("{}", wiki::serve::search_json(hits));
+                let text =
+                    wiki::serve::search_json_text(&w, q, kind.as_ref(), tag.as_deref(), limit);
+                println!("{text}");
             } else {
                 let text = wiki::serve::search_text(&w, q, kind.as_ref(), tag.as_deref(), limit);
                 print!("{text}");

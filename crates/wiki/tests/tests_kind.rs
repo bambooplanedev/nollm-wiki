@@ -200,6 +200,51 @@ fn the_answer_lines_name_the_tests_kind() {
     assert_eq!(text(&w, "zq", code), "no matches\n");
 }
 
+fn json(w: &Wiki, q: &str, kind: Option<&KindFilter>) -> Vec<serde_json::Value> {
+    let text = wiki::serve::search_json_text(w, q, kind, None, Some(10));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The JSON answer carries what the line answer says, on its first hit,
+/// and lists the same pages in the same order.
+#[test]
+fn the_json_answer_carries_the_line_signals() {
+    let (_d, w) = fixture();
+    let code = Some(&KindFilter::Code);
+    let first = |q: &str, kind| json(&w, q, kind).into_iter().next().unwrap();
+    let names = |v: &serde_json::Value| v.as_array().unwrap().clone();
+    let t = first("only_in_tests", code);
+    assert_eq!(names(&t["tests_only"]), ["only_in_tests"]);
+    assert_eq!(t["path"], "tests/ledger_flow.rs");
+    let t = first("ledger_balance", None);
+    assert_eq!(names(&t["no_symbol"]), ["ledger_balance"]);
+    assert_eq!(first("ledger round trip", code)["tests_also_match"], true);
+    // Nothing to say: no new field.
+    let t = first("ledger balance", code);
+    for k in ["no_symbol", "tests_only", "tests_also_match"] {
+        assert!(t.get(k).is_none(), "{k}: {t}");
+    }
+    for (q, kind) in [
+        ("only_in_tests", code),
+        ("ledger_balance only_in_tests", code),
+        ("ledger_balance", None),
+        ("ledger round trip", code),
+        ("post_balance", None),
+    ] {
+        let lines = text(&w, q, kind);
+        let from_lines: Vec<&str> = lines
+            .lines()
+            .filter(|l| !l.starts_with(' ') && l.split("  ").count() > 2)
+            .map(|l| l.split("  ").nth(1).unwrap())
+            .collect();
+        let from_json: Vec<String> = json(&w, q, kind)
+            .iter()
+            .map(|h| h["path"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(from_json, from_lines, "{q}");
+    }
+}
+
 fn cli(out: &std::path::Path, args: &[&str]) -> String {
     let o = Command::cargo_bin("wiki")
         .unwrap()

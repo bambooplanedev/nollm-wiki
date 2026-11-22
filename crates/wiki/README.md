@@ -673,7 +673,11 @@ no hint line, no call edge (its calls are its enclosing function's). A summary,
 snippet or doc longer than 160 characters is cut with
 `…`. `--format json` prints `[{id, title, summary, updated, score, snippet, path, symbols}]`, each
 symbol `{path, start_line, end_line, name, signature, doc}`; a memory note adds `memory`, `origin`
-and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
+and, when they apply, `author`, `mine`, `edited` and `superseded_by`. The JSON answer is the line
+answer's: test definitions of a name only tests define come first, a symbol past the per-name cap
+adds `more: {count, pages, owned}` (the `+N more` line), and the first hit adds `no_symbol` and
+`tests_only` (lists of names) and `tests_also_match: true` when the line answer has those lines.
+An answer with no hit is `[]` and carries none of them.
 
 #### page
 
