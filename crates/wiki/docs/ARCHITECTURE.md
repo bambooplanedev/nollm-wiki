@@ -591,7 +591,13 @@ matching:
   `provisioning` finds `provision` below an exact or prefix hit. The
   body hits by substring, never by stem. Item names (`items.json`, lowercased, or one of
   their snake/CamelCase words) hit by whole term only, so `to` does not hit
-  `token_estimate`. Fuller
+  `token_estimate`. Two adjacent name words of at most 2 characters each
+  also hit joined (`Wiki::match_words`: `QoS` is `qo`, `s` and `qos`); the
+  join is a match word only, and the spelled-name check (`W_SYMBOL` for a
+  query of exactly an item's words) and `name_sets` keep `name_words`.
+  Joining when either word is short (`ofin`, `byid`) changed 16–44% of a
+  tree's names and cost 2 ranks on a 1,350-query sweep; the narrow rule
+  changed none there. Fuller
   matches are not forced above partial ones by a sort key; IDF does that
   where it matters, by making a rare missing token expensive and a common
   one nearly free.

@@ -642,7 +642,9 @@ clean directory.
 
 The default output is one line per page, `id  path  [date  ]title — summary`. Under a code page, up
 to 3 indented lines name its matching symbols, `  path:start-end  name  signature  — doc` (1-based,
-inclusive range; `name` is `Owner::name` for methods). A symbol is shown when it scores at least 30%
+inclusive range; `name` is `Owner::name` for methods). An item matches by its whole name or by one
+of its `_` and case-change words (`clampQoSLevel`: `clamp`, `qo`, `s`, `level`); two adjacent words
+of at most two characters also match joined (`qos`). A symbol is shown when it scores at least 30%
 of the best symbol in the response, or is its page's best, so a page with any matching symbol keeps
 one, and test code ranks at half score. A function whose name has exactly one other
 non-test definition in another file gets a four-space-indented line under it,

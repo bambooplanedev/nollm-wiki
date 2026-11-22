@@ -157,6 +157,46 @@ fn name_words_splits_snake_camel_and_acronym_runs() {
     assert_eq!(Wiki::name_words("walk"), vec!["walk"]);
 }
 
+#[test]
+fn match_words_join_two_adjacent_short_words() {
+    let w = |n: &str| Wiki::match_words(n);
+    // `QoS` splits as `qo`, `s`; both are short, so `qos` matches too.
+    assert_eq!(w("clampQoSLevel"), ["clamp", "qo", "s", "level", "qos"]);
+    assert_eq!(w("QoS"), ["qo", "s", "qos"]);
+    assert_eq!(w("IoT"), ["io", "t", "iot"]);
+    // One long word in the pair: no join (not `getx`, `ofin`, `byid`).
+    assert_eq!(w("getXPos"), ["get", "x", "pos"]);
+    assert_eq!(w("find_by_id"), ["find", "by", "id", "byid"]);
+    assert_eq!(w("is_of_interest"), ["is", "of", "interest", "isof"]);
+    assert_eq!(w("HTTPServer"), ["http", "server"]);
+    // Digits are no boundary.
+    assert_eq!(w("base64Encode"), ["base64encode"]);
+    assert_eq!(w("walk"), ["walk"]);
+}
+
+#[test]
+fn joined_words_match_but_spelled_and_name_sets_keep_the_split() {
+    use CodeItemKind::Fn;
+    let items = [item(Fn, "clampQoSLevel", None, false)];
+    let f = Wiki::symbol_fields("position", &items);
+    assert!(f.words.contains("qos"), "{:?}", f.words);
+    assert_eq!(f.name_sets, [set(&["clamp", "qo", "s", "level"])].into());
+    let score = |q: &[&str]| {
+        let t: Vec<String> = q.iter().map(|s| (*s).into()).collect();
+        Wiki::item_score(
+            &items[0],
+            &t,
+            &t.iter().cloned().collect(),
+            &vec![1.0; t.len()],
+        )
+    };
+    // `qos` is a name word of the item now, not its whole name.
+    assert!(score(&["qos"]) > 0.0);
+    assert!(score(&["qos"]) < score(&["clampqoslevel"]));
+    // The joined word does not make `clamp qos level` the item's spelling.
+    assert!(score(&["clamp", "qo", "s", "level"]) > score(&["clamp", "qos", "level"]));
+}
+
 fn item(kind: CodeItemKind, name: &str, doc: Option<&str>, test: bool) -> CodeItem {
     CodeItem {
         kind,

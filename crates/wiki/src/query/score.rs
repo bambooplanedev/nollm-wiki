@@ -82,7 +82,7 @@ impl Wiki {
                 f.name_sets.insert(words.iter().cloned().collect());
             }
             f.words.extend(
-                words
+                Self::match_words(&item.name)
                     .into_iter()
                     .filter(|w| !title_words.contains(&w.as_str())),
             );
@@ -124,6 +124,7 @@ impl Wiki {
         // The query's words are this item's name words, in any order.
         let spelled =
             words.len() > 1 && words.iter().cloned().collect::<BTreeSet<_>>() == *query_words;
+        let words = Self::match_words(&item.name);
         let doc = Field::of(Self::lower_words(item.doc.as_deref()));
         let doc_rest = Field::of(Self::lower_words(item.doc_text.as_deref()));
         let score: f64 = tokens

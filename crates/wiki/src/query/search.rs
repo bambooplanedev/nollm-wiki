@@ -404,7 +404,7 @@ impl Wiki {
             .iter()
             .map(|w| w.trim_matches('_').to_lowercase())
             .collect();
-        let words: BTreeSet<String> = idents.iter().flat_map(|w| Self::name_words(w)).collect();
+        let words: BTreeSet<String> = idents.iter().flat_map(|w| Self::match_words(w)).collect();
         let stems: BTreeSet<String> = words.iter().map(|w| Self::stem(w)).collect();
         terms
             .iter()

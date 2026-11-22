@@ -133,6 +133,27 @@ impl Wiki {
         wiki_code::support::name_words(name)
     }
 
+    /// `name_words`, then the join of each two adjacent words of at most 2
+    /// characters each: `QoS` splits as `qo`, `s` and also matches `qos`.
+    /// Words to match only; the spelled-name check and `name_sets` keep
+    /// `name_words`. Joining when either word is short changed up to 44% of
+    /// a tree's names (`ofin`, `byid`) for no gain on real queries.
+    pub(crate) fn match_words(name: &str) -> Vec<String> {
+        let mut words = Self::name_words(name);
+        let short = |w: &String| w.chars().count() <= 2;
+        let joins: Vec<String> = words
+            .windows(2)
+            .filter(|p| short(&p[0]) && short(&p[1]))
+            .map(|p| format!("{}{}", p[0], p[1]))
+            .collect();
+        for j in joins {
+            if !words.contains(&j) {
+                words.push(j);
+            }
+        }
+        words
+    }
+
     /// The words of a lowercased field: maximal runs of alphanumeric
     /// characters (`char::is_alphanumeric`, so digits count and `_`, `-`,
     /// `:` and punctuation split). Computed once per page per field.

@@ -114,6 +114,14 @@ per question is noise-level: treat single results as anecdotes.
   unrelated word that shares it, and two forms with different stems still
   miss: "decision" does not find `decide`. Body text is matched by
   substring, not by stem. Doc text helps only when the comment uses the user's word.
+- **Name words split at `_` and case changes only.** Digits are no
+  boundary (`base64Encode` is one word, `base64encode`), and an acronym
+  with a lower-case tail splits oddly (`GPUs` → `gp`, `us`; `OAuth2Token` →
+  `o`, `auth2token`). Two adjacent words of at most 2 characters also match
+  joined (`QoS` → `qos`), nothing longer: `qos` now finds `clampQoSLevel`,
+  but on one project the page with such a name still ranked 12th for a two-word query.
+  A digit split, tried together with the wider join, cost a top-5 answer on
+  a generated sweep and is not built.
 - **Docs crowd out code without `kind`.** In a project with many spec and
   plan pages, 2–3 of the top hits for a code question are docs or tests
   unless the query passes `kind: code`.
