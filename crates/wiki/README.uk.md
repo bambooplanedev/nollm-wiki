@@ -637,7 +637,8 @@ adds one.
 
     wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
-- `--kind <k>` — `code` (усі `code:<lang>`, крім тестових сторінок), `tests` (лише тестові сторінки),
+- `--kind <k>` — `code` (усі `code:<lang>`, крім тестових сторінок), `tests` (лише тестові сторінки будь-якої
+  мови: `tests:<lang>` немає),
   `docs` (`markdown` і `text`) або один точний тип: `text`, `markdown`, `code:<lang>` (наприклад,
   `code:rust`; тестові сторінки відкинуто, як і для `code`). Нотатки памʼяті проходять і `code`, і
   `docs`, але ніколи `tests`; до двох, що проходять поріг, йдуть після збігів рядками `memory (<origin>):` з уривком (див.

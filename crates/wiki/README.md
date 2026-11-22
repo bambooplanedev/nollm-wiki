@@ -624,8 +624,8 @@ clean directory.
 
     wiki search [--kind K] [--tag T] [--docs FILE]... [--limit N] [--format lines|json] [--dir DIR] [QUERY]
 
-- `--kind <k>` — `code` (every `code:<lang>` except test pages), `tests` (test pages only), `docs`
-  (`markdown` and `text`), or one exact kind: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`;
+- `--kind <k>` — `code` (every `code:<lang>` except test pages), `tests` (test pages only, of every
+  language: there is no `tests:<lang>`), `docs` (`markdown` and `text`), or one exact kind: `text`, `markdown`, `code:<lang>` (e.g. `code:rust`;
   test pages left out as with `code`). Memory notes pass both `code` and `docs`, never `tests`; up to two that pass the gate follow the hits as
   `memory (<origin>):` lines, each with its snippet line (see [Agent memory](#agent-memory)).
   A test page is a code file under a `tests` folder or named `test_*`, `*_test.*` or `*_tests.*`;

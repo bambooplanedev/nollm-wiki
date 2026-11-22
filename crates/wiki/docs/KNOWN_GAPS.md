@@ -168,7 +168,7 @@ per question is noise-level: treat single results as anecdotes.
   (the definition is added, not moved first). A name defined by no item, such
   as a lambda, a local variable, a field outside C/C++, a function nested in
   another outside Python, or a
-  Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
+  Python function in a shell heredoc (`python3 - <<'PY'`), gets `no symbol named`.
   C/C++ data members are items up to two pointer or array levels and as
   plain function pointers; not a member a macro declares (`FIELD(int, x)`),
   three or more levels (`char ***p`), an array of function pointers
@@ -177,11 +177,12 @@ per question is noise-level: treat single results as anecdotes.
   left out). A namespace is in no owner chain: `ns::Class::name` finds an
   owned `Class::name` only when no item matches the whole qualified name, and
   any namespace prefix is accepted then; `ns::f` does not find a free `f`.
-  A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
+  A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.
   A name with more than 3 definitions shows 3, one per page first, and a
   `+N more named …` line that counts the rest but does not list them; the
   JSON output has no such count.
-  `--format json` has no `not found` entries. On the 2026-11-11 bench replay
+  `--format json` has no `no symbol named`, `in test pages only` or `tests also match` entries, and
+  under `code` it drops test pages without saying so. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);
   each of the 14 distinct names one search per name still missed was a plain
@@ -572,6 +573,6 @@ per question is noise-level: treat single results as anecdotes.
 - The ratio branch of the gate (a note scoring twice the best code hit) can
   be gamed by a note whose summary is stuffed with common code words; the
   origin label on the row is the defence, nothing filters such a note.
-- A name asked in the wrong case (`orderBook` for `OrderBook`) is `not found` as a definition; the ranked list still shows it.
+- A name asked in the wrong case (`orderBook` for `OrderBook`) gets `no symbol named` as a definition; the ranked list still shows it.
 - Shell: tree-sitter-bash folds a `\.` that starts a line after another command into that command, so that `source` import is not captured.
 - A `--memory DIR` folder is always labelled `local`, even when it sits inside the repo and co-authors committed it; only `.agents/memory` gets a git origin.

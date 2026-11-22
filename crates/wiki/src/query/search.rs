@@ -514,8 +514,8 @@ impl Wiki {
         };
         // `tests` counts every code page, as `code` does, and both narrow
         // their hits after scoring: a page scores as in a search that splits
-        // nothing. Statistics over the narrowed pages cost 31 of 1,350 ranks
-        // on the critic sweep of 2026-11-22. A prompt never splits.
+        // nothing. Statistics over the narrowed pages moved ranks on a
+        // generated sweep. A prompt never splits.
         let counted_kind = match kind {
             Some(KindFilter::Tests) => Some(&KindFilter::Code),
             k => k,
