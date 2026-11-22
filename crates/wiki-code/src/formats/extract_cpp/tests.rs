@@ -893,6 +893,7 @@ fn pointer_array_and_function_pointer_members_are_nested_values() {
   char ***triple;
   void (*handlers[4])(int);
   int (*rows)[3];
+  LIST_HEAD(entry_type) link;
 };
 typedef struct { int anon_field; } Anon;
 ";
@@ -911,7 +912,7 @@ typedef struct { int anon_field; } Anon;
             m("Ops::triple", "12-12", "char ***triple"),
             m("Ops::handlers", "13-13", "void (*handlers[4])(int)"),
             m("Ops::rows", "14-14", "int (*rows)[3]"),
-            m("Anon::anon_field", "16-16", "int anon_field"),
+            m("Anon::anon_field", "17-17", "int anon_field"),
         ]
     );
 }
@@ -948,4 +949,42 @@ private:
         "{:?}",
         e.symbols
     );
+}
+
+/// A constructor whose initializer list an `#if` splits parses as a field
+/// declaration that also declares a function: its export keeps the shape it
+/// had before data members were items.
+#[test]
+fn a_split_initializer_keeps_its_export_signature() {
+    let src = "class Gate {\n public:\n  Gate(int cap)\n      :\n#if !defined(NDEBUG)\n        cap_(cap),\n#endif\n        left_(cap) {\n  }\n private:\n  int cap_;\n  int left_;\n};\n";
+    let e = crate::extract("gate.cc", src);
+    assert!(
+        !e.symbols.iter().any(|s| s.contains("#endif")),
+        "{:?}",
+        e.symbols
+    );
+}
+
+/// A constructor behind an unknown macro parses as a field declaration whose
+/// initializer list reads as a bitfield width; its item keeps the signature
+/// it had before members were items.
+#[test]
+fn a_macro_led_constructor_keeps_its_item_signature() {
+    let src = "template <typename T> struct Knob : Base {\n  const T& ref;\n  tone_t tone;\n  CONSTEXPR_IF Knob(const T& v, tone_t s) : ref(v), tone(s) {}\n};\n";
+    let e = crate::extract("knob.h", src);
+    let sigs: Vec<&str> = e
+        .items
+        .iter()
+        .filter(|i| !i.nested)
+        .map(|i| i.signature.as_str())
+        .collect();
+    assert!(!sigs.iter().any(|s| s.contains(": ref(v)")), "{sigs:?}");
+}
+
+/// Error recovery can insert a field name with no text; it is no member.
+#[test]
+fn a_name_the_parser_inserted_is_no_item() {
+    let src = "#ifndef TINT_H_\n#define TINT_H_\n\n#include \"base.h\"\n\nNS_OPEN\nNS_EXPORT\n\nenum class tint : uint32_t {\n  pale = 0xF0F8FF,\n  dark = 0x000000\n};  // enum class tint\n\nenum class shade : uint8_t {\n  low = 30,\n  high,\n};\n";
+    let e = crate::extract("tint.h", src);
+    assert!(e.items.iter().all(|i| !i.name.is_empty()), "{:?}", e.items);
 }

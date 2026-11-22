@@ -477,7 +477,14 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
     let declarator = def.child_by_field_name("declarator");
-    if is_data_member(def) {
+    // Only a declaration of data alone: a function it also declares (a
+    // constructor an `#if` split parses so) keeps the default shape, and
+    // with it the signature it had before members were items.
+    if is_data_member(def)
+        && def
+            .children_by_field_name("declarator", &mut def.walk())
+            .all(is_data_declarator)
+    {
         let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
         return value_shape(eq, def.child_by_field_name("default_value"), true);
     }
@@ -551,13 +558,19 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
 /// that names no field (a method, a qualified name).
 pub(crate) fn declared_name(d: Node) -> Option<Node> {
     match d.kind() {
-        "field_identifier" => Some(d),
+        // A name error recovery inserted has no text.
+        "field_identifier" => (!d.is_missing()).then_some(d),
         // A function, unless it is `(*name)(…)`, a pointer to one.
         "function_declarator" if !is_data_declarator(d) => None,
+        // `(*p)` or `(&r)`: a bare `(name)` is a macro call the grammar
+        // misread (`LIST_HEAD(entry_type) link;`), not a declarator.
+        "parenthesized_declarator" => d
+            .named_children(&mut d.walk())
+            .find(|c| matches!(c.kind(), "pointer_declarator" | "reference_declarator"))
+            .and_then(declared_name),
         "pointer_declarator"
         | "array_declarator"
         | "reference_declarator"
-        | "parenthesized_declarator"
         | "function_declarator"
         | "attributed_declarator" => d
             .child_by_field_name("declarator")
