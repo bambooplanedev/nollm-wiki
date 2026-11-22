@@ -307,7 +307,7 @@ fn oversized_target_degrades_to_summary_and_keeps_neighborhood() {
         pack.text
     );
     assert!(
-        pack.text.contains("wiki://page/hub"),
+        pack.text.contains("call page with full: true"),
         "pack must point at the full page: {}",
         pack.text
     );

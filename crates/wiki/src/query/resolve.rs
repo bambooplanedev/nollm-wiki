@@ -284,8 +284,8 @@ impl Wiki {
     /// charged at the size of the text actually emitted. A code target is
     /// its outline, cut to the budget. Another target is its full page;
     /// when that alone would blow the ceiling, it degrades to a summary
-    /// block (title + summary + a pointer at `wiki://page/<id>`) so the
-    /// neighborhood still fits. The one floor exception: the outline's
+    /// block (title + summary + a pointer at the `page` tool with
+    /// `full: true`) so the neighborhood still fits. The one floor exception: the outline's
     /// header or the degraded block is always emitted, even when a
     /// pathologically small budget cannot contain it — a neighbors call
     /// always says something about the target.
@@ -368,7 +368,7 @@ impl Wiki {
             full_target
         } else {
             format!(
-                "# {} ({id})\n\n{}\n\n_body (~{} tokens) {OVER_BUDGET_NOTE}; read wiki://page/{id} for the full page_\n",
+                "# {} ({id})\n\n{}\n\n_body (~{} tokens) {OVER_BUDGET_NOTE}; call page with full: true for the whole page_\n",
                 target.title,
                 summary_line(target.summary.as_deref()),
                 target.token_estimate,

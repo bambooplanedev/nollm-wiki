@@ -745,7 +745,7 @@ lives, gets a note that the folder is not compiled. `neighbors` then BFS-collect
   pack can't overshoot the ceiling.
 - The target page comes first. A code page is its outline, cut to the
   budget; another page is in full when it fits, otherwise degraded to a
-  title + summary block pointing at `wiki://page/<id>`. The outline's
+  title + summary block pointing at `page` with `full: true`. The outline's
   header and `…` line, or the degraded block, are the one floor
   exception: always emitted, even when a pathologically small budget
   cannot contain them.

@@ -565,7 +565,7 @@ fn neighbors_defaults_to_a_token_ceiling() {
         text.len()
     );
     assert!(
-        text.contains("wiki://page/huge"),
+        text.contains("call page with full: true"),
         "target should degrade: {text}"
     );
 
