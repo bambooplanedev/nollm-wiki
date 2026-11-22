@@ -2848,7 +2848,11 @@ fn a_namespace_qualified_member_or_method_finds_its_class_member() {
     // An exact owner chain wins over the namespace reading.
     assert_eq!(found("Frame::Tile::edge_len"), ["src/geo.h:11-11"]);
     // No class of that name, or a namespace without the class: nothing.
-    for q in ["geo::Zone::edge_len", "geo::edge_len", "geo::Sheet2::edge_len"] {
+    for q in [
+        "geo::Zone::edge_len",
+        "geo::edge_len",
+        "geo::Sheet2::edge_len",
+    ] {
         assert_eq!(found(q), Vec::<String>::new(), "{q}");
     }
 }
@@ -3020,15 +3024,45 @@ fn unknown_page_names_where_the_stem_is_defined() {
 
 #[test]
 fn unknown_page_defined_in_lists_non_test_first_and_at_most_three() {
+    // The test page sorts first by path: only the rule puts it last.
     let (_t, w) = code_fixture(&[
-        ("tests/test_a.py", "def zed():\n    pass\n"),
-        ("a.py", "def zed():\n    pass\n"),
+        ("aa/tests/test_a.py", "def zed():\n    pass\n"),
         ("b.py", "def zed():\n    pass\n"),
         ("c.py", "def zed():\n    pass\n"),
+        ("d.py", "def zed():\n    pass\n"),
     ]);
     let e = w.resolve("zed.py").unwrap_err();
     assert!(
-        e.contains("defined in: a.py:1-2 zed, b.py:1-2 zed, c.py:1-2 zed —"),
+        e.contains("defined in: b.py:1-2 zed, c.py:1-2 zed, d.py:1-2 zed —"),
+        "{e}"
+    );
+}
+
+const PANE_FILES: [(&str, &str); 3] = [
+    (
+        "src/layout.h",
+        "struct Frame {\n  int pane;\n};\nstruct Grid {\n  int pane;\n};\n",
+    ),
+    ("src/view.cpp", "int pane(int x) { return x; }\n"),
+    (
+        "src/dock.h",
+        "class Dock {\n  void pane();\n  void pane(int);\n};\nconst int pane = 1;\n",
+    ),
+];
+
+#[test]
+fn unknown_page_defined_in_prefers_functions_one_per_file_qualified() {
+    let (_t, w) = code_fixture(&PANE_FILES);
+    let e = w.resolve("pane.h").unwrap_err();
+    assert!(
+        e.contains("defined in: src/dock.h:2-2 Dock::pane, src/view.cpp:1-1 pane —"),
+        "{e}"
+    );
+    // Fields only when nothing else is named so.
+    let (_u, w) = code_fixture(&PANE_FILES[..1]);
+    let e = w.resolve("pane.h").unwrap_err();
+    assert!(
+        e.contains("defined in: src/layout.h:2-2 Frame::pane —"),
         "{e}"
     );
 }

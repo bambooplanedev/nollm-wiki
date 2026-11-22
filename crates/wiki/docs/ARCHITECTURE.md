@@ -764,8 +764,10 @@ the one page whose source path equals it or ends with `/<arg>`. A failure
 lists up to 5 closest ids (the pages an ambiguous path matched, else ids
 or titles sharing a word, non-test pages first). When the ids came from the
 shared word or from nothing, the error also gives up to 3 `defined in:` places
-of items named like the argument's file stem (`Wiki::defined_as_stem`,
-non-test files first). On a failure `Wiki::resolve` first asks
+of items named like the argument's file stem (`Wiki::defined_as_stem`:
+one per file, non-test files first, then types and functions before
+values, nested values only when nothing else has the name, each as
+`Owner::name`). On a failure `Wiki::resolve` first asks
 `Wiki::skipped_path`: a relative path whose outermost pruned directory
 (`walk::pruned_dir`, the `SKIPPED_DIRS` and hidden-folder rule) is not at or
 above the compile input's name (`root`), and under which no indexed page

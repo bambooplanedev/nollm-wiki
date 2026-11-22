@@ -683,7 +683,9 @@ and, when they apply, `author`, `mine`, `edited` and `superseded_by`.
 title, a source path or a unique path suffix (`query.rs`), or an absolute path under the compiled
 directory. If nothing matches, the error lists the closest ids (pages that are not tests first) and,
 when the argument's file name without extension (`thumbnail` for `thumbnail.py`) is the name of an item, up
-to 3 places that define it (`defined in: app/images.py:1-3 thumbnail`, non-test files first). A path under a folder the compile
+to 3 places that define it (`defined in: app/images.py:1-3 thumbnail`, `Owner::name` for a member),
+one per file, non-test files first, types and functions before values, and a C/C++ field only when
+nothing else has the name. A path under a folder the compile
 skips or a hidden folder gets a note that the folder is not compiled instead, with the `docs` search
 to use for Markdown. `neighbors` and `callers` resolve `<ID>` the same way.
 

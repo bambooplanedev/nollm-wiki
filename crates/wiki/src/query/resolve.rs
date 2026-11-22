@@ -108,8 +108,10 @@ impl Wiki {
         })
     }
 
-    /// Up to 3 `path:start-end name` places of items named like the file stem
-    /// of `arg` (`app/thumbnail.py` gives `thumbnail`), non-test pages first.
+    /// Up to 3 `path:start-end Owner::name` places of items named like the
+    /// file stem of `arg` (`app/thumbnail.py` gives `thumbnail`), one per
+    /// file: non-test pages first, then types and functions before values.
+    /// A nested value (a C/C++ field) only when nothing else has the name.
     fn defined_as_stem(&self, arg: &str) -> Vec<String> {
         let norm = norm_path(arg);
         let file = norm.rsplit('/').next().unwrap_or(&norm);
@@ -125,11 +127,19 @@ impl Wiki {
             })
             .map(|(path, i)| (is_test_path(path), path, i))
             .collect();
-        found.sort_by_key(|(test, path, i)| (*test, *path, i.start_line));
+        if found.iter().any(|(_, _, i)| !i.nested) {
+            found.retain(|(_, _, i)| !i.nested);
+        }
+        found.sort_by_key(|(test, path, i)| {
+            let value = i.kind == CodeItemKind::Value;
+            (*test, value, *path, i.start_line)
+        });
+        let mut files = std::collections::HashSet::new();
         found
             .into_iter()
+            .filter(|(_, path, _)| files.insert(*path))
             .take(3)
-            .map(|(_, path, i)| format!("{} {}", i.span(path), i.name))
+            .map(|(_, path, i)| format!("{} {}", i.span(path), i.qualified_name()))
             .collect()
     }
 
