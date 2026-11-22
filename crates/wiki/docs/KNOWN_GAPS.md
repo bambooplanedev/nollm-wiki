@@ -169,12 +169,13 @@ per question is noise-level: treat single results as anecdotes.
   as a lambda, a local variable, a field outside C/C++, a function nested in
   another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `no symbol named`.
-  C/C++ data members are items up to two pointer or array levels and as
-  plain function pointers; not a member a macro declares (`FIELD(int, x)`),
-  three or more levels (`char ***p`), an array of function pointers
-  (`void (*on[4])(int)`) or a pointer to member (`int Box::* pm`, which the
-  grammar misreads; a member whose declarator is followed by a parse error is
-  left out). A namespace is in no owner chain: `ns::Class::name` finds an
+  C/C++ data members are items through any nesting of pointers, arrays,
+  references and function pointers (`void (*on[4])(int)`); not a member a
+  macro declares (`FIELD(int, x)`, which does not parse as a declaration) or
+  a pointer to member (`int Box::* pm`, which the grammar misreads; a member
+  whose declarator is followed by a parse error is left out). A pointer to a
+  function returning a pointer (`int *(*make)(int)`) is still read as a
+  method named `(*make)`, as before members were indexed. A namespace is in no owner chain: `ns::Class::name` finds an
   owned `Class::name` only when no item matches the whole qualified name, and
   any namespace prefix is accepted then; `ns::f` does not find a free `f`.
   A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.

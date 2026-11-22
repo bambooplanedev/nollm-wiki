@@ -890,6 +890,9 @@ fn pointer_array_and_function_pointer_members_are_nested_values() {
   int Box::* pm;
   ATOMIC int ticks;
   int *RESTRICT slots;
+  char ***triple;
+  void (*handlers[4])(int);
+  int (*rows)[3];
 };
 typedef struct { int anon_field; } Anon;
 ";
@@ -905,7 +908,10 @@ typedef struct { int anon_field; } Anon;
             m("Ops::bits", "8-8", "unsigned bits : 3"),
             m("Ops::more", "8-8", "unsigned more : 2"),
             m("Ops::ticks", "10-10", "ATOMIC int ticks"),
-            m("Anon::anon_field", "13-13", "int anon_field"),
+            m("Ops::triple", "12-12", "char ***triple"),
+            m("Ops::handlers", "13-13", "void (*handlers[4])(int)"),
+            m("Ops::rows", "14-14", "int (*rows)[3]"),
+            m("Anon::anon_field", "16-16", "int anon_field"),
         ]
     );
 }
@@ -925,12 +931,16 @@ public:
   typedef int Num;
 private:
   int (*hook_)(int);
+  int spare_, peek();
 };
 ";
     let e = crate::extract("gadget.h", src);
     assert_eq!(
         members("gadget.h", src),
-        vec![m("Gadget::hook_", "13-13", "int (*hook_)(int)")]
+        vec![
+            m("Gadget::hook_", "13-13", "int (*hook_)(int)"),
+            m("Gadget::spare_", "14-14", "int spare_"),
+        ]
     );
     assert!(!e.methods.iter().any(|n| n == "hook_"), "{:?}", e.methods);
     assert!(

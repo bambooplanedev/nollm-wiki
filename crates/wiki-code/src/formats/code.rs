@@ -412,6 +412,15 @@ fn split_captures<'a>(
             }
         }
     }
+    // A C/C++ data member's `@name` is its whole declarator: walk it to the
+    // name, and to none for a declarator that is no data member.
+    if let (Some(item), Some(d)) = (parts.item, parts.name) {
+        if item.kind() == "field_declaration" {
+            parts.name = super::extract_cpp::is_data_declarator(d)
+                .then(|| super::extract_cpp::declared_name(d))
+                .flatten();
+        }
+    }
     parts
 }
 
@@ -853,7 +862,7 @@ fn code_item<'t>(
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
     // A C/C++ data member: a value `search` finds by its exact name only.
-    let member = spec.lang_name == "cpp" && super::extract_cpp::is_data_member(def);
+    let member = spec.lang_name == "cpp" && super::extract_cpp::names_data_member(def, name);
     // An error after the name means the grammar misread it: `int Box::* pm;`
     // names `Box`, `int *RESTRICT slots;` names `RESTRICT`. One before it
     // (`ATOMIC int ticks;`, a macro the grammar cannot know) leaves it right.
