@@ -2838,3 +2838,60 @@ fn the_note_counts_what_callers_lists_twin_included() {
         2
     );
 }
+
+fn thumbnail_fixture() -> (tempfile::TempDir, Wiki) {
+    code_fixture(&[
+        (
+            "app/media/images.py",
+            "def thumbnail(image):\n    return image\n",
+        ),
+        (
+            "tests/test_thumbnail.py",
+            "def test_thumbnail():\n    assert True\n",
+        ),
+    ])
+}
+
+#[test]
+fn unknown_page_names_where_the_stem_is_defined() {
+    let (_t, w) = thumbnail_fixture();
+    for arg in ["thumbnail.py", "src/thumbnail.py"] {
+        let e = w.resolve(arg).unwrap_err();
+        assert_eq!(
+            e,
+            format!("unknown page {arg:?}; closest: test_thumbnail; defined in: app/media/images.py:1-2 thumbnail — use search to find ids")
+        );
+    }
+}
+
+#[test]
+fn unknown_page_defined_in_lists_non_test_first_and_at_most_three() {
+    let (_t, w) = code_fixture(&[
+        ("tests/test_a.py", "def zed():\n    pass\n"),
+        ("a.py", "def zed():\n    pass\n"),
+        ("b.py", "def zed():\n    pass\n"),
+        ("c.py", "def zed():\n    pass\n"),
+    ]);
+    let e = w.resolve("zed.py").unwrap_err();
+    assert!(
+        e.contains("defined in: a.py:1-2 zed, b.py:1-2 zed, c.py:1-2 zed —"),
+        "{e}"
+    );
+}
+
+#[test]
+fn unknown_page_without_a_defining_item_keeps_the_old_text() {
+    let (_t, w) = thumbnail_fixture();
+    let e = w.resolve("nothing.py").unwrap_err();
+    assert_eq!(e, "unknown page \"nothing.py\" — use search to find ids");
+}
+
+#[test]
+fn unknown_page_closest_lists_non_test_pages_first() {
+    let (_t, w) = code_fixture(&[
+        ("tests/a_thumbnail.py", "def t():\n    pass\n"),
+        ("zz/thumbnail_notes.py", "def n():\n    pass\n"),
+    ]);
+    let near = w.resolve_id("thumbnail.py").unwrap_err();
+    assert_eq!(near, ["thumbnail_notes", "a_thumbnail"]);
+}

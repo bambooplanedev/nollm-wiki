@@ -3,7 +3,9 @@
 use super::{
     norm_path, unknown_page, ContextPack, Entry, PackBudget, SymbolLine, Wiki, OVER_BUDGET_NOTE,
 };
-use crate::model::{clip, CodeItem, CodeItemKind, KindFilter, ITEM_DOC_TEXT_MAX_CHARS};
+use crate::model::{
+    clip, is_test_path, CodeItem, CodeItemKind, KindFilter, ITEM_DOC_TEXT_MAX_CHARS,
+};
 use std::collections::{BTreeSet, HashMap};
 
 impl Wiki {
@@ -93,10 +95,41 @@ impl Wiki {
 
     /// `resolve_id` with the unknown-page error text callers show.
     pub fn resolve(&self, arg: &str) -> Result<String, String> {
-        self.resolve_id(arg).map_err(|near| {
-            self.skipped_path(arg)
-                .unwrap_or_else(|| unknown_page(arg, &near))
+        self.resolve_near(arg).map_err(|(near, by_word)| {
+            self.skipped_path(arg).unwrap_or_else(|| {
+                let defined = if by_word {
+                    self.defined_as_stem(arg)
+                } else {
+                    vec![]
+                };
+                unknown_page(arg, &near, &defined)
+            })
         })
+    }
+
+    /// Up to 3 `path:start-end name` places of items named like the file stem
+    /// of `arg` (`app/thumbnail.py` gives `thumbnail`), non-test pages first.
+    fn defined_as_stem(&self, arg: &str) -> Vec<String> {
+        let norm = norm_path(arg);
+        let file = norm.rsplit('/').next().unwrap_or(&norm);
+        let stem = file.split('.').next().unwrap_or(file);
+        if stem.is_empty() {
+            return Vec::new();
+        }
+        let mut found: Vec<(bool, &str, &CodeItem)> = self
+            .code_items()
+            .flat_map(|(path, items)| items.iter().map(move |i| (path, i)))
+            .filter(|(_, i)| {
+                i.name == stem && !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
+            })
+            .map(|(path, i)| (is_test_path(path), path, i))
+            .collect();
+        found.sort_by_key(|(test, path, i)| (*test, *path, i.start_line));
+        found
+            .into_iter()
+            .take(3)
+            .map(|(_, path, i)| format!("{} {}", i.span(path), i.name))
+            .collect()
     }
 
     /// The error for a relative path under a folder the compile prunes
@@ -149,6 +182,12 @@ impl Wiki {
     /// 5 candidate ids, sorted: the several pages that suffix matched, else
     /// ids sharing a lowercase word with `arg`.
     pub fn resolve_id(&self, arg: &str) -> Result<String, Vec<String>> {
+        self.resolve_near(arg).map_err(|(near, _)| near)
+    }
+
+    /// `resolve_id`; the error also says whether its candidates came from the
+    /// shared-word fallback (or are none), not from a path or file name.
+    fn resolve_near(&self, arg: &str) -> Result<String, (Vec<String>, bool)> {
         if self.entries.contains_key(arg) {
             return Ok(arg.to_string());
         }
@@ -182,7 +221,7 @@ impl Wiki {
             return Ok(id.clone());
         }
         if !by_path.is_empty() {
-            return Err(by_path.into_iter().take(5).collect());
+            return Err((by_path.into_iter().take(5).collect(), false));
         }
         // A longer path such as an absolute one, `…/{root}/{path}`: the
         // longest such page path. Without a root (an older wiki) nothing is.
@@ -207,7 +246,7 @@ impl Wiki {
             .take(5)
             .collect();
         if !same_name.is_empty() {
-            return Err(same_name);
+            return Err((same_name, false));
         }
         let words = |s: &str| -> BTreeSet<String> {
             s.split(|c: char| !c.is_alphanumeric())
@@ -216,14 +255,17 @@ impl Wiki {
                 .collect()
         };
         let want = words(arg);
-        // BTreeMap iteration is already sorted by id.
-        Err(self
+        // BTreeMap iteration is already sorted by id; test pages go last.
+        let mut near: Vec<&Entry> = self
             .entries
             .values()
             .filter(|e| !want.is_disjoint(&words(&e.id)) || !want.is_disjoint(&words(&e.title)))
-            .map(|e| e.id.clone())
-            .take(5)
-            .collect())
+            .collect();
+        near.sort_by_key(|e| is_test_path(&e.path));
+        Err((
+            near.into_iter().take(5).map(|e| e.id.clone()).collect(),
+            true,
+        ))
     }
 
     /// Whether page `id` is a code page.

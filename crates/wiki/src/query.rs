@@ -116,14 +116,18 @@ fn norm_path(arg: &str) -> String {
     norm.strip_prefix("./").unwrap_or(&norm).to_string()
 }
 
-/// The error for an id `resolve_id` could not place; `near` are its candidates.
-pub(crate) fn unknown_page(arg: &str, near: &[String]) -> String {
-    let closest = if near.is_empty() {
-        String::new()
-    } else {
-        format!("; closest: {}", near.join(", "))
-    };
-    format!("unknown page {arg:?}{closest} — use search to find ids")
+/// The error for an id `resolve_id` could not place; `near` are its
+/// candidates and `defined` the places that define an item named like the
+/// argument's file stem.
+pub(crate) fn unknown_page(arg: &str, near: &[String], defined: &[String]) -> String {
+    let mut parts = String::new();
+    if !near.is_empty() {
+        parts += &format!("; closest: {}", near.join(", "));
+    }
+    if !defined.is_empty() {
+        parts += &format!("; defined in: {}", defined.join(", "));
+    }
+    format!("unknown page {arg:?}{parts} — use search to find ids")
 }
 
 /// A code page's `## Body` without the fence lines `render_page` wraps it in,
@@ -151,7 +155,7 @@ impl Wiki {
         if self.has_page(id) && self.page(id).is_none() {
             format!("page {id:?} is in the index but its file {id}.md is missing from the wiki folder — recompile the wiki")
         } else {
-            unknown_page(arg, &[])
+            unknown_page(arg, &[], &[])
         }
     }
 }

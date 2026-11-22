@@ -419,7 +419,7 @@ impl WikiServer {
             None => wiki
                 .neighbors(&id, p.depth.unwrap_or(1), &budget)
                 .map(|pack| pack.text)
-                .ok_or_else(|| crate::query::unknown_page(&p.id, &[])),
+                .ok_or_else(|| crate::query::unknown_page(&p.id, &[], &[])),
         });
         Ok(tool_result(r, stale.as_deref()))
     }
