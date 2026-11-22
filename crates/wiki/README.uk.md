@@ -187,7 +187,7 @@ calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matche
 | агент | що записує `wiki setup` | що каже йому користуватися вікі |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) або `claude mcp add-json` (local) | інструкції сервера; інструменти завантажуються одразу |
-| pi | `.pi/mcp.json`, скіл `wiki-navigation` | скіл (інструкцій сервера pi не показує) |
+| pi | `.pi/mcp.json`, кроки навігації в `.pi/APPEND_SYSTEM.md`, скіл `wiki-navigation` | кроки й скіл (інструкцій сервера pi не показує) |
 | Cursor | `.cursor/mcp.json` | описи інструментів (у наших прогонах їх вистачило) |
 | Codex | `.codex/config.toml`, [правила навігації](#правила-навігації) в `AGENTS.md` | `AGENTS.md` |
 | будь-який інший MCP-клієнт | — ([вручну](#інші-mcp-клієнти)) | правила навігації в його файлі інструкцій |
@@ -199,8 +199,9 @@ calls  crates/wiki/src/calls.rs  Calls — Call edges between code items: matche
     wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 Команда компілює `.` у `.nollm-wiki`, потім встановлює MCP-сервер (`wiki serve --source .`) і те, що
-каже кожному агентові ним користуватися. pi отримує скіл `wiki-navigation` (як шукати код і
-правила памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він
+каже кожному агентові ним користуватися. pi отримує короткі кроки навігації в
+`.pi/APPEND_SYSTEM.md`, який pi додає до свого системного промпту, і скіл `wiki-navigation` (як
+шукати код і правила памʼяті). Claude Code не отримує скіла: інструкції сервера, де ті самі кроки навігації, він
 показує й так, а сервер позначає свої інструменти для завантаження одразу, а не через `ToolSearch`;
 власну памʼять Claude Code вікі читає сама. Codex не читає ні того, ні того, тож отримує правила
 навігації в `AGENTS.md`, між маркерами `<!-- wiki:navigation -->`. Агенти визначаються автоматично
@@ -215,7 +216,7 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 і виходить з кодом 0.
 
 - `--scope repo` — закомічені файли для всієї команди: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
+  `.pi/APPEND_SYSTEM.md`, `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
   `.agents/skills/wiki-navigation/SKILL.md` і `.nollm-wiki/` у `.gitignore`. Для файлу, який setup
   записав, а git ігнорує, він друкує `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — лише ця робоча копія: сервер для Claude Code додається через
@@ -257,6 +258,15 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 це змінює спільні файли команди: запускайте setup з `--scope repo`, бо локальний варіант пропускає
 відстежуваний `AGENTS.md`.
 
+Кроки для pi записуються позначеним блоком (`<!-- wiki:navigation -->`) у `.pi/APPEND_SYSTEM.md`;
+`--remove` прибирає блок, а файл — коли в ньому більше нічого не лишилося. pi бере
+`.pi/APPEND_SYSTEM.md` проєкту замість файлу зі своєї теки агента (`$PI_CODING_AGENT_DIR`, інакше
+`~/.pi/agent`), ніколи обидва. Тож коли в теці агента є `APPEND_SYSTEM.md`, а в проєкті немає,
+setup пропускає кроки (код виходу 1), щоб не сховати ваш файл у цьому проєкті; скопіюйте його в
+`.pi/APPEND_SYSTEM.md` і запустіть setup знову, щоб мати обидва. Коли `AGENTS.md` у теці агента
+містить блок `<!-- wiki:navigation -->` — старішу копію, покладену вручну, яку pi завантажує в
+кожному проєкті, — setup попереджає; теку агента він ніколи не редагує.
+
 `wiki`, встановлений nollm-wiki (запущений як `~/.nollm-wiki-home/bin/wiki` або з `$NOLLM_WIKI_HOME/bin`),
 агенти запускають як `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` через `sh -c` (хук промпту
 виконує цей рядок, розширення pi саме будує той самий шлях), тож жодному агентові не треба мати його
@@ -285,8 +295,8 @@ stderr `no agent found: nothing agent-specific removed; pass --agent … to remo
 
 #### pi
 
-`wiki setup --agent pi` записує `.pi/mcp.json` і скіл `wiki-navigation`; pi завантажує і те, і
-те після `/trust` (`--approve` з `pi -p`). Без скілу pi не обійдеться: інструкцій MCP-сервера для
+`wiki setup --agent pi` записує `.pi/mcp.json`, кроки навігації в `.pi/APPEND_SYSTEM.md` і скіл
+`wiki-navigation`; pi завантажує їх після `/trust` (`--approve` з `pi -p`). Без скілу pi не обійдеться: інструкцій MCP-сервера для
 серверів `direct` він не показує, тож про вікі знає лише з описів інструментів і скілу. Без нього в
 наших прогонах модель шукала через grep, а коли встановлене користувачем розширення змушувало pi
 завантажити скіл перед відповіддю (у нас це було skill-first), вона брала невідповідний

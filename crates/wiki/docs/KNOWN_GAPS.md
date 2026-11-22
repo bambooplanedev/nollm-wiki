@@ -465,6 +465,10 @@ per question is noise-level: treat single results as anecdotes.
   (`"c\u0061lque"` under `[mcp_servers]`, or `[mcp_servers."c\u0061lque"]`) is not recognised as
   naming the server: setup appends its block, the file then holds two definitions of the same table,
   and it no longer parses until one of them is removed by hand.
+- pi's steps in `.pi/APPEND_SYSTEM.md` hide an `APPEND_SYSTEM.md` the user puts in pi's agent dir
+  after setup ran: setup checks only when it runs.
+- With `--agent codex,pi` in a project whose `AGENTS.md` has Codex's block, pi reads both sets of
+  steps.
 - With `--agent codex`, a project that has `CLAUDE.md` but no `AGENTS.md` gets Codex's server but
   not its navigation steps (exit 1): a new `AGENTS.md` would make pi stop reading `CLAUDE.md`, and
   one an earlier setup created there with only the steps is removed. Seen

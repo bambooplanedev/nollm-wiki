@@ -72,6 +72,10 @@ Show the user every hint the commands printed and apply each only after they say
   user; nothing is edited for them.
 - `skipped AGENTS.md wiki navigation steps: an AGENTS.md beside CLAUDE.md hides CLAUDE.md from
   pi; ...`: the rename it names, if the user wants it.
+- `skipped .pi/APPEND_SYSTEM.md wiki navigation steps: a project .pi/APPEND_SYSTEM.md would
+  replace pi's global APPEND_SYSTEM.md ...`: the copy it names, if the user wants it.
+- `warning: <dir>/AGENTS.md holds an older wiki navigation block, loaded in every pi project; ...`:
+  tell the user; removing it is theirs to do.
 - `Codex loads the server only in a project it trusts: ...`: the trust it names.
 - `Cursor: ... cursor-agent mcp enable wiki`: run it.
 

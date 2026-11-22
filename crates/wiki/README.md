@@ -180,7 +180,7 @@ for `W21` or `D12`), a match in the first cell first; a first line names the fal
 | agent | `wiki setup` writes | what tells it to use the wiki |
 |---|---|---|
 | Claude Code | `.mcp.json` (repo) or `claude mcp add-json` (local) | the server's instructions; tools load up front |
-| pi | `.pi/mcp.json`, the `wiki-navigation` skill | the skill (pi does not show server instructions) |
+| pi | `.pi/mcp.json`, navigation steps in `.pi/APPEND_SYSTEM.md`, the `wiki-navigation` skill | the steps and the skill (pi does not show server instructions) |
 | Cursor | `.cursor/mcp.json` | the tool descriptions (enough in our runs) |
 | Codex | `.codex/config.toml`, the [navigation rules](#navigation-rules) in `AGENTS.md` | `AGENTS.md` |
 | any other MCP client | — ([by hand](#other-mcp-clients)) | the navigation rules in its instructions file |
@@ -192,8 +192,8 @@ for `W21` or `D12`), a match in the first cell first; a first line names the fal
     wiki setup [--agent claude,pi,cursor,codex] [--scope repo|local] [--hook | --no-hook] [--memory | --no-memory] [--remove] [--yes]
 
 It compiles `.` into `.nollm-wiki`, then installs the MCP server (`wiki serve --source .`) and what tells
-each agent to use it. pi gets the `wiki-navigation` skill (how to find code, and the memory
-rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
+each agent to use it. pi gets short navigation steps in `.pi/APPEND_SYSTEM.md`, which pi adds to
+its system prompt, and the `wiki-navigation` skill (how to find code, and the memory rules). Claude Code gets no skill: it shows the server's instructions, which carry the same
 navigation steps, and the server marks its tools to load up front instead of behind a `ToolSearch`
 call; its own memory is read by the wiki. Codex reads neither, so it gets the navigation rules
 in `AGENTS.md`, between `<!-- wiki:navigation -->` markers. Agents are detected (`.claude/`,
@@ -208,7 +208,7 @@ ignore lines and the memory folder, sets up no agent, says
 stderr and exits 0.
 
 - `--scope repo` — committed files for the whole team: `.mcp.json`, `.pi/mcp.json`,
-  `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
+  `.pi/APPEND_SYSTEM.md`, `.cursor/mcp.json`, `.codex/config.toml`, `AGENTS.md`,
   `.agents/skills/wiki-navigation/SKILL.md`, and `.nollm-wiki/` in `.gitignore`. For a file it wrote
   that git ignores, setup prints `warning: <file> is ignored by git; teammates will not get it`.
 - `--scope local` — this checkout only: Claude Code's server goes through
@@ -249,6 +249,14 @@ new `CLAUDE.md` whose only line is `@AGENTS.md` so Claude Code still loads it, a
 Codex and Cursor then read the same rules. If `CLAUDE.md` is committed, that changes team files:
 run setup with `--scope repo`, since local scope skips a tracked `AGENTS.md`.
 
+pi's steps go in a marked block (`<!-- wiki:navigation -->`) in `.pi/APPEND_SYSTEM.md`; `--remove`
+takes out the block, and the file when nothing else is left. pi uses a project `.pi/APPEND_SYSTEM.md`
+instead of the one in its agent dir (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`), never both. So when
+the agent dir has an `APPEND_SYSTEM.md` and the project has none, setup skips the steps (exit 1)
+rather than hide yours in this project; copy it to `.pi/APPEND_SYSTEM.md` and run setup again to get
+both. When the agent dir's `AGENTS.md` holds a `<!-- wiki:navigation -->` block, an older copy placed
+by hand that pi loads in every project, setup warns; it never edits the agent dir.
+
 A `wiki` installed by nollm-wiki (run as `~/.nollm-wiki-home/bin/wiki`, or from `$NOLLM_WIKI_HOME/bin`) has the
 agents start it as `"${NOLLM_WIKI_HOME:-$HOME/.nollm-wiki-home}/bin/wiki"` through `sh -c` (the prompt hook
 runs that line, pi's extension builds the same path itself), so no agent needs it on `PATH` and no
@@ -277,8 +285,8 @@ finding code; the wiki reads Claude Code's own memory, see [Agent memory](#agent
 
 #### pi
 
-`wiki setup --agent pi` writes `.pi/mcp.json` and the `wiki-navigation` skill; pi loads both
-after `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server
+`wiki setup --agent pi` writes `.pi/mcp.json`, the navigation steps in `.pi/APPEND_SYSTEM.md` and
+the `wiki-navigation` skill; pi loads them after `/trust` (`--approve` with `pi -p`). pi needs the skill: it does not show MCP server
 instructions for `direct` servers, so all it learns about the wiki is the tool descriptions and the
 skill. Without it, in our runs the model grepped, and when a user-installed extension made pi load a
 skill before it answered (we ran one called skill-first), it picked an unrelated one
