@@ -50,7 +50,9 @@ pub use pairs::pair_declarations;
 /// export, through the two `@item` patterns at the end: a namespace- or
 /// file-scope variable is a `value` item, and a class, struct or union data
 /// member (`int n_ = 0;`, `static constexpr int kMax = 4;`, a bitfield, one
-/// pointer, reference or array level) is a nested `value` owned by its class,
+/// pointer or array level, two levels, a reference, a function pointer) is a
+/// nested `value` owned by its class (by its typedef name for
+/// `typedef struct { … } Name;`),
 /// which `search` finds by exact name and nothing else shows (see
 /// `code_item`). `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
@@ -151,8 +153,13 @@ const QUERY: &str = r"
 (field_declaration declarator: [
   (field_identifier) @name
   (pointer_declarator declarator: (field_identifier) @name)
+  (pointer_declarator declarator: (pointer_declarator declarator: (field_identifier) @name))
+  (pointer_declarator declarator: (array_declarator declarator: (field_identifier) @name))
   (reference_declarator (field_identifier) @name)
-  (array_declarator declarator: (field_identifier) @name)]) @item
+  (array_declarator declarator: (field_identifier) @name)
+  (array_declarator declarator: (array_declarator declarator: (field_identifier) @name))
+  (function_declarator declarator: (parenthesized_declarator
+    (pointer_declarator declarator: (field_identifier) @name)))]) @item
 
 (preproc_include path: (_) @import)
 ";
@@ -360,11 +367,20 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 
     let mut chain = Vec::new();
     let mut node = def;
+    // A data member of `typedef struct { … } Name;` is owned by `Name`.
+    let data = is_data_member(def);
     while let Some(parent) = node.parent() {
         if parent.kind() == "field_declaration_list" {
             if let Some(name) = parent
                 .parent()
-                .and_then(|ty| ty.child_by_field_name("name"))
+                .and_then(|ty| {
+                    ty.child_by_field_name("name").or_else(|| {
+                        ty.parent()
+                            .filter(|t| data && t.kind() == "type_definition")
+                            .and_then(|t| t.child_by_field_name("declarator"))
+                            .filter(|d| d.kind() == "type_identifier")
+                    })
+                })
                 .and_then(|name| text.get(name.byte_range()))
             {
                 chain.push(name.to_string());
@@ -469,7 +485,7 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
     let declarator = def.child_by_field_name("declarator");
-    if def.kind() == "field_declaration" && !declarator.is_some_and(is_function_declarator) {
+    if is_data_member(def) {
         let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
         return value_shape(eq, def.child_by_field_name("default_value"), true);
     }
@@ -535,6 +551,21 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
     // spell both without a field name for the same reason), so scan children.
     d.named_children(&mut d.walk())
         .any(|c| c.kind() == "function_declarator")
+}
+
+/// True when `def` is a class, struct or union data member: a
+/// `field_declaration` that declares no function, a function pointer
+/// (`int (*open_fn)(const char*)`) being data.
+pub(crate) fn is_data_member(def: Node) -> bool {
+    let pointer = |d: Node| {
+        d.kind() == "function_declarator"
+            && d.child_by_field_name("declarator")
+                .is_some_and(|p| p.kind() == "parenthesized_declarator")
+    };
+    def.kind() == "field_declaration"
+        && def
+            .child_by_field_name("declarator")
+            .is_none_or(|d| !is_function_declarator(d) || pointer(d))
 }
 
 /// The number of parameters in the list right after `name(` in a signature:

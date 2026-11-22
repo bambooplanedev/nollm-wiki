@@ -169,6 +169,14 @@ per question is noise-level: treat single results as anecdotes.
   as a lambda, a local variable, a field outside C/C++, a function nested in
   another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
+  C/C++ data members are items up to two pointer or array levels and as
+  plain function pointers; not a member a macro declares (`FIELD(int, x)`),
+  three or more levels (`char ***p`), an array of function pointers
+  (`void (*on[4])(int)`) or a pointer to member (`int Box::* pm`, which the
+  grammar misreads; a member whose declarator is followed by a parse error is
+  left out). A namespace is in no owner chain: `ns::Class::name` finds an
+  owned `Class::name` only when no item matches the whole qualified name, and
+  any namespace prefix is accepted then; `ns::f` does not find a free `f`.
   A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
   A name with more than 3 definitions shows 3, one per page first, and a
   `+N more named …` line that counts the rest but does not list them; the

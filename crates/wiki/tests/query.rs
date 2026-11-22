@@ -2833,6 +2833,27 @@ fn a_qualified_name_returns_that_one_definition_and_no_marker() {
 }
 
 #[test]
+fn a_namespace_qualified_member_or_method_finds_its_class_member() {
+    let src = "namespace geo {\nstruct Tile {\n  int edge_len;\n  void redraw();\n};\n}\nstruct Sheet {\n  int edge_len;\n};\nstruct Frame {\n  struct Tile { int edge_len; };\n};\n";
+    let (_d, w) = code_fixture(&[("src/geo.h", src)]);
+    let found = |q: &str| {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        out.lines()
+            .filter(|l| l.starts_with("  src/"))
+            .map(|l| l.split("  ").nth(1).unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(found("geo::Tile::edge_len"), ["src/geo.h:3-3"]);
+    assert_eq!(found("geo::Tile::redraw"), ["src/geo.h:4-4"]);
+    // An exact owner chain wins over the namespace reading.
+    assert_eq!(found("Frame::Tile::edge_len"), ["src/geo.h:11-11"]);
+    // No class of that name, or a namespace without the class: nothing.
+    for q in ["geo::Zone::edge_len", "geo::edge_len", "geo::Sheet2::edge_len"] {
+        assert_eq!(found(q), Vec::<String>::new(), "{q}");
+    }
+}
+
+#[test]
 fn a_capped_function_name_gets_the_marker_without_the_class_advice() {
     let files: Vec<(String, String)> = (1..=5)
         .map(|n| (format!("src/m{n}.rs"), "pub fn run_step() {}\n".to_string()))

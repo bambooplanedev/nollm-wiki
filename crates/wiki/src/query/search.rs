@@ -131,7 +131,9 @@ impl Wiki {
     /// The items called `name` (or `owner::name`) on pages that pass `kind`
     /// and `tag`, matched case-sensitively: a name in another case is another
     /// item (`max_weekly_fee_usd` is a field, `MAX_WEEKLY_FEE_USD` a
-    /// constant). Module and top-level items never.
+    /// constant). Module and top-level items never. `Inner::f` also names
+    /// `Outer::Inner::f`; when nothing matches so, `ns::Inner::f` names an
+    /// owned `Inner::f`, since an owner chain holds no namespace.
     fn definitions(
         &self,
         name: &str,
@@ -139,20 +141,30 @@ impl Wiki {
         tag: Option<&str>,
     ) -> Vec<(&Entry, &CodeItem)> {
         let qualified = name.contains("::");
-        self.items
-            .iter()
-            .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
-            .filter(|(e, _)| e.shown(kind, tag))
-            .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+        let all = || {
+            self.items
+                .iter()
+                .filter_map(|(id, items)| Some((self.entries.get(id)?, items)))
+                .filter(|(e, _)| e.shown(kind, tag))
+                .flat_map(|(e, items)| items.iter().map(move |i| (e, i)))
+                .filter(|(_, i)| !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel))
+        };
+        let found: Vec<_> = all()
             .filter(|(_, i)| {
-                !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
-                    && if qualified {
-                        // `Inner::f` also names `Outer::Inner::f`.
-                        let q = i.qualified_name();
-                        q == name || q.ends_with(&format!("::{name}"))
-                    } else {
-                        i.name == name
-                    }
+                if qualified {
+                    let q = i.qualified_name();
+                    q == name || q.ends_with(&format!("::{name}"))
+                } else {
+                    i.name == name
+                }
+            })
+            .collect();
+        if !found.is_empty() || !qualified {
+            return found;
+        }
+        all()
+            .filter(|(_, i)| {
+                i.owner.is_some() && name.ends_with(&format!("::{}", i.qualified_name()))
             })
             .collect()
     }

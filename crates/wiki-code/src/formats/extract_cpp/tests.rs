@@ -876,3 +876,66 @@ fn anonymous_members_and_bitfields_do_not_panic() {
         ]
     );
 }
+
+#[test]
+fn pointer_array_and_function_pointer_members_are_nested_values() {
+    let src = "struct Ops {
+  int (*open_fn)(const char*);
+  void (*cb)(int);
+  char **argv_list;
+  int const* const* pp;
+  int grid[3][3];
+  char *names[4];
+  unsigned bits : 3, more : 2;
+  int Box::* pm;
+  ATOMIC int ticks;
+  int *RESTRICT slots;
+};
+typedef struct { int anon_field; } Anon;
+";
+    assert_eq!(
+        members("ops.h", src),
+        vec![
+            m("Ops::open_fn", "2-2", "int (*open_fn)(const char*)"),
+            m("Ops::cb", "3-3", "void (*cb)(int)"),
+            m("Ops::argv_list", "4-4", "char **argv_list"),
+            m("Ops::pp", "5-5", "int const* const* pp"),
+            m("Ops::grid", "6-6", "int grid[3][3]"),
+            m("Ops::names", "7-7", "char *names[4]"),
+            m("Ops::bits", "8-8", "unsigned bits : 3"),
+            m("Ops::more", "8-8", "unsigned more : 2"),
+            m("Ops::ticks", "10-10", "ATOMIC int ticks"),
+            m("Anon::anon_field", "13-13", "int anon_field"),
+        ]
+    );
+}
+
+#[test]
+fn methods_constructors_operators_and_aliases_add_no_member() {
+    let src = "class Gadget {
+public:
+  Gadget();
+  ~Gadget();
+  Gadget& operator=(const Gadget&);
+  friend void swap(Gadget&, Gadget&);
+  virtual void draw() = 0;
+  static Gadget* make();
+  enum Mode { kIdle, kBusy };
+  using Id = int;
+  typedef int Num;
+private:
+  int (*hook_)(int);
+};
+";
+    let e = crate::extract("gadget.h", src);
+    assert_eq!(
+        members("gadget.h", src),
+        vec![m("Gadget::hook_", "13-13", "int (*hook_)(int)")]
+    );
+    assert!(!e.methods.iter().any(|n| n == "hook_"), "{:?}", e.methods);
+    assert!(
+        !e.symbols.iter().any(|s| s.contains("hook_")),
+        "{:?}",
+        e.symbols
+    );
+}

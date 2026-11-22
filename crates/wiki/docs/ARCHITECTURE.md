@@ -983,7 +983,9 @@ item with `nested` set, never public and found by `search` only: a Python
 `def` directly in a function body (`Placement::Nested`, owner-less; one in a
 class defined there stays out), a shell file's first top-level `NAME=` of
 each UPPERCASE name, and a C/C++ class, struct or union data member (a
-`value` owned by its class, `static constexpr` ones included). A nested
+`value` owned by its class, or by the typedef name of `typedef struct { … }
+Name;`; `static constexpr` ones and function pointers included, see
+`extract_cpp`'s query for the declarator shapes). A nested
 value matches its exact name only: word scoring and the any-case fallback
 skip it. Outlines (`Keep::items`), the hint, `also defined`
 (`same_name`) and the call graph skip it: it is no call target and owns no

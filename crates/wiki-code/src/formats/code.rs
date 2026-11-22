@@ -853,7 +853,17 @@ fn code_item<'t>(
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
     // A C/C++ data member: a value `search` finds by its exact name only.
-    let member = spec.lang_name == "cpp" && def.kind() == "field_declaration" && !is_function(def);
+    let member = spec.lang_name == "cpp" && super::extract_cpp::is_data_member(def);
+    // An error after the name means the grammar misread it: `int Box::* pm;`
+    // names `Box`, `int *RESTRICT slots;` names `RESTRICT`. One before it
+    // (`ATOMIC int ticks;`, a macro the grammar cannot know) leaves it right.
+    if member
+        && def
+            .children(&mut def.walk())
+            .any(|c| c.is_error() && c.start_byte() >= name.end_byte())
+    {
+        return None;
+    }
     let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
         _ if member => CodeItemKind::Value,
         (ItemKind::Member, true) => CodeItemKind::Method,
