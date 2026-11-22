@@ -495,6 +495,8 @@ fn namespace_scope_variables_are_value_items_but_not_exports() {
             "6-6 value kName pub",
             "7-7 value table pub",
             "9-12 type B pub",
+            "10-10 value B::a priv",
+            "11-11 value B::M priv",
             "13-15 fn f pub",
         ]
     );
@@ -548,14 +550,18 @@ fn a_trailing_member_doc_never_documents_the_next_item() {
         item_lines(&e.items),
         vec![
             "1-10 type Book pub",
+            "2-2 value Book::size_ priv",
             "3-3 method Book::apply pub",
+            "4-4 value Book::count priv",
             "5-6 method Book::reset pub",
+            "7-7 value Book::x priv",
             "9-9 method Book::clear pub",
         ]
     );
-    assert_eq!(e.items[1].doc, None);
-    assert_eq!(e.items[2].doc.as_deref(), Some("Resets everything."));
-    assert_eq!(e.items[3].doc, None);
+    let doc = |n: usize| e.items[n].doc.as_deref();
+    assert_eq!([doc(1), doc(2), doc(3)], [None, None, None]);
+    assert_eq!(doc(4), Some("Resets everything."));
+    assert_eq!([doc(5), doc(6)], [None, None]);
 }
 
 #[test]
@@ -699,8 +705,11 @@ fn a_type_body_inside_a_signature_is_elided() {
         [
             "struct client",
             "typedef struct client {…} client",
+            "int id",
+            "char *name",
             "struct config",
             "static struct config {…} config",
+            "int port",
             "enum {…} mode",
         ],
         "{sigs:?}"
@@ -747,4 +756,123 @@ fn a_signature_never_reads_back_a_skipped_branch_or_a_broken_declarator() {
             .collect();
         assert_eq!(sigs, want, "{path}");
     }
+}
+
+/// `(owner::name, start-end, signature)` of every nested value item; each one
+/// is private.
+fn members(path: &str, src: &str) -> Vec<(String, String, String)> {
+    let e = crate::extract(path, src);
+    e.items
+        .iter()
+        .filter(|i| i.nested && i.kind == crate::model::CodeItemKind::Value)
+        .map(|i| {
+            assert!(!i.public, "{} is public", i.name);
+            let owner = i
+                .owner
+                .as_deref()
+                .map_or(String::new(), |o| format!("{o}::"));
+            (
+                format!("{owner}{}", i.name),
+                format!("{}-{}", i.start_line, i.end_line),
+                i.signature.clone(),
+            )
+        })
+        .collect()
+}
+
+fn m(name: &str, lines: &str, sig: &str) -> (String, String, String) {
+    (name.to_string(), lines.to_string(), sig.to_string())
+}
+
+const WIDGET_H: &str = "\
+class Widget {
+public:
+  void step();
+  int count() const { return n_; }
+private:
+  std::array<uint8_t, 4> pane_border_width_{};
+  int n_ = 0;
+  double zoom_;
+  static constexpr int kMaxPanes = 4;
+  static const int kMin = 1;
+  Order* head_;
+};
+";
+
+#[test]
+fn class_data_members_are_nested_values_owned_by_the_class() {
+    assert_eq!(
+        members("widget.h", WIDGET_H),
+        vec![
+            m(
+                "Widget::pane_border_width_",
+                "6-6",
+                "std::array<uint8_t, 4> pane_border_width_"
+            ),
+            m("Widget::n_", "7-7", "int n_ = 0"),
+            m("Widget::zoom_", "8-8", "double zoom_"),
+            m(
+                "Widget::kMaxPanes",
+                "9-9",
+                "static constexpr int kMaxPanes = 4"
+            ),
+            m("Widget::kMin", "10-10", "static const int kMin = 1"),
+            m("Widget::head_", "11-11", "Order* head_"),
+        ]
+    );
+}
+
+#[test]
+fn data_members_leave_methods_exports_and_defined_names_as_they_were() {
+    let e = crate::extract("widget.h", WIDGET_H);
+    let shown: Vec<&String> = e
+        .items
+        .iter()
+        .filter(|i| !i.nested)
+        .map(|i| &i.name)
+        .collect();
+    assert_eq!(shown, ["Widget", "step", "count"]);
+    assert_eq!(e.items.iter().filter(|i| i.name == "step").count(), 1);
+    assert_eq!(
+        e.symbols,
+        [
+            "class Widget",
+            "int Widget::count() const",
+            "void Widget::step()"
+        ]
+    );
+    assert_eq!(e.methods, ["count", "step"]);
+    assert_eq!(e.defined, ["Widget"]);
+}
+
+#[test]
+fn plain_struct_fields_are_nested_values_too() {
+    let src =
+        "struct Cell {\n  int row;\n  double width, height;\n  struct Cell* next;\n  char tag[8];\n};\n";
+    assert_eq!(
+        members("cell.c", src),
+        vec![
+            m("Cell::row", "2-2", "int row"),
+            m("Cell::height", "3-3", "double height"),
+            m("Cell::width", "3-3", "double width"),
+            m("Cell::next", "4-4", "struct Cell* next"),
+            m("Cell::tag", "5-5", "char tag[8]"),
+        ]
+    );
+}
+
+#[test]
+fn anonymous_members_and_bitfields_do_not_panic() {
+    let src = "struct P {\n  union { int i; float f; };\n  struct { int a; } s;\n  unsigned flag : 1;\n  class Inner { int deep_; };\n};\nvoid g() { struct T { int local; }; }\n";
+    assert_eq!(
+        members("p.h", src),
+        vec![
+            m("P::f", "2-2", "float f"),
+            m("P::i", "2-2", "int i"),
+            m("P::a", "3-3", "int a"),
+            m("P::s", "3-3", "struct {…} s"),
+            m("P::flag", "4-4", "unsigned flag : 1"),
+            m("P::Inner::deep_", "5-5", "int deep_"),
+        ]
+    );
 }

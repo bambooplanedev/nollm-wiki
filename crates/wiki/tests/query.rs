@@ -2720,6 +2720,61 @@ fn a_shell_global_stays_out_of_page_graph_and_hint() {
     assert!(!hint.contains("QX_PY_DERIVE"), "{hint}");
 }
 
+const LAYOUT_H: &str = "\
+#pragma once
+/// Lays out the panes of one window.
+class PaneLayout {
+public:
+  bool hasPaneBorder(int pane) const { return pane_border_width_[pane] != 0; }
+private:
+  std::array<uint8_t, 4> pane_border_width_{};
+  static constexpr int kMaxPanes = 4;
+};
+";
+
+#[test]
+fn a_cpp_data_member_is_found_by_its_exact_name() {
+    let (_d, w) = code_fixture(&[("src/layout.h", LAYOUT_H)]);
+    let out = wiki::serve::search_lines(&w.search("pane_border_width_", None, 10));
+    assert!(
+        out.contains(
+            "  src/layout.h:7-7  PaneLayout::pane_border_width_  std::array<uint8_t, 4> pane_border_width_\n"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("[called by"), "{out}");
+    assert_eq!(
+        w.not_found("pane_border_width_ kMaxPanes", None, None),
+        Vec::<String>::new()
+    );
+    // Exact case only, as for shell globals.
+    assert_eq!(
+        w.not_found("KMAXPANES", None, None),
+        vec!["KMAXPANES".to_string()]
+    );
+}
+
+#[test]
+fn a_cpp_data_member_stays_out_of_word_queries_page_graph_and_hint() {
+    let (_d, w) = code_fixture(&[("src/layout.h", LAYOUT_H)]);
+    for q in ["pane border width", "max panes", "pane layout"] {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        assert!(!out.contains("::pane_border_width_"), "{q}: {out}");
+        assert!(!out.contains("::kMaxPanes"), "{q}: {out}");
+    }
+    let outline = w.outline("layout", None).unwrap();
+    assert!(!outline.contains("kMaxPanes"), "{outline}");
+    assert!(!outline.contains("pane_border_width_ "), "{outline}");
+    assert!(w.callers("layout", "kMaxPanes", None, None).is_err());
+    let pack = w
+        .neighbors("layout", 1, &PackBudget::default())
+        .unwrap()
+        .text;
+    assert!(!pack.contains("::kMaxPanes"), "{pack}");
+    let hint = wiki::hint::hint_lines(&w, "where is the pane border width of the pane layout");
+    assert!(!hint.contains("::pane_border_width_"), "{hint}");
+}
+
 const CALLED_RS: &str = "\
 pub const MAX_DEPTH: usize = 3;
 pub struct OrderBook;

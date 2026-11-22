@@ -101,6 +101,6 @@ fn c_with_cpp_keyword_identifiers_known_limit() {
     )]);
     assert_eq!(
         names(&items(&out), "k"),
-        ["before", "new", "class", "takes_this", "after"]
+        ["before", "new", "class", "x", "takes_this", "after"]
     );
 }

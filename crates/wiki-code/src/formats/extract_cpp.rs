@@ -46,10 +46,13 @@ pub use pairs::pair_declarations;
 /// what admit constructors (an `identifier` declarator, because the grammar
 /// cannot know the name is the class's), destructors and operators.
 ///
-/// Types and functions are indexed; DATA is not — no member variables, no
-/// file-scope globals or constants. The one exception is the `@item` pattern
-/// at the end: a namespace- or file-scope variable is an item (kind `value`),
-/// never an export. `field_declaration.declarator` is
+/// Types and functions are exports and items. Data is an item only, never an
+/// export, through the two `@item` patterns at the end: a namespace- or
+/// file-scope variable is a `value` item, and a class, struct or union data
+/// member (`int n_ = 0;`, `static constexpr int kMax = 4;`, a bitfield, one
+/// pointer, reference or array level) is a nested `value` owned by its class,
+/// which `search` finds by exact name and nothing else shows (see
+/// `code_item`). `field_declaration.declarator` is
 /// `multiple`, so `int a, b, c;` emits three matches over one node, and
 /// `default_cut` finds no `body` field. An item's signature is then the
 /// declaration's specifiers plus that declarator's own text (`int a`, `int *b`,
@@ -144,6 +147,12 @@ const QUERY: &str = r"
     (pointer_declarator declarator: (identifier) @name)
     (reference_declarator (identifier) @name)
     (array_declarator declarator: (identifier) @name)])]) @item
+
+(field_declaration declarator: [
+  (field_identifier) @name
+  (pointer_declarator declarator: (field_identifier) @name)
+  (reference_declarator (field_identifier) @name)
+  (array_declarator declarator: (field_identifier) @name)]) @item
 
 (preproc_include path: (_) @import)
 ";
@@ -460,6 +469,10 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
 /// first `=` would give `b` the signature `int a = 1`.
 pub(crate) fn cpp_shape(def: Node) -> Shape {
     let declarator = def.child_by_field_name("declarator");
+    if def.kind() == "field_declaration" && !declarator.is_some_and(is_function_declarator) {
+        let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+        return value_shape(eq, def.child_by_field_name("default_value"), true);
+    }
     if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
         let single = def
             .children_by_field_name("declarator", &mut def.walk())

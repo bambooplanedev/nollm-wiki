@@ -682,7 +682,7 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
                 &shape,
             );
             let item = item.map(|(key, mut it, node)| {
-                it.nested = nested;
+                it.nested |= nested;
                 let def = Def {
                     source,
                     start_byte: node.start_byte(),
@@ -827,7 +827,8 @@ fn opens_its_line(node: Node, text: &str) -> bool {
 
 /// One definition as an item, keyed by its `@name` node's start byte, or
 /// `None` when it is not an item: no `@name` (an impl header), rejected by
-/// kind (a field, a variant, an associated const), or an empty signature.
+/// kind (a field outside C/C++, a variant, an associated const), or an
+/// empty signature.
 ///
 /// The range climbs from the signature's start node over the contiguous
 /// leads above it; a blank line, a lead trailing other code on its line, or
@@ -851,7 +852,10 @@ fn code_item<'t>(
         .child_by_field_name("declaration")
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
+    // A C/C++ data member: a value `search` finds by its exact name only.
+    let member = spec.lang_name == "cpp" && def.kind() == "field_declaration" && !is_function(def);
     let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
+        _ if member => CodeItemKind::Value,
         (ItemKind::Member, true) => CodeItemKind::Method,
         (ItemKind::FreeDef, true) => CodeItemKind::Fn,
         (ItemKind::FreeDef, false) => CodeItemKind::Type,
@@ -945,7 +949,7 @@ fn code_item<'t>(
     };
 
     let mut item = CodeItem {
-        nested: false,
+        nested: member,
         kind,
         name: name_text.to_string(),
         owner: owner.map(str::to_string),
@@ -954,7 +958,7 @@ fn code_item<'t>(
         end_line: last_row(top) + 1,
         doc: raw_doc.as_deref().and_then(item_doc_line),
         doc_text: None,
-        public,
+        public: public && !member,
         twin: None,
         test: false,
         calls: Vec::new(),
