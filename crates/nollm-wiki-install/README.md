@@ -208,7 +208,7 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
 
 ```json
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "modules": [
     {
       "name": "wiki",
@@ -217,13 +217,13 @@ every archive from `download/v<version>/`. `install.sh` reads `SHA256SUMS` from
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "wiki-v0.9.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "wiki-v0.9.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "nollm-wiki-install": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "nollm-wiki-install-v0.9.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "nollm-wiki-install-v0.9.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }

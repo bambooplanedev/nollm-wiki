@@ -214,7 +214,7 @@ errors: <modules>` і виходить з кодом першого модуля
 
 ```json
 {
-  "version": "0.9.1",
+  "version": "0.9.2",
   "modules": [
     {
       "name": "wiki",
@@ -223,13 +223,13 @@ errors: <modules>` і виходить з кодом першого модуля
       "requires": [],
       "options": [{ "name": "memory", "default": true }],
       "archives": {
-        "aarch64-apple-darwin": { "file": "wiki-v0.9.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+        "aarch64-apple-darwin": { "file": "wiki-v0.9.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
       }
     }
   ],
   "nollm-wiki-install": {
     "archives": {
-      "aarch64-apple-darwin": { "file": "nollm-wiki-install-v0.9.1-aarch64-apple-darwin.tar.gz", "sha256": "…" }
+      "aarch64-apple-darwin": { "file": "nollm-wiki-install-v0.9.2-aarch64-apple-darwin.tar.gz", "sha256": "…" }
     }
   }
 }
