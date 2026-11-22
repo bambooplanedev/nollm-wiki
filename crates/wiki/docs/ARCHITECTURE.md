@@ -744,8 +744,11 @@ matching:
   test page matched, that line would fire on nearly every query. For a
   query of names alone, `Wiki::in_tests_only` picks the `not_found` names a
   `tests` search would find (a definition on, or the module stem of, a test
-  page), and the line output gives each `<name>: in test pages only; use
-  kind "tests"` in place of `no symbol named`.
+  page), and the line output opens with `<name>: in test pages only; use
+  kind "tests"` in place of `no symbol named`, then those names' test
+  definitions (`Wiki::test_definitions`: `lift_names` under `tests`, so the
+  same cap and marker) and no ranked pages for them; the other names are
+  answered as a query of their own, so one call gives the definition.
 - **Output.** `serve::search_lines` renders the default line format (page
   line `id  path  [date  ]title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page

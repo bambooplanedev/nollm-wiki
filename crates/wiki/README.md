@@ -661,8 +661,9 @@ name of the query is defined, the ranked pages follow and the line ends
 `; the pages below match its words` (`their words` for several names): they match the name's words,
 not the name. With `code`, a name
 defined only on test pages, or the module name of a test file only, gets
-`<name>: in test pages only; use kind "tests"` instead. The definitions of the
-other names and any ranked hits come after it. In such a query a function or method line ends its signature with
+`<name>: in test pages only; use kind "tests"` first instead, followed by those test definitions
+(the lines `tests` would give) and no ranked pages for it. The answer for the other names comes
+after it, as if they were the whole query. In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's
 definition included), and has no note when N is 0. In any other query a definition the ranking missed
 is added after its page's lines, or as a page after the hits; the order does not change. A Python

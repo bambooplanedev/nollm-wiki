@@ -153,17 +153,33 @@ fn the_missing_line_says_what_the_pages_below_are() {
 fn the_answer_lines_name_the_tests_kind() {
     let (_d, w) = fixture();
     let code = Some(&KindFilter::Code);
+    let pointer = "tests also match";
+    // The test definition itself, and no ranked pages for the name.
     let t = text(&w, "only_in_tests", code);
+    let head = "only_in_tests: in test pages only; use kind \"tests\"\n";
+    assert!(t.starts_with(head), "{t}");
     assert!(
-        t.starts_with("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        t.contains("\n  tests/ledger_flow.rs:2-2  only_in_tests"),
         "{t}"
     );
-    let t = text(&w, "zq_xv only_in_tests", code);
-    assert!(t.contains("no symbol named zq_xv"), "{t}");
+    assert!(!t.contains("src/") && !t.contains(pointer), "{t}");
+    assert_eq!(t.lines().count(), 3, "{t}");
+    // A test file's module name: its page line.
+    let t = text(&w, "ledger_flow", code);
+    assert!(t.contains("  tests/ledger_flow.rs  "), "{t}");
+    assert!(!t.contains("src/"), "{t}");
+    // The other names keep their answer, ranked by their own words.
+    let t = text(&w, "ledger_balance only_in_tests", code);
+    assert!(t.starts_with(head), "{t}");
     assert!(
-        t.contains("only_in_tests: in test pages only; use kind \"tests\"\n"),
+        t.contains("no symbol named ledger_balance; the pages below match its words\n"),
         "{t}"
     );
+    assert!(t.contains("  src/ledger.rs  "), "{t}");
+    let t = text(&w, "post_balance only_in_tests", code);
+    assert!(t.starts_with(head), "{t}");
+    assert!(t.contains("src/ledger.rs:1-2  post_balance"), "{t}");
+    assert!(!t.contains("no symbol named"), "{t}");
     assert_eq!(text(&w, "zq", code), "no matches\n");
 }
 

@@ -198,6 +198,21 @@ impl Wiki {
             .collect()
     }
 
+    /// The answer a `tests` search gives a query of `names` alone: their
+    /// definitions (and module pages) on test pages, as `lift_names` lists
+    /// them, with no ranked pages.
+    pub fn test_definitions(&self, names: &[String], tag: Option<&str>, limit: usize) -> Vec<Hit> {
+        let mut hits = Vec::new();
+        self.lift_names(
+            &mut hits,
+            &names.join(" "),
+            Some(&KindFilter::Tests),
+            tag,
+            limit,
+        );
+        hits
+    }
+
     /// The pages passing `kind` and `tag` whose file is known by `name`
     /// (`module_stem`, any case): `auto_refill` names `auto_refill.rs`, which
     /// is no item. Never a memory note.

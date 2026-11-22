@@ -210,8 +210,10 @@ const USE_TESTS: &str = "use kind \"tests\"";
 /// names alone that no item defines (`Wiki::not_found`). The line says the
 /// pages below match the names' words only when they are the ranked pages,
 /// that is when no name of the query has a definition. Names in `tests_only`
-/// (`Wiki::in_tests_only`) get their own line instead, sending them to
-/// `tests`; else `tests_cut` adds a last line that test pages also match.
+/// (`Wiki::in_tests_only`) come first instead, on a line sending them to
+/// `tests` and with their test definitions (`Wiki::test_definitions`); the
+/// rest of the query is answered without them. Else `tests_cut` adds a last
+/// line that test pages also match.
 pub fn search_text(
     w: &Wiki,
     q: &str,
@@ -219,30 +221,44 @@ pub fn search_text(
     tag: Option<&str>,
     limit: Option<usize>,
 ) -> String {
-    let (hits, tests_cut) = w.search_answer(q, kind, tag, limit);
     let missing = w.not_found(q, kind, tag);
     let tests_only = w.in_tests_only(&missing, kind, tag);
     let mut out = String::new();
-    let plain: Vec<&str> = missing
-        .iter()
-        .filter(|n| !tests_only.contains(n))
-        .map(String::as_str)
-        .collect();
-    if !plain.is_empty() {
-        let names = plain.join(", ");
-        // Pages ranked by the words, unless another name's definitions replaced them.
-        let ranked = missing.len() == Wiki::query_names(q).0.len();
-        out += &match (hits.is_empty() || !ranked, plain.len()) {
-            (true, _) => format!("no symbol named {names}\n"),
-            (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
-            (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
-        };
-    }
-    if !tests_only.is_empty() {
+    let rest: String;
+    let q = if tests_only.is_empty() {
+        q
+    } else {
         out += &format!(
             "{}: in test pages only; {USE_TESTS}\n",
             tests_only.join(", ")
         );
+        out += &search_lines(&w.test_definitions(&tests_only, tag, limit.unwrap_or(10)));
+        let (names, _) = Wiki::query_names(q);
+        rest = names
+            .into_iter()
+            .filter(|n| !tests_only.iter().any(|t| t == n))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if rest.is_empty() {
+            return out;
+        }
+        &rest
+    };
+    let (hits, tests_cut) = w.search_answer(q, kind, tag, limit);
+    let missing: Vec<&str> = missing
+        .iter()
+        .filter(|n| !tests_only.contains(n))
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        let names = missing.join(", ");
+        // Pages ranked by the words, unless another name's definitions replaced them.
+        let ranked = missing.len() == Wiki::query_names(q).0.len();
+        out += &match (hits.is_empty() || !ranked, missing.len()) {
+            (true, _) => format!("no symbol named {names}\n"),
+            (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
+            (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
+        };
     }
     if !hits.is_empty() || missing.is_empty() {
         out += &search_lines(&hits);
