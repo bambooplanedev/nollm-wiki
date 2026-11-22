@@ -830,6 +830,7 @@ fn search_lines_keeps_one_line_per_hit_and_symbol() {
             nested: false,
             also: None,
             called_by: None,
+            hidden: None,
         }],
     };
     let out = wiki::serve::search_lines(&[hit]);
@@ -2773,6 +2774,83 @@ fn a_cpp_data_member_stays_out_of_word_queries_page_graph_and_hint() {
     assert!(!pack.contains("::kMaxPanes"), "{pack}");
     let hint = wiki::hint::hint_lines(&w, "where is the pane border width of the pane layout");
     assert!(!hint.contains("::pane_border_width_"), "{hint}");
+}
+
+const ORDER_ID_FILES: [(&str, &str); 3] = [
+    (
+        "src/shop.h",
+        "struct Shop {\n  struct Cart { unsigned order_id; };\n  struct Invoice { unsigned order_id; };\n  struct Refund { unsigned order_id; };\n};\n",
+    ),
+    (
+        "src/fill.h",
+        "#include \"shop.h\"\nstruct Fill { unsigned order_id; };\n",
+    ),
+    (
+        "src/ack.h",
+        "#include \"shop.h\"\nstruct Ack { unsigned order_id; };\n",
+    ),
+];
+
+#[test]
+fn a_capped_name_spreads_over_pages_and_says_how_many_are_hidden() {
+    let (_d, w) = code_fixture(&ORDER_ID_FILES);
+    let out = wiki::serve::search_lines(&w.search("order_id", None, 10));
+    let shown: Vec<&str> = out
+        .lines()
+        .filter(|l| l.contains("::order_id  "))
+        .map(|l| l.split("  ").nth(1).unwrap())
+        .collect();
+    assert_eq!(shown.len(), 3, "{out}");
+    let files: std::collections::BTreeSet<&str> =
+        shown.iter().map(|l| l.split(':').next().unwrap()).collect();
+    assert_eq!(files.len(), 3, "one per page first: {out}");
+    assert!(
+        out.contains(
+            "\n    +2 more named order_id on the pages above; narrow with Class::order_id or a path word\n"
+        ),
+        "{out}"
+    );
+    // The marker follows the name's last shown line, the answer ends there.
+    assert!(out.trim_end().ends_with("or a path word"), "{out}");
+}
+
+#[test]
+fn a_qualified_name_returns_that_one_definition_and_no_marker() {
+    let (_d, w) = code_fixture(&ORDER_ID_FILES);
+    for (q, want) in [
+        ("Fill::order_id", "src/fill.h:2-2  Fill::order_id"),
+        ("Cart::order_id", "src/shop.h:2-2  Shop::Cart::order_id"),
+        (
+            "Shop::Refund::order_id",
+            "src/shop.h:4-4  Shop::Refund::order_id",
+        ),
+    ] {
+        let out = wiki::serve::search_lines(&w.search(q, None, 10));
+        assert_eq!(out.matches("order_id  ").count(), 1, "{q}: {out}");
+        assert!(out.contains(want), "{q}: {out}");
+        assert!(!out.contains("more named"), "{q}: {out}");
+    }
+}
+
+#[test]
+fn a_capped_function_name_gets_the_marker_without_the_class_advice() {
+    let files: Vec<(String, String)> = (1..=5)
+        .map(|n| (format!("src/m{n}.rs"), "pub fn run_step() {}\n".to_string()))
+        .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, t)| (p.as_str(), t.as_str()))
+        .collect();
+    let (_d, w) = code_fixture(&refs);
+    let out = wiki::serve::search_lines(&w.search("run_step", None, 10));
+    assert!(
+        out.contains("\n    +2 more named run_step on 2 other pages; narrow with a path word\n"),
+        "{out}"
+    );
+    // At or under the cap, no marker.
+    let (_e, few) = code_fixture(&refs[..3]);
+    let out = wiki::serve::search_lines(&few.search("run_step", None, 10));
+    assert!(!out.contains("more named"), "{out}");
 }
 
 const CALLED_RS: &str = "\

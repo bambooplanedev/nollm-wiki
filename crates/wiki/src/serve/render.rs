@@ -108,7 +108,8 @@ pub fn memory_prefix(o: &Origin) -> String {
 /// per page, then one `  path:start-end  name  signature  — doc` line per
 /// symbol (`SymbolLine::called_by` adds `  [called by N: callers]`, callers in backticks,
 /// before the doc; a function with exactly one other definition elsewhere adds
-/// `    also defined: path:start-end  name`), or
+/// `    also defined: path:start-end  name`; the last line shown for a name
+/// past `DEFINITIONS_PER_NAME` adds `    +N more named <name> …`), or
 /// the snippet (four-space indent) when the page has no symbols. A summary,
 /// snippet or doc is cut at `LINE_CHARS`, as a hint line is.
 /// A memory note renders as the hook's one line, `memory (origin): path — summary`
@@ -175,6 +176,22 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 if !shown.contains(&(p, *a, *b)) {
                     out.push_str(&format!("    also defined: {p}:{a}-{b}  {name}\n"));
                 }
+            }
+            if let Some(m) = &s.hidden {
+                let place = match m.pages {
+                    0 => " on the pages above".to_string(),
+                    1 => " on 1 other page".to_string(),
+                    n => format!(" on {n} other pages"),
+                };
+                let owner = if m.owned {
+                    format!("Class::{} or ", m.name)
+                } else {
+                    String::new()
+                };
+                out.push_str(&format!(
+                    "    +{} more named {}{place}; narrow with {owner}a path word\n",
+                    m.count, m.name
+                ));
             }
         }
         if let (true, Some(sn)) = (h.symbols.is_empty(), &h.snippet) {

@@ -696,9 +696,15 @@ matching:
   (`search_tagged`), not in `hint`. A query word with `_` or `::`, or an
   upper-case letter after the first, is an identifier (`identifier`: outer
   punctuation trimmed, `_` kept). Its definitions are the items named so,
-  or `owner::name` so, case-sensitively only (a name in another case is another item); modules and
+  or `owner::name` so (`Inner::f` also names `Outer::Inner::f`),
+  case-sensitively only (a name in another case is another item); modules and
   top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
-  pages ranked higher first, then by pagerank. In a query of identifiers
+  pages ranked higher first, then by pagerank, one per page before any
+  page's second. A name with more than 3 marks its last shown line
+  (`SymbolLine::hidden`), which the line output follows with
+  `+N more named <name> on M other pages; narrow with Class::<name> or a
+  path word` (`Class::` only when a hidden one has an owner; `--format
+  json` has no marker). In a query of identifiers
   alone a name equal, in any case, to a page's `module_stem` puts that page
   (`stem_pages`, same cap and order) before its definitions, as a page with
   no lines: a module is no item. Such a query with any defined or stem page

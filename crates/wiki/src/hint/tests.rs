@@ -17,6 +17,7 @@ fn line(name: &str, start: usize, end: usize, test: bool) -> SymbolLine {
         nested: false,
         also: None,
         called_by: None,
+        hidden: None,
     }
 }
 

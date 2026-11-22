@@ -284,6 +284,21 @@ pub struct SymbolLine {
     /// How many functions call it, as `callers` lists them one level up;
     /// set on a function's line in a query of names alone, when any does.
     pub called_by: Option<usize>,
+    /// On the last line shown for a queried name: the definitions of that
+    /// name `DEFINITIONS_PER_NAME` left out.
+    pub hidden: Option<Hidden>,
+}
+
+/// The definitions of a queried name past `DEFINITIONS_PER_NAME`.
+#[derive(Clone)]
+pub struct Hidden {
+    /// The name as queried.
+    pub name: String,
+    pub count: usize,
+    /// Pages holding them that show none of the name's lines.
+    pub pages: usize,
+    /// Whether any has an owner, so `Owner::name` narrows to it.
+    pub owned: bool,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,

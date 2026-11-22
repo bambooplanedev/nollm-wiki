@@ -22,6 +22,7 @@ impl Wiki {
             nested: i.nested,
             also: self.same_name(i, path),
             called_by: None,
+            hidden: None,
         }
     }
 

@@ -170,7 +170,9 @@ per question is noise-level: treat single results as anecdotes.
   another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
   A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
-  A name defined on more than 3 pages shows 3 definitions and no "+N more" marker.
+  A name with more than 3 definitions shows 3, one per page first, and a
+  `+N more named …` line that counts the rest but does not list them; the
+  JSON output has no such count.
   `--format json` has no `not found` entries. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);

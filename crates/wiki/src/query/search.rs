@@ -1,8 +1,8 @@
 //! Ranked search: `search` and its tagged, scoped and prompt forms, lifting and expansion.
 
 use super::{
-    gate_len, query_dates, unfence, Candidate, Entry, Hit, MemoryScope, PassStats, SymbolLine,
-    Wiki, MEMORY_GATE_RATIO, MEMORY_TAIL,
+    gate_len, query_dates, unfence, Candidate, Entry, Hidden, Hit, MemoryScope, PassStats,
+    SymbolLine, Wiki, MEMORY_GATE_RATIO, MEMORY_TAIL,
 };
 use crate::model::{CodeItem, CodeItemKind, KindFilter};
 use aho_corasick::AhoCorasick;
@@ -147,7 +147,9 @@ impl Wiki {
             .filter(|(_, i)| {
                 !matches!(i.kind, CodeItemKind::Module | CodeItemKind::TopLevel)
                     && if qualified {
-                        i.qualified_name() == name
+                        // `Inner::f` also names `Outer::Inner::f`.
+                        let q = i.qualified_name();
+                        q == name || q.ends_with(&format!("::{name}"))
                     } else {
                         i.name == name
                     }
@@ -263,27 +265,58 @@ impl Wiki {
                     .then_with(|| a.path.cmp(&b.path))
                     .then_with(|| x.start_line.cmp(&y.start_line))
             });
-            defs.truncate(Self::DEFINITIONS_PER_NAME.min(limit));
-            for (e, i) in defs {
+            // One per page first: a page's second definition after every
+            // page's first (a stable sort keeps the order otherwise).
+            let mut nth: HashMap<&str, usize> = HashMap::new();
+            defs.sort_by_cached_key(|(e, _)| {
+                let n = nth.entry(e.id.as_str()).or_default();
+                *n += 1;
+                *n
+            });
+            let cut = Self::DEFINITIONS_PER_NAME.min(limit).min(defs.len());
+            let left_out = defs.split_off(cut);
+            // Marked only past the cap: a smaller `limit` is the caller's.
+            let capped = defs.len() + left_out.len() > Self::DEFINITIONS_PER_NAME;
+            let hidden = capped.then(|| Hidden {
+                name: name.to_string(),
+                count: left_out.len(),
+                pages: left_out
+                    .iter()
+                    .map(|(e, _)| &e.id)
+                    .filter(|id| !defs.iter().any(|(s, _)| s.id == **id))
+                    .collect::<BTreeSet<_>>()
+                    .len(),
+                owned: left_out.iter().any(|(_, i)| i.owner.is_some()),
+            });
+            let last = defs.len().saturating_sub(1);
+            for (k, (e, i)) in defs.into_iter().enumerate() {
                 let mut line = self.symbol_line(&e.path, i);
+                if k == last {
+                    line.hidden.clone_from(&hidden);
+                }
                 if only && matches!(i.kind, CodeItemKind::Fn | CodeItemKind::Method) && !i.nested {
                     let n = self.caller_count(&e.path, i);
                     line.called_by = (n > 0).then_some(n);
                 }
-                let same = |s: &SymbolLine| {
-                    (s.start_line, s.end_line, &s.name)
-                        == (line.start_line, line.end_line, &line.name)
-                };
                 let at = hits.iter().position(|h| h.id == e.id).unwrap_or_else(|| {
                     hits.push(Hit::from_entry(e, 0.0, None));
                     hits.len() - 1
                 });
-                if !hits[at].symbols.iter().any(same) {
-                    hits[at].symbols.push(line.clone());
-                }
+                // A line already shown takes the marker; else it is added.
+                let put = |lines: &mut Vec<SymbolLine>, line: SymbolLine| {
+                    let key = (line.start_line, line.end_line, &line.name);
+                    match lines
+                        .iter()
+                        .position(|s| (s.start_line, s.end_line, &s.name) == key)
+                    {
+                        Some(n) if line.hidden.is_some() => lines[n].hidden = line.hidden,
+                        Some(_) => {}
+                        None => lines.push(line),
+                    }
+                };
+                put(&mut hits[at].symbols, line.clone());
                 match by_page.iter_mut().find(|(id, _)| *id == e.id) {
-                    Some((_, lines)) if lines.iter().any(same) => {}
-                    Some((_, lines)) => lines.push(line),
+                    Some((_, lines)) => put(lines, line),
                     None => by_page.push((e.id.clone(), vec![line])),
                 }
             }
