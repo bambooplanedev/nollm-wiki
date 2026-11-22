@@ -184,12 +184,28 @@ pub fn search_lines(hits: &[Hit]) -> String {
     out
 }
 
-/// `search_lines` of `hits`, then one `not found: <name>` line per name in
-/// `missing` (`Wiki::not_found`).
+/// A first line naming the `missing` names (`Wiki::not_found`) that no item
+/// defines, then `search_lines` of `hits`. The line says the pages below, if
+/// any, only mention the names.
 pub fn search_lines_missing(hits: &[Hit], missing: &[String]) -> String {
-    let mut out = search_lines(hits);
-    for name in missing {
-        out.push_str(&format!("not found: {name}\n"));
+    if missing.is_empty() {
+        return search_lines(hits);
     }
-    out
+    let names = missing.join(", ");
+    if hits.is_empty() {
+        return format!("no symbol named {names}\n");
+    }
+    let body = search_lines(hits);
+    format!("no symbol named {names}; the pages below only mention it\n{body}")
+}
+
+#[cfg(test)]
+mod missing_tests {
+    use super::*;
+
+    #[test]
+    fn missing_names_come_first() {
+        let out = search_lines_missing(&[], &["a_b".into(), "c_d".into()]);
+        assert_eq!(out, "no symbol named a_b, c_d\n");
+    }
 }

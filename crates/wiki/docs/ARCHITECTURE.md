@@ -697,7 +697,7 @@ matching:
   no lines: a module is no item. Such a query with any defined or stem page
   gets just those lines, page by page in the order names first land, with no
   per-page cap; `not_found` lists the names with neither and
-  the line output prints `not found: <name>` after the hits. There each
+  the line output prints `no symbol named <name>; the pages below only mention it` before the hits. There each
   non-nested function or method line carries `called_by`
   (`Wiki::caller_count`: the distinct callers of the item and its twin, as
   `callers` lists them one level up, `None` at 0), which the line output

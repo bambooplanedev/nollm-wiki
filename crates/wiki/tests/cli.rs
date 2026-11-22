@@ -909,7 +909,11 @@ fn cli_search_says_which_names_it_did_not_find() {
         .success();
     let out = String::from_utf8(o.get_output().stdout.clone()).unwrap();
     assert!(out.contains("a.py:1-2  _ack"), "{out}");
-    assert!(out.ends_with("not found: _nope\n"), "{out}");
+    assert!(
+        out.starts_with("no symbol named _nope; the pages below only mention it\n"),
+        "{out}"
+    );
+    assert!(!out.contains("not found:"), "{out}");
 }
 
 #[test]
