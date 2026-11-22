@@ -166,7 +166,8 @@ per question is noise-level: treat single results as anecdotes.
   `Order`) is ranked like any word even when a function has exactly that
   name, and a query mixing words with identifiers keeps the ranked order
   (the definition is added, not moved first). A name defined by no item, such
-  as a lambda, a variable, a function nested in another outside Python, or a
+  as a lambda, a local variable, a field outside C/C++, a function nested in
+  another outside Python, or a
   Python function in a shell heredoc (`python3 - <<'PY'`), gets `not found`.
   A one-letter shell global (`I`) is not found and gets no `not found` line: a one-letter word is not identifier-shaped.
   A name defined on more than 3 pages shows 3 definitions and no "+N more" marker.

@@ -966,10 +966,14 @@ doc), and JS/TS top-level variables that hold no function. C++, Go and JS/TS
 values are `@item`-only, so `## Exports`, `defined` and `methods` never see
 them; Rust `const`/`static` and Python module assignments are `@def`s.
 Fields, variants, associated consts and types, impl headers and
-function-local definitions are not items, except a Python `def` directly in
-a function body (`Placement::Nested`; one in a class defined there stays
-out): an item with `nested` set, never public, owner-less, found by
-`search` only. Outlines (`Keep::items`), the hint, `also defined`
+function-local definitions are not items, with three exceptions, each an
+item with `nested` set, never public and found by `search` only: a Python
+`def` directly in a function body (`Placement::Nested`, owner-less; one in a
+class defined there stays out), a shell file's first top-level `NAME=` of
+each UPPERCASE name, and a C/C++ class, struct or union data member (a
+`value` owned by its class, `static constexpr` ones included). A nested
+value matches its exact name only: word scoring and the any-case fallback
+skip it. Outlines (`Keep::items`), the hint, `also defined`
 (`same_name`) and the call graph skip it: it is no call target and owns no
 call sites (`attach_call_sites`), so calls in its body stay its enclosing
 function's. As targets, same-named helpers nested in different test
