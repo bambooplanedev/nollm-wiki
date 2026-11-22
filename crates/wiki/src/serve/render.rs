@@ -179,7 +179,7 @@ pub fn search_lines(hits: &[Hit]) -> String {
             }
             if let Some(m) = &s.hidden {
                 let place = match m.pages {
-                    0 => " on the pages above".to_string(),
+                    0 => " on the pages shown".to_string(),
                     1 => " on 1 other page".to_string(),
                     n => format!(" on {n} other pages"),
                 };

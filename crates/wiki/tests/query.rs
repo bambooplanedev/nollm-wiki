@@ -2806,7 +2806,7 @@ fn a_capped_name_spreads_over_pages_and_says_how_many_are_hidden() {
     assert_eq!(files.len(), 3, "one per page first: {out}");
     assert!(
         out.contains(
-            "\n    +2 more named order_id on the pages above; narrow with Class::order_id or a path word\n"
+            "\n    +2 more named order_id on the pages shown; narrow with Class::order_id or a path word\n"
         ),
         "{out}"
     );
