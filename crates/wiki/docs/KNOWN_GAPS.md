@@ -413,9 +413,8 @@ per question is noise-level: treat single results as anecdotes.
 - A compile already running when `serve`'s binary is replaced still finishes.
 - `serve` sees a binary replaced only at a tool call or before a recompile,
   and `touch` on the binary counts as a replacement.
-- `lint` and the `wiki://index` and `wiki://llms.txt` resources read disk,
-  not the live snapshot; `lint` falls back to the snapshot when that read
-  would outrun the call.
+- `lint` reads disk, not the live snapshot; it falls back to the snapshot
+  when that read would outrun the call.
 - A generated file ignored at file level still triggers a recompile when
   it sits in a watched directory.
 - inotify watches `target/` and `.git` too: check the project's directory
@@ -430,8 +429,7 @@ per question is noise-level: treat single results as anecdotes.
 - Servers on one `--dir` are assumed to share inputs (`--source`,
   `--memory`). If they differ, the writer's inputs win.
 - A call that meets a compile holding `compile.lock` past its 5 s answers
-  from the snapshot it has, with `recompile still running`; `wiki://index`
-  and `wiki://llms.txt` return an error instead.
+  from the snapshot it has, with `recompile still running`.
 - A reader can load the output of a later compile that failed part way,
   under the earlier ack's empty stale reason. The window is narrow; a plain
   `serve` without `--source` has the same exposure.

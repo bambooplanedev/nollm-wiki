@@ -269,124 +269,35 @@ fn mcp_search_returns_five_hits_unless_asked() {
 }
 
 #[test]
-fn serve_lists_and_reads_resources() {
+fn serve_offers_no_resources() {
     let (_tmp, out) = compile_fixture();
     let (mut child, mut stdin, stdout) = spawn_server(&out);
-    initialize(&mut stdin, &stdout);
-
-    // resources/list: 12 pages + index + llms.txt
     send(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 2, "method": "resources/list"}),
-    );
-    let resp = read_response(&stdout, 2);
-    let resources = resp["result"]["resources"].as_array().unwrap();
-    let uris: Vec<&str> = resources
-        .iter()
-        .map(|r| r["uri"].as_str().unwrap())
-        .collect();
-    assert_eq!(uris.len(), 14, "uris: {uris:?}");
-    assert!(uris.contains(&"wiki://index"));
-    assert!(uris.contains(&"wiki://llms.txt"));
-    assert!(uris.contains(&"wiki://page/gradient_descent"));
-
-    // resources/list: MIME types are set per the spec.
-    let index_entry = resources
-        .iter()
-        .find(|r| r["uri"] == json!("wiki://index"))
-        .unwrap();
-    assert_eq!(index_entry["mimeType"], json!("application/json"));
-    let page_entry = resources
-        .iter()
-        .find(|r| r["uri"] == json!("wiki://page/gradient_descent"))
-        .unwrap();
-    assert_eq!(page_entry["mimeType"], json!("text/markdown"));
-
-    // resources/read a page
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {
-            "uri": "wiki://page/gradient_descent"
+        &json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-03-26", "capabilities": {},
+            "clientInfo": {"name": "test-client", "version": "0.0.0"}
         }}),
     );
-    let resp = read_response(&stdout, 3);
-    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
-    assert!(text.contains("\n# Gradient Descent\n"));
+    let resp = read_response(&stdout, 1);
     assert_eq!(
-        resp["result"]["contents"][0]["mimeType"],
-        json!("text/markdown")
+        resp["result"]["capabilities"],
+        json!({"tools": {}}),
+        "{resp}"
     );
-
-    // resources/read the index
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {
-            "uri": "wiki://index"
-        }}),
-    );
-    let resp = read_response(&stdout, 4);
-    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
-    assert!(
-        serde_json::from_str::<Value>(text).is_ok(),
-        "index.json should be valid JSON"
-    );
-
-    // unknown resource -> JSON-RPC error
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": {
-            "uri": "wiki://page/no_such_page"
-        }}),
-    );
-    let resp = read_response(&stdout, 5);
-    assert!(resp["error"].is_object(), "expected error, got: {resp}");
-
-    drop(stdin);
-    let _ = child.wait();
-}
-
-#[test]
-fn a_resource_read_does_not_wait_out_a_compile() {
-    let (_tmp, out) = compile_fixture();
-    std::fs::create_dir(out.join(".serve")).unwrap();
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
-    initialize(&mut stdin, &stdout);
-
-    // A compile holds the lock past RESPONSE_DEADLINE.
-    let (held, release) = (mpsc::channel(), mpsc::channel::<()>());
-    let d = out.clone();
-    let cli = std::thread::spawn(move || {
-        wiki::dirlock::exclusive(&d, || {
-            held.0.send(()).unwrap();
-            let _ = release.1.recv_timeout(Duration::from_secs(15));
-        });
-    });
-    held.1.recv().unwrap();
-    let read = |stdin: &mut ChildStdin, id: u64, uri: &str| {
+    for (n, method) in [
+        (2, "resources/list"),
+        (3, "resources/templates/list"),
+        (4, "resources/read"),
+    ] {
         send(
-            stdin,
-            &json!({"jsonrpc": "2.0", "id": id, "method": "resources/read", "params": {"uri": uri}}),
+            &mut stdin,
+            &json!({"jsonrpc": "2.0", "id": n, "method": method,
+                "params": {"uri": "wiki://page/gradient_descent"}}),
         );
-        read_response(&stdout, id)
-    };
-
-    // Pages come from the snapshot.
-    let resp = read(&mut stdin, 2, "wiki://page/gradient_descent");
-    let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
-    assert!(text.contains("\n# Gradient Descent\n"), "{resp}");
-    // Files on disk cannot be read meanwhile.
-    let resp = read(&mut stdin, 3, "wiki://index");
-    let msg = resp["error"]["message"].as_str().unwrap_or_default();
-    assert!(msg.contains("recompile still running"), "{resp}");
-
-    release.0.send(()).unwrap();
-    cli.join().unwrap();
-    let resp = read(&mut stdin, 4, "wiki://index");
-    assert_eq!(
-        resp["result"]["contents"][0]["mimeType"],
-        json!("application/json")
-    );
-
+        let resp = read_response(&stdout, n);
+        assert_eq!(resp["error"]["code"], json!(-32601), "{method}: {resp}");
+    }
     drop(stdin);
     let _ = child.wait();
 }
@@ -400,18 +311,14 @@ fn serve_refuses_path_traversal_outside_index() {
     let (mut child, mut stdin, stdout) = spawn_server(&out);
     initialize(&mut stdin, &stdout);
 
-    send(
+    let (err, text) = page(
         &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {
-            "uri": "wiki://page/../secret"
-        }}),
+        &stdout,
+        2,
+        &json!({"id": "../secret", "full": true}),
     );
-    let resp = read_response(&stdout, 2);
-    assert_eq!(resp["error"]["code"], json!(-32002), "got: {resp}");
-    assert_eq!(
-        resp["error"]["message"], "no such resource: wiki://page/../secret",
-        "got: {resp}"
-    );
+    assert!(err, "{text}");
+    assert!(!text.contains("# Secret"), "{text}");
 
     drop(stdin);
     let _ = child.wait();
@@ -1125,40 +1032,7 @@ fn mcp_page_names_a_missing_page_file() {
     let (err, text) = page(&mut stdin, &stdout, 5, &json!({"id": "nope", "full": true}));
     assert!(err);
     assert!(text.contains("unknown page \"nope\""), "{text}");
-    for (n, id, msg) in [
-        (6, "alpha", a3.to_string()),
-        (7, "nope", "no such resource: wiki://page/nope".to_string()),
-    ] {
-        send(
-            &mut stdin,
-            &json!({"jsonrpc": "2.0", "id": n, "method": "resources/read",
-                "params": {"uri": format!("wiki://page/{id}")}}),
-        );
-        let resp = read_response(&stdout, n);
-        assert_eq!(resp["error"]["code"], json!(-32002), "{resp}");
-        assert_eq!(resp["error"]["message"], json!(msg), "{resp}");
-    }
     child.kill().ok();
-}
-
-#[test]
-fn mcp_page_full_matches_resource() {
-    let (_src, out, id) = big_project();
-    let (mut child, mut stdin, stdout) = spawn_server(&out);
-    initialize(&mut stdin, &stdout);
-    let (err, full) = page(&mut stdin, &stdout, 2, &json!({"id": id, "full": true}));
-    assert!(!err);
-    send(
-        &mut stdin,
-        &json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read",
-            "params": {"uri": format!("wiki://page/{id}")}}),
-    );
-    let resp = read_response(&stdout, 3);
-    child.kill().ok();
-    assert_eq!(
-        resp["result"]["contents"][0]["text"].as_str().unwrap(),
-        full
-    );
 }
 
 #[test]

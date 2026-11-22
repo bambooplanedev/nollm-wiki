@@ -147,8 +147,8 @@ pub fn render_index_json(m: &Manifest) -> String {
 /// `items.json`: each code page's items (see `Entity::items`) keyed by page
 /// id, in id order, pages without items left out. A sidecar rather than a
 /// field of `index.json` entries, because items outweigh the rest of the
-/// catalog several times over and `index.json` is served whole as
-/// `wiki://index`. Compact, as only tools read it.
+/// catalog several times over and `index.json` is read whole. Compact, as
+/// only tools read it.
 pub fn render_items_json(entities: &BTreeMap<String, Entity>) -> String {
     let items: BTreeMap<&str, &[CodeItem]> = entities
         .iter()

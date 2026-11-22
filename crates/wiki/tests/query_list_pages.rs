@@ -1,4 +1,4 @@
-//! `Wiki::list_pages` id and title ordering, backing the MCP server's `resources/list`.
+//! `Wiki::list_pages` id and title ordering.
 
 use wiki::query::Wiki;
 

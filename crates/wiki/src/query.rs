@@ -497,7 +497,6 @@ impl Wiki {
     }
 
     /// All pages as `(id, title)` pairs, ascending by id (`BTreeMap` order).
-    /// Used by the MCP server's `resources/list`.
     pub fn list_pages(&self) -> Vec<(String, String)> {
         self.entries
             .values()

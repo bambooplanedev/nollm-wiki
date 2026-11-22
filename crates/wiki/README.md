@@ -451,9 +451,6 @@ back. A committed AGENTS.md block or skill that still names it is not updated by
 leaves a block that differs from its own alone and reports it: delete the block or the skill file,
 then run setup again.
 
-**Resources:** every page is `wiki://page/<id>` (Markdown), plus `wiki://index` (`index.json`) and
-`wiki://llms.txt`.
-
 **Freshness.** With `--source` the server compiles the project itself. An existing wiki is served
 at once while the compile runs in the background, and a call waits at most 1 s for that first
 compile; with none, the first compile runs before serving and a failure exits. It then watches
@@ -1158,7 +1155,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `CompileOptions.project` (the CLI's `--project`) sets the project name written to `index.json`,
 `llms.txt` and `AGENTS.md`; it defaults to the input directory's basename. Besides `search` and
 `neighbors`, `Wiki` exposes `page(id)` (a rendered page's Markdown), `has_page(id)` and
-`list_pages()` (`(id, title)` pairs, ascending by id) — the calls the MCP server's resources use.
+`list_pages()` (`(id, title)` pairs, ascending by id).
 
 ## Determinism
 
