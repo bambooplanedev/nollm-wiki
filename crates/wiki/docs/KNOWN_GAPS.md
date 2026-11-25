@@ -172,6 +172,21 @@ per question is noise-level: treat single results as anecdotes.
   A C/C++ file with more than 2,000 data members indexes none of them
   (its other items stay); a query for one names the file instead of
   `no symbol named`, but only when the file holds the name as a word.
+  Enum values (C/C++ enumerators, Rust variants, TS enum members) follow
+  the same rule under their own count of 2,000. They are found by exact
+  name only when the name is identifier-shaped (`kDark`, `TONE_LOW`); a
+  plain-word variant (`Pending`) is found as `Enum::Pending`. A value an
+  X-macro writes (`ENTRY(x)` in the enum body) is none, and the grammar
+  closes the enum at the macro call, so the values after it are no
+  enumerators either (one may remain a file-scope value with a broken
+  signature). A value with an attribute (`V ATTR = 2`, `V [[deprecated]] =
+  4`, `V __attribute__((deprecated)) = 4`) is kept, but a standard
+  attribute can also make the grammar close the enum at that value
+  (`V [[deprecated("old")]] = 4`, `V [[maybe_unused]],`): the value keeps
+  its name but not its `= …`, and the values after it are no enumerators
+  (some remain file-scope values with broken signatures, as before). No
+  value is ever named after a word inside an attribute or a macro call. A Python `Enum` member is a class
+  attribute and, like any field outside C/C++, no item.
   C/C++ data members are items through any nesting of pointers, arrays,
   references and function pointers (`void (*on[4])(int)`); not a member a
   macro declares (`FIELD(int, x)`, which does not parse as a declaration) or

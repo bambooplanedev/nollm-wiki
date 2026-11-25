@@ -257,6 +257,7 @@ const QUERY: &str = r"
                 (trait_item name: (type_identifier) @name) @item
                 (union_item name: (type_identifier) @name) @item
                 (type_item name: (type_identifier) @name) @item
+                (enum_variant name: (identifier) @name) @item
             ";
 
 pub(crate) fn rust_spec() -> LangSpec {

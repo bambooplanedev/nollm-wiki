@@ -666,8 +666,9 @@ defined only on test pages, or the module name of a test file only, gets
 (the lines `tests` would give) and no ranked pages for it; with `tests`, a name only non-test code
 defines gets `<name>: in code pages only; use kind "code"` and its code definitions, then, unlike
 `code`, the test pages that rank for it under `the test pages below match its words`.
-The answer for the other names comes after it, as if they were the whole query. A C/C++ file with more than 2,000 data members (a
-generated register header) indexes none of them, and a name such a file holds gets
+The answer for the other names comes after it, as if they were the whole query. An enum's value (a C/C++ enumerator, a Rust variant, a TS enum member) is found by its exact
+name or `Enum::name`, at its own line, as a data member is. A C/C++ file with more than 2,000 data members (a
+generated register header) indexes none of them, nor a file with more than 2,000 enum values those, and a name such a file holds gets
 `<name>: members of <path> are not indexed (<N> there, more than 2000)` instead of
 `no symbol named`. In such a query a function or method line ends its signature with
 `` [called by N: `callers`] ``, N being how many functions `callers` lists for it (a C++ declaration's

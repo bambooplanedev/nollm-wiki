@@ -53,12 +53,14 @@ pub struct CodeFile {
     pub methods: Vec<String>,
     /// Every item with its lines, doc and call sites, in line order.
     pub items: Vec<CodeItem>,
-    /// The C/C++ data members left out because there are more than
-    /// `MEMBERS_PER_FILE`; 0 when every one is an item.
+    /// The C/C++ data members, and apart from them the enumerators, left out
+    /// because there are more than `MEMBERS_PER_FILE`; 0 when every one is
+    /// an item.
     pub members_unindexed: usize,
 }
 
-/// Most C/C++ data members one file indexes; past it, none are. Hand-written
+/// Most C/C++ data members one file indexes; past it, none are. Enumerators
+/// are counted and dropped apart, under the same cap. Hand-written
 /// headers measured up to 1,322 (one server's main header); a generated
 /// register header holds tens of thousands.
 pub const MEMBERS_PER_FILE: usize = 2_000;
@@ -644,6 +646,9 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
     // C/C++ data member declarators seen; past `MEMBERS_PER_FILE` none is
     // built, since none will be kept.
     let mut members = 0;
+    // Enumerators, counted apart, and their items' keys.
+    let mut enumerators = 0;
+    let mut enumerator_keys = BTreeSet::new();
     for (source, t) in sources.iter().enumerate() {
         let text = t.text();
         let mut cursor = QueryCursor::new();
@@ -653,6 +658,13 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             if parts.name.is_some() && parts.item.is_some_and(|i| i.kind() == "field_declaration") {
                 members += 1;
                 if members > MEMBERS_PER_FILE {
+                    continue;
+                }
+            }
+            if let Some(n) = parts.name.filter(|_| parts.item.is_some_and(is_enum_value)) {
+                enumerators += 1;
+                enumerator_keys.insert(n.start_byte());
+                if enumerators > MEMBERS_PER_FILE {
                     continue;
                 }
             }
@@ -722,22 +734,26 @@ fn extract_code(ext: &str, text: &str, pre_parsed: Option<Tree>) -> Option<CodeI
             merge_item(&mut items, item);
         }
     }
+    // Data members (C/C++ only) and enum values are nested values; each
+    // kind past the cap keeps none.
+    let members = if spec.lang_name == "cpp" { members } else { 0 };
+    let over = |n: usize| n > MEMBERS_PER_FILE;
+    if over(members) || over(enumerators) {
+        items.retain(|key, (i, _)| {
+            let counted = if enumerator_keys.contains(key) {
+                enumerators
+            } else {
+                members
+            };
+            !(i.nested && i.kind == CodeItemKind::Value && over(counted))
+        });
+    }
+    let members_unindexed = [members, enumerators]
+        .into_iter()
+        .filter(|&n| over(n))
+        .sum();
     let (mut items, mut defs): (Vec<CodeItem>, Vec<Option<Def>>) = items.into_values().unzip();
     sort_items(&mut items, &mut defs);
-    // Data members are nested values only in C/C++.
-    let members_unindexed = if spec.lang_name == "cpp" && members > MEMBERS_PER_FILE {
-        let keep: Vec<bool> = items
-            .iter()
-            .map(|i| !(i.nested && i.kind == CodeItemKind::Value))
-            .collect();
-        let mut k = keep.iter();
-        items.retain(|_| *k.next().unwrap());
-        let mut k = keep.iter();
-        defs.retain(|_| *k.next().unwrap());
-        members
-    } else {
-        0
-    };
     if spec.lang_name == "shell" && tree.root_node().has_error() {
         let missed = super::extract_shell::missed_functions(text, &items);
         for it in &missed {
@@ -889,6 +905,24 @@ fn code_item<'t>(
     shape: &Shape,
 ) -> Option<(usize, CodeItem, Node<'t>)> {
     let name = name?;
+    // `V [[deprecated]] = 4` and `V __attribute__((deprecated)) = 4` can
+    // parse as an error holding `V [[` (`V __attribute__((`) before the value
+    // `deprecated]] = 4`: the value is that `V`, and reads from there. Any
+    // other error just before an enum value means its name is a word the
+    // grammar lost its place in (an attribute's, a macro argument): none.
+    let after_error = Some(def)
+        .filter(|d| is_enum_value(*d))
+        .and_then(|d| d.prev_sibling())
+        .filter(Node::is_error);
+    let attributed = after_error.and_then(|e| {
+        let v = e.named_child(0).filter(|n| n.kind() == "identifier")?;
+        let rest = text[v.end_byte()..e.end_byte()].trim_start();
+        (rest.starts_with("[[") || rest.starts_with("__attribute__")).then_some((e, v))
+    });
+    if after_error.is_some() && attributed.is_none() {
+        return None;
+    }
+    let name = attributed.map_or(name, |(_, n)| n);
     // JS exports match on the `export_statement`, which is no function: the
     // item is its declaration. `sig_start` climbs back to the statement, so
     // the range and signature are the declaration's own match's.
@@ -896,16 +930,31 @@ fn code_item<'t>(
         .child_by_field_name("declaration")
         .filter(|_| def.kind() == "export_statement")
         .unwrap_or(def);
-    // A C/C++ data member: a value `search` finds by its exact name only.
-    let member = spec.lang_name == "cpp" && super::extract_cpp::names_data_member(def, name);
-    // An error after the name means the grammar misread it: `int Box::* pm;`
-    // names `Box`, `int *RESTRICT slots;` names `RESTRICT`. One before it
-    // (`ATOMIC int ticks;`, a macro the grammar cannot know) leaves it right.
-    if member
-        && def
-            .children(&mut def.walk())
-            .any(|c| c.is_error() && c.start_byte() >= name.end_byte())
-    {
+    // A C/C++ data member or an enum's value: a value `search` finds by its
+    // exact name only.
+    let member = is_enum_value(def)
+        || (spec.lang_name == "cpp" && super::extract_cpp::names_data_member(def, name));
+    // An error after a data member's name means the grammar misread it:
+    // `int Box::* pm;` names `Box`, `int *RESTRICT slots;` names `RESTRICT`.
+    // One before it (`ATOMIC int ticks;`, a macro the grammar cannot know)
+    // leaves it right. An enum value's name always comes first, so an error
+    // after it is an attribute the grammar cannot read (`V ATTR = 4`); but
+    // one nothing well-formed follows (no `,` or `}`) is a macro call the
+    // grammar misread (`ENTRY(x)` in an X-macro enum), unless a standard
+    // attribute follows its name (`V [[deprecated]] = 4` ends the enum).
+    let misread = if is_enum_value(def) {
+        let attribute = text[name.end_byte()..].trim_start().starts_with("[[");
+        !attribute
+            && def
+                .next_sibling()
+                .is_none_or(|s| s.is_missing() || s.is_error())
+    } else {
+        member
+            && def
+                .children(&mut def.walk())
+                .any(|c| c.is_error() && c.start_byte() >= name.end_byte())
+    };
+    if misread {
         return None;
     }
     let kind = match (classify(Some(name), owner, shape.rank), is_function(def)) {
@@ -921,8 +970,14 @@ fn code_item<'t>(
         (ItemKind::Header | ItemKind::Member, _) => return None,
     };
     // No owner splice: the signature reads as the source does.
-    let signature = shared_declaration_signature(text, def, name, spec)
-        .unwrap_or_else(|| build_signature(text, def, Some(name), None, spec, shape));
+    let signature = match attributed {
+        Some((e, _)) => text[e.start_byte()..def.end_byte()]
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+        None => shared_declaration_signature(text, def, name, spec)
+            .unwrap_or_else(|| build_signature(text, def, Some(name), None, spec, shape)),
+    };
     if signature.is_empty() {
         return None;
     }
@@ -1050,6 +1105,16 @@ fn code_item<'t>(
         .as_deref()
         .and_then(|r| item_doc_text(r, item.doc.as_deref()));
     Some((name.start_byte(), item, def))
+}
+
+/// An enum's value: a C/C++ enumerator, a Rust variant, a TS enum member
+/// (bare or assigned).
+fn is_enum_value(def: Node) -> bool {
+    matches!(
+        def.kind(),
+        "enumerator" | "enum_variant" | "enum_assignment"
+    ) || (def.kind() == "property_identifier"
+        && def.parent().is_some_and(|p| p.kind() == "enum_body"))
 }
 
 /// Keep the first item seen for a name node. A later match of the same node

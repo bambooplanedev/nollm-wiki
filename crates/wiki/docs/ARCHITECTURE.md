@@ -769,7 +769,9 @@ matching:
   and adds `more` to a capped symbol and `no_symbol`, `tests_only` or
   `code_only`, `unindexed`, `tests_also_match` to its first hit. A file past
   `wiki_code::MEMBERS_PER_FILE` (2,000) C/C++ data members keeps none of
-  them as items and records the count (`CodeFile::members_unindexed`,
+  them as items, and one past 2,000 enum values none of those (counted
+  apart, so either set stays when only the other is past), and records the
+  count (`CodeFile::members_unindexed`,
   `index.json`'s `members_unindexed`, absent at 0); a missing name such a
   page's body holds as a word (`Wiki::in_unindexed_members`) gets
   `<name>: members of <path> are not indexed` instead of `no symbol named`.
@@ -1000,14 +1002,18 @@ doc), and JS/TS top-level variables that hold no function. C++, Go and JS/TS
 values are `@item`-only, so `## Exports`, `defined` and `methods` never see
 them; Rust `const`/`static` and Python module assignments are `@def`s.
 Fields, variants, associated consts and types, impl headers and
-function-local definitions are not items, with three exceptions, each an
+function-local definitions are not items, with four exceptions, each an
 item with `nested` set, never public and found by `search` only: a Python
 `def` directly in a function body (`Placement::Nested`, owner-less; one in a
 class defined there stays out), a shell file's first top-level `NAME=` of
 each UPPERCASE name, and a C/C++ class, struct or union data member (a
 `value` owned by its class, or by the typedef name of `typedef struct { … }
 Name;`; `static constexpr` ones and function pointers included, see
-`extract_cpp`'s query for the declarator shapes). A nested
+`extract_cpp`'s query for the declarator shapes), and an enum's value: a
+C/C++ enumerator, a Rust variant, a TS enum member (`code::is_enum_value`;
+a `value` owned by its enum, by the typedef name of `typedef enum { … }
+Name;`, by nothing in an anonymous enum; signature `NAME = value`; one a
+parse error follows, an X-macro call the grammar misread, is none). A nested
 value matches its exact name only: word scoring and the any-case fallback
 skip it. Outlines (`Keep::items`), the hint, `also defined`
 (`same_name`) and the call graph skip it: it is no call target and owns no

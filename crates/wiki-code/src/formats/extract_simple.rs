@@ -63,6 +63,8 @@ pub(crate) fn ts_spec() -> LangSpec {
                 (interface_declaration name: (type_identifier) @name) @item
                 (type_alias_declaration name: (type_identifier) @name) @item
                 (enum_declaration name: (identifier) @name) @item
+                (enum_body (property_identifier) @name @item)
+                (enum_body (enum_assignment name: (property_identifier) @name) @item)
                 (import_statement source: (string) @import)
             ",
     )
@@ -82,7 +84,7 @@ fn ecma_placement(def: Node, text: &str) -> Placement {
             | "arrow_function"
             | "method_definition"
             | "generator_function" => return Placement::Rejected,
-            "class_declaration" | "class" | "abstract_class_declaration" => {
+            "class_declaration" | "class" | "abstract_class_declaration" | "enum_declaration" => {
                 if let Some(name) = n
                     .child_by_field_name("name")
                     .and_then(|n| text.get(n.byte_range()))
@@ -101,6 +103,11 @@ fn ecma_placement(def: Node, text: &str) -> Placement {
 /// A variable whose value is not a function is a value. It keeps the shared
 /// cut at its value, so `const LIMIT = 5` reads `const LIMIT`.
 pub(crate) fn ecma_shape(def: Node) -> Shape {
+    // An enum member reads with its value: `Dark = 3`.
+    if def.kind() == "enum_assignment" {
+        let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+        return value_shape(eq, def.child_by_field_name("value"), false);
+    }
     let rank = if def.kind() == "variable_declarator" && !is_function(def) {
         Rank::Value
     } else {

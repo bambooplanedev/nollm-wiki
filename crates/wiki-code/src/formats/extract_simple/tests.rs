@@ -226,3 +226,42 @@ fn ts_line_and_block_comments_are_docs_jsdoc_wins() {
     let src = "// plain\n/** Real doc. */\nfunction f() {}\n";
     assert_eq!(doc_of(src, "f"), (Some("Real doc.".into()), 2));
 }
+
+/// A TS enum member is a nested value owned by its enum, with its value; a
+/// Go constant stays the top-level value it was.
+#[test]
+fn ts_enum_members_are_nested_values_owned_by_their_enum() {
+    let src = "export enum Shade {\n  Pale,\n  /** The dark one. */\n  Dark = 3,\n  Named = 'named',\n}\nconst enum Tone { Low }\nfunction f() {\n  enum Local { Gone }\n}\n";
+    for path in ["shade.ts", "shade.tsx"] {
+        let e = crate::extract(path, src);
+        let nested: Vec<String> = e
+            .items
+            .iter()
+            .filter(|i| i.nested && i.kind == crate::model::CodeItemKind::Value)
+            .map(|i| {
+                assert!(!i.public, "{} is public", i.name);
+                format!(
+                    "{}  {}-{}  {}",
+                    i.qualified_name(),
+                    i.start_line,
+                    i.end_line,
+                    i.signature
+                )
+            })
+            .collect();
+        assert_eq!(
+            nested,
+            [
+                "Shade::Pale  2-2  Pale",
+                "Shade::Dark  3-4  Dark = 3",
+                "Shade::Named  5-5  Named = 'named'",
+                "Tone::Low  7-7  Low",
+            ],
+            "{path}"
+        );
+        let dark = e.items.iter().find(|i| i.name == "Dark").unwrap();
+        assert_eq!(dark.doc.as_deref(), Some("The dark one."));
+    }
+    let go = crate::extract("shade.go", "package a\nconst (\n\tPale = iota\n)\n");
+    assert!(go.items.iter().all(|i| !i.nested), "{:?}", go.items);
+}
