@@ -93,6 +93,10 @@ impl<'a, U: CodeUnit> Index<'a, U> {
                 modules.entry(dir).or_default().insert(p);
             }
             for (i, it) in e.items().iter().enumerate() {
+                // A gtest test is no call target, and its suite no type.
+                if it.is_test_case() {
+                    continue;
+                }
                 types.extend(it.owner.as_deref().map(owner_key));
                 if it.kind == CodeItemKind::Type {
                     types.insert(&it.name);
@@ -310,6 +314,22 @@ mod tests {
     use super::*;
     use crate::CodeFile;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn only_a_gtest_test_of_the_owned_fns_is_no_call_target() {
+        let mut file = crate::extract(
+            "src/u.cpp",
+            "int Trim(int x) { return x; }\nint run() { return Trim(1); }\nTEST(Strings, Trim) {}\n",
+        );
+        // An owned `fn` no gtest macro writes, as a future language might.
+        file.items[0].owner = Some("Box".to_string());
+        assert!(!file.items[0].is_test_case() && file.items[2].is_test_case());
+        let units: BTreeMap<String, CodeFile> = [("src/u.cpp".to_string(), file)].into();
+        let index = Index::new(&units);
+        let site = &units["src/u.cpp"].items[1].call_sites[0];
+        let found = index.scope(0, None, &BTreeSet::new()).fns_here(site);
+        assert_eq!(found, [(0, 0)]);
+    }
 
     #[test]
     fn index_scope_and_imports_work_over_code_files() {

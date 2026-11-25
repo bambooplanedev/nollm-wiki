@@ -64,6 +64,9 @@ fn hit_values(hits: Vec<Hit>) -> Vec<serde_json::Value> {
                             "pages": m.pages,
                             "owned": m.owned,
                         });
+                        if m.of_owner {
+                            sym["more"]["of_owner"] = true.into();
+                        }
                     }
                     sym
                 })
@@ -201,8 +204,9 @@ pub fn search_lines(hits: &[Hit]) -> String {
                 } else {
                     String::new()
                 };
+                let named = if m.of_owner { "owned by" } else { "named" };
                 out.push_str(&format!(
-                    "    +{} more named {}{place}; narrow with {owner}a path word\n",
+                    "    +{} more {named} {}{place}; narrow with {owner}a path word\n",
                     m.count, m.name
                 ));
             }
@@ -243,6 +247,9 @@ struct Answer {
     /// The hits are the ranked pages: no name of the query is defined
     /// (under `tests`, the names only code defines count as not defined).
     ranked: bool,
+    /// How many names of `other_only` the ranking kept: all of them under
+    /// `tests`, or under `code` when one was typed `A.B` (a word, too).
+    kept: usize,
     hits: Vec<Hit>,
     /// A test page ranked first and `code` dropped it.
     tests_cut: bool,
@@ -258,6 +265,25 @@ fn answer(
     tag: Option<&str>,
     limit: Option<usize>,
 ) -> Answer {
+    // Names are looked up as `A::B`; pages rank on the words as typed.
+    let typed_q = q;
+    let (q, typed) = match w.dotted_as_qualified(q, kind, tag) {
+        Some((rewritten, typed)) => (std::borrow::Cow::Owned(rewritten), typed),
+        None => (std::borrow::Cow::Borrowed(q), Vec::new()),
+    };
+    let q = q.as_ref();
+    // A name is echoed as the user typed it (`Suite.Name`).
+    let as_typed = |names: Vec<String>| -> Vec<String> {
+        names
+            .into_iter()
+            .map(|n| {
+                typed
+                    .iter()
+                    .find(|(r, _)| *r == n)
+                    .map_or(n, |(_, t)| t.clone())
+            })
+            .collect()
+    };
     let missing = w.not_found(q, kind, tag);
     let unindexed = w.in_unindexed_members(&missing, kind, tag);
     let missing: Vec<String> = missing
@@ -277,18 +303,24 @@ fn answer(
         .filter(|n| !other_only.contains(n))
         .collect();
     let (names, _) = Wiki::query_names(q);
-    let rest = names
-        .into_iter()
-        .filter(|n| !other_only.iter().any(|t| t == n))
-        .collect::<Vec<_>>()
-        .join(" ");
+    let names = names.into_iter().map(str::to_string).collect::<Vec<_>>();
+    let rest: Vec<String> = names
+        .iter()
+        .filter(|n| !other_only.contains(n))
+        .cloned()
+        .collect();
+    let rest_len = rest.len();
+    let rest = as_typed(rest).join(" ");
     // Under `tests` a name only code defines still ranks the test pages
-    // that mention it: finding those is why one searches `tests`.
-    let keep = matches!(other, Some(KindFilter::Code));
-    let q = if other_only.is_empty() || keep {
-        q
+    // that mention it: finding those is why one searches `tests`. A word
+    // typed `A.B` ranks as typed under any kind, as it did before it named
+    // anything.
+    let keep = matches!(other, Some(KindFilter::Code))
+        || other_only.iter().any(|n| typed.iter().any(|(r, _)| r == n));
+    let (q, name_count) = if other_only.is_empty() || keep {
+        (typed_q, names.len())
     } else {
-        &rest
+        (rest.as_str(), rest_len)
     };
     let (hits, tests_cut) = if !other_only.is_empty() && !keep && rest.is_empty() {
         (Vec::new(), false)
@@ -297,14 +329,15 @@ fn answer(
     };
     let kept = if keep { other_only.len() } else { 0 };
     let ranked = !missing.is_empty() || kept > 0;
-    let ranked = ranked && missing.len() + kept == Wiki::query_names(q).0.len();
+    let ranked = ranked && missing.len() + kept == name_count;
     Answer {
         unindexed,
         tests_cut: tests_cut && other_only.is_empty(),
-        other_only,
+        kept,
+        other_only: as_typed(other_only),
         other,
         other_hits,
-        missing,
+        missing: as_typed(missing),
         ranked,
         hits,
     }
@@ -344,16 +377,18 @@ pub fn search_text(
             } else {
                 "their"
             };
-            out += &format!("the test pages below match {whose} words\n");
+            // The pages below are of the kind searched, the other's other.
+            let pages = if matches!(other, KindFilter::Code) {
+                "test"
+            } else {
+                "code"
+            };
+            out += &format!("the {pages} pages below match {whose} words\n");
         }
     }
     if !a.missing.is_empty() {
         let names = a.missing.join(", ");
-        let kept = match a.other {
-            Some(KindFilter::Code) => a.other_only.len(),
-            _ => 0,
-        };
-        out += &match (a.hits.is_empty() || !a.ranked, a.missing.len() + kept) {
+        out += &match (a.hits.is_empty() || !a.ranked, a.missing.len() + a.kept) {
             (true, _) => format!("no symbol named {names}\n"),
             (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
             (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
@@ -382,7 +417,7 @@ pub fn search_json_text(
     limit: Option<usize>,
 ) -> String {
     let a = answer(w, q, kind, tag, limit);
-    // The line answer's `the test pages below match its words`.
+    // The line answer's `the test (code) pages below match its words`.
     let marked = (!a.other_only.is_empty() && a.missing.is_empty() && a.ranked)
         .then_some(a.other_hits.len());
     let mut hits = hit_values(a.other_hits.into_iter().chain(a.hits).collect());

@@ -1197,3 +1197,60 @@ fn misread_macros_and_attributes_in_an_enum() {
         .collect();
     assert_eq!(last, [(None, false)]);
 }
+
+/// A gtest test is named by its test name and owned by its suite, so a
+/// search for either finds it; its signature, exports and defined names
+/// stay as written.
+#[test]
+fn a_gtest_test_is_named_by_its_test_and_owned_by_its_suite() {
+    let src = "namespace {\nTEST(LedgerSuite, PostsTwice) {\n  EXPECT_EQ(1, 1);\n}\n}  // namespace\nTEST_F(LedgerFixture, RollsBack) {}\nTEST_P(LedgerParam, Holds) {}\nTYPED_TEST(LedgerTyped, Grows) {}\nTYPED_TEST_P(LedgerTypedP, Shrinks) {}\nvoid TEST(int a);\nint TEST_F(Fixture, Name) { return 0; }\nTEST(Wrong, two, three) {}\n";
+    let e = crate::extract("tests/ledger_test.cc", src);
+    let named: Vec<(Option<&str>, &str, &str)> = e
+        .items
+        .iter()
+        .map(|i| (i.owner.as_deref(), i.name.as_str(), i.signature.as_str()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            (
+                Some("LedgerSuite"),
+                "PostsTwice",
+                "TEST(LedgerSuite, PostsTwice)"
+            ),
+            (
+                Some("LedgerFixture"),
+                "RollsBack",
+                "TEST_F(LedgerFixture, RollsBack)"
+            ),
+            (Some("LedgerParam"), "Holds", "TEST_P(LedgerParam, Holds)"),
+            (
+                Some("LedgerTyped"),
+                "Grows",
+                "TYPED_TEST(LedgerTyped, Grows)"
+            ),
+            (
+                Some("LedgerTypedP"),
+                "Shrinks",
+                "TYPED_TEST_P(LedgerTypedP, Shrinks)"
+            ),
+            // Not a gtest macro's shape: as before.
+            (None, "TEST", "void TEST(int a)"),
+            (None, "TEST_F", "int TEST_F(Fixture, Name)"),
+            (None, "TEST", "TEST(Wrong, two, three)"),
+        ]
+    );
+    assert!(e
+        .items
+        .iter()
+        .all(|i| i.kind == crate::model::CodeItemKind::Fn));
+    assert_eq!(e.items[0].start_line, 2);
+    assert_eq!(e.items[0].end_line, 4);
+    assert!(e
+        .symbols
+        .contains(&"TEST(LedgerSuite, PostsTwice)".to_string()));
+    assert_eq!(
+        e.defined,
+        ["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P"]
+    );
+}

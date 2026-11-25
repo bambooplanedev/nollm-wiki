@@ -128,8 +128,7 @@ pub fn resolve(mut project: Project) -> Resolved {
                 for (&item, flow) in &mut flows {
                     // An owner like `<W as Display>` has no key: no own methods.
                     let own = file.code.items[item]
-                        .owner
-                        .as_deref()
+                        .call_owner()
                         .map(owner_key)
                         .filter(|k| !k.is_empty());
                     let cx = Caller {

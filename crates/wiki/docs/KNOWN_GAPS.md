@@ -201,6 +201,22 @@ per question is noise-level: treat single results as anecdotes.
   (`code` points to `tests` and `tests` to `code`, with the definitions), but
   `code:<lang>` and `docs` searches still answer `no symbol named` for a name
   defined only in another language or kind.
+  A gtest test is found as `Suite::Name` only in the five plain macro forms
+  over two bare names; a test from another framework's macro, a macro
+  wrapping `TEST`, or a parameterized instance name (`Inst/Suite.Name/0`)
+  is still the item its macro call parses as. The forms are told by name
+  and shape only: any function-like macro named `TEST` (or `TEST_F`, …)
+  with two bare arguments and a body, gtest or not, is read as the test
+  `Suite::Name`. A dotted word names `A::B`
+  only in a code search and only when that names an item; pages always rank
+  on the word as typed and follow its definition (or a pointer to the
+  other kind's), up to `limit`: a page main ranked last can fall off the
+  end. Under `tests`, a function name that is also a
+  gtest test's name answers with that test only, with no pointer to the
+  function. A name that is no item but owns items (not only a
+  gtest suite: a nested C++ struct or enum, a type only Rust impls own)
+  answers with up to 3 of those items, not its own definition line, which
+  no item holds; the pages that rank for it follow.
   A name with more than 3 definitions shows 3, one per page first, and a
   `+N more named …` line that counts the rest but does not list them.
   `--format json` stays an array of hits, so the answer-level fields

@@ -697,7 +697,17 @@ matching:
   upper-case letter after the first, is an identifier (`identifier`: outer
   punctuation trimmed, `_` kept). Its definitions are the items named so,
   or `owner::name` so (`Inner::f` also names `Outer::Inner::f`),
-  case-sensitively only (a name in another case is another item); modules and
+  case-sensitively only (a name in another case is another item); a name no
+  item has names the items it owns (a gtest suite, whose tests are items
+  `Suite::Name`: `extract_cpp::gtest_names`; also a nested C++ type or a
+  type only impls own), their marker reads `+N more owned by <name>`, and
+  the ranked pages follow them up to `limit`; a gtest test
+  (`CodeItem::is_test_case`) defines a name only under `tests` or when
+  nothing else does, is in no call `Index`, and its suite is no `own` for
+  its body's calls (`CodeItem::call_owner`); in a code kind or none
+  `render::answer` and `search_answer` look a word `A.B` up as `A::B` when
+  that names an item (`Wiki::dotted_as_qualified`), rank pages on the
+  query as typed, and echo the names as typed; modules and
   top-level items never; at most 3 (`DEFINITIONS_PER_NAME`) and `limit`,
   pages ranked higher first, then by pagerank, one per page before any
   page's second. A name with more than 3 marks its last shown line

@@ -1104,6 +1104,13 @@ fn code_item<'t>(
     item.doc_text = raw_doc
         .as_deref()
         .and_then(|r| item_doc_text(r, item.doc.as_deref()));
+    if let Some((suite, test)) = (spec.lang_name == "cpp")
+        .then(|| super::extract_cpp::gtest_names(def, text))
+        .flatten()
+    {
+        item.name = test.to_string();
+        item.owner = Some(suite.to_string());
+    }
     Some((name.start_byte(), item, def))
 }
 
