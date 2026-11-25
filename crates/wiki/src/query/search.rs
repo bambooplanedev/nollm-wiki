@@ -187,41 +187,42 @@ impl Wiki {
             .collect()
     }
 
-    /// Of `names` (`not_found` for a `code` search), those a `tests` search
-    /// would find: defined only on test pages, or the file stem of one.
-    /// Empty for any other kind.
-    pub fn in_tests_only(
+    /// Of `names` (`not_found` for a `kind` search), those a search of
+    /// `kind.other()` would find (a `code` search's names only tests define,
+    /// a `tests` search's names only code defines), as a name or the file
+    /// stem of a page. Empty for a kind with no other.
+    pub fn in_other_kind(
         &self,
         names: &[String],
         kind: Option<&KindFilter>,
         tag: Option<&str>,
     ) -> Vec<String> {
-        if !kind.is_some_and(KindFilter::drops_tests) {
+        let Some(other) = kind.and_then(KindFilter::other) else {
             return Vec::new();
-        }
-        let tests = Some(&KindFilter::Tests);
+        };
+        let other = Some(&other);
         names
             .iter()
             .filter(|n| {
-                !self.definitions(n, tests, tag).is_empty()
-                    || !self.stem_pages(n, tests, tag).is_empty()
+                !self.definitions(n, other, tag).is_empty()
+                    || !self.stem_pages(n, other, tag).is_empty()
             })
             .cloned()
             .collect()
     }
 
-    /// The answer a `tests` search gives a query of `names` alone: their
-    /// definitions (and module pages) on test pages, as `lift_names` lists
-    /// them, with no ranked pages.
-    pub fn test_definitions(&self, names: &[String], tag: Option<&str>, limit: usize) -> Vec<Hit> {
+    /// The answer a `kind` search gives a query of `names` alone: their
+    /// definitions (and module pages), as `lift_names` lists them, with no
+    /// ranked pages.
+    pub fn definitions_in(
+        &self,
+        names: &[String],
+        kind: &KindFilter,
+        tag: Option<&str>,
+        limit: usize,
+    ) -> Vec<Hit> {
         let mut hits = Vec::new();
-        self.lift_names(
-            &mut hits,
-            &names.join(" "),
-            Some(&KindFilter::Tests),
-            tag,
-            limit,
-        );
+        self.lift_names(&mut hits, &names.join(" "), Some(kind), tag, limit);
         hits
     }
 

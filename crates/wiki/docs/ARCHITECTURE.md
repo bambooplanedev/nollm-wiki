@@ -745,23 +745,29 @@ matching:
   line output ends `tests also match; use kind "tests"`. Printed for a test
   page anywhere in the top `limit`, the line came on most queries of a large
   tree and said little. For a
-  query of names alone, `Wiki::in_tests_only` picks the `not_found` names a
-  `tests` search would find (a definition on, or the module stem of, a test
+  query of names alone, `Wiki::in_other_kind` picks the `not_found` names a
+  search of the other kind (`KindFilter::other`: `tests` for `code`, `code`
+  for `tests`) would find (a definition on, or the module stem of, such a
   page), and the line output opens with `<name>: in test pages only; use
-  kind "tests"` in place of `no symbol named`, then those names' test
-  definitions (`Wiki::test_definitions`: `lift_names` under `tests`, so the
-  same cap and marker) and no ranked pages for them; the other names are
-  answered as a query of their own, so one call gives the definition.
+  kind "tests"` (or `in code pages only; use kind "code"`) in place of
+  `no symbol named`, then those names' definitions there
+  (`Wiki::definitions_in`: `lift_names` under that kind, so the same cap and
+  marker) and, under `code`, no ranked pages for them, the other names
+  being answered as a query of their own, so one call gives the definition.
+  Under `tests` the whole query still ranks the test pages, which follow
+  under `the test pages below match its words`: the tests that mention a
+  code name are what a `tests` search for it is after (on one tree, 129 of
+  300 code-only names listed test pages).
 - **Output.** `serve::search_lines` renders the default line format (page
   line `id  path  [date  ]title — summary`, indented symbol lines
   `path:start-end  name  signature  — doc`, or the snippet for a page
   without symbols; `no matches` when nothing hit); `serve::search_json`
   renders the JSON form. `serve::search_text` and `serve::search_json_text`
-  render one `Answer` (`render::answer`: the tests-only names and their
+  render one `Answer` (`render::answer`: the other kind's names and their
   definitions, the other missing names, whether the hits are the ranked
   pages, the hits, the pointer); the JSON array keeps its fields and order
-  and adds `more` to a capped symbol and `no_symbol`, `tests_only`,
-  `unindexed`, `tests_also_match` to its first hit. A file past
+  and adds `more` to a capped symbol and `no_symbol`, `tests_only` or
+  `code_only`, `unindexed`, `tests_also_match` to its first hit. A file past
   `wiki_code::MEMBERS_PER_FILE` (2,000) C/C++ data members keeps none of
   them as items and records the count (`CodeFile::members_unindexed`,
   `index.json`'s `members_unindexed`, absent at 0); a missing name such a
