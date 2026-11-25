@@ -1014,3 +1014,33 @@ fn a_name_the_parser_inserted_is_no_item() {
     let e = crate::extract("tint.h", src);
     assert!(e.items.iter().all(|i| !i.name.is_empty()), "{:?}", e.items);
 }
+
+/// Guards the lead walk above each item: it stops at the item before it on
+/// its line, so extracting one line of N data members grows about linearly
+/// in N. Walking the whole line back per item grows with N squared: from
+/// 125 to 2,000 members (the most one file indexes), about 256 times the
+/// time, where linear is about 16.
+/// A ratio of two sizes does not depend on the machine's speed or on the
+/// build profile; each size takes its best of several runs, so a busy
+/// machine slowing one run does not decide it. The bound, 100, sits between
+/// a loaded machine's linear runs (up to about 45) and the quadratic walk
+/// (about 280 in debug, 370 in release).
+#[test]
+fn a_line_of_members_extracts_in_linear_time() {
+    let run = |n: usize| {
+        let fields = (0..n)
+            .map(|k| format!("int m{k}; "))
+            .collect::<Vec<_>>()
+            .concat();
+        let src = format!("struct Wide {{ {fields}}};\n");
+        let start = std::time::Instant::now();
+        let e = crate::extract("wide.h", &src);
+        assert_eq!(e.items.iter().filter(|i| i.nested).count(), n);
+        start.elapsed().as_secs_f64()
+    };
+    let small = (0..5).map(|_| run(125)).fold(f64::MAX, f64::min);
+    let large = (0..3).map(|_| run(2_000)).fold(f64::MAX, f64::min);
+    let ratio = large / small;
+    eprintln!("125: {small:.4} s, 2000: {large:.4} s, ratio {ratio:.1}");
+    assert!(ratio < 100.0, "125: {small:.4} s, 2000: {large:.4} s");
+}

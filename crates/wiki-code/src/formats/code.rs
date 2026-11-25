@@ -945,7 +945,12 @@ fn code_item<'t>(
         // A lead that trails other nodes on its line (`#[a] #[b]`) is taken
         // with them only when they are all leads and the first opens the line.
         let mut group = vec![lead];
-        while !opens_its_line(group[group.len() - 1], text) {
+        // A `Stop` ends the walk below whatever else the group holds, so the
+        // group stops growing at one: a line of thousands of members would
+        // otherwise be walked back once per item.
+        while !opens_its_line(group[group.len() - 1], text)
+            && !matches!((spec.item_lead)(group[group.len() - 1], text), Lead::Stop)
+        {
             let head = group[group.len() - 1];
             match head.prev_named_sibling() {
                 Some(p) if last_row(p) == head.start_position().row => group.push(p),
