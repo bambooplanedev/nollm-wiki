@@ -666,7 +666,14 @@ defined only on test pages, or the module name of a test file only, gets
 (the lines `tests` would give) and no ranked pages for it; with `tests`, a name only non-test code
 defines gets `<name>: in code pages only; use kind "code"` and its code definitions, then, unlike
 `code`, the test pages that rank for it under `the test pages below match its words`.
-The answer for the other names comes after it, as if they were the whole query. An enum's value (a C/C++ enumerator, a Rust variant, a TS enum member) is found by its exact
+The answer for the other names comes after it, as if they were the whole query. A gtest test
+(`TEST`, `TEST_F`, `TEST_P`, `TYPED_TEST`, `TYPED_TEST_P`) is the item `Suite::Name`: `Name`,
+`Suite::Name` and `Suite.Name` find it (in a code search, any word `A.B` that names an item as `A::B`
+is read so, and echoed as typed; the pages that rank for the word as typed follow its definition, even
+after a `code` pointer to tests, under `the code pages below match its words`). A test named like a function it calls is not that function: no
+call resolves to a test, and outside `tests` a name some non-test item defines does not list the tests
+so named. Any name no item has but that owns items (a gtest suite, a nested C++ struct, a type only
+impls own) lists those, with `+N more owned by <name>` past 3, then the pages that rank for it. An enum's value (a C/C++ enumerator, a Rust variant, a TS enum member) is found by its exact
 name or `Enum::name`, at its own line, as a data member is. A C/C++ file with more than 2,000 data members (a
 generated register header) indexes none of them, nor a file with more than 2,000 enum values those, and a name such a file holds gets
 `<name>: members of <path> are not indexed (<N> there, more than 2000)` instead of
