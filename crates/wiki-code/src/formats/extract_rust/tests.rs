@@ -453,3 +453,52 @@ fn the_existing_gate_decides_public_for_restricted_and_trait_impl_items() {
         ]
     );
 }
+
+/// `owner::name  start-end  signature` of every nested value; each private.
+fn nested_values(path: &str, src: &str) -> Vec<String> {
+    crate::extract(path, src)
+        .items
+        .iter()
+        .filter(|i| i.nested && i.kind == crate::model::CodeItemKind::Value)
+        .map(|i| {
+            assert!(!i.public, "{} is public", i.name);
+            format!(
+                "{}  {}-{}  {}",
+                i.qualified_name(),
+                i.start_line,
+                i.end_line,
+                i.signature
+            )
+        })
+        .collect()
+}
+
+/// A variant is a nested value owned by its enum, public or not, as a C/C++
+/// enumerator is; a local enum's are not, and the exports stay as they were.
+#[test]
+fn enum_variants_are_nested_values_owned_by_their_enum() {
+    let src = "pub enum Shade {\n    Pale,\n    /// The dark one.\n    Dark = 3,\n    Rgb(u8, u8),\n    Named { v: u8 },\n}\nenum Tone { Low }\nfn f() {\n    enum Local { Gone }\n}\n";
+    assert_eq!(
+        nested_values("shade.rs", src),
+        [
+            "Shade::Pale  2-2  Pale",
+            "Shade::Dark  3-4  Dark = 3",
+            "Shade::Rgb  5-5  Rgb(u8, u8)",
+            "Shade::Named  6-6  Named { v: u8 }",
+            "Tone::Low  8-8  Low",
+        ]
+    );
+    let e = crate::extract("shade.rs", src);
+    assert_eq!(
+        e.symbols,
+        [
+            "pub enum Shade",
+            "Shade::Dark = 3",
+            "Shade::Named { v: u8 }",
+            "Shade::Pale",
+            "Shade::Rgb(u8, u8)"
+        ]
+    );
+    let dark = e.items.iter().find(|i| i.name == "Dark").unwrap();
+    assert_eq!(dark.doc.as_deref(), Some("The dark one."));
+}

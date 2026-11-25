@@ -3097,3 +3097,55 @@ fn unknown_page_closest_lists_non_test_pages_first() {
     let near = w.resolve_id("thumbnail.py").unwrap_err();
     assert_eq!(near, ["thumbnail_notes", "a_thumbnail"]);
 }
+
+const SHADES: [(&str, &str); 3] = [
+    (
+        "src/shade.h",
+        "#pragma once\nenum class Shade { kPale, kDark = 3 };\nenum Tone { TONE_LOW, TONE_HIGH };\n",
+    ),
+    ("src/mood.h", "enum Mood { TONE_LOW };\n"),
+    ("src/hue.rs", "pub enum Hue {\n    Ochre,\n    Umber(u8),\n}\n"),
+];
+
+/// An enum's value is found by its exact name or `Enum::name`, each enum's
+/// own when two share it; nothing else shows it.
+#[test]
+fn an_enum_value_is_found_by_its_exact_name_only() {
+    let (_d, w) = code_fixture(&SHADES);
+    let text = |q: &str| wiki::serve::search_text(&w, q, None, None, Some(10));
+    let t = text("kDark");
+    assert!(
+        t.contains("  src/shade.h:2-2  Shade::kDark  kDark = 3\n"),
+        "{t}"
+    );
+    assert!(!t.contains("no symbol named"), "{t}");
+    let t = text("TONE_LOW");
+    assert!(
+        t.contains("  src/shade.h:3-3  Tone::TONE_LOW  TONE_LOW\n"),
+        "{t}"
+    );
+    assert!(
+        t.contains("  src/mood.h:1-1  Mood::TONE_LOW  TONE_LOW\n"),
+        "{t}"
+    );
+    let t = text("Mood::TONE_LOW");
+    assert!(
+        t.contains("Mood::TONE_LOW") && !t.contains("Tone::TONE_LOW"),
+        "{t}"
+    );
+    // A plain word (`Ochre`) stays a ranked word, as for any item.
+    let t = text("Hue::Ochre Hue::Umber");
+    assert!(t.contains("  src/hue.rs:2-2  Hue::Ochre  Ochre\n"), "{t}");
+    assert!(
+        t.contains("  src/hue.rs:3-3  Hue::Umber  Umber(u8)\n"),
+        "{t}"
+    );
+    for q in ["dark", "tone low", "shade"] {
+        assert!(!text(q).contains("::kDark"), "{q}: {}", text(q));
+        assert!(!text(q).contains("::TONE_LOW"), "{q}: {}", text(q));
+    }
+    let outline = w.outline("shade", None).unwrap();
+    assert!(!outline.contains("kDark"), "{outline}");
+    let hint = wiki::hint::hint_lines(&w, "where is the dark shade value");
+    assert!(!hint.contains("kDark"), "{hint}");
+}

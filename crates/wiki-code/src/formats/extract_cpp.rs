@@ -153,6 +153,8 @@ const QUERY: &str = r"
 
 (field_declaration declarator: (_) @name) @item
 
+(enumerator name: (identifier) @name) @item
+
 (preproc_include path: (_) @import)
 ";
 
@@ -359,10 +361,11 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 
     let mut chain = Vec::new();
     let mut node = def;
-    // A data member of `typedef struct { … } Name;` is owned by `Name`.
-    let data = is_data_member(def);
+    // A data member of `typedef struct { … } Name;` is owned by `Name`, an
+    // enumerator of `typedef enum { … } Name;` too.
+    let data = is_data_member(def) || def.kind() == "enumerator";
     while let Some(parent) = node.parent() {
-        if parent.kind() == "field_declaration_list" {
+        if matches!(parent.kind(), "field_declaration_list" | "enumerator_list") {
             if let Some(name) = parent
                 .parent()
                 .and_then(|ty| {
@@ -487,6 +490,11 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
     {
         let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
         return value_shape(eq, def.child_by_field_name("default_value"), true);
+    }
+    // An enumerator reads with its value: `DARK = 3`.
+    if def.kind() == "enumerator" {
+        let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+        return value_shape(eq, def.child_by_field_name("value"), false);
     }
     if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
         let single = def
