@@ -182,10 +182,14 @@ per question is noise-level: treat single results as anecdotes.
   owned `Class::name` only when no item matches the whole qualified name, and
   any namespace prefix is accepted then; `ns::f` does not find a free `f`.
   A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.
+  A name the other side of the test split defines is not called missing
+  (`code` points to `tests` and `tests` to `code`, with the definitions), but
+  `code:<lang>` and `docs` searches still answer `no symbol named` for a name
+  defined only in another language or kind.
   A name with more than 3 definitions shows 3, one per page first, and a
   `+N more named …` line that counts the rest but does not list them.
   `--format json` stays an array of hits, so the answer-level fields
-  (`no_symbol`, `tests_only`, `tests_also_match`) ride on its first hit and
+  (`no_symbol`, `tests_only`, `code_only`, `tests_also_match`) ride on its first hit and
   an answer with no hit (`[]`) loses them. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);

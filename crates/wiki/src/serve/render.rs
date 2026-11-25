@@ -217,27 +217,40 @@ pub fn search_lines(hits: &[Hit]) -> String {
 /// The line that sends a `code` search to `tests`.
 const USE_TESTS: &str = "use kind \"tests\"";
 
+/// The pages and kind a search of `other` (`KindFilter::other`) names:
+/// `("test", "tests")` or `("code", "code")`.
+fn kind_words(other: &KindFilter) -> (&'static str, &'static str) {
+    match other {
+        KindFilter::Tests => ("test", "tests"),
+        _ => ("code", "code"),
+    }
+}
+
 /// What a `search` answers, which its line and JSON renderings share.
 struct Answer {
     /// Names a page whose members were not indexed holds, with that page's
     /// path and member count (`Wiki::in_unindexed_members`).
     unindexed: Vec<(String, String, usize)>,
-    /// Names defined only on test pages (`Wiki::in_tests_only`).
-    tests_only: Vec<String>,
-    /// Their test definitions (`Wiki::test_definitions`).
-    test_hits: Vec<Hit>,
+    /// Names defined only in the other kind (`Wiki::in_other_kind`): on
+    /// test pages for a `code` search, outside them for a `tests` one.
+    other_only: Vec<String>,
+    /// That kind (`KindFilter::other`).
+    other: Option<KindFilter>,
+    /// Their definitions there (`Wiki::definitions_in`).
+    other_hits: Vec<Hit>,
     /// The other names no item defines (`Wiki::not_found`).
     missing: Vec<String>,
-    /// The hits are the ranked pages: no name of the query is defined.
+    /// The hits are the ranked pages: no name of the query is defined
+    /// (under `tests`, the names only code defines count as not defined).
     ranked: bool,
     hits: Vec<Hit>,
     /// A test page ranked first and `code` dropped it.
     tests_cut: bool,
 }
 
-/// A query of names alone that names something only tests define is
-/// answered with those test definitions, and the rest of the query without
-/// those names.
+/// A query of names alone that names something only the other kind defines
+/// (tests for `code`, code for `tests`) is answered with those definitions,
+/// and the rest of the query without those names.
 fn answer(
     w: &Wiki,
     q: &str,
@@ -251,34 +264,46 @@ fn answer(
         .into_iter()
         .filter(|n| !unindexed.iter().any(|(u, _, _)| u == n))
         .collect();
-    let tests_only = w.in_tests_only(&missing, kind, tag);
-    let test_hits = if tests_only.is_empty() {
-        Vec::new()
-    } else {
-        w.test_definitions(&tests_only, tag, limit.unwrap_or(10))
+    let other_only = w.in_other_kind(&missing, kind, tag);
+    let other = kind.and_then(KindFilter::other);
+    let other_hits = match &other {
+        Some(o) if !other_only.is_empty() => {
+            w.definitions_in(&other_only, o, tag, limit.unwrap_or(10))
+        }
+        _ => Vec::new(),
     };
     let missing: Vec<String> = missing
         .into_iter()
-        .filter(|n| !tests_only.contains(n))
+        .filter(|n| !other_only.contains(n))
         .collect();
     let (names, _) = Wiki::query_names(q);
     let rest = names
         .into_iter()
-        .filter(|n| !tests_only.iter().any(|t| t == n))
+        .filter(|n| !other_only.iter().any(|t| t == n))
         .collect::<Vec<_>>()
         .join(" ");
-    let q = if tests_only.is_empty() { q } else { &rest };
-    let (hits, tests_cut) = if !tests_only.is_empty() && rest.is_empty() {
+    // Under `tests` a name only code defines still ranks the test pages
+    // that mention it: finding those is why one searches `tests`.
+    let keep = matches!(other, Some(KindFilter::Code));
+    let q = if other_only.is_empty() || keep {
+        q
+    } else {
+        &rest
+    };
+    let (hits, tests_cut) = if !other_only.is_empty() && !keep && rest.is_empty() {
         (Vec::new(), false)
     } else {
         w.search_answer(q, kind, tag, limit)
     };
-    let ranked = !missing.is_empty() && missing.len() == Wiki::query_names(q).0.len();
+    let kept = if keep { other_only.len() } else { 0 };
+    let ranked = !missing.is_empty() || kept > 0;
+    let ranked = ranked && missing.len() + kept == Wiki::query_names(q).0.len();
     Answer {
         unindexed,
-        tests_cut: tests_cut && tests_only.is_empty(),
-        tests_only,
-        test_hits,
+        tests_cut: tests_cut && other_only.is_empty(),
+        other_only,
+        other,
+        other_hits,
         missing,
         ranked,
         hits,
@@ -286,8 +311,8 @@ fn answer(
 }
 
 /// The default line answer to a `search`: for a query of names alone, a
-/// line sending names only tests define to `tests`, with their test
-/// definitions, then a line naming the names no item defines, saying the
+/// line sending names only the other kind defines to that kind (`code` to
+/// `tests`, `tests` to `code`), with their definitions there, then a line naming the names no item defines, saying the
 /// pages below match their words when they are the ranked pages; then
 /// `search_lines` of the hits, and a last line when a test page ranked
 /// first under `code`.
@@ -306,22 +331,35 @@ pub fn search_text(
             wiki_code::MEMBERS_PER_FILE
         );
     }
-    if !a.tests_only.is_empty() {
+    if let (false, Some(other)) = (a.other_only.is_empty(), &a.other) {
+        let (pages, kind) = kind_words(other);
         out += &format!(
-            "{}: in test pages only; {USE_TESTS}\n",
-            a.tests_only.join(", ")
+            "{}: in {pages} pages only; use kind \"{kind}\"\n",
+            a.other_only.join(", ")
         );
-        out += &search_lines(&a.test_hits);
+        out += &search_lines(&a.other_hits);
+        if a.missing.is_empty() && a.ranked && !a.hits.is_empty() {
+            let whose = if a.other_only.len() == 1 {
+                "its"
+            } else {
+                "their"
+            };
+            out += &format!("the test pages below match {whose} words\n");
+        }
     }
     if !a.missing.is_empty() {
         let names = a.missing.join(", ");
-        out += &match (a.hits.is_empty() || !a.ranked, a.missing.len()) {
+        let kept = match a.other {
+            Some(KindFilter::Code) => a.other_only.len(),
+            _ => 0,
+        };
+        out += &match (a.hits.is_empty() || !a.ranked, a.missing.len() + kept) {
             (true, _) => format!("no symbol named {names}\n"),
             (false, 1) => format!("no symbol named {names}; the pages below match its words\n"),
             (false, _) => format!("no symbol named {names}; the pages below match their words\n"),
         };
     }
-    if !a.hits.is_empty() || (a.missing.is_empty() && a.tests_only.is_empty()) {
+    if !a.hits.is_empty() || (a.missing.is_empty() && a.other_only.is_empty()) {
         out += &search_lines(&a.hits);
     }
     if a.tests_cut {
@@ -330,8 +368,10 @@ pub fn search_text(
     out
 }
 
-/// `search_text`'s answer as `search_json`: the test definitions, then the
-/// hits. The first hit adds `no_symbol` and `tests_only` (name lists) and
+/// `search_text`'s answer as `search_json`: the other kind's definitions,
+/// then the hits, the first ranked test page after them marked
+/// `pages_match_words: true`. The first hit adds `no_symbol` and
+/// `tests_only` or `code_only` (name lists) and
 /// `tests_also_match: true` when the line answer has those lines; an answer
 /// with no hit has nowhere to put them.
 pub fn search_json_text(
@@ -342,7 +382,13 @@ pub fn search_json_text(
     limit: Option<usize>,
 ) -> String {
     let a = answer(w, q, kind, tag, limit);
-    let mut hits = hit_values(a.test_hits.into_iter().chain(a.hits).collect());
+    // The line answer's `the test pages below match its words`.
+    let marked = (!a.other_only.is_empty() && a.missing.is_empty() && a.ranked)
+        .then_some(a.other_hits.len());
+    let mut hits = hit_values(a.other_hits.into_iter().chain(a.hits).collect());
+    if let Some(h) = marked.and_then(|n| hits.get_mut(n)) {
+        h["pages_match_words"] = true.into();
+    }
     if let Some(first) = hits.first_mut() {
         if !a.unindexed.is_empty() {
             let u: Vec<_> = a
@@ -355,8 +401,8 @@ pub fn search_json_text(
         if !a.missing.is_empty() {
             first["no_symbol"] = a.missing.into();
         }
-        if !a.tests_only.is_empty() {
-            first["tests_only"] = a.tests_only.into();
+        if let (false, Some(other)) = (a.other_only.is_empty(), &a.other) {
+            first[format!("{}_only", kind_words(other).1)] = a.other_only.into();
         }
         if a.tests_cut {
             first["tests_also_match"] = true.into();

@@ -122,7 +122,7 @@ fn a_name_only_tests_define_is_not_missing_but_in_tests() {
     for q in ["only_in_tests", "ledger_flow"] {
         let missing = w.not_found(q, code, None);
         assert_eq!(missing, [q]);
-        assert_eq!(w.in_tests_only(&missing, code, None), [q]);
+        assert_eq!(w.in_other_kind(&missing, code, None), [q]);
         assert_eq!(w.not_found(q, None, None), Vec::<String>::new(), "{q}");
         assert_eq!(
             w.not_found(q, Some(&KindFilter::Tests), None),
@@ -132,10 +132,10 @@ fn a_name_only_tests_define_is_not_missing_but_in_tests() {
     // A name nothing defines stays plain missing.
     let missing = w.not_found("no_such_name", code, None);
     assert_eq!(missing, ["no_such_name"]);
-    assert_eq!(w.in_tests_only(&missing, code, None), Vec::<String>::new());
+    assert_eq!(w.in_other_kind(&missing, code, None), Vec::<String>::new());
     // Only a `code` search points at tests.
     let named = ["only_in_tests".to_string()];
-    assert_eq!(w.in_tests_only(&named, None, None), Vec::<String>::new());
+    assert_eq!(w.in_other_kind(&named, None, None), Vec::<String>::new());
 }
 
 fn text(w: &Wiki, q: &str, kind: Option<&KindFilter>) -> String {
@@ -198,6 +198,48 @@ fn the_answer_lines_name_the_tests_kind() {
     assert!(t.contains("src/ledger.rs:1-2  post_balance"), "{t}");
     assert!(!t.contains("no symbol named"), "{t}");
     assert_eq!(text(&w, "zq", code), "no matches\n");
+}
+
+/// The mirror of the line above: under `tests`, a name only code defines is
+/// not missing; the answer says where code defines it.
+#[test]
+fn a_name_only_code_defines_is_not_missing_under_tests() {
+    let (_d, w) = fixture();
+    let tests = Some(&KindFilter::Tests);
+    let missing = w.not_found("post_balance", tests, None);
+    assert_eq!(missing, ["post_balance"]);
+    assert_eq!(w.in_other_kind(&missing, tests, None), ["post_balance"]);
+    let t = text(&w, "post_balance", tests);
+    assert!(
+        t.starts_with("post_balance: in code pages only; use kind \"code\"\n"),
+        "{t}"
+    );
+    assert!(t.contains("\n  src/ledger.rs:1-2  post_balance"), "{t}");
+    assert!(!t.contains("no symbol named"), "{t}");
+    // The test pages that mention it follow, as `tests` ranked them on main.
+    let (pointer, ranked) = t
+        .split_once("\nthe test pages below match its words\n")
+        .expect(&t);
+    assert!(!pointer.contains("tests/"), "{t}");
+    assert!(ranked.contains("  tests/ledger_flow.rs  "), "{t}");
+    assert!(!ranked.contains("src/"), "{t}");
+    // Another name keeps its own answer.
+    let t = text(&w, "post_balance only_in_tests", tests);
+    assert!(t.starts_with("post_balance: in code pages only"), "{t}");
+    assert!(t.contains("tests/ledger_flow.rs:2-2  only_in_tests"), "{t}");
+    let t = text(&w, "post_balance zq_xv", tests);
+    assert!(
+        t.contains("no symbol named zq_xv; the pages below match their words\n"),
+        "{t}"
+    );
+    let v = json(&w, "post_balance", tests);
+    assert_eq!(v[0]["code_only"], serde_json::json!(["post_balance"]));
+    assert_eq!(v[0]["path"], "src/ledger.rs");
+    assert_eq!(v[1]["path"], "tests/ledger_flow.rs");
+    // The first ranked test page is marked, as the line answer marks it.
+    assert_eq!(v[1]["pages_match_words"], true);
+    assert!(v[0].get("pages_match_words").is_none(), "{}", v[0]);
+    assert!(v[0].get("tests_only").is_none(), "{}", v[0]);
 }
 
 fn json(w: &Wiki, q: &str, kind: Option<&KindFilter>) -> Vec<serde_json::Value> {
