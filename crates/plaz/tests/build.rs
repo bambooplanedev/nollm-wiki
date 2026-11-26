@@ -2124,6 +2124,58 @@ fn python_class_relative_calls_walk_the_project_bases() {
     );
 }
 
+const GAUGE: &str = "class Gauge:\n    def __init__(self, v):\n        self.v = v\n\nclass Base:\n    def __init__(self, v):\n        self.v = v\n\nclass Dial(Base):\n    def turn(self):\n        pass\n\ndef make(v):\n    Gauge(v)\n    Dial(v)\n";
+
+#[test]
+fn a_python_construction_of_a_project_class_links_its_init() {
+    let b = "from a import Gauge\n\ndef build(v):\n    Gauge(v)\n";
+    let files = [("a.py", GAUGE), ("b.py", b)];
+    assert_eq!(
+        calls_in(&files, "map/a_py", "make"),
+        [
+            "`Gauge(v)` L14 → [[map/a_py#gauge_init|Gauge::__init__]]",
+            "`Dial(v)` L15 → one of: [[map/a_py#base_init|Base::__init__]], or outside the project",
+        ]
+    );
+    assert_eq!(
+        calls_in(&files, "map/b_py", "build"),
+        ["`Gauge(v)` L4 → [[map/a_py#gauge_init|Gauge::__init__]]"]
+    );
+    let (_d, vault) = common::built(&files);
+    let called = common::fn_section(
+        &common::map_page(&vault, "map/a_py"),
+        "gauge_init",
+        "Called from",
+    );
+    assert_eq!(
+        called,
+        [
+            "certainly: [[map/a_py#make|make]] L14",
+            "certainly: [[map/b_py#build|build]] L4"
+        ]
+    );
+}
+
+#[test]
+fn a_python_construction_that_may_not_run_the_init_stays_hidden() {
+    let a = "from enum import Enum\n\nclass Meta(type):\n    pass\n\nclass Pooled:\n    def __new__(cls, v):\n        return cls\n\n    def __init__(self, v):\n        self.v = v\n\nclass Typed(metaclass=Meta):\n    def __init__(self, v):\n        self.v = v\n\nclass Color(Enum):\n    def __init__(self, v):\n        self.v = v\n\nclass Bare:\n    pass\n\ndef make(v):\n    Pooled(v)\n    Typed(v)\n    Color(v)\n    Bare()\n";
+    assert_eq!(
+        calls_in(&[("a.py", a)], "map/a_py", "make"),
+        [
+            "`Pooled(v)` L25 → target not visible",
+            "`Typed(v)` L26 → target not visible",
+            "`Color(v)` L27 → target not visible",
+            "`Bare()` L28 → target not visible",
+        ]
+    );
+    // Two classes of the name and no import saying which: as before.
+    let two = "class Gauge:\n    def __init__(self, v):\n        pass\n";
+    let c = "def build(v):\n    Gauge(v)\n";
+    let files = [("a.py", two), ("d.py", two), ("c.py", c)];
+    let built = calls_in(&files, "map/c_py", "build");
+    assert!(!built[0].contains("__init__"), "{built:?}");
+}
+
 #[test]
 fn a_python_subclass_through_an_aliased_base_import_still_overrides() {
     let a =

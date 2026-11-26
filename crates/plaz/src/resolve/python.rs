@@ -216,6 +216,23 @@ impl<'a> Python<'a> {
             .collect()
     }
 
+    /// Does calling `class` surely run its `__init__`: no decorator, no
+    /// `metaclass=`, no `__new__` of its own, and only bases of the
+    /// project (or `object`) that are so too?
+    fn constructs(&self, class: FnRef, depth: usize) -> bool {
+        let it = self.item(class);
+        let sig = it.signature.trim_start();
+        let plain = !sig.starts_with('@') && !sig.contains("metaclass");
+        let bases_too = || {
+            bases(it).into_iter().all(|b| {
+                let found = self.classes_named(class.0, b);
+                b == "object"
+                    || (!found.is_empty() && found.iter().all(|&c| self.constructs(c, depth - 1)))
+            })
+        };
+        depth > 0 && plain && self.methods(class, "__new__").is_empty() && bases_too()
+    }
+
     /// The methods `name` that `class` inherits: those of the first base,
     /// in the order written, that has one, itself or inherited. `true`
     /// when a base from outside the project may have it first.
@@ -272,7 +289,10 @@ impl Rules for Caller<'_, '_, '_> {
             {
                 Evidence::Hidden
             }
-            CallVia::Bare => cx.bare(call),
+            CallVia::Bare => match cx.bare(call) {
+                Evidence::Hidden => cx.construction(call).unwrap_or(Evidence::Hidden),
+                found @ (Evidence::Outside | Evidence::Found { .. }) => found,
+            },
             CallVia::Path(q) if q == "Self" => on_self(),
             CallVia::Path(q) => cx.path(call, q, &rebound),
             CallVia::SelfRecv => on_self(),
@@ -375,6 +395,39 @@ impl super::Caller<'_, '_> {
             }
         }
         out
+    }
+
+    /// `Cls(…)`, a bare call of the one project class of its name the file
+    /// defines (and no import binds) or its imports name, when calling it
+    /// surely runs `__init__` (`Python::constructs`): its own `__init__`,
+    /// else one it inherits, or something outside.
+    pub(super) fn construction(&self, call: &MapCall) -> Option<Evidence> {
+        let (py, page, name) = (self.py, self.page, call.site.name.as_str());
+        let all = py.classes.get(name)?.iter().copied();
+        let bound = py.outside.get(&page).is_some_and(|o| o.contains(name));
+        let class: Vec<FnRef> = match py.sources(page, name) {
+            None if !bound => all.filter(|c| c.0 == page).collect(),
+            Some(from) if all.clone().all(|c| c.0 != page) => {
+                all.filter(|c| from.contains(&c.0)).collect()
+            }
+            None | Some(_) => Vec::new(),
+        };
+        let &[class] = class.as_slice() else {
+            return None;
+        };
+        if !py.constructs(class, 16) {
+            return None;
+        }
+        let own = py.methods(class, "__init__");
+        let (fns, open) = if own.is_empty() {
+            (py.inherited(class, "__init__", 16).0, true)
+        } else {
+            (own, false)
+        };
+        (!fns.is_empty()).then(|| Evidence::Found {
+            fns: self.ids(fns),
+            open,
+        })
     }
 
     /// Does the Python module bind `x` to a value or function of its
