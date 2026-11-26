@@ -557,9 +557,13 @@ pub(super) fn arity_of(def: Node, lang: &str, method: bool, text: &str) -> Optio
 }
 
 /// A C++ function's parameter list: under its function declarator, through
-/// any pointer or reference declarator wrapping it.
+/// any pointer or reference declarator wrapping it. A definition's is the
+/// one naming the function, not that of a function pointer it returns.
 fn cpp_parameters(def: Node) -> Option<Node> {
     let mut d = def.child_by_field_name("declarator")?;
+    if def.kind() == "function_definition" {
+        d = crate::formats::extract_cpp::naming_declarator(d).unwrap_or(d);
+    }
     while d.kind() != "function_declarator" {
         let mut cursor = d.walk();
         let inner = d.child_by_field_name("declarator").or_else(|| {

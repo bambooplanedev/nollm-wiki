@@ -1020,6 +1020,124 @@ fn a_name_the_parser_inserted_is_no_item() {
     assert!(e.items.iter().all(|i| !i.name.is_empty()), "{:?}", e.items);
 }
 
+/// Each item of `src` as `Kind name | signature | start-end`.
+fn item_rows(path: &str, src: &str) -> Vec<String> {
+    crate::extract(path, src)
+        .items
+        .iter()
+        .map(|i| {
+            format!(
+                "{:?} {} | {} | {}-{}",
+                i.kind, i.name, i.signature, i.start_line, i.end_line
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn deep_pointer_and_function_pointer_returning_definitions_are_functions() {
+    // A definition's declarator nests the function declarator under any
+    // number of pointers (`const` between them included), or under the
+    // pointer to the function it returns: each is a function, named as
+    // written, its signature cut at the body as `char *f(int)`'s is.
+    let src = "static char **split_rows(int n)\n{\n  return 0;\n}\n\
+               char * const *frozen_rows(int n) { return 0; }\n\
+               int ***cube(void) { return 0; }\n\
+               static void (*choose_hook(int n))(void)\n{\n  return 0;\n}\n\
+               char *(*maker(void))(int) { return 0; }\n";
+    assert_eq!(
+        item_rows("src/rows.c", src),
+        [
+            "Fn split_rows | static char **split_rows(int n) | 1-4",
+            "Fn frozen_rows | char * const *frozen_rows(int n) | 5-5",
+            "Fn cube | int ***cube(void) | 6-6",
+            "Fn choose_hook | static void (*choose_hook(int n))(void) | 7-10",
+            "Fn maker | char *(*maker(void))(int) | 11-11",
+        ]
+    );
+    let e = crate::extract("src/rows.c", src);
+    assert_eq!(
+        e.defined,
+        ["choose_hook", "cube", "frozen_rows", "maker", "split_rows"]
+    );
+    // The function's own parameters, not those of the pointer it returns.
+    let hook = e.items.iter().find(|i| i.name == "choose_hook").unwrap();
+    assert_eq!(hook.arity.map(|a| a.max), Some(Some(1)), "{:?}", hook.arity);
+    let maker = e.items.iter().find(|i| i.name == "maker").unwrap();
+    assert_eq!(
+        maker.arity.map(|a| a.max),
+        Some(Some(0)),
+        "{:?}",
+        maker.arity
+    );
+}
+
+#[test]
+fn deep_pointer_returning_methods_and_reference_to_pointer_returns_are_functions() {
+    let src = "class Box {\npublic:\n  char **inline_rows() { return 0; }\n};\n\
+               char **Box::rows() { return 0; }\n\
+               int *&slot() { static int *p; return p; }\n";
+    let e = crate::extract("src/box.cpp", src);
+    assert_eq!(
+        e.symbols,
+        [
+            "class Box",
+            "char **Box::inline_rows()",
+            "char **Box::rows()",
+            "int *&slot()"
+        ],
+        "{:?}",
+        e.symbols
+    );
+    assert_eq!(e.methods, ["inline_rows", "rows"], "{:?}", e.methods);
+    assert_eq!(
+        item_rows("src/box.cpp", src),
+        [
+            "Type Box | class Box | 1-4",
+            "Method inline_rows | char **inline_rows() | 3-3",
+            "Method rows | char **Box::rows() | 5-5",
+            "Fn slot | int *&slot() | 6-6",
+        ]
+    );
+}
+
+#[test]
+fn neighbours_of_deep_pointer_definitions_stay_as_they_were() {
+    // What each read before deep declarators were walked: a variable
+    // holding a function pointer, a declaration with no body, K&R
+    // definitions (which the grammar reads as a declaration), a macro-led
+    // head the grammar cannot parse, and a header's two-star member.
+    let cases: [(&str, &str, &[&str]); 7] = [
+        ("src/a.c", "void (*handler)(int) = on_tick;\n", &[]),
+        ("src/a.c", "void (*spare)(int);\nchar **grid;\n", &[]),
+        ("src/a.c", "char **names(void);\n", &[]),
+        (
+            "src/a.c",
+            "char *one_name(void);\n",
+            &["Fn one_name | char *one_name(void) | 1-1"],
+        ),
+        (
+            "src/a.c",
+            "char **old_style(a)\nint a;\n{ return 0; }\n",
+            &[],
+        ),
+        (
+            "src/a.c",
+            "WRAP(word) **wrapped(int x) { return 0; }\n",
+            &[],
+        ),
+        (
+            "src/a.h",
+            "class Box {\npublic:\n  char **rows();\n};\n",
+            &["Type Box | class Box | 1-4"],
+        ),
+    ];
+    for (path, src, want) in cases {
+        assert_eq!(item_rows(path, src), want, "{src:?}");
+        assert!(crate::extract(path, src).methods.is_empty(), "{src:?}");
+    }
+}
+
 /// Guards the lead walk above each item: it stops at the item before it on
 /// its line, so extracting one line of N data members grows about linearly
 /// in N. Walking the whole line back per item grows with N squared: from

@@ -3205,3 +3205,20 @@ fn cpp_locals_line_lists_body_names_not_parameters() {
     );
     assert_eq!(line("bare"), Vec::<String>::new());
 }
+
+#[test]
+fn a_deep_pointer_or_function_pointer_returning_function_is_charted_and_linked() {
+    let src = "static char **split_rows(int n) {\n    if (n) { return 0; }\n    return 0;\n}\nstatic void (*choose_hook(int n))(void) {\n    return 0;\n}\nvoid run(int n) {\n    split_rows(n);\n    choose_hook(n);\n}\n";
+    let (_d, vault) = common::built(&[("src/rows.c", src)]);
+    let page = common::map_page(&vault, "map/src/rows_c");
+    assert_eq!(headings(&page), ["split_rows", "choose_hook", "run"]);
+    let rows = common::fn_block(&page, "split_rows");
+    assert!(rows.contains("    n1{\"n\"}\n"), "{rows}");
+    assert_eq!(
+        cpp_targets(&[("src/rows.c", src)], "src/rows.c", "run"),
+        [
+            "split_rows(n) → src/rows.c:1",
+            "choose_hook(n) → src/rows.c:5"
+        ]
+    );
+}

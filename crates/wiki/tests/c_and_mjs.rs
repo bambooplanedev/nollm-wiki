@@ -104,3 +104,21 @@ fn c_with_cpp_keyword_identifiers_known_limit() {
         ["before", "new", "class", "x", "takes_this", "after"]
     );
 }
+
+#[test]
+fn a_c_function_returning_a_deep_or_function_pointer_is_a_symbol_with_callers() {
+    let (_d, w) = common::compiled_wiki(&[(
+        "src/rows.c",
+        "static char **split_rows(int n) {\n  return 0;\n}\nstatic void (*choose_hook(int n))(void) {\n  return 0;\n}\nint main(void) {\n  choose_hook(2);\n  return split_rows(1) != 0;\n}\n",
+    )]);
+    let out = w.callers("rows", "split_rows", None, None).unwrap();
+    assert!(
+        out.contains("src/rows.c\n  7-10  fn  main  calls split_rows at 9"),
+        "{out}"
+    );
+    let out = w.callers("rows", "choose_hook", None, None).unwrap();
+    assert!(
+        out.contains("src/rows.c\n  7-10  fn  main  calls choose_hook at 8"),
+        "{out}"
+    );
+}
