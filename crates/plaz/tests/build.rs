@@ -3068,3 +3068,54 @@ fn asserts_are_counted_as_not_drawn() {
     let f = common::fn_block(&common::map_page(&vault, "map/a_py"), "f");
     assert!(f.contains(" Not drawn: 2 assert.\n"), "{f}");
 }
+
+#[test]
+fn a_module_file_declared_under_cfg_test_is_test_code() {
+    let helpers =
+        "use super::*;\nfn fixture() {\n    keep();\n}\n#[test]\nfn t() {\n    fixture();\n}\n";
+    let (_d, vault) = common::built(&[
+        (
+            "src/lib.rs",
+            "mod store;\nmod shelf;\nmod plain;\n#[cfg(test)]\nmod tests;\n",
+        ),
+        ("src/tests.rs", helpers),
+        (
+            "src/store.rs",
+            "pub fn keep() {}\n#[cfg(test)]\nmod tests;\n",
+        ),
+        ("src/store/tests.rs", helpers),
+        (
+            "src/shelf/mod.rs",
+            "pub fn keep() {}\n#[cfg(test)]\nmod checks;\n",
+        ),
+        ("src/shelf/checks.rs", helpers),
+        // Declared with no `cfg(test)`: charted as any module.
+        ("src/plain.rs", "pub fn other() {}\nmod tests;\n"),
+        (
+            "src/plain/tests.rs",
+            "fn fixture() {\n    super::other();\n}\n",
+        ),
+    ]);
+    for page in [
+        "map/src/tests_rs",
+        "map/src/store/tests_rs",
+        "map/src/shelf/checks_rs",
+    ] {
+        let text = common::map_page(&vault, page);
+        assert!(common::headings(&text).is_empty(), "{page}:\n{text}");
+        assert!(
+            text.contains("\nTest code is not charted: 2 functions.\n"),
+            "{page}:\n{text}"
+        );
+    }
+    for page in ["map/src/store_rs", "map/src/shelf/mod_rs"] {
+        let text = common::map_page(&vault, page);
+        assert_eq!(
+            common::fn_section(&text, "keep", "Called from"),
+            ["none found"],
+            "{page}"
+        );
+    }
+    let plain = common::map_page(&vault, "map/src/plain/tests_rs");
+    assert_eq!(common::headings(&plain), ["fixture"]);
+}

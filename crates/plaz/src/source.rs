@@ -9,7 +9,7 @@ use cpp::cpp_facts;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use wiki_code::index::Family;
-use wiki_code::model::CallVia;
+use wiki_code::model::{CallVia, CodeItemKind};
 use wiki_code::walk::walk;
 use wiki_code::{analyze, handles, is_cpp_fragment, pair_declarations, Analyzed};
 
@@ -62,6 +62,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         files.insert(path, f);
     }
     drop_pieces(&mut files);
+    test_modules(&mut files);
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();
@@ -159,6 +160,39 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
     }
     let read: BTreeSet<String> = (read.difference(&bad)).map(|p| (*p).to_string()).collect();
     files.retain(|path, _| !is_cpp_fragment(path) || read.contains(path));
+}
+
+/// Makes test code of each Rust file a `#[cfg(test)] mod n;` declares
+/// (`n.rs` or `n/mod.rs` in the declaring module's directory): its items
+/// are tests, its flows counted in `test_fns` instead.
+fn test_modules(files: &mut BTreeMap<String, File>) {
+    let mut declared = Vec::new();
+    for (path, f) in files.iter().filter(|(_, f)| f.family == Family::Rust) {
+        let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
+        let base = match name.strip_suffix(".rs") {
+            Some("mod" | "lib" | "main") | None => dir.to_string(),
+            Some(stem) if dir.is_empty() => stem.to_string(),
+            Some(stem) => format!("{dir}/{stem}"),
+        };
+        let at = |p: String| {
+            if base.is_empty() {
+                p
+            } else {
+                format!("{base}/{p}")
+            }
+        };
+        for it in (f.code.items.iter()).filter(|it| it.kind == CodeItemKind::Module && it.test) {
+            declared.push(at(format!("{}.rs", it.name)));
+            declared.push(at(format!("{}/mod.rs", it.name)));
+        }
+    }
+    for path in declared {
+        if let Some(f) = files.get_mut(&path) {
+            f.test_fns += f.flows.len();
+            f.flows.clear();
+            f.code.items.iter_mut().for_each(|it| it.test = true);
+        }
+    }
 }
 
 /// The file at `path` of the text `text`, analysed as `a`.
