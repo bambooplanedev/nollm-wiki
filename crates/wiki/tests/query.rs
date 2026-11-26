@@ -3097,3 +3097,299 @@ fn unknown_page_closest_lists_non_test_pages_first() {
     let near = w.resolve_id("thumbnail.py").unwrap_err();
     assert_eq!(near, ["thumbnail_notes", "a_thumbnail"]);
 }
+
+const SHADES: [(&str, &str); 3] = [
+    (
+        "src/shade.h",
+        "#pragma once\nenum class Shade { kPale, kDark = 3 };\nenum Tone { TONE_LOW, TONE_HIGH };\n",
+    ),
+    ("src/mood.h", "enum Mood { TONE_LOW };\n"),
+    ("src/hue.rs", "pub enum Hue {\n    Ochre,\n    Umber(u8),\n}\n"),
+];
+
+/// An enum's value is found by its exact name or `Enum::name`, each enum's
+/// own when two share it; nothing else shows it.
+#[test]
+fn an_enum_value_is_found_by_its_exact_name_only() {
+    let (_d, w) = code_fixture(&SHADES);
+    let text = |q: &str| wiki::serve::search_text(&w, q, None, None, Some(10));
+    let t = text("kDark");
+    assert!(
+        t.contains("  src/shade.h:2-2  Shade::kDark  kDark = 3\n"),
+        "{t}"
+    );
+    assert!(!t.contains("no symbol named"), "{t}");
+    let t = text("TONE_LOW");
+    assert!(
+        t.contains("  src/shade.h:3-3  Tone::TONE_LOW  TONE_LOW\n"),
+        "{t}"
+    );
+    assert!(
+        t.contains("  src/mood.h:1-1  Mood::TONE_LOW  TONE_LOW\n"),
+        "{t}"
+    );
+    let t = text("Mood::TONE_LOW");
+    assert!(
+        t.contains("Mood::TONE_LOW") && !t.contains("Tone::TONE_LOW"),
+        "{t}"
+    );
+    // A plain word (`Ochre`) stays a ranked word, as for any item.
+    let t = text("Hue::Ochre Hue::Umber");
+    assert!(t.contains("  src/hue.rs:2-2  Hue::Ochre  Ochre\n"), "{t}");
+    assert!(
+        t.contains("  src/hue.rs:3-3  Hue::Umber  Umber(u8)\n"),
+        "{t}"
+    );
+    for q in ["dark", "tone low", "shade"] {
+        assert!(!text(q).contains("::kDark"), "{q}: {}", text(q));
+        assert!(!text(q).contains("::TONE_LOW"), "{q}: {}", text(q));
+    }
+    let outline = w.outline("shade", None).unwrap();
+    assert!(!outline.contains("kDark"), "{outline}");
+    let hint = wiki::hint::hint_lines(&w, "where is the dark shade value");
+    assert!(!hint.contains("kDark"), "{hint}");
+}
+
+const LEDGER_TESTS: [(&str, &str); 2] = [
+    (
+        "src/ledger.h",
+        "class LedgerFixture {\n public:\n  int depth() const;\n};\n",
+    ),
+    (
+        "tests/ledger_test.cc",
+        "#include \"ledger.h\"\nTEST(LedgerSuite, PostsTwice) {\n  EXPECT_EQ(1, 1);\n}\nTEST(LedgerSuite, KeepsOrder) {}\nTEST(LedgerSuite, DropsStale) {}\nTEST(LedgerSuite, MergesDays) {}\nTEST_F(LedgerFixture, RollsBack) {}\n",
+    ),
+];
+
+/// A gtest test is found by its test name, its suite, and both written
+/// `Suite::Name` or `Suite.Name`, as gtest prints it.
+#[test]
+fn a_gtest_test_is_found_by_name_suite_and_both() {
+    let (_d, w) = code_fixture(&LEDGER_TESTS);
+    let line =
+        "  tests/ledger_test.cc:2-4  LedgerSuite::PostsTwice  TEST(LedgerSuite, PostsTwice)\n";
+    for kind in [None, Some(KindFilter::Tests)] {
+        for q in [
+            "PostsTwice",
+            "LedgerSuite::PostsTwice",
+            "LedgerSuite.PostsTwice",
+        ] {
+            let t = wiki::serve::search_text(&w, q, kind.as_ref(), None, Some(10));
+            assert!(t.contains(line), "{q} {kind:?}: {t}");
+            assert!(!t.contains("no symbol named"), "{q}: {t}");
+            assert!(!t.contains("KeepsOrder"), "{q}: {t}");
+        }
+        // A suite that is no item names its tests, three and a count.
+        let t = wiki::serve::search_text(&w, "LedgerSuite", kind.as_ref(), None, Some(10));
+        assert!(t.contains(line), "{kind:?}: {t}");
+        assert!(t.contains("LedgerSuite::KeepsOrder"), "{t}");
+        assert!(
+            t.contains(
+                "\n    +1 more owned by LedgerSuite on the pages shown; narrow with a path word\n"
+            ),
+            "{t}"
+        );
+        assert!(!t.contains("no symbol named"), "{t}");
+    }
+    let v: serde_json::Value = serde_json::from_str(&wiki::serve::search_json_text(
+        &w,
+        "LedgerSuite",
+        None,
+        None,
+        Some(10),
+    ))
+    .unwrap();
+    let more: Vec<&serde_json::Value> = v[0]["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s.get("more"))
+        .collect();
+    assert_eq!(
+        more,
+        [&serde_json::json!({"count": 1, "pages": 0, "owned": false, "of_owner": true})]
+    );
+    // A fixture that is a class: the class itself, as before.
+    let t = wiki::serve::search_text(&w, "LedgerFixture", None, None, Some(10));
+    assert!(t.contains("  src/ledger.h:1-4  LedgerFixture  "), "{t}");
+    assert!(!t.contains("RollsBack"), "{t}");
+    // `code` points to the tests.
+    let code = Some(&KindFilter::Code);
+    for q in ["PostsTwice", "LedgerSuite.PostsTwice", "LedgerSuite"] {
+        let t = wiki::serve::search_text(&w, q, code, None, Some(10));
+        assert!(
+            t.contains(": in test pages only; use kind \"tests\"\n"),
+            "{q}: {t}"
+        );
+        assert!(t.contains(line), "{q}: {t}");
+    }
+    // A dotted word that names nothing stays a plain query.
+    let t = wiki::serve::search_text(&w, "LedgerSuite.Nowhere", None, None, Some(10));
+    assert!(!t.contains("no symbol named"), "{t}");
+}
+
+const TRIM_FILES: [(&str, &str); 3] = [
+    ("src/strings.h", "#pragma once\nint Trim(int x);\n"),
+    (
+        "src/strings.cpp",
+        "#include \"strings.h\"\nint Trim(int x) { return x; }\nint run_engine() { return Trim(1); }\n",
+    ),
+    (
+        "tests/test_strings.cpp",
+        "#include \"../src/strings.h\"\nTEST(Strings, Trim) { EXPECT_EQ(Trim(1), 1); }\nTEST(Strings, TrimTwice) { EXPECT_EQ(Trim(Trim(2)), 2); }\nTEST(EngineSuite, run_engine) { run_engine(); }\n",
+    ),
+];
+
+/// A gtest test is no call target: a test named like the function it calls
+/// leaves that call to the function, and a function's name finds the
+/// function, not a test of that name, unless only tests define it or the
+/// search is `tests`.
+#[test]
+fn a_gtest_test_named_like_a_function_leaves_it_its_calls_and_name() {
+    let (_d, w) = code_fixture(&TRIM_FILES);
+    let src = w.resolve("src/strings.cpp").unwrap();
+    let callers = w.callers(&src, "Trim", None, None).unwrap();
+    assert!(callers.contains("Strings::Trim "), "{callers}");
+    assert!(callers.contains("Strings::TrimTwice "), "{callers}");
+    let callers = w.callers(&src, "run_engine", None, None).unwrap();
+    assert!(callers.contains("EngineSuite::run_engine "), "{callers}");
+    let t = wiki::serve::search_text(&w, "run_engine", None, None, Some(10));
+    assert!(t.contains("  src/strings.cpp:3-3  run_engine  "), "{t}");
+    assert!(!t.contains("EngineSuite::run_engine"), "{t}");
+    let t = wiki::serve::search_text(&w, "run_engine", Some(&KindFilter::Tests), None, Some(10));
+    assert!(t.contains("EngineSuite::run_engine"), "{t}");
+    let t = wiki::serve::search_text(&w, "TrimTwice", None, None, Some(10));
+    assert!(t.contains("Strings::TrimTwice"), "{t}");
+}
+
+/// `Suite.Name` is read as `Suite::Name` for code only: a `docs` search keeps
+/// the word as typed, and every answer line names it as typed.
+#[test]
+fn a_dotted_name_is_qualified_for_code_only_and_echoed_as_typed() {
+    let notes = (
+        "docs/notes.md",
+        "# Notes\n\nThe LedgerSuite.PostsTwice test covers posting.\n",
+    );
+    let (_d, w) = code_fixture(&[LEDGER_TESTS[0], LEDGER_TESTS[1], notes]);
+    let t = wiki::serve::search_text(
+        &w,
+        "LedgerSuite.PostsTwice",
+        Some(&KindFilter::Docs),
+        None,
+        Some(10),
+    );
+    assert!(t.contains("  docs/notes.md  "), "{t}");
+    assert!(!t.contains("no symbol named"), "{t}");
+    let t = wiki::serve::search_text(
+        &w,
+        "LedgerSuite.PostsTwice",
+        Some(&KindFilter::Code),
+        None,
+        Some(10),
+    );
+    assert!(
+        t.starts_with("LedgerSuite.PostsTwice: in test pages only; use kind \"tests\"\n"),
+        "{t}"
+    );
+}
+
+/// A name no item has but that owns items lists them, then still the pages
+/// that rank for its words: the owner may be a type that is no item (a
+/// nested struct, a type only impls own), whose other pages matter.
+#[test]
+fn an_owner_that_is_no_item_lists_its_items_then_the_ranked_pages() {
+    let report = (
+        "src/suite_report.py",
+        "\"\"\"Reports on LedgerSuite runs.\"\"\"\ndef report_suite():\n    return 0\n",
+    );
+    let (_d, w) = code_fixture(&[LEDGER_TESTS[0], LEDGER_TESTS[1], report]);
+    let t = wiki::serve::search_text(&w, "LedgerSuite", None, None, Some(10));
+    let (owned, ranked) = t.split_once("  src/suite_report.py  ").expect(&t);
+    assert!(owned.contains("LedgerSuite::PostsTwice"), "{t}");
+    assert!(!ranked.contains("LedgerSuite::"), "{t}");
+}
+
+/// A dotted word ranks pages as typed: `A::B` is only how its definition is
+/// looked up. Under `tests`, a test page that writes `Gauge.level` still
+/// follows the pointer to the code definition.
+#[test]
+fn a_dotted_word_ranks_pages_as_typed() {
+    let (_d, w) = code_fixture(&[
+        ("src/gauge.h", "struct Gauge {\n  int level;\n};\n"),
+        (
+            "tests/test_gauge.cpp",
+            "// Checks Gauge.level after a reset.\nTEST(GaugeSuite, Resets) {}\n",
+        ),
+    ]);
+    let t = wiki::serve::search_text(&w, "Gauge.level", Some(&KindFilter::Tests), None, Some(10));
+    assert!(
+        t.starts_with("Gauge.level: in code pages only; use kind \"code\"\n"),
+        "{t}"
+    );
+    assert!(t.contains("  src/gauge.h:2-2  Gauge::level  "), "{t}");
+    assert!(t.contains("  tests/test_gauge.cpp  "), "{t}");
+}
+
+/// A dotted word that names a definition adds it to the answer and takes
+/// nothing away: the pages that rank for the word as typed follow it, under
+/// every kind.
+#[test]
+fn a_dotted_word_keeps_the_pages_that_rank_for_it() {
+    let (_d, w) = code_fixture(&[
+        ("tests/gauge_test.cc", "TEST(GaugeSuite, Resets) {}\n"),
+        (
+            "tests/panel_test.cc",
+            "// Like GaugeSuite.Resets, for panels.\nTEST(PanelSuite, Redraws) {}\n",
+        ),
+    ]);
+    for kind in [None, Some(KindFilter::Tests)] {
+        let t = wiki::serve::search_text(&w, "GaugeSuite.Resets", kind.as_ref(), None, Some(10));
+        let (def, ranked) = t.split_once("  tests/panel_test.cc  ").expect(&t);
+        assert!(
+            def.contains("  tests/gauge_test.cc:1-1  GaugeSuite::Resets  "),
+            "{t}"
+        );
+        assert!(!ranked.contains("GaugeSuite::Resets"), "{t}");
+    }
+}
+
+/// Under `code`, a dotted word only tests define still keeps the code pages
+/// that rank for it as typed, after the pointer to its test definition.
+#[test]
+fn a_dotted_word_only_tests_define_keeps_its_code_pages() {
+    let (_d, w) = code_fixture(&[
+        ("tests/gauge_test.cc", "TEST(GaugeSuite, Resets) {}\n"),
+        (
+            "src/panel.cpp",
+            "// Mirrors GaugeSuite.Resets for panels.\nint redraw_panel() { return 0; }\n",
+        ),
+    ]);
+    let t = wiki::serve::search_text(
+        &w,
+        "GaugeSuite.Resets",
+        Some(&KindFilter::Code),
+        None,
+        Some(10),
+    );
+    assert!(
+        t.starts_with("GaugeSuite.Resets: in test pages only; use kind \"tests\"\n"),
+        "{t}"
+    );
+    let (pointer, ranked) = t
+        .split_once("\nthe code pages below match its words\n")
+        .expect(&t);
+    assert!(
+        pointer.contains("  tests/gauge_test.cc:1-1  GaugeSuite::Resets  "),
+        "{t}"
+    );
+    assert!(ranked.contains("  src/panel.cpp  "), "{t}");
+    // A plain name only tests define keeps main's answer: no ranked pages.
+    let t = wiki::serve::search_text(
+        &w,
+        "GaugeSuite::Resets",
+        Some(&KindFilter::Code),
+        None,
+        Some(10),
+    );
+    assert!(!t.contains("src/panel.cpp"), "{t}");
+}

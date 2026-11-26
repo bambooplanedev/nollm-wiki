@@ -4,7 +4,7 @@ use super::{
     gate_len, query_dates, unfence, Candidate, Entry, Hidden, Hit, MemoryScope, PassStats,
     SymbolLine, Wiki, MEMORY_GATE_RATIO, MEMORY_TAIL,
 };
-use crate::model::{CodeItem, CodeItemKind, KindFilter};
+use crate::model::{CodeItem, CodeItemKind, KindFilter, SourceKind};
 use aho_corasick::AhoCorasick;
 use std::collections::{BTreeSet, HashMap};
 
@@ -86,7 +86,11 @@ impl Wiki {
             self.search_terms(q, kind, tag, limit, MemoryScope::Without, None, None);
         // The ranked best, before `lift_names` may put an unscored page first.
         let best = hits.first().map_or(0.0, |h| h.score);
-        self.lift_names(&mut hits, q, kind, tag, limit.unwrap_or(10));
+        // Pages rank on the words as typed; `Suite.Name` names `Suite::Name`.
+        let qualified = self.dotted_as_qualified(q, kind, tag).map(|(n, _)| n);
+        let lookup = qualified.as_deref().unwrap_or(q);
+        let dotted = qualified.is_some();
+        self.lift_names(&mut hits, lookup, kind, tag, limit.unwrap_or(10), dotted);
         // The tail counts pages of every kind, so the code pass's statistics
         // are its own only when `kind` narrowed nothing.
         hits.extend(self.memory_tail(q, tag, best, kind.is_none().then_some(&stats)));
@@ -133,7 +137,9 @@ impl Wiki {
     /// item (`max_weekly_fee_usd` is a field, `MAX_WEEKLY_FEE_USD` a
     /// constant). Module and top-level items never. `Inner::f` also names
     /// `Outer::Inner::f`; when nothing matches so, `ns::Inner::f` names an
-    /// owned `Inner::f`, since an owner chain holds no namespace.
+    /// owned `Inner::f`, since an owner chain holds no namespace. A plain
+    /// name no item has names the items it owns: a gtest suite owns its
+    /// tests (`Suite::Name`) and is no item itself.
     fn definitions(
         &self,
         name: &str,
@@ -159,14 +165,75 @@ impl Wiki {
                 }
             })
             .collect();
-        if !found.is_empty() || !qualified {
+        // A gtest test named like something else defined is that thing's
+        // test: it is a definition of the name only under `tests`, or when
+        // nothing else defines it.
+        let found =
+            if found.iter().all(|(_, i)| i.is_test_case()) || kind == Some(&KindFilter::Tests) {
+                found
+            } else {
+                found
+                    .into_iter()
+                    .filter(|(_, i)| !i.is_test_case())
+                    .collect()
+            };
+        if !found.is_empty() {
             return found;
+        }
+        if !qualified {
+            let owns = format!("::{name}");
+            return all()
+                .filter(|(_, i)| {
+                    i.owner
+                        .as_deref()
+                        .is_some_and(|o| o == name || o.ends_with(&owns))
+                })
+                .collect();
         }
         all()
             .filter(|(_, i)| {
                 i.owner.is_some() && name.ends_with(&format!("::{}", i.qualified_name()))
             })
             .collect()
+    }
+
+    /// `q` with each word written `A.B` (gtest's `Suite.Name`) as `A::B`
+    /// when that names an item of any kind, with each `(A::B, A.B)`, or
+    /// `None` when no word does or `kind` is no code kind: a dotted word is
+    /// otherwise a plain word, as before.
+    pub fn dotted_as_qualified(
+        &self,
+        q: &str,
+        kind: Option<&KindFilter>,
+        tag: Option<&str>,
+    ) -> Option<(String, Vec<(String, String)>)> {
+        let code = kind.is_none_or(|k| {
+            matches!(
+                k,
+                KindFilter::Code | KindFilter::Tests | KindFilter::Exact(SourceKind::Code { .. })
+            )
+        });
+        if !code {
+            return None;
+        }
+        let mut typed = Vec::new();
+        let words: Vec<String> = q
+            .split_whitespace()
+            .map(|w| {
+                let t = w.trim_matches(|c: char| !(c.is_alphanumeric() || c == '_'));
+                let qualified = t.replace('.', "::");
+                let names = t.contains('.')
+                    && Self::identifier(&qualified) == Some(qualified.as_str())
+                    && !self.definitions(&qualified, None, tag).is_empty();
+                if names {
+                    typed.push((qualified.clone(), t.to_string()));
+                    qualified
+                } else {
+                    w.to_string()
+                }
+            })
+            .collect();
+        (!typed.is_empty()).then(|| (words.join(" "), typed))
     }
 
     /// The identifiers of a query made of identifiers alone (`query_names`)
@@ -187,41 +254,42 @@ impl Wiki {
             .collect()
     }
 
-    /// Of `names` (`not_found` for a `code` search), those a `tests` search
-    /// would find: defined only on test pages, or the file stem of one.
-    /// Empty for any other kind.
-    pub fn in_tests_only(
+    /// Of `names` (`not_found` for a `kind` search), those a search of
+    /// `kind.other()` would find (a `code` search's names only tests define,
+    /// a `tests` search's names only code defines), as a name or the file
+    /// stem of a page. Empty for a kind with no other.
+    pub fn in_other_kind(
         &self,
         names: &[String],
         kind: Option<&KindFilter>,
         tag: Option<&str>,
     ) -> Vec<String> {
-        if !kind.is_some_and(KindFilter::drops_tests) {
+        let Some(other) = kind.and_then(KindFilter::other) else {
             return Vec::new();
-        }
-        let tests = Some(&KindFilter::Tests);
+        };
+        let other = Some(&other);
         names
             .iter()
             .filter(|n| {
-                !self.definitions(n, tests, tag).is_empty()
-                    || !self.stem_pages(n, tests, tag).is_empty()
+                !self.definitions(n, other, tag).is_empty()
+                    || !self.stem_pages(n, other, tag).is_empty()
             })
             .cloned()
             .collect()
     }
 
-    /// The answer a `tests` search gives a query of `names` alone: their
-    /// definitions (and module pages) on test pages, as `lift_names` lists
-    /// them, with no ranked pages.
-    pub fn test_definitions(&self, names: &[String], tag: Option<&str>, limit: usize) -> Vec<Hit> {
+    /// The answer a `kind` search gives a query of `names` alone: their
+    /// definitions (and module pages), as `lift_names` lists them, with no
+    /// ranked pages.
+    pub fn definitions_in(
+        &self,
+        names: &[String],
+        kind: &KindFilter,
+        tag: Option<&str>,
+        limit: usize,
+    ) -> Vec<Hit> {
         let mut hits = Vec::new();
-        self.lift_names(
-            &mut hits,
-            &names.join(" "),
-            Some(&KindFilter::Tests),
-            tag,
-            limit,
-        );
+        self.lift_names(&mut hits, &names.join(" "), Some(kind), tag, limit, false);
         hits
     }
 
@@ -273,7 +341,9 @@ impl Wiki {
     /// the pages a name is the stem of when the query is of names alone
     /// (`stem_pages`). A query of
     /// identifiers alone, when any is defined, gets just those lines, page by
-    /// page in the order the names first land, past the per-page line cap.
+    /// page in the order the names first land, past the per-page line cap,
+    /// then, when a name came from a dotted word (`dotted`) or is an owner
+    /// no item has, the ranked pages up to `limit`.
     /// In any other query a definition the ranking missed is added after its
     /// page's lines (the page after the hits), and nothing moves: on the
     /// regression set, putting a named line first cost top-1 answers where
@@ -285,10 +355,13 @@ impl Wiki {
         kind: Option<&KindFilter>,
         tag: Option<&str>,
         limit: usize,
+        dotted: bool,
     ) {
         let (names, only) = Self::query_names(q);
         // Per page, in the order names first land on it: its definition lines.
         let mut by_page: Vec<(String, Vec<SymbolLine>)> = Vec::new();
+        // Whether a name was answered with the items it owns (`definitions`).
+        let mut any_owner = false;
         for name in names {
             let rank = |e: &Entry| hits.iter().position(|h| h.id == e.id).unwrap_or(usize::MAX);
             // In a query of names, a file the name is the stem of comes
@@ -330,6 +403,9 @@ impl Wiki {
                 *n += 1;
                 *n
             });
+            let of_owner =
+                defs.first().is_some_and(|(_, i)| i.name != name) && !name.contains("::");
+            any_owner |= of_owner;
             let cut = Self::DEFINITIONS_PER_NAME.min(limit).min(defs.len());
             let left_out = defs.split_off(cut);
             // Marked only past the cap: a smaller `limit` is the caller's.
@@ -343,7 +419,8 @@ impl Wiki {
                     .filter(|id| !defs.iter().any(|(s, _)| s.id == **id))
                     .collect::<BTreeSet<_>>()
                     .len(),
-                owned: left_out.iter().any(|(_, i)| i.owner.is_some()),
+                owned: left_out.iter().any(|(_, i)| i.owner.is_some()) && !of_owner,
+                of_owner,
             });
             let last = defs.len().saturating_sub(1);
             for (k, (e, i)) in defs.into_iter().enumerate() {
@@ -379,12 +456,21 @@ impl Wiki {
             }
         }
         if only && !by_page.is_empty() {
+            let ranked = std::mem::take(hits);
+            let order: Vec<String> = ranked.iter().map(|h| h.id.clone()).collect();
             let mut by_id: HashMap<String, Hit> =
-                hits.drain(..).map(|h| (h.id.clone(), h)).collect();
+                ranked.into_iter().map(|h| (h.id.clone(), h)).collect();
             for (id, lines) in by_page {
                 let mut hit = by_id.remove(&id).expect("a named page is a hit");
                 hit.symbols = lines;
                 hits.push(hit);
+            }
+            // An owner that is no item may be a type defined elsewhere, or
+            // in other languages; a word typed `A.B` (`dotted`) is text too:
+            // the ranked pages follow, up to `limit`.
+            if any_owner || dotted {
+                let room = limit.saturating_sub(hits.len());
+                hits.extend(order.iter().filter_map(|id| by_id.remove(id)).take(room));
             }
         }
     }

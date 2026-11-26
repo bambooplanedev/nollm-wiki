@@ -172,6 +172,21 @@ per question is noise-level: treat single results as anecdotes.
   A C/C++ file with more than 2,000 data members indexes none of them
   (its other items stay); a query for one names the file instead of
   `no symbol named`, but only when the file holds the name as a word.
+  Enum values (C/C++ enumerators, Rust variants, TS enum members) follow
+  the same rule under their own count of 2,000. They are found by exact
+  name only when the name is identifier-shaped (`kDark`, `TONE_LOW`); a
+  plain-word variant (`Pending`) is found as `Enum::Pending`. A value an
+  X-macro writes (`ENTRY(x)` in the enum body) is none, and the grammar
+  closes the enum at the macro call, so the values after it are no
+  enumerators either (one may remain a file-scope value with a broken
+  signature). A value with an attribute (`V ATTR = 2`, `V [[deprecated]] =
+  4`, `V __attribute__((deprecated)) = 4`) is kept, but a standard
+  attribute can also make the grammar close the enum at that value
+  (`V [[deprecated("old")]] = 4`, `V [[maybe_unused]],`): the value keeps
+  its name but not its `= …`, and the values after it are no enumerators
+  (some remain file-scope values with broken signatures, as before). No
+  value is ever named after a word inside an attribute or a macro call. A Python `Enum` member is a class
+  attribute and, like any field outside C/C++, no item.
   C/C++ data members are items through any nesting of pointers, arrays,
   references and function pointers (`void (*on[4])(int)`); not a member a
   macro declares (`FIELD(int, x)`, which does not parse as a declaration) or
@@ -182,10 +197,30 @@ per question is noise-level: treat single results as anecdotes.
   owned `Class::name` only when no item matches the whole qualified name, and
   any namespace prefix is accepted then; `ns::f` does not find a free `f`.
   A one-letter shell global (`I`) is not found and gets no `no symbol named` line: a one-letter word is not identifier-shaped.
+  A name the other side of the test split defines is not called missing
+  (`code` points to `tests` and `tests` to `code`, with the definitions), but
+  `code:<lang>` and `docs` searches still answer `no symbol named` for a name
+  defined only in another language or kind.
+  A gtest test is found as `Suite::Name` only in the five plain macro forms
+  over two bare names; a test from another framework's macro, a macro
+  wrapping `TEST`, or a parameterized instance name (`Inst/Suite.Name/0`)
+  is still the item its macro call parses as. The forms are told by name
+  and shape only: any function-like macro named `TEST` (or `TEST_F`, …)
+  with two bare arguments and a body, gtest or not, is read as the test
+  `Suite::Name`. A dotted word names `A::B`
+  only in a code search and only when that names an item; pages always rank
+  on the word as typed and follow its definition (or a pointer to the
+  other kind's), up to `limit`: a page main ranked last can fall off the
+  end. Under `tests`, a function name that is also a
+  gtest test's name answers with that test only, with no pointer to the
+  function. A name that is no item but owns items (not only a
+  gtest suite: a nested C++ struct or enum, a type only Rust impls own)
+  answers with up to 3 of those items, not its own definition line, which
+  no item holds; the pages that rank for it follow.
   A name with more than 3 definitions shows 3, one per page first, and a
   `+N more named …` line that counts the rest but does not list them.
   `--format json` stays an array of hits, so the answer-level fields
-  (`no_symbol`, `tests_only`, `tests_also_match`) ride on its first hit and
+  (`no_symbol`, `tests_only`, `code_only`, `tests_also_match`) ride on its first hit and
   an answer with no hit (`[]`) loses them. On the 2026-11-11 bench replay
   of 137 definition greps, one search with all names found 344 of 371
   defined names (113 before exact names, 329 before nested Python functions);
