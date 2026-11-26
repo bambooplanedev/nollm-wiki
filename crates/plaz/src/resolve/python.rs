@@ -25,6 +25,9 @@ pub(super) struct Python<'a> {
     globs: BTreeMap<usize, BTreeSet<usize>>,
     /// Per page: the names its imports from outside the project bind.
     outside: BTreeMap<usize, BTreeSet<&'a str>>,
+    /// The pages with a `from m import *` of no project file: it may
+    /// bind any name.
+    open_globs: BTreeSet<usize>,
     /// Per class name: its definitions.
     classes: BTreeMap<&'a str, Vec<FnRef>>,
     /// Per class name: the classes naming it as a base.
@@ -63,6 +66,7 @@ impl<'a> Python<'a> {
             named: BTreeMap::new(),
             globs: BTreeMap::new(),
             outside: BTreeMap::new(),
+            open_globs: BTreeSet::new(),
             classes: BTreeMap::new(),
             subclasses: BTreeMap::new(),
             pages,
@@ -90,7 +94,11 @@ impl<'a> Python<'a> {
         }
         for (page, path, file) in python {
             for imp in &file.imports {
+                let glob = imp.name.as_deref() == Some("*");
                 if python_import(imp, path, file, &py.roots) != Whose::Project {
+                    if glob {
+                        py.open_globs.insert(page);
+                    }
                     py.outside.entry(page).or_default().extend(imp.binds());
                     continue;
                 }
@@ -98,6 +106,9 @@ impl<'a> Python<'a> {
                 let mut from = py.files(path, module);
                 let key = match imp.name.as_deref() {
                     Some("*") => {
+                        if from.is_empty() {
+                            py.open_globs.insert(page);
+                        }
                         py.globs.entry(page).or_default().extend(from);
                         continue;
                     }
@@ -216,9 +227,18 @@ impl<'a> Python<'a> {
             .collect()
     }
 
-    /// Does calling `class` surely run its `__init__`: no decorator, no
-    /// `metaclass=`, no `__new__` of its own, and only bases of the
-    /// project (or `object`) that are so too?
+    /// Is the name `name` surely the file of `page`'s own or imported
+    /// project class: no import from outside binds it and no `import *`
+    /// the map cannot follow may?
+    fn binds_surely(&self, page: usize, name: &str) -> bool {
+        !self.open_globs.contains(&page)
+            && !self.outside.get(&page).is_some_and(|o| o.contains(name))
+    }
+
+    /// Does calling `class` surely run its `__init__`: its module surely
+    /// binds its name to it, no decorator, no `metaclass=`, no `__new__`
+    /// of its own, and only bases of the project (or `object`) that are
+    /// so too?
     fn constructs(&self, class: FnRef, depth: usize) -> bool {
         let it = self.item(class);
         let sig = it.signature.trim_start();
@@ -230,7 +250,11 @@ impl<'a> Python<'a> {
                     || (!found.is_empty() && found.iter().all(|&c| self.constructs(c, depth - 1)))
             })
         };
-        depth > 0 && plain && self.methods(class, "__new__").is_empty() && bases_too()
+        depth > 0
+            && plain
+            && self.binds_surely(class.0, &it.name)
+            && self.methods(class, "__new__").is_empty()
+            && bases_too()
     }
 
     /// The methods `name` that `class` inherits: those of the first base,
@@ -404,13 +428,13 @@ impl super::Caller<'_, '_> {
     pub(super) fn construction(&self, call: &MapCall) -> Option<Evidence> {
         let (py, page, name) = (self.py, self.page, call.site.name.as_str());
         let all = py.classes.get(name)?.iter().copied();
-        let bound = py.outside.get(&page).is_some_and(|o| o.contains(name));
         let class: Vec<FnRef> = match py.sources(page, name) {
-            None if !bound => all.filter(|c| c.0 == page).collect(),
+            _ if !py.binds_surely(page, name) => Vec::new(),
+            None => all.filter(|c| c.0 == page).collect(),
             Some(from) if all.clone().all(|c| c.0 != page) => {
                 all.filter(|c| from.contains(&c.0)).collect()
             }
-            None | Some(_) => Vec::new(),
+            Some(_) => Vec::new(),
         };
         let &[class] = class.as_slice() else {
             return None;

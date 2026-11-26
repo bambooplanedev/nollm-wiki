@@ -2210,6 +2210,31 @@ fn a_python_construction_that_may_not_run_the_init_stays_hidden() {
 }
 
 #[test]
+fn a_python_class_its_module_may_rebind_from_outside_stays_hidden() {
+    // A star import from outside, after the class, may replace it.
+    let starred = "class Getter:\n    def __init__(self, k):\n        self.k = k\n\ndef make(k):\n    Getter(k)\n\nfrom _speedups import *\n";
+    // An outside import binds the name; the class is only the fallback.
+    let fallback = "try:\n    from types import SimpleNamespace as Holder\nexcept ImportError:\n    class Holder:\n        def __init__(self, **kw):\n            pass\n";
+    let user = "from starred import Getter\nfrom fallback import Holder\n\ndef build(k):\n    Getter(k)\n    Holder(k=k)\n";
+    let files = [
+        ("starred.py", starred),
+        ("fallback.py", fallback),
+        ("user.py", user),
+    ];
+    assert_eq!(
+        calls_in(&files, "map/user_py", "build"),
+        [
+            "`Getter(k)` L5 → target not visible",
+            "`Holder(k=k)` L6 → target not visible",
+        ]
+    );
+    assert_eq!(
+        calls_in(&files, "map/starred_py", "make"),
+        ["`Getter(k)` L6 → target not visible"]
+    );
+}
+
+#[test]
 fn a_python_subclass_through_an_aliased_base_import_still_overrides() {
     let a =
         "class X:\n    def run(self):\n        self.step()\n\n    def step(self):\n        pass\n";
