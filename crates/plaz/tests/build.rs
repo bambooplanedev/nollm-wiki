@@ -1506,6 +1506,106 @@ fn an_exit_inside_a_closure_or_async_block_is_not_the_functions() {
     );
 }
 
+/// The edges of `anchor`'s chart on the page of `path`, built from `files`.
+fn edges_in(files: &[(&str, &str)], path: &str, anchor: &str) -> Vec<String> {
+    let (_d, vault) = common::built(files);
+    let id = format!("map/{}", path.replace('.', "_"));
+    chart_edges(&common::map_page(&vault, &id), anchor)
+}
+
+#[test]
+fn a_certain_call_of_a_c_function_that_never_returns_ends_the_path() {
+    let h = "#define NORETURN __attribute__((noreturn))\nNORETURN void die(const char *m);\n[[noreturn]] void halt(int c);\n_Noreturn void stop(int c);\nvoid quit(int c) __attribute__((noreturn));\nint fail(int c);\n";
+    let c = "#include \"a.h\"\nvoid die(const char *m) { report(m); }\nvoid halt(int c) { report(c); }\nint run(int v) {\n    if (v < 0) die(\"neg\");\n    if (v == 1) halt(1);\n    if (v == 2) stop(1);\n    if (v == 3) quit(1);\n    if (v == 4) fail(1);\n    return v * 2;\n}\n";
+    let e = edges_in(&[("src/a.h", h), ("src/a.c", c)], "src/a.c", "run");
+    for (call, next) in [
+        ("die(#quot;neg#quot;)", "v == 1"),
+        ("halt(1)", "v == 2"),
+        ("stop(1)", "v == 3"),
+        ("quit(1)", "v == 4"),
+    ] {
+        assert!(e.contains(&format!("{call} --> {call}")), "{call}: {e:#?}");
+        assert!(!e.contains(&format!("{call} --> {next}")), "{call}: {e:#?}");
+    }
+    // A function with no such attribute returns.
+    assert!(
+        e.contains(&"fail(1) --> return v * 2;".to_string()),
+        "{e:#?}"
+    );
+}
+
+#[test]
+fn a_noreturn_call_that_is_one_of_several_or_inside_an_expression_continues() {
+    let crash = "__attribute__((noreturn)) void crash(int c) { abort(); }\n";
+    let c = "[[noreturn]] void die(int c);\nvoid on_fault(void (*h)(int) __attribute__((noreturn)));\nint run(int v) {\n    crash(1);\n    on_fault(die);\n    ok(v) || die(2);\n    return v;\n}\n";
+    let files = [("src/b.c", crash), ("src/d.c", crash), ("src/a.c", c)];
+    let e = edges_in(&files, "src/a.c", "run");
+    assert!(
+        e.contains(&"crash(1) --> on_fault(die)".to_string()),
+        "{e:#?}"
+    );
+    // A parameter that never returns says nothing of the function.
+    assert!(e.contains(&"on_fault(die) --> ok(v)".to_string()), "{e:#?}");
+    assert!(e.contains(&"die(2) --> return v;".to_string()), "{e:#?}");
+}
+
+#[test]
+fn a_python_exit_ends_the_path_unless_its_name_is_rebound() {
+    let src = "import sys\nimport os\n\ndef f(v):\n    if v < 0:\n        sys.exit(1)\n    if v == 1:\n        os._exit(2)\n    if v == 2:\n        exit(3)\n    if v == 3:\n        quit(4)\n    return v * 2\n\ndef g(v):\n    sys = make(v)\n    sys.exit(1)\n    return v\n";
+    let page = page_of_py(src);
+    let f = chart_edges(&page, "f");
+    for call in ["sys.exit(1)", "os._exit(2)", "exit(3)", "quit(4)"] {
+        assert!(f.contains(&format!("{call} --> {call}")), "{call}: {f:#?}");
+    }
+    assert!(!f.contains(&"sys.exit(1) --> v == 1".to_string()), "{f:#?}");
+    let g = chart_edges(&page, "g");
+    assert!(
+        g.contains(&"sys.exit(1) --> return v".to_string()),
+        "{g:#?}"
+    );
+    // A project function named `exit` is the one called.
+    let own = "def exit(c):\n    return c\n\ndef h(v):\n    exit(1)\n    return v\n";
+    let h = edges_of_py(own, "h");
+    assert!(h.contains(&"exit(1) --> return v".to_string()), "{h:#?}");
+}
+
+#[test]
+fn a_rust_process_exit_or_a_never_returning_fn_ends_the_path() {
+    let src = "use std::process;\nfn fail(m: &str) -> ! { panic!(\"{m}\") }\nfn f(v: i32) -> i32 {\n    if v < 0 { std::process::exit(1); }\n    if v == 1 { process::exit(2) }\n    if v == 2 { fail(\"x\"); }\n    v * 2\n}\nfn g(o: Option<i32>) {\n    let n = o.map(|x| match x { 1 => keep(), _ => process::exit(x) });\n    after(n);\n}\n";
+    let f = edges_of(src, "f");
+    for call in [
+        "std#58;#58;process#58;#58;exit(1)",
+        "process#58;#58;exit(2)",
+        "fail(#quot;x#quot;)",
+    ] {
+        assert!(f.contains(&format!("{call} --> {call}")), "{call}: {f:#?}");
+    }
+    assert!(
+        !f.contains(&"std#58;#58;process#58;#58;exit(1) --> v == 1".to_string()),
+        "{f:#?}"
+    );
+    // In a closure the exit ends the closure's own flow, not the path.
+    let g = edges_of(src, "g");
+    let exit = "process#58;#58;exit(x)";
+    assert!(g.contains(&format!("{exit} --> {exit}")), "{g:#?}");
+    assert!(g.iter().any(|e| e.ends_with("--> after(n)")), "{g:#?}");
+}
+
+#[test]
+fn a_project_function_named_exit_that_returns_continues() {
+    let lib = "mod process;\nfn h() {\n    process::exit(1);\n    after();\n}\n";
+    let process = "pub fn exit(_c: i32) {}\n";
+    let e = edges_in(
+        &[("src/lib.rs", lib), ("src/process.rs", process)],
+        "src/lib.rs",
+        "h",
+    );
+    assert!(
+        e.contains(&"process#58;#58;exit(1) --> after()".to_string()),
+        "{e:#?}"
+    );
+}
+
 fn edges_of(src: &str, anchor: &str) -> Vec<String> {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     chart_edges(&common::map_page(&vault, "map/src/a_rs"), anchor)

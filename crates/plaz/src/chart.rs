@@ -193,6 +193,12 @@ impl Chart<'_> {
                     let href = (self.href)(t);
                     self.clicks.push(format!("    click n{id} href \"{href}\""));
                 }
+                // A call that never returns is drawn as an exit after it;
+                // one not resolved yet (hidden) ends nothing.
+                if c.ends && c.target != Target::Hidden {
+                    self.node(("([", "])"), &c.text, &[(id, None)]);
+                    return Vec::new();
+                }
                 vec![(id, None)]
             }
             Step::Exit { text, kind, .. } => {

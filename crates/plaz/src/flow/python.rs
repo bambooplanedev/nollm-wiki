@@ -11,6 +11,7 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
     skips_call: |_| false,
+    ends_path: |n, _| super::whole_statement(n),
 };
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {

@@ -692,11 +692,27 @@ fn a_files_macros_are_each_define_once_with_whether_its_body_has_a_jump_token() 
     assert_eq!(
         f.cpp.macros,
         [
-            ("BAIL".to_string(), true),
-            ("LIMIT".to_string(), false),
-            ("NOTE".to_string(), false),
-            ("SAY".to_string(), false),
-            ("STEP".to_string(), true),
+            ("BAIL".to_string(), true, false),
+            ("LIMIT".to_string(), false, false),
+            ("NOTE".to_string(), false, false),
+            ("SAY".to_string(), false, false),
+            ("STEP".to_string(), true, false),
+        ]
+    );
+}
+
+#[test]
+fn a_macro_with_a_noreturn_word_outside_comments_is_marked() {
+    let src = "#define NORETURN __attribute__((__noreturn__))
+#define DEAD [[noreturn]]
+#define NOTE(x) keep(x) // noreturn
+";
+    assert_eq!(
+        file("a.cpp", src).cpp.macros,
+        [
+            ("DEAD".to_string(), false, true),
+            ("NORETURN".to_string(), false, true),
+            ("NOTE".to_string(), false, false),
         ]
     );
 }
@@ -707,7 +723,7 @@ fn a_jump_after_a_quote_character_or_a_digit_separator_is_still_a_jump() {
         "a.cpp",
         "#define STOP_AT(c) if ((c) == '\"' || (c) > 1'000) return\n",
     );
-    assert_eq!(f.cpp.macros, [("STOP_AT".to_string(), true)]);
+    assert_eq!(f.cpp.macros, [("STOP_AT".to_string(), true, false)]);
 }
 
 /// The not-drawn counts and the call texts of `name` in `path` of a

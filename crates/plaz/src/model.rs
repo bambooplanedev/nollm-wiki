@@ -51,10 +51,10 @@ pub struct CppFacts {
     /// The C/C++ function items with no body to chart, by index into
     /// `code.items`: a section each, with no flow.
     pub declarations: BTreeMap<usize, Bodiless>,
-    /// Every `#define` name of a C/C++ file, once, sorted, and whether a
+    /// Every `#define` name of a C/C++ file, once, sorted, whether a
     /// body of it holds a `return`, `goto`, `break`, `continue` or `throw`
-    /// token.
-    pub macros: Vec<(String, bool)>,
+    /// token, and whether one holds a `noreturn` token (`NORETURN`).
+    pub macros: Vec<(String, bool, bool)>,
     /// The C/C++ function items, by index into `code.items`, that are
     /// `static` free functions or inside an anonymous namespace: seen only
     /// where the file is compiled in.
@@ -369,6 +369,10 @@ pub struct MapCall {
     /// that is one name (`x.f()`).
     pub callee: Option<String>,
     pub target: Target,
+    /// The path ends at the call: set by the flow when the call is a whole
+    /// statement on the path, kept by the resolve stage only when its
+    /// target never returns.
+    pub ends: bool,
 }
 
 /// A handle valid within one build, never written to a page.
