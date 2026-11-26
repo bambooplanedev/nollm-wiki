@@ -20,6 +20,9 @@ pub fn mermaid_label(s: &str) -> String {
             '{' => out.push_str("#123;"),
             '}' => out.push_str("#125;"),
             '`' => out.push_str("#96;"),
+            '\\' => out.push_str("#92;"),
+            ':' => out.push_str("#58;"),
+            '$' => out.push_str("#36;"),
             '\n' => out.push_str("<br/>"),
             '\r' => {}
             c => out.push(c),
