@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use wiki_code::index::Family;
 use wiki_code::model::{CallSite, CallVia, CodeItemKind};
-use wiki_code::support::{clip, one_line};
+use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
 use wiki_code::{Analyzed, Def, Source};
 
@@ -240,6 +240,22 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
         }
         file.flows.insert(i, flow);
     }
+}
+
+/// `s` on one line; past `chars` characters, its middle cut to `…` so that
+/// it is `chars` long and its end stays visible.
+fn clip_middle(s: &str, chars: usize) -> String {
+    let line = one_line(s);
+    let n = line.chars().count();
+    if n <= chars {
+        return line;
+    }
+    let tail = (chars - 1) / 2;
+    let head = chars - 1 - tail;
+    let mut out: String = line.chars().take(head).collect();
+    out.push('…');
+    out.extend(line.chars().skip(n - tail));
+    out
 }
 
 /// How many times each name is bound in `flow` and its nested flows (2
@@ -602,7 +618,7 @@ impl<'s> Walker<'s> {
                 CallVia::Bare | CallVia::SelfRecv | CallVia::Member(Some(_)) => None,
             };
             out.push(Step::Call(MapCall {
-                text: clip(lit, 80),
+                text: clip_middle(lit, 80),
                 site: c.site,
                 callee: callee.map(str::to_string),
                 target: Target::Hidden,

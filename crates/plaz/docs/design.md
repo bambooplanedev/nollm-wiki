@@ -55,7 +55,7 @@ The code is deterministic, so an undetermined target is written as what it is: "
 | **Outside** | path or receiver type known to be external (std, dependency, an import that resolves to no project file) | "outside the project" |
 | **Hidden** | call to a parameter, local, closure, function value, unknown `Q::` path, nested def | "target not visible", never "outside", never "one of" |
 
-The node text is always the literal call (`ask(messages)`); the form only decides the link. When unsure: Hidden.
+The node text is always the literal call (`ask(messages)`), on one line; past 80 characters its middle is cut to `…`, so its start and its end stay visible (the Calls list shows the same text). The form only decides the link. When unsure: Hidden.
 
 Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, Rust `assert!`-family macros and Python `assert` (counted as `assert`, no node), conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
 

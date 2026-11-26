@@ -975,7 +975,7 @@ fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
     let src = "struct Crate {\n    static int make(int v) { return v; }\n    template <class A, class B, class C> struct Tray {\n        static int make(int v) { return v + 1; }\n    };\n};\nint run() {\n    return Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigned long long>::make(1);\n}\nint cut() { return Crate::Tray<int, int, decltype(run())>::make(2) + Crate::Tray<int, int, sizeof(int)>::make(3); }\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
-        ["Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigne… → src/a.cpp:4"]
+        ["Crate::Tray<unsigned long long, unsigned…long long, unsigned long long>::make(1) → src/a.cpp:4"]
     );
     // A parenthesis in the template arguments does not end the qualifier.
     let mut cut = cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "cut");
@@ -992,13 +992,13 @@ fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
 #[test]
 fn a_member_chain_longer_than_the_calls_shown_text_is_read_whole() {
     // The outer `twig` is called on what the inner one returns, a `Knot`,
-    // whatever the shown text, clipped inside the inner call, ends with.
+    // whatever the shown text, clipped in the middle, holds.
     let src = "struct Knot {\n    Knot& twig(const char* k) { return *this; }\n};\nstruct Bush {\n    Knot& twig(const char* k) { return root; }\n    Knot root;\n};\nvoid climb(Bush& b) {\n    b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_end_of_its_shown_text\").twig(\"x\");\n}\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "climb"),
         [
-            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → src/a.cpp:5",
-            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → one of: src/a.cpp:2, src/a.cpp:5, or outside"
+            "b.twig(\"a_branch_name_long_enough_to_car…l_well_past_the_end_of_its_shown_text\") → src/a.cpp:5",
+            "b.twig(\"a_branch_name_long_enough_to_car…t_the_end_of_its_shown_text\").twig(\"x\") → one of: src/a.cpp:2, src/a.cpp:5, or outside"
         ]
     );
 }

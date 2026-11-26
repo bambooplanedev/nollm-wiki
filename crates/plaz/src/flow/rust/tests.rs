@@ -219,3 +219,19 @@ fn an_else_after_a_comment_is_kept_and_a_body_comment_stays_in_its_arm() {
         ]
     );
 }
+
+#[test]
+fn a_long_call_keeps_its_head_and_its_end() {
+    let src = "fn f(rows: Vec<u8>) {\n    rows.iter().map(|r| r + 1).filter(|r| *r > 2).map(|r| r * 3).filter(|r| *r < 90).count();\n    tally(\"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\");\n}\n";
+    let lines = flow_lines("src/a.rs", src, "f");
+    assert_eq!(
+        lines[lines.len() - 3..],
+        [
+            // 80 characters: whole.
+            "call rows.iter().map(|r| r + 1).filter(|r| *r > 2).map(|r| r * 3).filter(|r| *r < 90) @2",
+            // 88: its end stays, so it is told apart from the call above.
+            "call rows.iter().map(|r| r + 1).filter(|r| *r…(|r| r * 3).filter(|r| *r < 90).count() @2",
+            "call tally(\"ééééééééééééééééééééééééééééééééé…ééééééééééééééééééééééééééééééééééééé\") @3",
+        ]
+    );
+}
