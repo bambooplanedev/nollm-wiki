@@ -47,7 +47,8 @@ pub fn build(source: &Path, vault: &Path) -> Result<Written, Error> {
     let resolved = resolve::resolve(project);
     let names = names::names(&resolved);
     let links = write::Links::load(vault);
-    let mut pages = render::render(&resolved, &names, &links);
-    pages.extend(index::index(resolved.project(), &names));
+    let index = index::index(resolved.project(), &names);
+    let mut pages = render::render(&resolved, &names, &links, &index.levels);
+    pages.extend(index.pages);
     write::write(vault, &pages)
 }

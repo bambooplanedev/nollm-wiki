@@ -3198,6 +3198,37 @@ fn the_index_lists_every_charted_function_from_the_top_down() {
 }
 
 #[test]
+fn a_function_section_names_its_level_in_the_index() {
+    let (_d, vault) = common::built(&index_tree());
+    let level = |page: &str, anchor: &str| {
+        let block = common::fn_block(&common::map_page(&vault, page), anchor);
+        block
+            .lines()
+            .find(|l| l.starts_with("Level: "))
+            .map(str::to_string)
+    };
+    for (page, anchor, n) in [
+        ("map/src/main_rs", "main", Some(0)),
+        ("map/src/main_rs", "prepare", Some(1)),
+        ("map/src/main_rs", "shared", Some(1)),
+        ("map/src/main_rs", "again", Some(2)),
+        ("map/src/main_rs", "leaf", Some(2)),
+        ("map/src/aux_rs", "pong", Some(2)),
+        ("map/src/main_rs", "spare", None),
+        ("map/src/aux_rs", "ring_b", None),
+        ("map/src/aux_rs", "store_get", None),
+    ] {
+        let want = n.map(|n| format!("Level: [[map/index/src|{n}]]"));
+        assert_eq!(level(page, anchor), want, "{anchor}");
+    }
+    let block = common::fn_block(&common::map_page(&vault, "map/src/main_rs"), "prepare");
+    assert!(
+        block.starts_with("## prepare\n`fn prepare()` · `src/main.rs:9-12`\nLevel: [[map/index/src|1]]\n\n**Called from**\n"),
+        "{block}"
+    );
+}
+
+#[test]
 fn the_index_puts_main_first_and_follows_calls_across_files() {
     let (_d, vault) = common::built(&[
         ("app/a.py", "def start():\n    helper()\n\ndef helper():\n    pass\n"),

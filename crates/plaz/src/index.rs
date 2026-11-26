@@ -10,6 +10,15 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth it is reached; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
 
+pub struct Index {
+    /// Empty when no function is charted.
+    pub pages: Vec<Page>,
+    /// Per function reached from a function no charted function calls:
+    /// the depth at which the index expands it (0 for that one) and the id
+    /// of the index page that does.
+    pub levels: BTreeMap<FnId, (usize, String)>,
+}
+
 /// Where each function is expanded: the function it is listed under
 /// (none for the first of a tree), its depth, and the first of its tree.
 type Placed<'a> = BTreeMap<&'a FnId, (Option<&'a FnId>, usize, &'a FnId)>;
@@ -47,8 +56,7 @@ fn top_dir(path: &str) -> &str {
     path.split_once('/').map_or("", |d| d.0)
 }
 
-/// The index pages; none when no function is charted.
-pub fn index(p: &Project, names: &Names) -> Vec<Page> {
+pub fn index(p: &Project, names: &Names) -> Index {
     let item = |f: &FnId| &p.files[&f.path].code.items[f.item];
     let is_main = |f: &FnId| item(f).name == "main" && item(f).owner.is_none();
     // Each charted function's certain callees, each once, in Calls order.
@@ -71,7 +79,10 @@ pub fn index(p: &Project, names: &Names) -> Vec<Page> {
         }
     }
     if callees.is_empty() {
-        return Vec::new();
+        return Index {
+            pages: Vec::new(),
+            levels: BTreeMap::new(),
+        };
     }
     let with_main: BTreeSet<&str> = (callees.keys().filter(|f| is_main(f)))
         .map(|f| f.path.as_str())
@@ -96,6 +107,14 @@ pub fn index(p: &Project, names: &Names) -> Vec<Page> {
     let maybe = pick(&|f| !uncalled(f) && names.callers(f).iter().all(|c| !c.2));
     let mut placed = Placed::new();
     place(&roots, &callees, &mut placed);
+    let levels = (placed.iter())
+        .map(|(f, (_, d, s))| {
+            (
+                (*f).clone(),
+                (*d, names.index_page(top_dir(&s.path)).to_string()),
+            )
+        })
+        .collect();
     place(&maybe, &callees, &mut placed);
     let mut cycles = Vec::new();
     for &f in &fns {
@@ -193,5 +212,5 @@ pub fn index(p: &Project, names: &Names) -> Vec<Page> {
         rel_path: format!("{INDEX}.md"),
         content: index,
     });
-    pages
+    Index { pages, levels }
 }
