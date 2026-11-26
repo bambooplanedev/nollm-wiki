@@ -3630,6 +3630,17 @@ fn a_let_mut_closure_is_not_linked() {
 }
 
 #[test]
+fn a_let_mut_closure_with_no_declared_type_is_linked() {
+    // Its type is the closure's own: nothing else can be assigned to it.
+    let src = "pub fn count(n: u8) -> u8 {\n    let mut total = 0;\n    let mut add = |x: u8| { if x > 1 { total += x; } };\n    add(n);\n    total\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    assert_eq!(
+        call_line(&common::map_page(&vault, "map/src/a_rs"), "count", "add(n)"),
+        "`add(n)` L4 → the closure `add`, drawn in this chart"
+    );
+}
+
+#[test]
 fn a_reassigned_python_nested_def_is_not_linked() {
     let py = "def spare(x):\n    return x\n\ndef choose(n):\n    def helper(x):\n        if x > 1:\n            return x\n        return 0\n    if n > 3:\n        helper = spare\n    return helper(n)\n";
     let (_d, vault) = common::built(&[("app/m.py", py)]);

@@ -172,13 +172,15 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 name: name.map(|p| text(p, src).to_string()),
                 body: n,
                 // From the end of the `let` to the end of its block; none for
-                // a `let mut`, which may be assigned another function.
+                // a `let mut` with a declared type, which may be assigned
+                // another function (a closure's own type cannot).
                 binds: bound
                     .zip(bound.and_then(|b| b.parent()))
                     .filter(|_| name.is_some())
                     .filter(|(l, _)| {
-                        !l.children(&mut l.walk())
-                            .any(|c| c.kind() == "mutable_specifier")
+                        let mutable =
+                            (l.children(&mut l.walk())).any(|c| c.kind() == "mutable_specifier");
+                        !mutable || l.child_by_field_name("type").is_none()
                     })
                     .map(|(l, b)| Binding {
                         scope: l.end_byte()..b.end_byte(),
