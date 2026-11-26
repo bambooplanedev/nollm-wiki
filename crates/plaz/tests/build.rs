@@ -595,6 +595,18 @@ fn a_path_on_a_prelude_or_primitive_type_is_outside() {
 }
 
 #[test]
+fn a_path_on_a_prelude_type_lists_only_trait_impls_for_that_type() {
+    // `impl From<Name> for Wrap` is no `usize::from`; a blanket impl on a
+    // generic parameter may be.
+    let a = "pub struct Name;\npub struct Wrap;\nimpl From<Name> for Wrap {\n    fn from(_n: Name) -> Wrap { Wrap }\n}\nimpl From<Name> for Box<u8> {\n    fn from(_n: Name) -> Box<u8> { todo!() }\n}\npub trait Show {\n    fn show(&self);\n}\nimpl<T: Copy> Show for T {\n    fn show(&self) {}\n}\nimpl Show for Wrap {\n    fn show(&self) {}\n}\npub fn f(n: Name) {\n    usize::from(1u8);\n    Box::from(n);\n    u8::show(&1);\n}\n";
+    let calls = calls_of(&[("src/a.rs", a)], "f");
+    assert_eq!(calls[0], "`usize::from(1u8)` L19 → outside the project");
+    assert_eq!(calls[1], "`Box::from(n)` L20 → one of: [[map/src/a_rs#box_u8_as_from_name_from|<Box<u8> as From<Name>>::from]], or outside the project");
+    assert!(calls[2].contains("t_as_show_show"), "{calls:#?}");
+    assert!(!calls[2].contains("wrap_as_show_show"), "{calls:#?}");
+}
+
+#[test]
 fn a_prelude_type_name_the_project_has_is_not_outside() {
     // A project type of the name and an alias of the name read as before;
     // a project trait method, or a trait impl on the type, may be called.

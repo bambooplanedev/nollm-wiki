@@ -276,6 +276,12 @@ fn library_exit(file: &File, names: &InScope, chain: &[FlowScope], call: &MapCal
     }
 }
 
+/// The Rust prelude and primitive types a path may start from.
+const PRELUDE: [&str; 22] = [
+    "Vec", "String", "Box", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "usize", "i8",
+    "i16", "i32", "i64", "i128", "isize", "f32", "f64", "char", "bool", "str",
+];
+
 /// One language family's call rules.
 trait Rules {
     /// What the code shows about the target of `call`, `chain` the flows
@@ -506,7 +512,8 @@ impl<'a> Caller<'_, 'a> {
                 // `Vec::new()`: a prelude or primitive type, as a value of it.
                 Evidence::Hidden if root == q && self.prelude(root) => self.external(false, {
                     let all = self.scope.methods_anywhere(site).into_iter();
-                    all.filter(|&c| self.by_trait(c)).collect()
+                    all.filter(|&c| self.by_trait(c) && self.may_impl_for(c, root))
+                        .collect()
                 }),
                 found @ (Evidence::Hidden | Evidence::Outside | Evidence::Found { .. }) => found,
             }
@@ -518,11 +525,7 @@ impl<'a> Caller<'_, 'a> {
     /// Is `name` a Rust prelude type or a primitive one that no project
     /// type, module, import or item of the file is named?
     fn prelude(&self, name: &str) -> bool {
-        const PRELUDE: [&str; 20] = [
-            "Vec", "String", "Box", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "usize",
-            "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "char",
-        ];
-        (PRELUDE.contains(&name) || matches!(name, "bool" | "str"))
+        PRELUDE.contains(&name)
             && self.file.family == Family::Rust
             && !self.index.is_type(name)
             && !self.index.is_module(name)
@@ -530,6 +533,21 @@ impl<'a> Caller<'_, 'a> {
             && !self.names.aliases.contains(name)
             && !defines(self.file, name)
             && !own_crate(self.file, name, self.crates)
+    }
+
+    /// May the trait method `c` be one of the type `root`: a trait's own
+    /// method, or one of an impl for `root` (`<Box<u8> as From<Name>>`)
+    /// or for a generic parameter (`<T as Show>`), not for another type.
+    fn may_impl_for(&self, c: FnRef, root: &str) -> bool {
+        let owner = self.index.item(c).owner.as_deref().unwrap_or("");
+        let Some(ty) = owner.strip_prefix('<').and_then(|o| o.split(" as ").next()) else {
+            return true;
+        };
+        let ty = ty.trim_start_matches('&').trim_start();
+        let ty = ty.strip_prefix("mut ").unwrap_or(ty);
+        let head = ty.split('<').next().unwrap_or("");
+        let word = !head.is_empty() && head.chars().all(|c| c.is_alphanumeric() || c == '_');
+        head == root || (word && !self.index.is_type(head) && !PRELUDE.contains(&head))
     }
 
     /// Is `name` a `use … as` alias that a project type is also called?
