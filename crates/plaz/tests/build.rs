@@ -3654,3 +3654,15 @@ fn a_python_nested_def_and_an_import_of_one_name_are_two_bindings() {
         "`pager(doc)` L16 → the nested function `pager`, drawn in this chart"
     );
 }
+
+#[test]
+fn a_let_rebound_by_a_macro_does_not_see_the_function_outside() {
+    let src = "macro_rules! with { ($i:ident, $e:expr) => {{ let $i = grow; $e }} }\npub fn level(n: u8) -> u8 { n }\npub fn grow(n: u8) -> u8 { n }\npub fn run(n: u8) -> u8 {\n    let level = with!(level, level(n));\n    level\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        call_line(&page, "run", "level(n)"),
+        "`level(n)` L5 → target not visible"
+    );
+}
+
