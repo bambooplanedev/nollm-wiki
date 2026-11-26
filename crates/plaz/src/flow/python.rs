@@ -11,8 +11,36 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
     skips_call: |_| false,
-    ends_path: |n, _| super::whole_statement(n),
+    ends_path: |n, src| super::whole_statement(n) && !caught_exit(n, src),
 };
+
+/// Is `n` in the body of a `try` whose handler catches an exit: a bare
+/// `except:`, or one naming `SystemExit` or `BaseException`?
+fn caught_exit(n: Node, src: &str) -> bool {
+    let mut at = n;
+    while let Some(p) = at.parent() {
+        if matches!(p.kind(), "function_definition" | "lambda") {
+            return false;
+        }
+        let in_body = p.child_by_field_name("body") == Some(at);
+        if p.kind() == "try_statement" && in_body {
+            let catches = |h: &Node| {
+                let body = h
+                    .named_children(&mut h.walk())
+                    .find(|c| c.kind() == "block");
+                let head = &src[h.start_byte()..body.map_or(h.end_byte(), |b| b.start_byte())];
+                let mut words = head.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+                head.trim_end().trim_end_matches(':').trim() == "except"
+                    || words.any(|w| matches!(w, "SystemExit" | "BaseException"))
+            };
+            if handlers(p).iter().any(catches) {
+                return true;
+            }
+        }
+        at = p;
+    }
+    false
+}
 
 fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
     let field = |f: &str| n.child_by_field_name(f);

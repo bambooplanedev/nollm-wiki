@@ -1639,6 +1639,43 @@ fn a_project_function_named_exit_that_returns_continues() {
     );
 }
 
+/// Is the call labelled `call` drawn as an end of the path in `edges`?
+fn ends_at(edges: &[String], call: &str) -> bool {
+    edges.contains(&format!("{call} --> {call}"))
+}
+
+#[test]
+fn a_noreturn_call_in_a_macro_argument_does_not_end_the_path() {
+    let c = "[[noreturn]] void raise_now(void);\nint run(int v) {\n    EXPECT_FAILS({ count++; raise_now(); }, \"msg\");\n    after(v);\n    return v;\n}\n";
+    let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
+    assert!(!ends_at(&e, "raise_now()"), "{e:#?}");
+    assert!(e.iter().any(|l| l.ends_with("--> after(v)")), "{e:#?}");
+}
+
+#[test]
+fn a_rust_never_returning_call_in_a_macro_or_an_argument_closure_does_not_end_the_path() {
+    let src = "fn fail() -> ! { panic!() }\nfn f() {\n    assert_panics!({ fail(); });\n    after();\n}\nfn g() {\n    let r = std::panic::catch_unwind(|| { fail(); });\n    after(r);\n}\n";
+    let f = edges_of(src, "f");
+    assert!(!ends_at(&f, "fail()"), "{f:#?}");
+    assert!(f.iter().any(|l| l.ends_with("--> after()")), "{f:#?}");
+    let g = edges_of(src, "g");
+    assert!(g.iter().any(|l| l.ends_with("--> after(r)")), "{g:#?}");
+}
+
+#[test]
+fn a_python_exit_in_a_lambda_or_a_try_catching_it_does_not_end_the_path() {
+    let src = "import sys\n\ndef f(v):\n    try:\n        sys.exit(1)\n    except SystemExit:\n        pass\n    after(v)\n\ndef g(v):\n    run(lambda: sys.exit(1))\n    after(v)\n\ndef h(v):\n    try:\n        sys.exit(2)\n    except:\n        pass\n    try:\n        sys.exit(3)\n    except ValueError:\n        pass\n";
+    let page = page_of_py(src);
+    let f = chart_edges(&page, "f");
+    assert!(!ends_at(&f, "sys.exit(1)"), "{f:#?}");
+    let g = chart_edges(&page, "g");
+    assert!(g.iter().any(|l| l.ends_with("--> after(v)")), "{g:#?}");
+    // A bare `except:` catches the exit; `except ValueError` does not.
+    let h = chart_edges(&page, "h");
+    assert!(!ends_at(&h, "sys.exit(2)"), "{h:#?}");
+    assert!(ends_at(&h, "sys.exit(3)"), "{h:#?}");
+}
+
 fn edges_of(src: &str, anchor: &str) -> Vec<String> {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     chart_edges(&common::map_page(&vault, "map/src/a_rs"), anchor)
