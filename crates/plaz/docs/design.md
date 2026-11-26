@@ -2,7 +2,7 @@
 
 Approved 2026-11-13.
 
-Status: function charts for Rust, Python and C/C++, call targets, `plaz build` and `plaz setup` exist (a preview, installed with nollm-wiki). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
+Status: function charts for Rust, Python and C/C++, call targets, index pages, `plaz build` and `plaz setup` exist (a preview, installed with nollm-wiki). State diagrams, "what changed in the logic", the other languages and publishing are planned; each is marked as planned where it appears below.
 
 ## Why
 
@@ -23,14 +23,24 @@ plaz depends on `wiki-code` only: a crate in this workspace, used by path, that 
 
 ## What it shows
 
-No end-to-end flows, no entry points. Each function gets a section with:
+No end-to-end flows and no entry points: the map never claims which path a run takes through the functions. Each function gets a section with:
 
-1. **Locals**, right under the signature: the names the body declares, parameters left out (they are in the signature), sorted by name, each with its type where the code writes one (`item: Entry`). Python `global` and `nonlocal` names go on an `Outside names:` line instead. No line when there are none. A nested function's or closure's names stay with its own sub-chart and are not listed.
-2. **Called from**: the functions that call it, each linking to its chart, split into "certainly calls" and "may call (if this `get` is this one)".
-3. **Decision flowchart** (UML activity, Mermaid) of the body: every `if` / `else if` / `switch` / `match` arm is a diamond holding the literal condition code and the whole comment attached to it; actions and calls in order; call nodes are clickable where the renderer allows.
-4. **Calls**: the callees as a plain wikilink list (guaranteed navigation in Obsidian and Quartz).
+1. **Level**, right under the signature, only for a function the index expands under a function no charted function calls: the depth at which it does (0 for that one), linking to that index page.
+2. **Locals**, under the signature and the level line: the names the body declares, parameters left out (they are in the signature), sorted by name, each with its type where the code writes one (`item: Entry`). Python `global` and `nonlocal` names go on an `Outside names:` line instead. No line when there are none. A nested function's or closure's names stay with its own sub-chart and are not listed.
+3. **Called from**: the functions that call it, each linking to its chart, split into "certainly calls" and "may call (if this `get` is this one)".
+4. **Decision flowchart** (UML activity, Mermaid) of the body: every `if` / `else if` / `switch` / `match` arm is a diamond holding the literal condition code and the whole comment attached to it; actions and calls in order; call nodes are clickable where the renderer allows.
+5. **Calls**: the callees as a plain wikilink list (guaranteed navigation in Obsidian and Quartz).
 
 The person builds the path by moving up and down between charts. The map makes no claim it cannot back.
+
+**Index pages** (owner decision, 2026-11-26) are the way in from the top. They re-list, top down, only the links the function sections already state as certain (a single link in **Calls**), and claim nothing of their own: cross-function edges are where a map lies, so no edge is added, guessed or followed through "one of". `map/index.md` lists the top directories with the count of functions each holds and carries the functions of the files at the top of the tree; each top directory has `map/index/<dir>.md`. A page has up to four sections, each grouped by file:
+
+- **Not called by any charted function**: these functions, each with what it certainly calls nested under it, in the order of its Calls list.
+- **Called only by calls that may be another function**: the functions whose only callers are "may call", the same way.
+- **In a call cycle no function above reaches**: what is left, trees that start at a function certainly called only from inside a cycle nothing above reaches.
+- **Not called, calling nothing certain**: a flat list.
+
+Files with a `main` function come first, then by path; in a file `main` comes first, then source order. A breadth-first walk over all the trees, in that order, places each function once, at the shallowest depth it is reached; it is expanded there, and every other function that certainly calls it lists it on its own last line, "also calls" (recursion included). A tree follows calls into other directories; it sits on the page of the directory where its first function is. The page says that "not called" is only what the map sees: a function may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project. No "entry point" wording, no sequence diagrams, no path claims beyond these links.
 
 **State diagrams** (planned, not built), simple shape only: an enum-typed field assigned enum literals, with the guard from the enclosing branch and the method or arm as the event. Shown as a *candidate* state machine. Other shapes (computed targets, string-literal unions, typestate) get a "not covered" note. The owner states that the order state machine of a C++ trading system is implemented fully in this shape (not checked yet).
 
@@ -60,7 +70,7 @@ Markdown pages with Mermaid, written by default into `<source>/.nollm-wiki/map/`
 ## Non-goals
 
 - No model, no paraphrase of conditions, no guessing of intent, no flagging of "suspicious" logic.
-- No end-to-end flows, entry points, or sequence diagrams (navigation between charts replaces them).
+- No end-to-end flows, entry points, or sequence diagrams: navigation between charts replaces them, and the index pages re-list certain links from the top down, claiming no path beyond them.
 - No commit/PR diff output (skipped for now).
 - No stored map history.
 - No project specs as a source: the map must work on any repo.
@@ -78,6 +88,7 @@ Decided by the owner:
 - Audience: the owner first, the agent second.
 - Literal code and comments only, no model; doubt shown as "either … or …".
 - Logic inside functions plus caller/callee navigation.
+- Index pages from the top down (2026-11-26), re-listing certain links only; this revisits the earlier "no entry points" rule, whose reason stands.
 - State diagrams in the simple shape; sequence diagrams deferred.
 - Browser main view (Quartz); Obsidian and agent access too.
 - No stored history; compare with commits on demand.
