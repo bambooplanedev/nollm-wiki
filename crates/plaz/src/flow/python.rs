@@ -265,7 +265,7 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
 /// body are `rebound`; the bodies of defs and classes bind for themselves.
 fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds: Vec<(String, Option<String>)> = Vec::new();
-    let mut rebound = BTreeSet::new();
+    let (mut rebound, mut rejoined) = (BTreeSet::new(), BTreeSet::new());
     let (mut params, mut outside) = (BTreeSet::new(), BTreeSet::new());
     let mut stack: Vec<Node> = root.children(&mut root.walk()).collect();
     while let Some(n) = stack.pop() {
@@ -275,18 +275,21 @@ fn bindings(root: Node, src: &str) -> Bindings {
                 names(p, src, &mut |b| binds.push((b, ty.clone())));
             }
         };
+        // A name a def, class or import binds a second time is `twice`.
+        let mut rebind = |b: Option<String>| {
+            if let Some(b) = b.filter(|b| !rebound.insert(b.clone())) {
+                rejoined.insert(b);
+            }
+        };
         match n.kind() {
             "function_definition" | "class_definition" => {
-                rebound.extend(field("name").map(|i| text(i, src).to_string()));
+                rebind(field("name").map(|i| text(i, src).to_string()));
                 continue;
             }
             "import_statement" | "import_from_statement" => {
-                rebound.extend(
-                    statement_imports(n, src)
-                        .iter()
-                        .filter_map(|i| i.binds())
-                        .map(String::from),
-                );
+                for i in statement_imports(n, src) {
+                    rebind(i.binds().map(String::from));
+                }
                 continue;
             }
             "parameters" | "lambda_parameters" => {
@@ -342,7 +345,8 @@ fn bindings(root: Node, src: &str) -> Bindings {
             t.filter(|t| !rebound.contains(t.split("::").next().unwrap_or(""))),
         )
     });
-    let joined = Bindings::join(binds);
+    let mut joined = Bindings::join(binds);
+    joined.twice.extend(rejoined);
     Bindings {
         params,
         outside,

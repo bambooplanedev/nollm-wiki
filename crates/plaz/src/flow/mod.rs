@@ -276,7 +276,7 @@ fn bound(flow: &Flow) -> (BTreeMap<&str, usize>, BTreeSet<&str>) {
     });
     let (mut counts, mut items) = (BTreeMap::new(), BTreeSet::new());
     for f in flows {
-        for name in &f.locals {
+        for name in f.locals.iter().chain(&f.rebound) {
             *counts.entry(name.as_str()).or_default() += 1 + usize::from(f.twice.contains(name));
         }
         items.extend(f.rebound.iter().map(String::as_str));
@@ -338,7 +338,7 @@ fn passes(call: Node, name: &str, src: &str) -> bool {
 /// and, when its name has no other binding in the function, to the calls
 /// of that name in its scope (`MapCall::local`).
 fn link_nested(flow: &mut Flow, root: Node, src: &str) {
-    let (counts, items) = bound(flow);
+    let (counts, _) = bound(flow);
     let mut binders: BTreeMap<&str, Vec<(Range<usize>, &Binding)>> = BTreeMap::new();
     let mut taken: Vec<(Range<usize>, Range<usize>)> = Vec::new();
     flow.each_step(&mut |s| {
@@ -358,10 +358,7 @@ fn link_nested(flow: &mut Flow, root: Node, src: &str) {
     // Per name bound once in the function, by a nested flow: where that
     // name means it, and the nested flow.
     let single: Vec<(Range<usize>, Local)> = (binders.into_iter())
-        .filter(|(name, b)| {
-            let all = counts.get(name).copied().unwrap_or(0) + usize::from(items.contains(name));
-            b.len() == 1 && all == 1
-        })
+        .filter(|(name, b)| b.len() == 1 && counts.get(name) == Some(&1))
         .map(|(name, b)| {
             let (at, binding) = &b[0];
             let local = Local {

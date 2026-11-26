@@ -3639,3 +3639,18 @@ fn a_reassigned_python_nested_def_is_not_linked() {
         "`helper(n)` L11 → target not visible"
     );
 }
+
+#[test]
+fn a_python_nested_def_and_an_import_of_one_name_are_two_bindings() {
+    let src = "def show(doc):\n    try:\n        from fastlib import pager\n    except ImportError:\n        def pager(text):\n            if text:\n                return text\n            return ''\n    return pager(doc)\n\ndef plain(doc):\n    def pager(text):\n        if text:\n            return text\n        return ''\n    return pager(doc)\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let page = common::map_page(&vault, "map/app/m_py");
+    assert_eq!(
+        call_line(&page, "show", "pager(doc)"),
+        "`pager(doc)` L9 → target not visible"
+    );
+    assert_eq!(
+        call_line(&page, "plain", "pager(doc)"),
+        "`pager(doc)` L16 → the nested function `pager`, drawn in this chart"
+    );
+}

@@ -261,7 +261,7 @@ pub struct Flow {
     pub types: BTreeMap<String, String>,
     /// The names in `locals` that are parameters of the function.
     pub params: BTreeSet<String>,
-    /// The names in `locals` bound more than once.
+    /// The names in `locals` or `rebound` bound more than once.
     pub twice: BTreeSet<String>,
     /// The names in `locals` declared `global` or `nonlocal` (Python).
     pub outside: BTreeSet<String>,
