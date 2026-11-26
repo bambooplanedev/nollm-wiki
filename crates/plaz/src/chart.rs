@@ -117,6 +117,9 @@ impl Chart<'_> {
         } else {
             c.text.clone()
         };
+        if text.trim().is_empty() {
+            return;
+        }
         let id = self.node(("[/", "\\]"), &text, &[]);
         self.edges += 1;
         self.lines.push(format!("    n{at} -.- n{id}"));

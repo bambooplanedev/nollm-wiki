@@ -2666,3 +2666,18 @@ fn build_leaves_a_compiled_wiki_alone() {
         assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), text);
     }
 }
+
+#[test]
+fn an_empty_comment_draws_no_note() {
+    for (path, src) in [
+        ("src/a.rs", "fn f(x: u8) {\n    //\n    if x > 1 { g(); }\n}\n"),
+        ("a.py", "def f(x):\n    #\n    if x > 1:\n        g()\n"),
+        ("a.cpp", "void f(int x) {\n    //\n    if (x > 1) { g(); }\n}\n"),
+    ] {
+        let (_d, vault) = common::built(&[(path, src)]);
+        let id = format!("map/{}", path.replace('.', "_"));
+        let page = common::map_page(&vault, &id);
+        assert!(page.contains("x #gt; 1"), "{path}: {page}");
+        assert!(!page.contains("\"\""), "{path}: {page}");
+    }
+}
