@@ -5,6 +5,7 @@ use wiki_code::model::{CallSite, CallVia};
 pub fn call(name: &str) -> Step {
     Step::Call(MapCall {
         text: format!("{name}()"),
+        whole: format!("{name}()"),
         site: CallSite {
             name: name.to_string(),
             via: CallVia::Bare,

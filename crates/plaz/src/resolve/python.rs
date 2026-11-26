@@ -373,7 +373,7 @@ impl Rules for Caller<'_, '_, '_> {
 /// where the call site names what a file-level `import … as` says that
 /// name stands for?
 fn rebinds_alias(chain: &[FlowScope], call: &MapCall) -> bool {
-    let written = call.text.split('(').next().unwrap_or("").trim();
+    let written = call.whole.split('(').next().unwrap_or("").trim();
     let bound = |f: &FlowScope| f.locals.contains(written) || f.rebound.contains(written);
     written != call.site.name && chain.iter().any(bound)
 }
@@ -511,7 +511,7 @@ impl super::Caller<'_, '_> {
     /// the call site names what it stands for (`au.u()` after `from app
     /// import utils as au`, beside an outside `import utils`)?
     pub(super) fn project_alias(&self, call: &MapCall, x: &str) -> bool {
-        let written = call.text.split(['.', '(']).next().unwrap_or("").trim();
+        let written = call.whole.split(['.', '(']).next().unwrap_or("").trim();
         written != x
             && self.names.aliases.contains(written)
             && !self.names.external.contains_key(written)
@@ -526,11 +526,11 @@ impl super::Caller<'_, '_> {
     pub(super) fn dotted(&self, chain: &[FlowScope], call: &MapCall) -> Evidence {
         let name = call.site.name.as_str();
         let word = |s: &&str| !s.is_empty() && s.chars().all(|c| c.is_alphanumeric() || c == '_');
-        let callee = call.text.split('(').next().unwrap_or("");
+        let callee = call.whole.split('(').next().unwrap_or("");
         let segs: Vec<&str> = callee.split('.').collect();
         let root = segs[0];
         let bound = |by: &dyn Fn(&FlowScope) -> bool| chain.iter().any(by);
-        if call.text.starts_with(&format!("super().{name}(")) {
+        if call.whole.starts_with(&format!("super().{name}(")) {
             let own = self.item.owner.as_deref().map_or("", owner_key);
             return self.py_on_self(call, own, Own::Super);
         }

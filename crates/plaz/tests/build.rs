@@ -226,6 +226,21 @@ fn a_python_chain_is_drawn_as_its_outermost_call() {
     assert_eq!(common::fn_section(&block, "tidy", "Calls").len(), 3);
 }
 
+#[test]
+fn a_call_is_resolved_from_its_whole_text_not_the_text_shown() {
+    let inner = "def measure_everything_carefully_at_once(*a):\n    return a\n";
+    let outer = "import pkg.gauges\n\ndef run(v):\n    return pkg.gauges.measure_everything_carefully_at_once(v, v + 1, v + 2, v + 3, v + 4, v + 5)\n";
+    let (_d, vault) = common::built(&[
+        ("pkg/__init__.py", ""),
+        ("pkg/gauges.py", inner),
+        ("app.py", outer),
+    ]);
+    assert_eq!(
+        common::fn_section(&common::map_page(&vault, "map/app_py"), "run", "Calls"),
+        ["`pkg.gauges.measure_everything_carefully_…e(v, v + 1, v + 2, v + 3, v + 4, v + 5)` L4 → [[map/pkg/gauges_py#measure_everything_carefully_at_once|measure_everything_carefully_at_once]]"]
+    );
+}
+
 fn cli_build(src: &Path, vault: &Path) -> assert_cmd::assert::Assert {
     assert_cmd::cargo_bin_cmd!()
         .args(["build", "--source"])

@@ -60,7 +60,7 @@ impl Caller<'_, '_, '_> {
         x: Option<&str>,
     ) -> Evidence {
         let path = match x {
-            Some(x) => Some((x, call.text.strip_prefix(x).unwrap_or(""))),
+            Some(x) => Some((x, call.whole.strip_prefix(x).unwrap_or(""))),
             None => member_path(call.callee.as_deref().unwrap_or(""), &call.site.name),
         };
         let Some((x, after)) = path else {

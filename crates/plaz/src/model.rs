@@ -402,7 +402,10 @@ pub struct Comment {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapCall {
+    /// The call as shown: on one line, its middle cut past 80 characters.
     pub text: String,
+    /// The call as written, on one line: what the resolve stage reads.
+    pub whole: String,
     pub site: CallSite,
     /// A path call's or a member call's callee (`a::f`, `x.g(1).f`) as
     /// written, to its arguments: `text` is clipped. None on a receiver

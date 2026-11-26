@@ -487,7 +487,7 @@ impl Caller<'_, '_, '_> {
         let site = &call.site;
         let name = site.name.as_str();
         // `::f()` names no local or member.
-        let global = call.text.starts_with("::");
+        let global = call.whole.starts_with("::");
         // A local called is its own call operator.
         let local = chain.iter().rev().find(|f| f.locals.contains(name));
         if let Some(f) = local.filter(|_| !global) {

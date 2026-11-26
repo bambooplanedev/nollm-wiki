@@ -739,6 +739,7 @@ impl<'s> Walker<'s> {
             let wrapper = (self.hooks.wrapper)(&c.site);
             out.push(Step::Call(MapCall {
                 text: clip_middle(lit, 80),
+                whole: one_line(lit),
                 site: c.site,
                 callee: callee.map(str::to_string),
                 target: Target::Hidden,
