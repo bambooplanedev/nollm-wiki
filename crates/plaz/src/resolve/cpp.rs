@@ -28,6 +28,9 @@ pub(super) struct Cpp<'a> {
     closures: Vec<BTreeSet<usize>>,
     /// The pages some file includes, directly or through another.
     included: BTreeSet<usize>,
+    /// The pages with a quoted include that names no project file: a
+    /// generated header, or one found through a build include path.
+    blind: BTreeSet<usize>,
     /// The functions by name, a function both trees list once; an
     /// operator's name without spaces (`operator->` of `operator -> ()`).
     by_name: BTreeMap<String, Vec<FnRef>>,
@@ -77,6 +80,7 @@ impl<'a> Cpp<'a> {
         let mut out = Cpp {
             closures: Vec::new(),
             included: BTreeSet::new(),
+            blind: BTreeSet::new(),
             by_name: BTreeMap::new(),
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
@@ -108,7 +112,11 @@ impl<'a> Cpp<'a> {
         // Per page: the pages its includes name.
         let mut includes = vec![Vec::new(); pages.len()];
         for (page, &(path, file)) in cpp() {
-            includes[page] = out.includes(&by_file, path, file);
+            let blind;
+            (includes[page], blind) = out.includes(&by_file, path, file);
+            if blind {
+                out.blind.insert(page);
+            }
             out.read_items(page, file);
         }
         out.closures = closures(&includes);
@@ -117,20 +125,26 @@ impl<'a> Cpp<'a> {
         out
     }
 
-    /// The pages the includes of `file`, at `path`, name.
+    /// The pages the includes of `file`, at `path`, name, and whether a
+    /// quoted one names none.
     fn includes(
         &self,
         by_file: &BTreeMap<&str, Vec<usize>>,
         path: &str,
         file: &File,
-    ) -> Vec<usize> {
-        let quoted = file.code.imports.iter().filter_map(|i| project_include(i));
-        let named = |inc: &str| {
+    ) -> (Vec<usize>, bool) {
+        let (mut pages, mut blind) = (Vec::new(), false);
+        for import in &file.code.imports {
+            let Some(inc) = project_include(import) else {
+                continue;
+            };
             let named = by_file.get(inc.rsplit('/').next().unwrap_or(inc));
             let named = named.into_iter().flatten().map(|&p| (p, self.pages[p].0));
-            included(&named.collect::<Vec<_>>(), path, inc)
-        };
-        quoted.flat_map(named).collect()
+            let found = included(&named.collect::<Vec<_>>(), path, inc);
+            blind |= found.is_empty() && !import.starts_with('<');
+            pages.extend(found);
+        }
+        (pages, blind)
     }
 
     /// Reads the items of `file`, at `page`: its types, its functions by
@@ -540,10 +554,13 @@ impl Caller<'_, '_, '_> {
         if pages.any(|&p| cpp.pages[p].1.cpp.variables.contains(name)) {
             return Evidence::Hidden;
         }
-        // A macro of the file or its includes; in a header, or a file
-        // another includes, one of the includer's too.
+        // A macro of the file or its includes, or of a quoted include the
+        // walk cannot match; in a header, or a file another includes, one
+        // of the includer's too.
         let mut pages = std::iter::once(&self.page).chain(self.included);
-        let defines = |p: usize| cpp.pages[p].1.cpp.macros.iter().any(|m| m.0 == name);
+        let defines = |p: usize| {
+            cpp.blind.contains(&p) || cpp.pages[p].1.cpp.macros.iter().any(|m| m.0 == name)
+        };
         let macro_seen =
             cpp.macros.contains(name) && (cpp.shared(self.page) || pages.any(|&p| defines(p)));
         // A function whose name a macro before its return type misread as

@@ -806,6 +806,39 @@ fn a_macro_hides_a_call_only_where_the_file_or_its_includes_define_it() {
 }
 
 #[test]
+fn a_macro_hides_a_call_where_a_quoted_include_matches_no_project_file() {
+    // A generated header (`conf_gen.h` from `conf_gen.h.in`) or one found
+    // through a build include path may define the macro.
+    let only = "#define release(p) guarded_release(p)\n";
+    let mid = "#include \"conf_gen.h\"\n";
+    let plain = "int plain(int v);\n";
+    let gen = "#include \"conf_gen.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let deep = "#include \"../x/mid.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let sys = "#include <stdio.h>\n#include <sys/types.h>\n#include \"../x/plain.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let files = [
+        ("x/only.h", only),
+        ("x/mid.h", mid),
+        ("x/plain.h", plain),
+        ("src/gen.c", gen),
+        ("src/deep.c", deep),
+        ("src/sys.c", sys),
+    ];
+    for path in ["src/gen.c", "src/deep.c"] {
+        assert_eq!(
+            cpp_targets(&files, path, "run"),
+            ["release(buf) → hidden"],
+            "{path}"
+        );
+    }
+    // Every quoted include matched, none defining it; angle ones are the
+    // system's: an ordinary call.
+    assert_eq!(
+        cpp_targets(&files, "src/sys.c", "run"),
+        ["release(buf) → outside"]
+    );
+}
+
+#[test]
 fn a_macro_hides_a_call_in_a_header_whatever_it_includes() {
     // A header may take the macro from its includer, as today.
     let only = "#define release(p) guarded_release(p)\n";
