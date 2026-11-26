@@ -995,7 +995,10 @@ fn mermaid_labels_escape_every_hostile_char() {
         plaz::render::mermaid_label("a<b> && c|d {\"#x\"} `y`\nz"),
         "a#lt;b#gt; #amp;#amp; c#124;d #123;#quot;#35;x#quot;#125; #96;y#96;<br/>z"
     );
-    assert_eq!(plaz::render::mermaid_label("w(s, \"\\n\")"), "w(s, #quot;#92;n#quot;)");
+    assert_eq!(
+        plaz::render::mermaid_label("w(s, \"\\n\")"),
+        "w(s, #quot;#92;n#quot;)"
+    );
     assert_eq!(plaz::render::mermaid_label("a: b"), "a#58; b");
     assert_eq!(plaz::render::mermaid_label("$$x$$"), "#36;#36;x#36;#36;");
 }
@@ -1046,7 +1049,10 @@ fn long_comments_become_a_line_reference() {
     );
     let (_d, vault) = common::built(&[("src/a.rs", &src)]);
     let page = common::map_page(&vault, "map/src/a_rs");
-    assert!(page.contains("comment#58; 7 lines at src/a.rs#58;2-8"), "{page}");
+    assert!(
+        page.contains("comment#58; 7 lines at src/a.rs#58;2-8"),
+        "{page}"
+    );
     assert!(page.contains("[/\"a<br/>b\"\\]"), "{page}");
 }
 
@@ -1076,14 +1082,23 @@ fn hostile_owner_names_keep_slug_anchors() {
 
 #[test]
 fn huge_charts_are_whole_and_point_to_the_calls_list() {
+    // 600 edges: over what mermaid.js draws, under the character limit.
     let body = (0..600).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
     let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
     let page = common::map_page(&vault, "map/src/a_rs");
     let chart = page.split("```mermaid\n").nth(1).unwrap();
     assert!(chart.split_once("\n```\n").unwrap().0.contains("g599()"));
-    assert!(page.contains("\n```\n\nThis chart exceeds Mermaid's default limits (500 edges, 50,000 characters); the Calls list below is the complete view.\n"));
+    assert!(page.contains("\n```\n\nThis chart exceeds the 500-edge limit of Mermaid.js renderers other than Obsidian's; the Calls list below is the complete view.\n"));
+    // over 50,000 characters no renderer draws it: no block, only the notice
+    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
+    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert!(!page.contains("```mermaid"), "{page}");
+    assert!(page.contains("\nThis chart exceeds Mermaid's 50,000-character limit and is not drawn; the Calls list below is the complete view.\n"));
+    assert!(page.contains("g2999()"), "the Calls list stays");
     let (_d, vault) = common::built(&[("src/a.rs", F_SRC)]);
-    assert!(!common::map_page(&vault, "map/src/a_rs").contains("Mermaid's default limits"));
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert!(page.contains("```mermaid") && !page.contains("This chart exceeds"));
 }
 
 #[test]
@@ -2670,9 +2685,15 @@ fn build_leaves_a_compiled_wiki_alone() {
 #[test]
 fn an_empty_comment_draws_no_note() {
     for (path, src) in [
-        ("src/a.rs", "fn f(x: u8) {\n    //\n    if x > 1 { g(); }\n}\n"),
+        (
+            "src/a.rs",
+            "fn f(x: u8) {\n    //\n    if x > 1 { g(); }\n}\n",
+        ),
         ("a.py", "def f(x):\n    #\n    if x > 1:\n        g()\n"),
-        ("a.cpp", "void f(int x) {\n    //\n    if (x > 1) { g(); }\n}\n"),
+        (
+            "a.cpp",
+            "void f(int x) {\n    //\n    if (x > 1) { g(); }\n}\n",
+        ),
     ] {
         let (_d, vault) = common::built(&[(path, src)]);
         let id = format!("map/{}", path.replace('.', "_"));
