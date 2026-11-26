@@ -98,7 +98,7 @@ pub fn resolve_calls(entities: &mut BTreeMap<String, Entity>, graph: &Graph) {
         }
         let sees = sees(p, |q| imports(q).collect());
         for (i, caller) in e.items.iter().enumerate() {
-            let own = caller.owner.as_deref().map(owner_key);
+            let own = caller.call_owner().map(owner_key);
             let mut calls: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
             for site in &caller.call_sites {
                 for c in resolve(&index, site, own, p, &sees) {

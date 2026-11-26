@@ -710,6 +710,8 @@ fn a_type_body_inside_a_signature_is_elided() {
             "struct config",
             "static struct config {…} config",
             "int port",
+            "A",
+            "B",
             "enum {…} mode",
         ],
         "{sigs:?}"
@@ -939,6 +941,9 @@ private:
     assert_eq!(
         members("gadget.h", src),
         vec![
+            // The enum's values are its own nested values.
+            m("Gadget::Mode::kBusy", "9-9", "kBusy"),
+            m("Gadget::Mode::kIdle", "9-9", "kIdle"),
             m("Gadget::hook_", "13-13", "int (*hook_)(int)"),
             m("Gadget::spare_", "14-14", "int spare_"),
         ]
@@ -1131,4 +1136,239 @@ fn neighbours_of_deep_pointer_definitions_stay_as_they_were() {
         assert_eq!(item_rows(path, src), want, "{src:?}");
         assert!(crate::extract(path, src).methods.is_empty(), "{src:?}");
     }
+}
+
+/// Guards the lead walk above each item: it stops at the item before it on
+/// its line, so extracting one line of N data members grows about linearly
+/// in N. Walking the whole line back per item grows with N squared: from
+/// 125 to 2,000 members (the most one file indexes), about 256 times the
+/// time, where linear is about 16.
+/// A ratio of two sizes does not depend on the machine's speed or on the
+/// build profile; each size takes its best of several runs, so a busy
+/// machine slowing one run does not decide it. The bound, 100, sits between
+/// a loaded machine's linear runs (up to about 45) and the quadratic walk
+/// (about 280 in debug, 370 in release).
+#[test]
+fn a_line_of_members_extracts_in_linear_time() {
+    let run = |n: usize| {
+        let fields = (0..n)
+            .map(|k| format!("int m{k}; "))
+            .collect::<Vec<_>>()
+            .concat();
+        let src = format!("struct Wide {{ {fields}}};\n");
+        let start = std::time::Instant::now();
+        let e = crate::extract("wide.h", &src);
+        assert_eq!(e.items.iter().filter(|i| i.nested).count(), n);
+        start.elapsed().as_secs_f64()
+    };
+    let small = (0..5).map(|_| run(125)).fold(f64::MAX, f64::min);
+    let large = (0..3).map(|_| run(2_000)).fold(f64::MAX, f64::min);
+    let ratio = large / small;
+    eprintln!("125: {small:.4} s, 2000: {large:.4} s, ratio {ratio:.1}");
+    assert!(ratio < 100.0, "125: {small:.4} s, 2000: {large:.4} s");
+}
+
+const SHADES_H: &str = "\
+enum Shade { PALE, DARK = 3 };
+enum class Tone : int {
+  Low,
+  /// The loud one.
+  High = Low + 4,
+};
+typedef enum { RED, GREEN } Color;
+enum { ANON_A, ANON_B };
+struct Box { enum Kind { PALE, K2 } kind; };
+namespace ns { enum Mode { ON }; }
+void f() { enum Local { L1 }; }
+";
+
+/// An enumerator is a nested value owned by its enum, as a data member is
+/// by its class: scoped or not, with an initializer or not; an anonymous
+/// enum's by nothing, a local enum's not at all.
+#[test]
+fn enumerators_are_nested_values_owned_by_their_enum() {
+    assert_eq!(
+        members("shades.h", SHADES_H),
+        vec![
+            m("Shade::DARK", "1-1", "DARK = 3"),
+            m("Shade::PALE", "1-1", "PALE"),
+            m("Tone::Low", "3-3", "Low"),
+            m("Tone::High", "4-5", "High = Low + 4"),
+            m("Color::GREEN", "7-7", "GREEN"),
+            m("Color::RED", "7-7", "RED"),
+            m("ANON_A", "8-8", "ANON_A"),
+            m("ANON_B", "8-8", "ANON_B"),
+            m("Box::Kind::K2", "9-9", "K2"),
+            m("Box::Kind::PALE", "9-9", "PALE"),
+            m("Box::kind", "9-9", "enum Kind {…} kind"),
+            m("Mode::ON", "10-10", "ON"),
+        ]
+    );
+    let e = crate::extract("shades.h", SHADES_H);
+    let high = e.items.iter().find(|i| i.name == "High").unwrap();
+    assert_eq!(high.doc.as_deref(), Some("The loud one."));
+    // Exports and defined names as before.
+    assert!(
+        !e.symbols.iter().any(|s| s.contains("PALE")),
+        "{:?}",
+        e.symbols
+    );
+    assert!(!e.defined.iter().any(|s| s == "PALE"), "{:?}", e.defined);
+}
+
+/// Enumerators have their own cap: past it a file indexes none of them, and
+/// its data members stay.
+#[test]
+fn a_file_past_the_enumerator_cap_indexes_none_of_its_enumerators() {
+    let cap = crate::formats::code::MEMBERS_PER_FILE;
+    let enum_of = |n: usize| {
+        let values = (0..n)
+            .map(|k| format!("  V{k},\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        format!("struct Holder {{ int held_; }};\nenum Big {{\n{values}}};\n")
+    };
+    let at = crate::extract("big.h", &enum_of(cap));
+    assert_eq!(at.items.iter().filter(|i| i.nested).count(), cap + 1);
+    assert_eq!(at.members_unindexed, 0);
+    let past = crate::extract("big.h", &enum_of(cap + 1));
+    let nested: Vec<&str> = past
+        .items
+        .iter()
+        .filter(|i| i.nested)
+        .map(|i| i.name.as_str())
+        .collect();
+    assert!(nested == ["held_"], "{} nested", nested.len());
+    assert_eq!(past.members_unindexed, cap + 1);
+}
+
+/// A macro the grammar misreads as an enumerator is none, and the parse
+/// errors leave the enum's other values as they are. An attribute between a
+/// value's name and its `=` (standard or a macro) is an error the grammar
+/// cannot read, but the name before it is right. How the grammar recovers
+/// from a standard attribute depends on the line: it may end the enum there
+/// (`Tint`: the value is kept without its `= 5`, the values after it are
+/// lost, see `KNOWN_GAPS`) or split the value (`KindTag`: read whole).
+///
+/// What an X-macro hides is lost: the grammar closes the enum at the macro
+/// call, so the real value after it (`G_LAST`) is no enumerator. It stays
+/// the file-scope value main already read it as, with the broken text as its
+/// signature (see `KNOWN_GAPS`).
+#[test]
+fn misread_macros_and_attributes_in_an_enum() {
+    let src = "#define ENTRY(x) x,\nenum Gen {\n  ENTRY(G_ONE)\n  ENTRY(G_TWO)\n  G_LAST\n};\nenum Mixed {\n  M_A = 1 << 2,\n#if FEATURE\n  M_B,\n#endif\n  M_C = M_A | 4, // trailing\n  M_D ATTR = 2,\n};\nenum Tint { T_A, T_B [[deprecated]] = 5, T_C };\n";
+    assert_eq!(
+        members("gen.h", src),
+        vec![
+            m("Mixed::M_A", "8-8", "M_A = 1 << 2"),
+            m("Mixed::M_B", "10-10", "M_B"),
+            m("Mixed::M_C", "12-12", "M_C = M_A | 4"),
+            m("Mixed::M_D", "13-13", "M_D ATTR = 2"),
+            m("Tint::T_A", "15-15", "T_A"),
+            m("Tint::T_B", "15-15", "T_B"),
+        ]
+    );
+    // A GNU attribute splits the value as a standard one can: the name is
+    // the one before the attribute, never a word inside it.
+    let gnu = "enum Gnu { B_GNU __attribute__((deprecated)) = 1, B_NEXT };\n";
+    assert_eq!(
+        members("gnu.h", gnu),
+        vec![
+            m("Gnu::B_GNU", "1-1", "B_GNU __attribute__((deprecated)) = 1"),
+            m("Gnu::B_NEXT", "1-1", "B_NEXT"),
+        ]
+    );
+    // Where the grammar ends the enum at an attribute, the values after it
+    // and the attributed value's `= …` are lost (KNOWN_GAPS), but no item
+    // takes a wrong name.
+    for (src, kept) in [
+        (
+            "enum Old { A_STD [[deprecated(\"old\")]] = 4, A_NEXT };\n",
+            "A_STD",
+        ),
+        (
+            "enum Pair { E_ONE [[maybe_unused]], E_TWO [[deprecated]] };\n",
+            "E_ONE",
+        ),
+    ] {
+        let values: Vec<String> = members("old.h", src).into_iter().map(|v| v.0).collect();
+        assert_eq!(values.len(), 1, "{values:?}");
+        assert!(values[0].ends_with(&format!("::{kept}")), "{values:?}");
+    }
+    // Where the grammar recovers inside the enum, the value keeps all of it.
+    let tagged =
+        "typedef enum { K_ONE = 1, K_TWO = K_ONE << 1, K_THREE [[deprecated]] = 4 } KindTag;\n";
+    assert_eq!(
+        members("tag.h", tagged),
+        vec![
+            m("KindTag::K_ONE", "1-1", "K_ONE = 1"),
+            m("KindTag::K_THREE", "1-1", "K_THREE [[deprecated]] = 4"),
+            m("KindTag::K_TWO", "1-1", "K_TWO = K_ONE << 1"),
+        ]
+    );
+    let e = crate::extract("gen.h", src);
+    let last: Vec<(Option<&str>, bool)> = e
+        .items
+        .iter()
+        .filter(|i| i.name == "G_LAST")
+        .map(|i| (i.owner.as_deref(), i.nested))
+        .collect();
+    assert_eq!(last, [(None, false)]);
+}
+
+/// A gtest test is named by its test name and owned by its suite, so a
+/// search for either finds it; its signature, exports and defined names
+/// stay as written.
+#[test]
+fn a_gtest_test_is_named_by_its_test_and_owned_by_its_suite() {
+    let src = "namespace {\nTEST(LedgerSuite, PostsTwice) {\n  EXPECT_EQ(1, 1);\n}\n}  // namespace\nTEST_F(LedgerFixture, RollsBack) {}\nTEST_P(LedgerParam, Holds) {}\nTYPED_TEST(LedgerTyped, Grows) {}\nTYPED_TEST_P(LedgerTypedP, Shrinks) {}\nvoid TEST(int a);\nint TEST_F(Fixture, Name) { return 0; }\nTEST(Wrong, two, three) {}\n";
+    let e = crate::extract("tests/ledger_test.cc", src);
+    let named: Vec<(Option<&str>, &str, &str)> = e
+        .items
+        .iter()
+        .map(|i| (i.owner.as_deref(), i.name.as_str(), i.signature.as_str()))
+        .collect();
+    assert_eq!(
+        named,
+        [
+            (
+                Some("LedgerSuite"),
+                "PostsTwice",
+                "TEST(LedgerSuite, PostsTwice)"
+            ),
+            (
+                Some("LedgerFixture"),
+                "RollsBack",
+                "TEST_F(LedgerFixture, RollsBack)"
+            ),
+            (Some("LedgerParam"), "Holds", "TEST_P(LedgerParam, Holds)"),
+            (
+                Some("LedgerTyped"),
+                "Grows",
+                "TYPED_TEST(LedgerTyped, Grows)"
+            ),
+            (
+                Some("LedgerTypedP"),
+                "Shrinks",
+                "TYPED_TEST_P(LedgerTypedP, Shrinks)"
+            ),
+            // Not a gtest macro's shape: as before.
+            (None, "TEST", "void TEST(int a)"),
+            (None, "TEST_F", "int TEST_F(Fixture, Name)"),
+            (None, "TEST", "TEST(Wrong, two, three)"),
+        ]
+    );
+    assert!(e
+        .items
+        .iter()
+        .all(|i| i.kind == crate::model::CodeItemKind::Fn));
+    assert_eq!(e.items[0].start_line, 2);
+    assert_eq!(e.items[0].end_line, 4);
+    assert!(e
+        .symbols
+        .contains(&"TEST(LedgerSuite, PostsTwice)".to_string()));
+    assert_eq!(
+        e.defined,
+        ["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P"]
+    );
 }

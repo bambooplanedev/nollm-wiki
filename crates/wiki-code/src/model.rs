@@ -181,6 +181,25 @@ impl CodeItem {
         format!("{path}:{}-{}", self.start_line, self.end_line)
     }
 
+    /// A gtest test (`TEST(Suite, Name)`, see `extract_cpp::gtest_names`):
+    /// an `fn` owned by its suite whose signature is the macro call. No call
+    /// names it, and its suite is no class its body's calls resolve against.
+    pub fn is_test_case(&self) -> bool {
+        self.kind == CodeItemKind::Fn
+            && self.owner.is_some()
+            && crate::formats::extract_cpp::GTEST_MACROS.iter().any(|m| {
+                self.signature
+                    .strip_prefix(m)
+                    .is_some_and(|rest| rest.starts_with('('))
+            })
+    }
+
+    /// The owner whose methods a call in this item's body may name bare:
+    /// its owner, but none for a gtest test.
+    pub fn call_owner(&self) -> Option<&str> {
+        self.owner.as_deref().filter(|_| !self.is_test_case())
+    }
+
     /// `owner::name`, or `name` when the item has no owner: how search
     /// prints the item, and a whole-name match for it.
     pub fn qualified_name(&self) -> String {
