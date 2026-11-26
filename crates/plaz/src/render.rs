@@ -147,7 +147,7 @@ fn locals(flow: &Flow) -> String {
 }
 
 /// `[[page#anchor|Qualified::name]]` of the function `f`.
-fn link(p: &Project, names: &Names, f: &FnId) -> String {
+pub(crate) fn link(p: &Project, names: &Names, f: &FnId) -> String {
     let it = &p.files[&f.path].code.items[f.item];
     format!(
         "[[{}#{}|{}]]",

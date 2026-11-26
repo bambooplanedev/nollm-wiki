@@ -273,7 +273,7 @@ fn the_cli_reports_counts_and_fails_cleanly() {
         .arg(d.path())
         .assert()
         .success()
-        .stdout("map: 3 written, 0 unchanged, 0 removed\n")
+        .stdout("map: 5 written, 0 unchanged, 0 removed\n")
         .stderr("");
     assert!(d.path().join(".nollm-wiki/map/src/a_rs.md").exists());
 
@@ -305,7 +305,7 @@ fn the_cli_names_every_file_it_could_not_read() {
         .arg(d.path())
         .assert()
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed\n")
+        .stdout("map: 3 written, 0 unchanged, 0 removed\n")
         .stderr("warning: could not read src/c.rs\n");
 }
 
@@ -391,7 +391,7 @@ fn a_foreign_file_at_a_page_path_is_left_alone() {
     let (a, b) = (vault.join("map/src/a_rs.md"), vault.join("map/src/b_rs.md"));
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed, 2 left alone\n")
+        .stdout("map: 3 written, 0 unchanged, 0 removed, 2 left alone\n")
         .stderr(format!(
             "warning: {}: not a map page, left alone\nwarning: {}: not a map page, left alone\n",
             a.display(),
@@ -493,7 +493,7 @@ fn an_unreadable_file_at_a_page_path_is_left_alone() {
     );
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 0 written, 0 unchanged, 0 removed, 1 left alone\n")
+        .stdout("map: 2 written, 0 unchanged, 0 removed, 1 left alone\n")
         .stderr(format!(
             "warning: {}: not readable, left alone\n",
             page.display()
@@ -2741,7 +2741,7 @@ fn an_empty_file_at_a_page_path_is_rewritten() {
     common::write_files(&vault, &[("map/src/a_rs.md", "")]);
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed\n")
+        .stdout("map: 3 written, 0 unchanged, 0 removed\n")
         .stderr("");
     assert!(common::map_page(&vault, "map/src/a_rs").contains("## f\n"));
 }
@@ -2773,7 +2773,7 @@ fn a_leftover_temporary_file_is_removed_and_no_temporary_file_stays() {
     );
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed\n");
+        .stdout("map: 3 written, 0 unchanged, 0 removed\n");
     assert!(!vault.join("map/old").exists());
     let names: Vec<_> = std::fs::read_dir(vault.join("map/src"))
         .unwrap()
@@ -2791,7 +2791,7 @@ fn a_note_with_kind_map_but_no_plaz_tag_survives_a_build() {
     common::write_files(&vault, &[("map/my-note.md", note)]);
     cli_build(&src, &vault)
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed\n");
+        .stdout("map: 3 written, 0 unchanged, 0 removed\n");
     assert_eq!(
         std::fs::read_to_string(vault.join("map/my-note.md")).unwrap(),
         note
@@ -2832,7 +2832,7 @@ fn an_unreadable_directory_under_map_is_skipped_with_a_warning() {
     );
     let out = cli_build(&src, &vault).success();
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-    out.stdout("map: 1 written, 0 unchanged, 0 removed\n")
+    out.stdout("map: 3 written, 0 unchanged, 0 removed\n")
         .stderr(format!(
             "warning: {}: not readable, left alone\n",
             locked.display()
@@ -2902,7 +2902,7 @@ fn the_cli_prints_help_and_version_and_rejects_bad_usage() {
         .arg(format!("--vault={}", vault.display()))
         .assert()
         .success()
-        .stdout("map: 1 written, 0 unchanged, 0 removed\n");
+        .stdout("map: 3 written, 0 unchanged, 0 removed\n");
 }
 
 // Pins the 512 MiB build stack: the flow walker recurses once per tree level.
@@ -2965,7 +2965,7 @@ fn build_leaves_a_compiled_wiki_alone() {
     ];
     common::write_files(&vault, &wiki);
     let w = plaz::build(&src, &vault).unwrap();
-    assert_eq!((w.written, w.removed, w.left_alone), (1, 0, 0));
+    assert_eq!((w.written, w.removed, w.left_alone), (3, 0, 0));
     for (path, text) in wiki {
         assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), text);
     }
@@ -3118,4 +3118,199 @@ fn a_module_file_declared_under_cfg_test_is_test_code() {
     }
     let plain = common::map_page(&vault, "map/src/plain/tests_rs");
     assert_eq!(common::headings(&plain), ["fixture"]);
+}
+
+const INDEX_MAIN: &str = "mod aux;\n#[cfg(test)]\nmod tests;\n\nfn main() {\n    prepare();\n    shared();\n}\nfn prepare() {\n    shared();\n    again();\n}\nfn shared() {\n    leaf();\n}\nfn leaf() {}\nfn again() {\n    again();\n}\nfn spare() {}\n";
+const INDEX_AUX: &str = "pub fn begin() {\n    ping();\n}\nfn ping() {\n    pong();\n}\nfn pong() {\n    ping();\n}\nfn lone() {}\nfn ring_a() {\n    ring_b();\n}\nfn ring_b() {\n    ring_a();\n}\npub struct Store;\nimpl Store {\n    pub fn get(&self) {}\n}\npub struct Cache;\nimpl Cache {\n    pub fn get(&self) {}\n}\npub fn fetch(t: &Holder) {\n    t.get();\n}\n";
+const INDEX_TESTS: &str =
+    "use super::*;\nfn fixture() {\n    spare();\n}\n#[test]\nfn t() {\n    fixture();\n}\n";
+
+fn index_tree() -> [(&'static str, &'static str); 3] {
+    [
+        ("src/main.rs", INDEX_MAIN),
+        ("src/aux.rs", INDEX_AUX),
+        ("src/tests.rs", INDEX_TESTS),
+    ]
+}
+
+const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth it is reached; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
+
+#[test]
+fn the_index_lists_every_charted_function_from_the_top_down() {
+    let (_d, vault) = common::built(&index_tree());
+    assert_eq!(
+        common::map_page(&vault, "map/index"),
+        format!("---\ntitle: \"Index\"\ntags: [\"plaz\"]\nkind: map\n---\n{INTRO}\n\n## Directories\n- [[map/index/src|src]] · 15 functions\n")
+    );
+    let m = |a: &str, t: &str| format!("[[map/src/main_rs#{a}|{t}]]");
+    let x = |a: &str, t: &str| format!("[[map/src/aux_rs#{a}|{t}]]");
+    let want = [
+        "---".to_string(),
+        "title: \"Index · src\"".into(),
+        "tags: [\"plaz\"]".into(),
+        "kind: map".into(),
+        "---".into(),
+        "The functions defined under `src/`, from the [[map/index|index]]. ".to_string() + INTRO,
+        String::new(),
+        "## Not called by any charted function".into(),
+        String::new(),
+        "### [[map/src/main_rs|src/main.rs]]".into(),
+        format!("- {}", m("main", "main")),
+        format!("  - {}", m("prepare", "prepare")),
+        format!("    - {}", m("again", "again")),
+        format!("      - also calls: {}", m("again", "again")),
+        format!("    - also calls: {}", m("shared", "shared")),
+        format!("  - {}", m("shared", "shared")),
+        format!("    - {}", m("leaf", "leaf")),
+        String::new(),
+        "### [[map/src/aux_rs|src/aux.rs]]".into(),
+        format!("- {}", x("begin", "begin")),
+        format!("  - {}", x("ping", "ping")),
+        format!("    - {}", x("pong", "pong")),
+        format!("      - also calls: {}", x("ping", "ping")),
+        String::new(),
+        "## Called only by calls that may be another function".into(),
+        String::new(),
+        "### [[map/src/aux_rs|src/aux.rs]]".into(),
+        format!("- {}", x("store_get", "Store::get")),
+        format!("- {}", x("cache_get", "Cache::get")),
+        String::new(),
+        "## In a call cycle no function above reaches".into(),
+        String::new(),
+        "### [[map/src/aux_rs|src/aux.rs]]".into(),
+        format!("- {}", x("ring_a", "ring_a")),
+        format!("  - {}", x("ring_b", "ring_b")),
+        format!("    - also calls: {}", x("ring_a", "ring_a")),
+        String::new(),
+        "## Not called, calling nothing certain".into(),
+        String::new(),
+        "### [[map/src/main_rs|src/main.rs]]".into(),
+        format!("- {}", m("spare", "spare")),
+        String::new(),
+        "### [[map/src/aux_rs|src/aux.rs]]".into(),
+        format!("- {}", x("lone", "lone")),
+        format!("- {}", x("fetch", "fetch")),
+    ];
+    assert_eq!(
+        common::map_page(&vault, "map/index/src"),
+        want.join("\n") + "\n"
+    );
+}
+
+#[test]
+fn the_index_puts_main_first_and_follows_calls_across_files() {
+    let (_d, vault) = common::built(&[
+        ("app/a.py", "def start():\n    helper()\n\ndef helper():\n    pass\n"),
+        ("app/tool.py", "from app.a import helper\n\ndef main():\n    helper()\n    finish()\n\ndef finish():\n    pass\n"),
+        ("tests/test_a.py", "from app.a import start\n\ndef test_start():\n    start()\n"),
+        ("cli.py", "def run():\n    pass\n"),
+    ]);
+    assert_eq!(
+        common::index_section(
+            &vault,
+            "map/index/app",
+            "Not called by any charted function"
+        ),
+        [
+            "### [[map/app/tool_py|app/tool.py]]",
+            "- [[map/app/tool_py#main|main]]",
+            "  - [[map/app/a_py#helper|helper]]",
+            "  - [[map/app/tool_py#finish|finish]]",
+            "### [[map/app/a_py|app/a.py]]",
+            "- [[map/app/a_py#start|start]]",
+            "  - also calls: [[map/app/a_py#helper|helper]]",
+        ]
+    );
+    // The top of the tree is on the index itself, after the directories.
+    let index = common::map_page(&vault, "map/index");
+    assert!(
+        index.ends_with("\n## Directories\n- [[map/index/app|app]] · 4 functions\n\n## Not called, calling nothing certain\n\n### [[map/cli_py|cli.py]]\n- [[map/cli_py#run|run]]\n"),
+        "{index}"
+    );
+}
+
+#[test]
+fn the_index_takes_its_page_ids_before_any_source_file() {
+    let script = "#!/bin/sh\nhelper() { :; }\n";
+    let (_d, vault) = common::built(&[("index", script), ("src/a.rs", "fn f() {}\n")]);
+    let index = common::map_page(&vault, "map/index");
+    assert!(
+        index.contains("\nkind: map\n---\nEvery charted function"),
+        "{index}"
+    );
+    assert!(
+        index.contains("\n- [[map/index/src|src]] · 1 function\n"),
+        "{index}"
+    );
+    assert!(common::map_page(&vault, "map/index_2").contains("\nsource: \"index\"\n"));
+
+    let (_d, vault) = common::built(&[("index/src", script), ("src/a.rs", "fn f() {}\n")]);
+    let src = common::map_page(&vault, "map/index/src");
+    assert!(src.starts_with("---\ntitle: \"Index · src\"\n"), "{src}");
+    assert!(common::map_page(&vault, "map/index/src_2").contains("\nsource: \"index/src\"\n"));
+}
+
+#[test]
+fn the_index_is_rewritten_only_when_it_changes_and_goes_with_the_functions() {
+    let d = tempfile::tempdir().unwrap();
+    let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
+    common::write_files(&src, &index_tree());
+    let first = plaz::build(&src, &vault).unwrap();
+    let before = common::map_page(&vault, "map/index");
+    let again = plaz::build(&src, &vault).unwrap();
+    assert_eq!((again.written, again.unchanged), (0, first.written));
+    assert_eq!(common::map_page(&vault, "map/index"), before);
+    let src_index = common::map_page(&vault, "map/index/src");
+    plaz::build(&src, &vault).unwrap();
+    assert_eq!(common::map_page(&vault, "map/index/src"), src_index);
+
+    // A tree left with no function: no index.
+    std::fs::remove_dir_all(&src).unwrap();
+    common::write_files(&src, &[("src/a.rs", "pub struct Plain;\n")]);
+    plaz::build(&src, &vault).unwrap();
+    assert!(!vault.join("map/index.md").exists());
+    assert!(!vault.join("map/index").exists());
+}
+
+#[test]
+fn a_file_of_the_users_at_the_index_path_is_left_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let (src, vault) = (d.path().join("src-root"), d.path().join("vault"));
+    common::write_files(&src, &index_tree());
+    common::write_files(&vault, &[("map/index.md", "my own notes\n")]);
+    let n = plaz::build(&src, &vault).unwrap();
+    assert_eq!(n.left_alone, 1);
+    assert_eq!(common::map_page(&vault, "map/index"), "my own notes\n");
+}
+
+#[test]
+fn a_directory_page_has_each_section_once_when_main_files_sort_between() {
+    let (_d, vault) = common::built(&[
+        ("src/main.rs", "fn main() {\n    go();\n}\nfn go() {}\n"),
+        (
+            "src/aux.rs",
+            "pub fn begin() {\n    step();\n}\nfn step() {}\n",
+        ),
+        ("tools/main.rs", "fn main() {\n    run();\n}\nfn run() {}\n"),
+    ]);
+    let page = common::map_page(&vault, "map/index/src");
+    assert_eq!(
+        common::headings(&page),
+        ["Not called by any charted function"]
+    );
+    assert_eq!(
+        common::index_section(
+            &vault,
+            "map/index/src",
+            "Not called by any charted function"
+        ),
+        [
+            "### [[map/src/main_rs|src/main.rs]]",
+            "- [[map/src/main_rs#main|main]]",
+            "  - [[map/src/main_rs#go|go]]",
+            "### [[map/src/aux_rs|src/aux.rs]]",
+            "- [[map/src/aux_rs#begin|begin]]",
+            "  - [[map/src/aux_rs#step|step]]",
+        ]
+    );
 }

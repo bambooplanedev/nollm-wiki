@@ -3273,3 +3273,27 @@ fn a_deep_pointer_or_function_pointer_returning_function_is_charted_and_linked()
         ]
     );
 }
+
+#[test]
+fn the_index_of_a_cpp_tree_follows_definitions() {
+    let (_d, vault) = common::built(&[
+        ("src/run.h", "void run(int n);\n"),
+        ("src/run.cpp", "#include \"run.h\"\nstatic void step(int n) {}\nvoid run(int n) {\n    step(n);\n    run(n - 1);\n}\n"),
+        ("src/main.cpp", "#include \"run.h\"\nint main() {\n    run(3);\n    return 0;\n}\n"),
+    ]);
+    assert_eq!(
+        common::index_section(
+            &vault,
+            "map/index/src",
+            "Not called by any charted function"
+        ),
+        [
+            "### [[map/src/main_cpp|src/main.cpp]]",
+            "- [[map/src/main_cpp#main|main]]",
+            "  - [[map/src/run_cpp#run|run]]",
+            "    - [[map/src/run_cpp#step|step]]",
+            "    - also calls: [[map/src/run_cpp#run|run]]",
+        ]
+    );
+    assert!(!common::map_page(&vault, "map/index/src").contains("run_h"));
+}

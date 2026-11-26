@@ -5,8 +5,13 @@ use crate::resolve::Resolved;
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::model::CodeItemKind;
 
+/// The index page's id. It and the id of each top directory's index page
+/// are taken before any source file's.
+pub const INDEX: &str = "map/index";
+
 pub struct Names {
     pages: BTreeMap<String, String>,
+    index_pages: BTreeMap<String, String>,
     anchors: BTreeMap<FnId, String>,
     callers: BTreeMap<FnId, Vec<(FnId, usize, bool)>>,
 }
@@ -15,6 +20,12 @@ impl Names {
     /// The page id of the file at `path`, like `map/src/a_rs`.
     pub fn page(&self, path: &str) -> &str {
         &self.pages[path]
+    }
+
+    /// The id of the index page of the top directory `dir`, like
+    /// `map/index/src`; `INDEX` for `""`, the top of the tree.
+    pub fn index_page(&self, dir: &str) -> &str {
+        self.index_pages.get(dir).map_or(INDEX, String::as_str)
     }
 
     /// The heading anchor of `f` on its page.
@@ -57,20 +68,32 @@ fn unique(base: &str, taken: &mut BTreeSet<String>) -> String {
 
 pub fn names(r: &Resolved) -> Names {
     let p = r.project();
-    let mut taken = BTreeSet::new();
-    let pages = p
-        .files
-        .keys()
+    let base = |path: &str| -> String {
+        (path.to_lowercase().chars())
+            .map(|c| match c {
+                'a'..='z' | '0'..='9' | '_' | '/' | '-' => c,
+                _ => '_',
+            })
+            .collect()
+    };
+    let mut taken = BTreeSet::from([INDEX.to_string()]);
+    let dirs: BTreeSet<&str> = (p.files.keys())
+        .filter_map(|p| Some(p.split_once('/')?.0))
+        .collect();
+    let index_pages = (dirs.into_iter())
+        .map(|d| {
+            (
+                d.to_string(),
+                unique(&format!("{INDEX}/{}", base(d)), &mut taken),
+            )
+        })
+        .collect();
+    let pages = (p.files.keys())
         .map(|path| {
-            let base: String = path
-                .to_lowercase()
-                .chars()
-                .map(|c| match c {
-                    'a'..='z' | '0'..='9' | '_' | '/' | '-' => c,
-                    _ => '_',
-                })
-                .collect();
-            (path.clone(), unique(&format!("map/{base}"), &mut taken))
+            (
+                path.clone(),
+                unique(&format!("map/{}", base(path)), &mut taken),
+            )
         })
         .collect();
     let mut anchors = BTreeMap::new();
@@ -123,6 +146,7 @@ pub fn names(r: &Resolved) -> Names {
         .collect();
     Names {
         pages,
+        index_pages,
         anchors,
         callers,
     }

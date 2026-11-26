@@ -137,8 +137,10 @@ fn remove_takes_only_the_maps_pages() {
     ];
     common::write_files(&out, &foreign);
 
+    assert!(out.join("map/index.md").is_file());
     let o = plaz(d.path(), &["--remove"]);
     assert_eq!(o.status.code(), Some(0));
+    assert!(!out.join("map/index.md").exists());
     // `write` counts a foreign file as left alone only where it would
     // overwrite one; with no pages to write it skips them silently.
     assert_eq!(stdout(&o), format!("map: {written} removed\n"));
