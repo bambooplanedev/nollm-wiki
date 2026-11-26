@@ -224,6 +224,11 @@ pub enum NotDrawn {
     /// An `assert` statement or an `assert!`-family macro: no node, no
     /// edge for the failing case.
     Assert,
+    /// A call outside the project that a longer call of the chart starts
+    /// with (`a.b()` of `a.b().c()`): its text is in that call's node.
+    ChainStep,
+    /// Rust's `Some(…)`, `Ok(…)`, `Err(…)` outside the project.
+    Wrapper,
 }
 
 impl NotDrawn {
@@ -242,6 +247,8 @@ impl NotDrawn {
             NotDrawn::BeforeCase => "code before the first case",
             NotDrawn::HiddenJump => "macro jump",
             NotDrawn::Assert => "assert",
+            NotDrawn::ChainStep => "chain step",
+            NotDrawn::Wrapper => "Some/Ok/Err",
         }
     }
 }
@@ -418,6 +425,9 @@ pub struct MapCall {
     /// The `Step::Nested::at` of each nested flow drawn in the same chart
     /// that the call takes as an argument, or by its one name.
     pub takes: Vec<std::ops::Range<usize>>,
+    /// A constructor of a value the chart does not draw as a call: Rust's
+    /// `Some(…)`, `Ok(…)`, `Err(…)`.
+    pub wrapper: bool,
 }
 
 /// A handle valid within one build, never written to a page.

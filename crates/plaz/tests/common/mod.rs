@@ -99,3 +99,13 @@ pub fn dotted_edges(block: &str) -> Vec<String> {
         })
         .collect()
 }
+
+/// The labels of the nodes of the charts in `block`, in order.
+pub fn node_labels(block: &str) -> Vec<String> {
+    block
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with('n') && !l.contains(" -"))
+        .map(|l| l.split('"').nth(1).unwrap_or("").to_string())
+        .collect()
+}

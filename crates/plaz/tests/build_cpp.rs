@@ -3316,3 +3316,19 @@ fn a_lambda_is_linked_to_the_calls_that_take_or_call_it() {
         "`bump(n)` L8 → the lambda `bump`, drawn in this chart"
     );
 }
+
+#[test]
+fn a_cpp_chain_is_drawn_as_its_outermost_call() {
+    let src = "#include <string>\nint size_of(const std::string& name) {\n    return name.substr(1).append(\"x\").size();\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "size_of");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "size_of",
+            "name.substr(1).append(#quot;x#quot;).size()",
+            "return name.substr(1).append(#quot;x#quot;).size();"
+        ]
+    );
+    assert_eq!(common::fn_section(&block, "size_of", "Calls").len(), 3);
+}

@@ -1,6 +1,7 @@
 use super::*;
 use crate::flow::testutil::{arm, branch, call, exit, flow_of, looping};
 use crate::model::NotDrawn;
+use wiki_code::model::CallVia;
 
 /// The node and edge lines of the chart of `steps`.
 fn drawn(steps: Vec<Step>) -> Vec<String> {
@@ -277,4 +278,41 @@ fn relative_page_ids_climb_only_past_the_shared_directories() {
     assert_eq!(relative("map/src/a_rs", "map/src/a_rs"), "a_rs");
     assert_eq!(relative("map/a_rs", "map/src/x/b_rs"), "src/x/b_rs");
     assert_eq!(relative("map/x/a_rs", "map/y/x"), "../y/x");
+}
+
+/// A call `text` at `bytes`, reaching `target` through `via`.
+fn at(text: &str, bytes: std::ops::Range<usize>, target: Target, via: CallVia) -> Step {
+    let Step::Call(mut c) = call(text) else {
+        unreachable!()
+    };
+    c.text = text.to_string();
+    (c.bytes, c.target, c.site.via) = (bytes, target, via);
+    Step::Call(c)
+}
+
+#[test]
+fn a_hidden_chain_step_is_not_drawn_only_on_an_outside_receiver() {
+    let member = || CallVia::Member(None);
+    // `h(1)` is the hidden head of the chain: drawn. `h(1).a()` is outside,
+    // `h(1).a().b()` hidden on it, both steps of `h(1).a().b().c()`.
+    let steps = vec![
+        at("h(1)", 0..4, Target::Hidden, CallVia::Bare),
+        at("h(1).a()", 0..8, Target::Outside, member()),
+        at("h(1).a().b()", 0..12, Target::Hidden, member()),
+        at("h(1).a().b().c()", 0..16, Target::Outside, member()),
+    ];
+    let lines = drawn(steps.clone());
+    assert!(
+        lines.contains(&"n1>\"h(1)\"]:::hidden".to_string()),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&"n2[/\"h(1).a().b().c()\"/]".to_string()),
+        "{lines:?}"
+    );
+    assert_eq!(lines.iter().filter(|l| !l.contains("-->")).count(), 4);
+    assert_eq!(
+        coverage(&flow_of(steps)),
+        "Coverage: 4 calls: 0 resolved, 0 one of, 2 outside, 2 hidden. Not drawn: 2 chain step."
+    );
 }

@@ -183,6 +183,49 @@ fn a_python_nested_def_is_linked_to_the_calls_that_take_or_call_it() {
     );
 }
 
+#[test]
+fn chain_steps_and_wrappers_outside_the_project_are_not_drawn() {
+    let src = "pub struct Store;\nimpl Store { pub fn load(&self) -> Vec<u8> { Vec::new() } }\npub fn helper(n: usize) -> usize { n }\npub fn shape(v: Vec<u8>, s: &Store) -> Option<usize> {\n    let n = v.iter().map(|x| x + 1).filter(|x| *x > 2).count();\n    let k = s.load().iter().count();\n    if n > k {\n        return Some(helper(n));\n    }\n    let e: Result<u8, u8> = Err(2);\n    None\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "shape");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "shape",
+            "v.iter().map(#124;x#124; x + 1).filter(#124;x#124; *x #gt; 2).count()",
+            // A project call inside a chain stays a node of its own.
+            "s.load()",
+            "s.load().iter().count()",
+            "n #gt; k",
+            "helper(n)",
+            "return Some(helper(n))",
+            "end",
+        ]
+    );
+    // The Calls list keeps every call.
+    assert_eq!(common::fn_section(&block, "shape", "Calls").len(), 10);
+    assert!(
+        block.contains("\nCoverage: 10 calls: 2 resolved, 0 one of, 8 outside, 0 hidden. Not drawn: 2 closure, 4 chain step, 2 Some/Ok/Err.\n"),
+        "{block}"
+    );
+}
+
+#[test]
+fn a_python_chain_is_drawn_as_its_outermost_call() {
+    let src = "def tidy(parts):\n    return \" \".join(parts).strip().lower()\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/app/m_py"), "tidy");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "tidy",
+            "#quot; #quot;.join(parts).strip().lower()",
+            "return #quot; #quot;.join(parts).strip().lower()"
+        ]
+    );
+    assert_eq!(common::fn_section(&block, "tidy", "Calls").len(), 3);
+}
+
 fn cli_build(src: &Path, vault: &Path) -> assert_cmd::assert::Assert {
     assert_cmd::cargo_bin_cmd!()
         .args(["build", "--source"])
@@ -1167,7 +1210,7 @@ fn coverage_line_counts_forms_and_not_drawn() {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     let f = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "f");
     assert!(
-        f.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 5 outside, 0 hidden. Not drawn: 1 ?, 1 unwrap_or, 1 closure.\n"),
+        f.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 5 outside, 0 hidden. Not drawn: 1 ?, 1 unwrap_or, 1 closure, 2 chain step.\n"),
         "{f}"
     );
 }

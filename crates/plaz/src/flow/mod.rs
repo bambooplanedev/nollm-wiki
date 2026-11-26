@@ -141,6 +141,8 @@ pub(crate) struct Hooks {
     /// Is the call node inside the initializer of a binding of the name
     /// given, which the binding does not reach there (Rust's `let`)?
     pub own_initializer: fn(Node, &str, &str) -> bool,
+    /// Is the call a constructor of a value (`MapCall::wrapper`)?
+    pub wrapper: fn(&CallSite) -> bool,
 }
 
 /// Is the call node `n` the whole of an expression statement?
@@ -734,6 +736,7 @@ impl<'s> Walker<'s> {
                 CallVia::Member(None) => node,
                 CallVia::Bare | CallVia::SelfRecv | CallVia::Member(Some(_)) => None,
             };
+            let wrapper = (self.hooks.wrapper)(&c.site);
             out.push(Step::Call(MapCall {
                 text: clip_middle(lit, 80),
                 site: c.site,
@@ -744,6 +747,7 @@ impl<'s> Walker<'s> {
                 outer: false,
                 local: None,
                 takes: Vec::new(),
+                wrapper,
             }));
         }
     }

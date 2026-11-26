@@ -3,6 +3,7 @@
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
 use crate::model::{Binding, ExitKind, NotDrawn};
 use std::collections::BTreeSet;
+use wiki_code::model::CallVia;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
 
@@ -19,6 +20,7 @@ pub(crate) const HOOKS: Hooks = Hooks {
         (super::whole_statement(n) || tail) && !in_inline_closure(n)
     },
     own_initializer,
+    wrapper: |s| s.via == CallVia::Bare && matches!(s.name.as_str(), "Some" | "Ok" | "Err"),
 };
 
 /// Is `n` inside the initializer of a `let` binding `name` alone, in the

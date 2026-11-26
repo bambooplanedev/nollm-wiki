@@ -18,6 +18,7 @@ pub fn call(name: &str) -> Step {
         outer: false,
         local: None,
         takes: Vec::new(),
+        wrapper: false,
     })
 }
 

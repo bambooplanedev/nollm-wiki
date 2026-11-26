@@ -1,9 +1,10 @@
 //! The decision flowchart of one function and its coverage line.
 
-use crate::model::{Arm, Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
+use crate::model::{Arm, Comment, ExitKind, Flow, FnId, MapCall, NotDrawn, Step, Target};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ops::Range;
+use wiki_code::model::CallVia;
 
 /// `s` as the text of a double-quoted Mermaid label: every char that could
 /// end the label, the node or the fence becomes an entity code, a line break
@@ -80,6 +81,8 @@ struct Chart<'a> {
     /// The node of each call drawn and the subgraph of each nested flow,
     /// by their bytes: the ends of the dotted edges between them.
     placed: BTreeMap<(usize, usize), usize>,
+    /// The calls drawn as no node (`undrawn`).
+    undrawn: &'a BTreeMap<(usize, usize), NotDrawn>,
 }
 
 impl Chart<'_> {
@@ -197,6 +200,7 @@ impl Chart<'_> {
     /// `next`: a step of the same list follows `s`.
     fn step(&mut self, s: &Step, ends: Ends, next: bool) -> Ends {
         match s {
+            Step::Call(c) if self.undrawn.contains_key(&(c.bytes.start, c.bytes.end)) => ends,
             Step::Call(c) => {
                 let shape = match &c.target {
                     _ if c.local.is_some() => ("(", ")"),
@@ -367,6 +371,7 @@ impl Chart<'_> {
             branches: Vec::new(),
             closed: self.closed,
             placed: BTreeMap::new(),
+            undrawn: self.undrawn,
         };
         let closed = (arms.iter()).all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty());
         self.closed.borrow_mut().insert(arms.as_ptr(), closed);
@@ -440,6 +445,45 @@ impl Chart<'_> {
     }
 }
 
+/// The calls of `flow` drawn as no node of their own, by their bytes: a
+/// chain step or a wrapper outside the project (or a call of a hidden
+/// target whose receiver is such a chain step), never one that takes a
+/// nested flow or calls one.
+fn undrawn(flow: &Flow) -> BTreeMap<(usize, usize), NotDrawn> {
+    let mut all = Vec::new();
+    flow.each_call(&mut |_, c| all.push(c));
+    // The calls that start where `c` does and are longer or shorter.
+    let starting = |c: &MapCall, longer: bool| -> Vec<&MapCall> {
+        (all.iter().copied())
+            .filter(|b| b.bytes.start == c.bytes.start && b.bytes != c.bytes)
+            .filter(|b| (b.bytes.end > c.bytes.end) == longer)
+            .collect()
+    };
+    let mut out = BTreeMap::new();
+    for c in &all {
+        if !c.takes.is_empty() || c.local.is_some() || c.ends {
+            continue;
+        }
+        let (outside, hidden) = (c.target == Target::Outside, c.target == Target::Hidden);
+        let kind = if c.wrapper && (outside || hidden) {
+            NotDrawn::Wrapper
+        } else if !starting(c, true).is_empty()
+            && (outside
+                || hidden
+                    && matches!(c.site.via, CallVia::Member(None))
+                    && starting(c, false)
+                        .iter()
+                        .any(|r| r.target == Target::Outside))
+        {
+            NotDrawn::ChainStep
+        } else {
+            continue;
+        };
+        out.insert((c.bytes.start, c.bytes.end), kind);
+    }
+    out
+}
+
 /// The fenced `mermaid` block of `flow` (only a notice when it is over 50,000
 /// characters), named `name`, in the file at
 /// `path`; `href` gives a resolved target's link from this page.
@@ -455,6 +499,7 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         branches: Vec::new(),
         closed: &RefCell::new(BTreeMap::new()),
         placed: BTreeMap::new(),
+        undrawn: &undrawn(flow),
     };
     c.flow(name, &flow.steps);
     // A nested flow is drawn beside the path: dotted edges tie it to the
@@ -537,6 +582,9 @@ pub(crate) fn coverage(flow: &Flow) -> String {
     });
     let mut kinds = flow.not_drawn.clone();
     not_drawn(&flow.steps, &mut kinds);
+    for k in undrawn(flow).into_values() {
+        *kinds.entry(k).or_default() += 1;
+    }
     let kinds: Vec<String> = kinds
         .iter()
         .map(|(k, n)| format!("{n} {}", k.label()))

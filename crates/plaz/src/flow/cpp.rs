@@ -24,6 +24,7 @@ pub(crate) const HOOKS: Hooks = Hooks {
     },
     // `int n = n(1);` sees the variable being declared: ill-formed.
     own_initializer: |_, _, _| false,
+    wrapper: |_| false,
 };
 
 /// Is `n` inside an argument list, below its function or lambda?
