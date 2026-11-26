@@ -595,6 +595,17 @@ fn a_path_on_a_prelude_or_primitive_type_is_outside() {
 }
 
 #[test]
+fn a_path_on_a_prelude_type_lists_only_trait_impls_for_that_type() {
+    // `impl From<Name> for Wrap` is no `usize::from`; a blanket impl on a
+    // generic parameter may be, which its trait's own method stands for.
+    let a = "pub struct Name;\npub struct Wrap;\nimpl From<Name> for Wrap {\n    fn from(_n: Name) -> Wrap { Wrap }\n}\nimpl From<Name> for Box<u8> {\n    fn from(_n: Name) -> Box<u8> { todo!() }\n}\npub trait Show {\n    fn show(&self);\n}\nimpl<T: Copy> Show for T {\n    fn show(&self) {}\n}\nimpl Show for Wrap {\n    fn show(&self) {}\n}\npub fn f(n: Name) {\n    usize::from(1u8);\n    Box::from(n);\n    u8::show(&1);\n}\n";
+    let calls = calls_of(&[("src/a.rs", a)], "f");
+    assert_eq!(calls[0], "`usize::from(1u8)` L19 → outside the project");
+    assert_eq!(calls[1], "`Box::from(n)` L20 → one of: [[map/src/a_rs#box_u8_as_from_name_from|<Box<u8> as From<Name>>::from]], or outside the project");
+    assert_eq!(calls[2], "`u8::show(&1)` L21 → one of: [[map/src/a_rs#show_show|Show::show]], or outside the project");
+}
+
+#[test]
 fn a_prelude_type_name_the_project_has_is_not_outside() {
     // A project type of the name and an alias of the name read as before;
     // a project trait method, or a trait impl on the type, may be called.
@@ -1639,6 +1650,43 @@ fn a_project_function_named_exit_that_returns_continues() {
     );
 }
 
+/// Is the call labelled `call` drawn as an end of the path in `edges`?
+fn ends_at(edges: &[String], call: &str) -> bool {
+    edges.contains(&format!("{call} --> {call}"))
+}
+
+#[test]
+fn a_noreturn_call_in_a_macro_argument_does_not_end_the_path() {
+    let c = "[[noreturn]] void raise_now(void);\nint run(int v) {\n    EXPECT_FAILS({ count++; raise_now(); }, \"msg\");\n    after(v);\n    return v;\n}\n";
+    let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
+    assert!(!ends_at(&e, "raise_now()"), "{e:#?}");
+    assert!(e.iter().any(|l| l.ends_with("--> after(v)")), "{e:#?}");
+}
+
+#[test]
+fn a_rust_never_returning_call_in_a_macro_or_an_argument_closure_does_not_end_the_path() {
+    let src = "fn fail() -> ! { panic!() }\nfn f() {\n    assert_panics!({ fail(); });\n    after();\n}\nfn g() {\n    let r = std::panic::catch_unwind(|| { fail(); });\n    after(r);\n}\n";
+    let f = edges_of(src, "f");
+    assert!(!ends_at(&f, "fail()"), "{f:#?}");
+    assert!(f.iter().any(|l| l.ends_with("--> after()")), "{f:#?}");
+    let g = edges_of(src, "g");
+    assert!(g.iter().any(|l| l.ends_with("--> after(r)")), "{g:#?}");
+}
+
+#[test]
+fn a_python_exit_in_a_lambda_or_a_try_catching_it_does_not_end_the_path() {
+    let src = "import sys\n\ndef f(v):\n    try:\n        sys.exit(1)\n    except SystemExit:\n        pass\n    after(v)\n\ndef g(v):\n    run(lambda: sys.exit(1))\n    after(v)\n\ndef h(v):\n    try:\n        sys.exit(2)\n    except:\n        pass\n    try:\n        sys.exit(3)\n    except ValueError:\n        pass\n";
+    let page = page_of_py(src);
+    let f = chart_edges(&page, "f");
+    assert!(!ends_at(&f, "sys.exit(1)"), "{f:#?}");
+    let g = chart_edges(&page, "g");
+    assert!(g.iter().any(|l| l.ends_with("--> after(v)")), "{g:#?}");
+    // A bare `except:` catches the exit; `except ValueError` does not.
+    let h = chart_edges(&page, "h");
+    assert!(!ends_at(&h, "sys.exit(2)"), "{h:#?}");
+    assert!(ends_at(&h, "sys.exit(3)"), "{h:#?}");
+}
+
 fn edges_of(src: &str, anchor: &str) -> Vec<String> {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     chart_edges(&common::map_page(&vault, "map/src/a_rs"), anchor)
@@ -2207,6 +2255,62 @@ fn a_python_construction_that_may_not_run_the_init_stays_hidden() {
     let files = [("a.py", two), ("d.py", two), ("c.py", c)];
     let built = calls_in(&files, "map/c_py", "build");
     assert!(!built[0].contains("__init__"), "{built:?}");
+}
+
+#[test]
+fn a_python_class_its_module_may_rebind_from_outside_stays_hidden() {
+    // A star import from outside, after the class, may replace it.
+    let starred = "class Getter:\n    def __init__(self, k):\n        self.k = k\n\ndef make(k):\n    Getter(k)\n\nfrom _speedups import *\n";
+    // An outside import binds the name; the class is only the fallback.
+    let fallback = "try:\n    from types import SimpleNamespace as Holder\nexcept ImportError:\n    class Holder:\n        def __init__(self, **kw):\n            pass\n";
+    let user = "from starred import Getter\nfrom fallback import Holder\n\ndef build(k):\n    Getter(k)\n    Holder(k=k)\n";
+    let files = [
+        ("starred.py", starred),
+        ("fallback.py", fallback),
+        ("user.py", user),
+    ];
+    assert_eq!(
+        calls_in(&files, "map/user_py", "build"),
+        [
+            "`Getter(k)` L5 → target not visible",
+            "`Holder(k=k)` L6 → target not visible",
+        ]
+    );
+    assert_eq!(
+        calls_in(&files, "map/starred_py", "make"),
+        ["`Getter(k)` L6 → target not visible"]
+    );
+}
+
+#[test]
+fn a_python_class_imported_through_a_module_that_may_rebind_it_stays_hidden() {
+    // `kit` takes its names from a C module when there is one.
+    let kit = "try:\n    from _ckit import *\nexcept ImportError:\n    from _pykit import *\n";
+    let pykit = "class Base:\n    def __init__(self):\n        pass\n\nclass Thing:\n    def __init__(self, v):\n        pass\n";
+    let user = "from kit import Thing, Base\n\nclass Mine(Base):\n    def __init__(self):\n        pass\n\ndef build(v):\n    Thing(v)\n    Mine()\n";
+    let files = [("kit.py", kit), ("_pykit.py", pykit), ("user.py", user)];
+    assert_eq!(
+        calls_in(&files, "map/user_py", "build"),
+        [
+            "`Thing(v)` L8 → target not visible",
+            "`Mine()` L9 → target not visible",
+        ]
+    );
+}
+
+#[test]
+fn a_python_class_with_a_base_the_caller_does_not_see_stays_hidden() {
+    // `enum.Enum` is no project class, whatever project class `Enum` exists;
+    // nor is a base no import or definition of the file names.
+    let a = "import enum\n\nclass Color(enum.Enum):\n    def __init__(self, v):\n        self.v = v\n\nclass Child(Parent):\n    def __init__(self, v):\n        self.v = v\n\ndef make(v):\n    Color(v)\n    Child(v)\n";
+    let b = "class Enum:\n    def __init__(self):\n        pass\n\nclass Parent:\n    def __init__(self, v):\n        pass\n";
+    assert_eq!(
+        calls_in(&[("a.py", a), ("b.py", b)], "map/a_py", "make"),
+        [
+            "`Color(v)` L12 → target not visible",
+            "`Child(v)` L13 → target not visible",
+        ]
+    );
 }
 
 #[test]
@@ -2910,6 +3014,32 @@ fn rust_locals_line_lists_body_names_not_parameters_or_unit_patterns() {
         ["Locals: `bag: BTreeMap<u8, u8>`, `count`, `got`, `hit`, `item: Entry`, `rest`"]
     );
     assert_eq!(locals_of(&page, "bare"), Vec::<String>::new());
+}
+
+#[test]
+fn a_local_shadowing_a_parameter_is_on_the_locals_line() {
+    let rust =
+        "fn open(original: &str) {\n    let original = original.trim();\n    keep(original);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", rust)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(locals_of(&page, "open"), ["Locals: `original`"]);
+    // Python: assigning a parameter rebinds it; no new name.
+    let py = "def open(items):\n    items = items or []\n    return items\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let page = common::map_page(&vault, "map/a_py");
+    assert_eq!(locals_of(&page, "open"), Vec::<String>::new());
+}
+
+#[test]
+fn a_python_case_pattern_binds_its_captures_only() {
+    // A class pattern's head, a dotted value and a keyword bind nothing.
+    let py = "def sort(v):\n    match v:\n        case str():\n            pass\n        case Color.RED:\n            pass\n        case Point(x=0, y=depth):\n            pass\n        case [first, *rest] as whole:\n            pass\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let page = common::map_page(&vault, "map/a_py");
+    assert_eq!(
+        locals_of(&page, "sort"),
+        ["Locals: `depth`, `first`, `rest`, `whole`"]
+    );
 }
 
 #[test]

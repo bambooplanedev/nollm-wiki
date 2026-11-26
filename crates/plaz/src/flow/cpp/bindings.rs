@@ -20,6 +20,7 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds = Vec::new();
     // The names of `root`'s own parameter list (and captures).
     let mut own = BTreeSet::new();
+    let mut own_at = 0..0;
     // The indices in `binds` of the bindings below the body's statements.
     let mut nested = BTreeSet::new();
     let body = root.child_by_field_name("body");
@@ -42,6 +43,7 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
                     nested.extend(from..binds.len());
                 } else if n == root {
                     own.extend(binds[from..].iter().map(|b| b.0.clone()));
+                    own_at = from..binds.len();
                 }
             }
             "declaration" | "for_range_loop" => {
@@ -90,6 +92,12 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         .filter(|n| !top.contains(n.as_str()))
         .cloned()
         .collect();
+    // A parameter's name declared again in the body is a local too.
+    let again: BTreeSet<&String> = (binds.iter().enumerate())
+        .filter(|(i, _)| !own_at.contains(i))
+        .map(|(_, b)| &b.0)
+        .collect();
+    own.retain(|p| !again.contains(p));
     let keep = |t: &String| !rebound.contains(class_root(t));
     // A missing name of a damaged declaration is empty.
     let binds = (binds.into_iter())

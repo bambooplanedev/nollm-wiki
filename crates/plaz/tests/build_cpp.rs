@@ -806,6 +806,43 @@ fn a_macro_hides_a_call_only_where_the_file_or_its_includes_define_it() {
 }
 
 #[test]
+fn a_macro_hides_a_call_where_a_quoted_include_matches_no_project_file() {
+    // A generated header (`conf_gen.h` from `conf_gen.h.in`) or one found
+    // through a build include path may define the macro.
+    let only = "#define release(p) guarded_release(p)\n";
+    let mid = "#include \"conf_gen.h\"\n";
+    let plain = "int plain(int v);\n";
+    let gen = "#include \"conf_gen.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let deep = "#include \"../x/mid.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let sys = "#include <stdio.h>\n#include <sys/types.h>\n#include \"../x/plain.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    // An angle include of a project file's name, found through a build
+    // include path (`-I x`).
+    let angle = "#include <only.h>\nint run(char *buf) { release(buf); return 0; }\n";
+    let files = [
+        ("x/only.h", only),
+        ("x/mid.h", mid),
+        ("x/plain.h", plain),
+        ("src/gen.c", gen),
+        ("src/deep.c", deep),
+        ("src/sys.c", sys),
+        ("src/angle.c", angle),
+    ];
+    for path in ["src/gen.c", "src/deep.c", "src/angle.c"] {
+        assert_eq!(
+            cpp_targets(&files, path, "run"),
+            ["release(buf) → hidden"],
+            "{path}"
+        );
+    }
+    // Every quoted include matched, none defining it; angle ones name no
+    // project file: an ordinary call.
+    assert_eq!(
+        cpp_targets(&files, "src/sys.c", "run"),
+        ["release(buf) → outside"]
+    );
+}
+
+#[test]
 fn a_macro_hides_a_call_in_a_header_whatever_it_includes() {
     // A header may take the macro from its includer, as today.
     let only = "#define release(p) guarded_release(p)\n";
@@ -3204,6 +3241,20 @@ fn cpp_locals_line_lists_body_names_not_parameters() {
         ["Locals: `count`, `f: Fault`, `pick`, `spare: Shelf`"]
     );
     assert_eq!(line("bare"), Vec::<String>::new());
+}
+
+#[test]
+fn a_cpp_local_redeclaring_a_parameter_in_an_inner_block_is_listed() {
+    let src =
+        "int pick(int v) {\n    {\n        int v = 2;\n        use(v);\n    }\n    return v;\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let page = common::map_page(&vault, "map/src/a_cpp");
+    let block = common::fn_block(&page, "pick");
+    let line: Vec<&str> = block
+        .lines()
+        .filter(|l| l.starts_with("Locals: "))
+        .collect();
+    assert_eq!(line, ["Locals: `v`"]);
 }
 
 #[test]

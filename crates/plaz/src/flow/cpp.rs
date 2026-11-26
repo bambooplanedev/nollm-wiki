@@ -13,12 +13,29 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings: bindings::bindings,
     skips_call: |s: &CallSite| s.via == CallVia::Bare && CASTS.contains(&s.name.as_str()),
-    // `ENDS` are exits already.
+    // `ENDS` are exits already. A block in a macro's argument
+    // (`EXPECT_FAILS({ die(); }, "m")`) reads as statements, but the macro
+    // may run it anywhere, or not at all.
     ends_path: |n, src| {
         let f = n.child_by_field_name("function");
-        super::whole_statement(n) && !f.is_some_and(|f| ENDS.contains(&text(f, src)))
+        super::whole_statement(n)
+            && !f.is_some_and(|f| ENDS.contains(&text(f, src)))
+            && !in_argument(n)
     },
 };
+
+/// Is `n` inside an argument list, below its function or lambda?
+fn in_argument(n: Node) -> bool {
+    let mut at = n.parent();
+    while let Some(p) = at {
+        match p.kind() {
+            "argument_list" => return true,
+            "function_definition" | "lambda_expression" => return false,
+            _ => at = p.parent(),
+        }
+    }
+    false
+}
 
 /// Casts the grammar reads as calls of a template function.
 const CASTS: [&str; 4] = [

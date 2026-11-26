@@ -4,7 +4,7 @@
 use super::{binder, rebound, Evidence, Rules};
 use crate::flow::FlowScope;
 use crate::model::{File, MapCall};
-use crate::uses::{bases, defines, python_import, PyRoots, Whose};
+use crate::uses::{bases, defines, python_import, written_bases, PyRoots, Whose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallVia, CodeItem, CodeItemKind};
@@ -25,6 +25,9 @@ pub(super) struct Python<'a> {
     globs: BTreeMap<usize, BTreeSet<usize>>,
     /// Per page: the names its imports from outside the project bind.
     outside: BTreeMap<usize, BTreeSet<&'a str>>,
+    /// The pages with a `from m import *` of no project file: it may
+    /// bind any name.
+    open_globs: BTreeSet<usize>,
     /// Per class name: its definitions.
     classes: BTreeMap<&'a str, Vec<FnRef>>,
     /// Per class name: the classes naming it as a base.
@@ -63,6 +66,7 @@ impl<'a> Python<'a> {
             named: BTreeMap::new(),
             globs: BTreeMap::new(),
             outside: BTreeMap::new(),
+            open_globs: BTreeSet::new(),
             classes: BTreeMap::new(),
             subclasses: BTreeMap::new(),
             pages,
@@ -90,7 +94,11 @@ impl<'a> Python<'a> {
         }
         for (page, path, file) in python {
             for imp in &file.imports {
+                let glob = imp.name.as_deref() == Some("*");
                 if python_import(imp, path, file, &py.roots) != Whose::Project {
+                    if glob {
+                        py.open_globs.insert(page);
+                    }
                     py.outside.entry(page).or_default().extend(imp.binds());
                     continue;
                 }
@@ -98,6 +106,9 @@ impl<'a> Python<'a> {
                 let mut from = py.files(path, module);
                 let key = match imp.name.as_deref() {
                     Some("*") => {
+                        if from.is_empty() {
+                            py.open_globs.insert(page);
+                        }
                         py.globs.entry(page).or_default().extend(from);
                         continue;
                     }
@@ -216,21 +227,62 @@ impl<'a> Python<'a> {
             .collect()
     }
 
-    /// Does calling `class` surely run its `__init__`: no decorator, no
-    /// `metaclass=`, no `__new__` of its own, and only bases of the
-    /// project (or `object`) that are so too?
+    /// Is the name `name` surely the file of `page`'s own or imported
+    /// project class: in that file and in each its imports bring the name
+    /// through, no import from outside binds it and no `import *` the map
+    /// cannot follow may?
+    fn binds_surely(&self, page: usize, name: &str) -> bool {
+        let unsure = |p: usize| {
+            self.open_globs.contains(&p) || self.outside.get(&p).is_some_and(|o| o.contains(name))
+        };
+        !unsure(page)
+            && !self
+                .sources(page, name)
+                .is_some_and(|f| f.into_iter().any(unsure))
+    }
+
+    /// The classes the base written `written` surely is in the file of
+    /// `page`: its own of that name, else the ones its project imports
+    /// name. None for a dotted base (`enum.Enum`) or one no definition or
+    /// import of the file names.
+    fn seen_base(&self, page: usize, written: &str) -> Vec<FnRef> {
+        if written.contains('.') || !self.binds_surely(page, written) {
+            return Vec::new();
+        }
+        let name = unaliased(self.pages[page].1, written);
+        let all = self.classes.get(name).map_or(&[][..], Vec::as_slice);
+        let own: Vec<FnRef> = all.iter().copied().filter(|c| c.0 == page).collect();
+        match self.sources(page, name) {
+            _ if !own.is_empty() => own,
+            Some(from) => all
+                .iter()
+                .copied()
+                .filter(|c| from.contains(&c.0))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Does calling `class` surely run its `__init__`: its module surely
+    /// binds its name to it, no decorator, no `metaclass=`, no `__new__`
+    /// of its own, and only bases the module surely sees in the project
+    /// (or `object`) that are so too?
     fn constructs(&self, class: FnRef, depth: usize) -> bool {
         let it = self.item(class);
         let sig = it.signature.trim_start();
         let plain = !sig.starts_with('@') && !sig.contains("metaclass");
         let bases_too = || {
-            bases(it).into_iter().all(|b| {
-                let found = self.classes_named(class.0, b);
+            written_bases(it).into_iter().all(|b| {
+                let found = self.seen_base(class.0, b);
                 b == "object"
                     || (!found.is_empty() && found.iter().all(|&c| self.constructs(c, depth - 1)))
             })
         };
-        depth > 0 && plain && self.methods(class, "__new__").is_empty() && bases_too()
+        depth > 0
+            && plain
+            && self.binds_surely(class.0, &it.name)
+            && self.methods(class, "__new__").is_empty()
+            && bases_too()
     }
 
     /// The methods `name` that `class` inherits: those of the first base,
@@ -404,13 +456,13 @@ impl super::Caller<'_, '_> {
     pub(super) fn construction(&self, call: &MapCall) -> Option<Evidence> {
         let (py, page, name) = (self.py, self.page, call.site.name.as_str());
         let all = py.classes.get(name)?.iter().copied();
-        let bound = py.outside.get(&page).is_some_and(|o| o.contains(name));
         let class: Vec<FnRef> = match py.sources(page, name) {
-            None if !bound => all.filter(|c| c.0 == page).collect(),
+            _ if !py.binds_surely(page, name) => Vec::new(),
+            None => all.filter(|c| c.0 == page).collect(),
             Some(from) if all.clone().all(|c| c.0 != page) => {
                 all.filter(|c| from.contains(&c.0)).collect()
             }
-            None | Some(_) => Vec::new(),
+            Some(_) => Vec::new(),
         };
         let &[class] = class.as_slice() else {
             return None;
