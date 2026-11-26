@@ -2926,3 +2926,15 @@ fn python_locals_line_moves_global_names_to_outside_names() {
     );
     assert_eq!(locals_of(&page, "bare"), Vec::<String>::new());
 }
+
+#[test]
+fn asserts_are_counted_as_not_drawn() {
+    let rs = "fn f(a: u8) {\n    assert!(a > 0);\n    assert_eq!(a, 1);\n    debug_assert_ne!(a, 2);\n    std::assert!(a);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", rs)]);
+    let f = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "f");
+    assert!(f.contains(" Not drawn: 4 assert.\n"), "{f}");
+    let py = "def f(a):\n    assert a\n    assert a > 1, 'big'\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let f = common::fn_block(&common::map_page(&vault, "map/a_py"), "f");
+    assert!(f.contains(" Not drawn: 2 assert.\n"), "{f}");
+}

@@ -21,6 +21,14 @@ pub(crate) const HOOKS: Hooks = Hooks {
 };
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];
+const ASSERTS: [&str; 6] = [
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+];
 const DEFAULTS: [&str; 5] = [
     "unwrap_or",
     "unwrap_or_else",
@@ -123,6 +131,13 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             }) && !in_inline_closure(n) =>
         {
             FlowNode::Exit(ExitKind::Return)
+        }
+        "macro_invocation"
+            if field("macro").is_some_and(|m| {
+                ASSERTS.contains(&text(m, src).rsplit("::").next().unwrap_or(""))
+            }) =>
+        {
+            FlowNode::NotDrawn(NotDrawn::Assert)
         }
         "closure_expression" if own_flow(n) => FlowNode::Nested {
             name: n

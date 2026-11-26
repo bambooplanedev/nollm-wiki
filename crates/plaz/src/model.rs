@@ -221,6 +221,9 @@ pub enum NotDrawn {
     /// A call of a project macro whose body holds a jump token: it may
     /// leave the function, loop or switch unseen.
     HiddenJump,
+    /// An `assert` statement or an `assert!`-family macro: no node, no
+    /// edge for the failing case.
+    Assert,
 }
 
 impl NotDrawn {
@@ -238,6 +241,7 @@ impl NotDrawn {
             NotDrawn::NestedCase => "nested case",
             NotDrawn::BeforeCase => "code before the first case",
             NotDrawn::HiddenJump => "macro jump",
+            NotDrawn::Assert => "assert",
         }
     }
 }

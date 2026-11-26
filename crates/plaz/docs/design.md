@@ -47,7 +47,7 @@ The code is deterministic, so an undetermined target is written as what it is: "
 
 The node text is always the literal call (`ask(messages)`); the form only decides the link. When unsure: Hidden.
 
-Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
+Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, Rust `assert!`-family macros and Python `assert` (counted as `assert`, no node), conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
 
 ## What changed in the logic (planned, not built)
 

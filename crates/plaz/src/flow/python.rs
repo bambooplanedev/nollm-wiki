@@ -79,6 +79,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         }
         "conditional_expression" => FlowNode::NotDrawn(NotDrawn::Ternary),
         "boolean_operator" => FlowNode::NotDrawn(NotDrawn::ShortCircuit),
+        "assert_statement" => FlowNode::NotDrawn(NotDrawn::Assert),
         _ => FlowNode::Plain,
     }
 }
