@@ -83,6 +83,26 @@ struct Chart<'a> {
     placed: BTreeMap<(usize, usize), usize>,
     /// The calls drawn as no node (`undrawn`).
     undrawn: &'a BTreeMap<(usize, usize), NotDrawn>,
+    /// The node drawn last, when it holds a run of calls a next call of
+    /// its form on the straight path joins.
+    run: Option<Run>,
+}
+
+/// A node holding consecutive calls of one form that links nowhere.
+struct Run {
+    id: usize,
+    /// Its line in `Chart::lines`.
+    line: usize,
+    shape: (&'static str, &'static str),
+    texts: Vec<String>,
+}
+
+/// The most calls one node holds.
+const RUN: usize = 8;
+
+/// The line of node `id` of `shape` labelled `text`.
+fn node_line(id: usize, (open, close): (&str, &str), text: &str) -> String {
+    format!("    n{id}{open}\"{}\"{close}", mermaid_label(text))
 }
 
 impl Chart<'_> {
@@ -95,14 +115,13 @@ impl Chart<'_> {
     /// `text`, with an edge from each of `from`.
     fn node(&mut self, shape: (&str, &str), text: &str, from: &[(usize, Option<&str>)]) -> usize {
         let id = self.id();
-        let (open, close) = shape;
-        self.lines
-            .push(format!("    n{id}{open}\"{}\"{close}", mermaid_label(text)));
+        self.lines.push(node_line(id, shape, text));
         self.edges_to(from, id);
         id
     }
 
     fn edges_to(&mut self, from: &[(usize, Option<&str>)], to: usize) {
+        self.run = None;
         for (f, label) in from {
             self.edges += 1;
             self.lines.push(match label {
@@ -183,6 +202,9 @@ impl Chart<'_> {
     /// subgraph is beside it, not on it, as is a `finally` no path falls
     /// into.
     fn steps(&mut self, steps: &[Step], mut ends: Ends) -> (Option<usize>, Ends) {
+        // The first step is a node of its own: what comes before may be
+        // reached by edges that skip it (a loop's way back).
+        self.run = None;
         let mut entry = None;
         for (i, s) in steps.iter().enumerate() {
             let nested = |s: &Step| matches!(s, Step::Nested { .. });
@@ -209,8 +231,35 @@ impl Chart<'_> {
                     Target::Outside => ("[/", "/]"),
                     Target::Hidden => (">", "]:::hidden"),
                 };
+                // Calls that link nowhere and are not an end of a dotted
+                // edge or an exit join the run of their form before them
+                // on the straight path, one per line.
+                let folds = matches!(c.target, Target::Outside | Target::Hidden)
+                    && c.local.is_none()
+                    && c.takes.is_empty()
+                    && !(c.ends && c.target != Target::Hidden);
+                let key = (c.bytes.start, c.bytes.end);
+                if let Some(r) = self.run.as_mut().filter(|r| {
+                    folds && r.shape == shape && r.texts.len() < RUN && ends == [(r.id, None)]
+                }) {
+                    r.texts.push(c.text.clone());
+                    let line = node_line(r.id, shape, &r.texts.join("\n"));
+                    let (id, at) = (r.id, r.line);
+                    self.lines[at] = line;
+                    self.placed.insert(key, id);
+                    return ends;
+                }
+                let line = self.lines.len();
                 let id = self.node(shape, &c.text, &ends);
-                self.placed.insert((c.bytes.start, c.bytes.end), id);
+                self.placed.insert(key, id);
+                if folds {
+                    self.run = Some(Run {
+                        id,
+                        line,
+                        shape,
+                        texts: vec![c.text.clone()],
+                    });
+                }
                 if let Target::Resolved(t) = &c.target {
                     let href = (self.href)(t);
                     self.clicks.push(format!("    click n{id} href \"{href}\""));
@@ -264,6 +313,8 @@ impl Chart<'_> {
                 arms, unseen: true, ..
             } if !(next && self.closed(arms)) => {
                 let ends = arms.iter().fold(ends, |e, a| self.steps(&a.body, e).1);
+                // A branch not drawn still ends a run.
+                self.run = None;
                 ends
             }
             Step::Branch { .. } => self.branched(s, ends),
@@ -372,6 +423,7 @@ impl Chart<'_> {
             closed: self.closed,
             placed: BTreeMap::new(),
             undrawn: self.undrawn,
+            run: None,
         };
         let closed = (arms.iter()).all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty());
         self.closed.borrow_mut().insert(arms.as_ptr(), closed);
@@ -500,6 +552,7 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         closed: &RefCell::new(BTreeMap::new()),
         placed: BTreeMap::new(),
         undrawn: &undrawn(flow),
+        run: None,
     };
     c.flow(name, &flow.steps);
     // A nested flow is drawn beside the path: dotted edges tie it to the

@@ -1270,19 +1270,24 @@ fn hostile_owner_names_keep_slug_anchors() {
 #[test]
 fn huge_charts_are_whole_and_point_to_the_calls_list() {
     // 600 edges: over what mermaid.js draws, under the character limit.
-    let body = (0..600).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
-    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    // Calls of a project function: each a node of its own.
+    let body = (0..600).fold(String::new(), |s, i| s + &format!("    g({i});\n"));
+    let src = |body| format!("fn f() {{\n{body}}}\nfn g(_: u32) {{}}\n");
+    let (_d, vault) = common::built(&[("src/a.rs", &src(body))]);
     let page = common::map_page(&vault, "map/src/a_rs");
     let chart = page.split("```mermaid\n").nth(1).unwrap();
-    assert!(chart.split_once("\n```\n").unwrap().0.contains("g599()"));
+    assert!(chart.split_once("\n```\n").unwrap().0.contains("g(599)"));
     assert!(page.contains("\n```\n\nThis chart exceeds the 500-edge limit of Mermaid.js renderers other than Obsidian's; the Calls list below is the complete view.\n"));
     // over 50,000 characters no renderer draws it: no block, only the notice
-    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
-    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g({i});\n"));
+    let (_d, vault) = common::built(&[("src/a.rs", &src(body))]);
     let page = common::map_page(&vault, "map/src/a_rs");
-    assert!(!page.contains("```mermaid"), "{page}");
+    assert!(
+        !common::fn_block(&page, "f").contains("```mermaid"),
+        "{page}"
+    );
     assert!(page.contains("\nThis chart exceeds Mermaid's 50,000-character limit and is not drawn; the Calls list below is the complete view.\n"));
-    assert!(page.contains("g2999()"), "the Calls list stays");
+    assert!(page.contains("g(2999)"), "the Calls list stays");
     let (_d, vault) = common::built(&[("src/a.rs", F_SRC)]);
     let page = common::map_page(&vault, "map/src/a_rs");
     assert!(page.contains("```mermaid") && !page.contains("This chart exceeds"));
@@ -1747,7 +1752,7 @@ fn a_python_exit_ends_the_path_unless_its_name_is_rebound() {
     assert!(!f.contains(&"sys.exit(1) --> v == 1".to_string()), "{f:#?}");
     let g = chart_edges(&page, "g");
     assert!(
-        g.contains(&"sys.exit(1) --> return v".to_string()),
+        g.contains(&"make(v)<br/>sys.exit(1) --> return v".to_string()),
         "{g:#?}"
     );
     // A project function named `exit` is the one called.
@@ -1803,7 +1808,12 @@ fn a_noreturn_call_in_a_macro_argument_does_not_end_the_path() {
     let c = "[[noreturn]] void raise_now(void);\nint run(int v) {\n    EXPECT_FAILS({ count++; raise_now(); }, \"msg\");\n    after(v);\n    return v;\n}\n";
     let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
     assert!(!ends_at(&e, "raise_now()"), "{e:#?}");
-    assert!(e.iter().any(|l| l.ends_with("--> after(v)")), "{e:#?}");
+    // Folded or not, the path goes on to `after(v)`.
+    assert!(
+        e.iter()
+            .any(|l| l.contains(" --> ") && l.ends_with("after(v)")),
+        "{e:#?}"
+    );
 }
 
 #[test]
@@ -1823,7 +1833,11 @@ fn a_python_exit_in_a_lambda_or_a_try_catching_it_does_not_end_the_path() {
     let f = chart_edges(&page, "f");
     assert!(!ends_at(&f, "sys.exit(1)"), "{f:#?}");
     let g = chart_edges(&page, "g");
-    assert!(g.iter().any(|l| l.ends_with("--> after(v)")), "{g:#?}");
+    assert!(
+        g.iter()
+            .any(|l| l.contains(" --> ") && l.ends_with("after(v)")),
+        "{g:#?}"
+    );
     // A bare `except:` catches the exit; `except ValueError` does not.
     let h = chart_edges(&page, "h");
     assert!(!ends_at(&h, "sys.exit(2)"), "{h:#?}");
@@ -1880,9 +1894,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
         [
             "f --> c",
             "c -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> after()",
             "c -no-> after()",
             "after() --> end",
@@ -1894,9 +1907,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
             "g --> match k",
             "match k --> 1",
             "1 -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "1 -no-> _",
             "_ -yes-> other()",
             "loop -exit not drawn-> after()",
@@ -1911,9 +1923,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
             "h --> for x in xs",
             "for x in xs -loop-> *x #gt; 1",
             "*x #gt; 1 -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> for x in xs",
             "*x #gt; 1 -no-> for x in xs",
             "for x in xs -done-> end",
@@ -1968,9 +1979,8 @@ fn an_async_block_awaited_in_place_is_on_the_path() {
     assert_eq!(
         edges_of(src, "f"),
         [
-            "f --> compute()",
-            "compute() --> use_it(v)",
-            "use_it(v) --> end"
+            "f --> compute()<br/>use_it(v)",
+            "compute()<br/>use_it(v) --> end"
         ]
     );
     assert_eq!(
@@ -2037,9 +2047,8 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
         [
             "o --> loop",
             "loop -loop-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> done()",
             "done() --> done()",
             "done() -yes-> return",
@@ -2050,10 +2059,8 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
         edges_of(src, "run"),
         [
             "run --> loop",
-            "loop -loop-> stop.recv()",
-            "stop.recv() --> rx.recv()",
-            "rx.recv() --> handle(m)",
-            "handle(m) --> loop",
+            "loop -loop-> stop.recv()<br/>rx.recv()<br/>handle(m)",
+            "stop.recv()<br/>rx.recv()<br/>handle(m) --> loop",
             "loop -exit not drawn-> end",
         ]
     );
@@ -2524,9 +2531,8 @@ fn a_python_finally_is_on_every_path_that_falls_into_it() {
         edges_of_py(plain, "w"),
         [
             "w --> work()",
-            "work() --> close()",
-            "close() --> after()",
-            "after() --> end",
+            "work() --> close()<br/>after()",
+            "close()<br/>after() --> end",
         ]
     );
     // An exit in the `finally` ends the path: nothing leads to `after()`.
@@ -2547,10 +2553,9 @@ fn a_python_finally_is_on_every_path_that_falls_into_it() {
             "except E -no-> except F",
             "except F -yes-> c()",
             "c() --> return c()",
-            "d() --> e()",
-            "b() --> e()",
-            "e() --> g()",
-            "g() --> end",
+            "d() --> e()<br/>g()",
+            "b() --> e()<br/>g()",
+            "e()<br/>g() --> end",
         ]
     );
     for src in [plain, exit, full] {

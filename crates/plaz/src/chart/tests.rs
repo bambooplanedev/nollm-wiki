@@ -316,3 +316,66 @@ fn a_hidden_chain_step_is_not_drawn_only_on_an_outside_receiver() {
         "Coverage: 4 calls: 0 resolved, 0 one of, 2 outside, 2 hidden. Not drawn: 2 chain step."
     );
 }
+
+fn outside(text: &str) -> Step {
+    at(text, 0..0, Target::Outside, CallVia::Bare)
+}
+
+#[test]
+fn a_run_of_calls_of_one_unlinked_form_is_one_node() {
+    let sure = Target::Resolved(FnId {
+        path: "a.rs".into(),
+        item: 0,
+    });
+    let steps = vec![
+        outside("a()"),
+        outside("b()"),
+        // A certain call breaks the run, as does a call of another form.
+        at("c()", 0..0, sure, CallVia::Bare),
+        outside("d()"),
+        outside("e()"),
+        call("h"),
+        call("i"),
+        // A decision breaks it; so does the join after it.
+        branch(
+            vec![arm(Some("k"), vec![outside("f()"), outside("g()")], false)],
+            false,
+        ),
+        outside("x()"),
+        outside("y()"),
+    ];
+    assert_eq!(
+        drawn(steps),
+        [
+            "n0([\"f\"])",
+            "n1[/\"a()<br/>b()\"/]",
+            "n0 --> n1",
+            "n2[\"c()\"]",
+            "n1 --> n2",
+            "n3[/\"d()<br/>e()\"/]",
+            "n2 --> n3",
+            "n4>\"h()<br/>i()\"]:::hidden",
+            "n3 --> n4",
+            "n5{\"k\"}",
+            "n4 --> n5",
+            "n6[/\"f()<br/>g()\"/]",
+            "n5 -->|yes| n6",
+            "n7[/\"x()<br/>y()\"/]",
+            "n6 --> n7",
+            "n5 -->|no| n7",
+            "n8([\"end\"])",
+            "n7 --> n8",
+        ]
+    );
+}
+
+#[test]
+fn a_run_longer_than_eight_calls_is_split() {
+    let steps = (0..10).map(|i| outside(&format!("s{i}()"))).collect();
+    let lines = drawn(steps);
+    assert_eq!(
+        lines[1],
+        "n1[/\"s0()<br/>s1()<br/>s2()<br/>s3()<br/>s4()<br/>s5()<br/>s6()<br/>s7()\"/]"
+    );
+    assert_eq!(lines[3], "n2[/\"s8()<br/>s9()\"/]");
+}
