@@ -278,6 +278,7 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
 /// has no type.
 fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds = Vec::new();
+    let mut params = BTreeSet::new();
     let mut rebound = generic_params(root, src);
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -319,7 +320,19 @@ fn bindings(root: Node, src: &str) -> Bindings {
             let ty = ty
                 .filter(|_| p.kind() == "identifier")
                 .and_then(|t| type_name(t, src));
-            names(p, src, &mut |b| binds.push((b, ty.clone())));
+            // A unit variant or constant (`None`) is no binding.
+            let unit = matches!(n.kind(), "match_arm" | "let_condition");
+            let own_param =
+                n.kind() == "parameter" && n.parent().and_then(|p| p.parent()) == Some(root);
+            names(p, src, &mut |b| {
+                if unit && b.starts_with(char::is_uppercase) {
+                    return;
+                }
+                if own_param {
+                    params.insert(b.clone());
+                }
+                binds.push((b, ty.clone()));
+            });
         }
         stack.extend(n.named_children(&mut n.walk()));
     }
@@ -328,7 +341,11 @@ fn bindings(root: Node, src: &str) -> Bindings {
         .into_iter()
         .map(|(n, t)| (n, t.filter(|t| !is_rebound(t))));
     let joined = Bindings::join(binds);
-    Bindings { rebound, ..joined }
+    Bindings {
+        params,
+        rebound,
+        ..joined
+    }
 }
 
 /// The type and const parameters of `root` and of each function, impl or

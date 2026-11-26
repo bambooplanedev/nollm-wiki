@@ -5,6 +5,8 @@ expression: "common::fn_block(&common::map_page(&vault, \"map/src/a_rs\"), \"f\"
 ## f
 `fn f(x: u8, cb: impl Fn()) -> u8` · `src/a.rs:1-21`
 
+Locals: `i`, `n`, `y`
+
 **Called from**
 - none found
 

@@ -98,6 +98,7 @@ State on 2026-11-16. The design is in [design.md](design.md). Rust, Python and C
 - **A trailing comment on a one-line `if … else` or `let … else {` row** is attached to both arms: `if c { a() } else { b() } // note`.
 - **Own-line comments inside a block that is not a decision** are not shown: `{ // note` above `step();` in a plain block or a loop body.
 - **`Ok(…)`, `Some(…)`, `Err(…)` and each prefix of a call chain** are their own call nodes: `Ok(xs.iter().map(f).collect())` gives `xs.iter()`, `xs.iter().map(f)`, `xs.iter().map(f).collect()` and `Ok(…)`.
+- **Locals line.** Only names the code binds visibly: a name bound inside a macro call (`let` in a `macro_rules!` body, `assert!(let …)`) is not seen; a Rust upper-case identifier in a `match` arm or `if let` pattern is read as a unit variant or constant and dropped, even when it binds a value; a name with several differently typed bindings prints bare; Python lambda and comprehension variables are listed with the enclosing function's locals; the locals of a nested function or closure are not printed anywhere.
 - **`?` and a function's tail value** are not drawn; `?` is counted on the coverage line: `let v = load()?; v`.
 - **A call used as a condition** appears as a call node and again in the diamond: `if ready() { … }`.
 - **A method call on a receiver whose type is not visible** (`x.iter()`, `v.len()`) reads "one of: <project methods of that name>, or outside the project" when the project has methods of that name. Typing locals and struct fields would narrow it.
