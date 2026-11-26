@@ -398,10 +398,10 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 /// Two stated gaps, both observed:
 ///   * only on a `function_definition`, through `naming_declarator`: a
 ///     pointer- or reference-returning out-of-line definition
-///     (`int** OrderBook::grid()`) resolves `OrderBook` through any
+///     (`int** Shelf::grid()`) resolves `Shelf` through any
 ///     nesting of wrappers, as `defined_name` names it. The query misses a
 ///     pointer-returning definition qualified three or more levels deep
-///     (`Level* a::b::Book::top()`);
+///     (`Slot* a::b::Book::top()`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
@@ -530,7 +530,7 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// Exactly ONE wrapper deep, deliberately: that is the reach of the
 /// declaration wrapper patterns in `QUERY` (a `function_definition` is a
 /// function whatever its declarator), so this gate accepts precisely the
-/// members the query captures — `Level** grid();` is uncovered on both sides at once
+/// members the query captures — `Slot** grid();` is uncovered on both sides at once
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
 /// that no pattern extracts.
 pub(crate) fn is_function_declarator(d: Node) -> bool {

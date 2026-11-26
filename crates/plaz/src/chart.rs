@@ -194,7 +194,9 @@ impl Chart<'_> {
                     self.clicks.push(format!("    click n{id} href \"{href}\""));
                 }
                 // A call that never returns is drawn as an exit after it;
-                // one not resolved yet (hidden) ends nothing.
+                // one not resolved yet (hidden) ends nothing: resolution
+                // clears `ends` for hidden calls, but charts of unresolved
+                // flows (the flow unit tests) carry the walker's raw mark.
                 if c.ends && c.target != Target::Hidden {
                     self.node(("([", "])"), &c.text, &[(id, None)]);
                     return Vec::new();

@@ -86,7 +86,7 @@ Decided by the owner:
 Made during design (open to change):
 - Change baseline HEAD by default.
 - Comments shown whole up to a line cap, then a link to the lines; never cut to the first sentence.
-- Charts always complete; no collapsing of large functions.
+- Charts complete; no collapsing of large functions. A chart over Mermaid's 50,000-character limit is not drawn: a notice points to the Calls list as the complete view.
 - Python nested defs and closures drawn as their own sub-charts.
 - Mermaid output escaped (quotes, `{}`, `<>`, `|`, `\`, `:`, `$`) and validated with mermaid-cli in tests; clicks checked in Quartz and Obsidian, with the wikilink list as the fallback.
 - Measurement gate before release, on projects not used to design this: zero wrong "resolved" links, every "one of" contains the true target or is "hidden", every diamond's text equals the source.
