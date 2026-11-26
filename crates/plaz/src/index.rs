@@ -118,10 +118,21 @@ pub fn index(p: &Project, names: &Names) -> Index {
     place(&maybe, &callees, &mut placed);
     let mut cycles = Vec::new();
     for &f in &fns {
-        if !uncalled(f) && !placed.contains_key(f) {
-            place(&[f], &callees, &mut placed);
-            cycles.push(f);
+        if uncalled(f) || placed.contains_key(f) {
+            continue;
         }
+        // Up the first unplaced certain caller until one repeats: that
+        // one is on a cycle, and `f` is in its tree.
+        let (mut start, mut seen) = (f, BTreeSet::new());
+        while seen.insert(start) {
+            let up = (names.callers(start).iter().filter(|c| c.2))
+                .filter_map(|c| callees.get_key_value(&c.0).map(|k| k.0))
+                .find(|c| !placed.contains_key(c));
+            let Some(up) = up else { break };
+            start = up;
+        }
+        place(&[start], &callees, &mut placed);
+        cycles.push(start);
     }
 
     // Per top directory: its page's text after the front matter, the

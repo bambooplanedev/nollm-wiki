@@ -37,7 +37,7 @@ The person builds the path by moving up and down between charts. The map makes n
 
 - **Not called by any charted function**: these functions, each with what it certainly calls nested under it, in the order of its Calls list.
 - **Called only by calls that may be another function**: the functions whose only callers are "may call", the same way.
-- **In a call cycle no function above reaches**: what is left, trees that start at a function certainly called only from inside a cycle nothing above reaches.
+- **In a call cycle no function above reaches**: what is left. Each tree starts on a cycle: from the first function left, in the order below, up its first certain caller until one repeats; that one starts the tree.
 - **Not called, calling nothing certain**: a flat list.
 
 Files with a `main` function come first, then by path; in a file `main` comes first, then source order. A breadth-first walk over all the trees, in that order, places each function once, at the shallowest depth it is reached; it is expanded there, and every other function that certainly calls it lists it on its own last line, "also calls" (recursion included). A tree follows calls into other directories; it sits on the page of the directory where its first function is. The page says that "not called" is only what the map sees: a function may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project. No "entry point" wording, no sequence diagrams, no path claims beyond these links.

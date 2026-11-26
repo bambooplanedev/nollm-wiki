@@ -3273,6 +3273,29 @@ fn the_index_lists_every_charted_function_from_the_top_down() {
 }
 
 #[test]
+fn a_cycle_tree_starts_on_the_cycle_not_at_a_leaf_it_calls() {
+    let (_d, vault) = common::built(&[(
+        "src/lib.rs",
+        "fn leaf() {}\nfn ring_a() {\n    ring_b();\n    leaf();\n}\nfn ring_b() {\n    ring_a();\n}\n",
+    )]);
+    let x = |a: &str| format!("[[map/src/lib_rs#{a}|{a}]]");
+    assert_eq!(
+        common::index_section(
+            &vault,
+            "map/index/src",
+            "In a call cycle no function above reaches"
+        ),
+        [
+            "### [[map/src/lib_rs|src/lib.rs]]".to_string(),
+            format!("- {}", x("ring_a")),
+            format!("  - {}", x("ring_b")),
+            format!("    - also calls: {}", x("ring_a")),
+            format!("  - {}", x("leaf")),
+        ]
+    );
+}
+
+#[test]
 fn a_function_section_names_its_level_in_the_index() {
     let (_d, vault) = common::built(&index_tree());
     let level = |page: &str, anchor: &str| {
