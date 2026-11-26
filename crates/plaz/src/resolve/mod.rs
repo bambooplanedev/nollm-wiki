@@ -536,8 +536,9 @@ impl<'a> Caller<'_, 'a> {
     }
 
     /// May the trait method `c` be one of the type `root`: a trait's own
-    /// method, or one of an impl for `root` (`<Box<u8> as From<Name>>`)
-    /// or for a generic parameter (`<T as Show>`), not for another type.
+    /// method, or one of an impl for `root` (`<Box<u8> as From<Name>>`),
+    /// not for another type. A blanket impl (`<T as Show>`) is left out:
+    /// its trait's own method stands for it.
     fn may_impl_for(&self, c: FnRef, root: &str) -> bool {
         let owner = self.index.item(c).owner.as_deref().unwrap_or("");
         let Some(ty) = owner.strip_prefix('<').and_then(|o| o.split(" as ").next()) else {
@@ -545,9 +546,7 @@ impl<'a> Caller<'_, 'a> {
         };
         let ty = ty.trim_start_matches('&').trim_start();
         let ty = ty.strip_prefix("mut ").unwrap_or(ty);
-        let head = ty.split('<').next().unwrap_or("");
-        let word = !head.is_empty() && head.chars().all(|c| c.is_alphanumeric() || c == '_');
-        head == root || (word && !self.index.is_type(head) && !PRELUDE.contains(&head))
+        ty.split('<').next() == Some(root)
     }
 
     /// Is `name` a `use … as` alias that a project type is also called?
