@@ -3240,6 +3240,20 @@ fn cpp_locals_line_lists_body_names_not_parameters() {
 }
 
 #[test]
+fn a_cpp_local_redeclaring_a_parameter_in_an_inner_block_is_listed() {
+    let src =
+        "int pick(int v) {\n    {\n        int v = 2;\n        use(v);\n    }\n    return v;\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let page = common::map_page(&vault, "map/src/a_cpp");
+    let block = common::fn_block(&page, "pick");
+    let line: Vec<&str> = block
+        .lines()
+        .filter(|l| l.starts_with("Locals: "))
+        .collect();
+    assert_eq!(line, ["Locals: `v`"]);
+}
+
+#[test]
 fn a_deep_pointer_or_function_pointer_returning_function_is_charted_and_linked() {
     let src = "static char **split_rows(int n) {\n    if (n) { return 0; }\n    return 0;\n}\nstatic void (*choose_hook(int n))(void) {\n    return 0;\n}\nvoid run(int n) {\n    split_rows(n);\n    choose_hook(n);\n}\n";
     let (_d, vault) = common::built(&[("src/rows.c", src)]);

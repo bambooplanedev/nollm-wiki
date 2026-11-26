@@ -293,7 +293,8 @@ fn if_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
 /// has no type.
 fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds = Vec::new();
-    let mut params = BTreeSet::new();
+    // The names `root`'s parameters bind, and those anything else binds.
+    let (mut params, mut body) = (BTreeSet::new(), BTreeSet::new());
     let mut rebound = generic_params(root, src);
     let mut stack = vec![root];
     while let Some(n) = stack.pop() {
@@ -345,6 +346,8 @@ fn bindings(root: Node, src: &str) -> Bindings {
                 }
                 if own_param {
                     params.insert(b.clone());
+                } else {
+                    body.insert(b.clone());
                 }
                 binds.push((b, ty.clone()));
             });
@@ -356,6 +359,8 @@ fn bindings(root: Node, src: &str) -> Bindings {
         .into_iter()
         .map(|(n, t)| (n, t.filter(|t| !is_rebound(t))));
     let joined = Bindings::join(binds);
+    // `let original = original.trim();` is a local.
+    params.retain(|p| !body.contains(p));
     Bindings {
         params,
         rebound,

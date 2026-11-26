@@ -3002,6 +3002,32 @@ fn rust_locals_line_lists_body_names_not_parameters_or_unit_patterns() {
 }
 
 #[test]
+fn a_local_shadowing_a_parameter_is_on_the_locals_line() {
+    let rust =
+        "fn open(original: &str) {\n    let original = original.trim();\n    keep(original);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", rust)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(locals_of(&page, "open"), ["Locals: `original`"]);
+    // Python: assigning a parameter rebinds it; no new name.
+    let py = "def open(items):\n    items = items or []\n    return items\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let page = common::map_page(&vault, "map/a_py");
+    assert_eq!(locals_of(&page, "open"), Vec::<String>::new());
+}
+
+#[test]
+fn a_python_case_pattern_binds_its_captures_only() {
+    // A class pattern's head, a dotted value and a keyword bind nothing.
+    let py = "def sort(v):\n    match v:\n        case str():\n            pass\n        case Color.RED:\n            pass\n        case Point(x=0, y=depth):\n            pass\n        case [first, *rest] as whole:\n            pass\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let page = common::map_page(&vault, "map/a_py");
+    assert_eq!(
+        locals_of(&page, "sort"),
+        ["Locals: `depth`, `first`, `rest`, `whole`"]
+    );
+}
+
+#[test]
 fn python_locals_line_moves_global_names_to_outside_names() {
     let src = "def tally(width, ready: bool):\n    global COUNT\n    count = 1\n    item: Entry = make()\n    for rest in width:\n        pass\n    def deep():\n        own = 2\n    COUNT = 3\n\ndef bare(a):\n    return a\n";
     let (_d, vault) = common::built(&[("a.py", src)]);

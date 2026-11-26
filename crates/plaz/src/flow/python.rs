@@ -310,7 +310,7 @@ fn bindings(root: Node, src: &str) -> Bindings {
                 });
                 bind(Some(n), None);
             }
-            "case_pattern" => bind(Some(n), None),
+            "case_pattern" => captures(n, src, &mut |b| binds.push((b, None))),
             _ => {}
         }
         stack.extend(n.named_children(&mut n.walk()));
@@ -327,6 +327,22 @@ fn bindings(root: Node, src: &str) -> Bindings {
         outside,
         rebound,
         ..joined
+    }
+}
+
+/// The names a `case` pattern binds: not a class pattern's head
+/// (`str()`), a dotted value (`Color.RED`) or a keyword (`x=` of
+/// `Point(x=0)`).
+fn captures(p: Node, src: &str, out: &mut impl FnMut(String)) {
+    let kids: Vec<Node> = p.named_children(&mut p.walk()).collect();
+    let skip = match p.kind() {
+        "identifier" => return out(text(p, src).to_string()),
+        "dotted_name" if kids.len() > 1 => return,
+        "class_pattern" | "keyword_pattern" => 1,
+        _ => 0,
+    };
+    for c in kids.into_iter().skip(skip) {
+        captures(c, src, out);
     }
 }
 
