@@ -302,6 +302,8 @@ pub struct Hidden {
     pub pages: usize,
     /// Whether any has an owner, so `Owner::name` narrows to it.
     pub owned: bool,
+    /// They are items `name` owns, which no item is named (`definitions`).
+    pub of_owner: bool,
 }
 
 /// A searchable field: its words (`Wiki::field_words`) and their stems,

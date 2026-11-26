@@ -90,6 +90,16 @@ impl KindFilter {
             KindFilter::Code | KindFilter::Exact(SourceKind::Code { .. })
         )
     }
+
+    /// The kind that holds the code pages a search of this kind leaves out:
+    /// `tests` for `code` and `code:<lang>`, `code` for `tests`.
+    pub fn other(&self) -> Option<KindFilter> {
+        match self {
+            KindFilter::Tests => Some(KindFilter::Code),
+            k if k.drops_tests() => Some(KindFilter::Tests),
+            _ => None,
+        }
+    }
 }
 
 pub use techlog::Origin;

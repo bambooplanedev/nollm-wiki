@@ -155,6 +155,8 @@ const QUERY: &str = r"
 
 (field_declaration declarator: (_) @name) @item
 
+(enumerator name: (identifier) @name) @item
+
 (preproc_include path: (_) @import)
 ";
 
@@ -361,10 +363,11 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 
     let mut chain = Vec::new();
     let mut node = def;
-    // A data member of `typedef struct { … } Name;` is owned by `Name`.
-    let data = is_data_member(def);
+    // A data member of `typedef struct { … } Name;` is owned by `Name`, an
+    // enumerator of `typedef enum { … } Name;` too.
+    let data = is_data_member(def) || def.kind() == "enumerator";
     while let Some(parent) = node.parent() {
-        if parent.kind() == "field_declaration_list" {
+        if matches!(parent.kind(), "field_declaration_list" | "enumerator_list") {
             if let Some(name) = parent
                 .parent()
                 .and_then(|ty| {
@@ -449,6 +452,42 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
     last
 }
 
+/// gtest's macros that define a test: `TEST(Suite, Name) { … }` and its
+/// fixture, parameterized and typed forms.
+pub(crate) const GTEST_MACROS: &[&str] =
+    &["TEST", "TEST_F", "TEST_P", "TYPED_TEST", "TYPED_TEST_P"];
+
+/// `(suite, test)` of a gtest test: a function definition with no return
+/// type whose declarator is one of `GTEST_MACROS` over exactly two bare
+/// names, which the grammar reads as two parameter types. The item is then
+/// the test, owned by its suite (`Suite::Name`), so `search` finds either.
+pub(crate) fn gtest_names<'a>(def: Node, text: &'a str) -> Option<(&'a str, &'a str)> {
+    if def.kind() != "function_definition" || def.child_by_field_name("type").is_some() {
+        return None;
+    }
+    let f = def
+        .child_by_field_name("declarator")
+        .filter(|d| d.kind() == "function_declarator")?;
+    let called = text.get(f.child_by_field_name("declarator")?.byte_range())?;
+    if !GTEST_MACROS.contains(&called) {
+        return None;
+    }
+    let params = f.child_by_field_name("parameters")?;
+    let names = params
+        .named_children(&mut params.walk())
+        .map(|p| {
+            p.child_by_field_name("type")
+                .filter(|t| t.kind() == "type_identifier")
+                .filter(|_| p.child_by_field_name("declarator").is_none())
+                .and_then(|t| text.get(t.byte_range()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    match names[..] {
+        [suite, name] => Some((suite, name)),
+        _ => None,
+    }
+}
+
 /// Cut a constructor's signature before its member-initializer list.
 ///
 /// Not redundant with `default_cut`: `field_initializer_list` is a plain child,
@@ -481,6 +520,11 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
     {
         let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
         return value_shape(eq, def.child_by_field_name("default_value"), true);
+    }
+    // An enumerator reads with its value: `DARK = 3`.
+    if def.kind() == "enumerator" {
+        let eq = def.children(&mut def.walk()).find(|c| c.kind() == "=");
+        return value_shape(eq, def.child_by_field_name("value"), false);
     }
     if def.kind() == "declaration" && !declarator.is_some_and(is_function_declarator) {
         let single = def
