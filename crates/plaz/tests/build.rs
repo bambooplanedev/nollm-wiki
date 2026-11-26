@@ -3666,3 +3666,13 @@ fn a_let_rebound_by_a_macro_does_not_see_the_function_outside() {
     );
 }
 
+#[test]
+fn a_c_call_that_never_returns_is_a_node_of_its_own() {
+    let c = "int run(int v) {\n    puts(\"c\");\n    exit(1);\n}\n";
+    let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
+    assert!(
+        e.contains(&"puts(#quot;c#quot;) --> exit(1)".to_string()),
+        "{e:#?}"
+    );
+    assert!(e.contains(&"exit(1) --> exit(1)".to_string()), "{e:#?}");
+}

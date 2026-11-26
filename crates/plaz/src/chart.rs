@@ -211,6 +211,13 @@ impl Chart<'_> {
             let beside = nested(s) || (matches!(s, Step::Finally { .. }) && ends.is_empty());
             let first = self.next;
             let next = !steps[i + 1..].iter().all(nested);
+            // `exit(1);` is a call and the exit that follows it: the call
+            // is no part of a run.
+            if let (Step::Call(c), Some(Step::Exit { text, .. })) = (s, steps.get(i + 1)) {
+                if *text == c.whole {
+                    self.run = None;
+                }
+            }
             ends = self.step(s, ends, next);
             if entry.is_none() && !beside && self.next > first {
                 entry = Some(first);
