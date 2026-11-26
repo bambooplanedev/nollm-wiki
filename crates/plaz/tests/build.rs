@@ -583,6 +583,39 @@ fn a_name_both_defined_and_imported_in_the_file_is_not_certain() {
     assert_eq!(calls_of(&files, "g"), [format!("`helper()` L7 → {to}")]);
 }
 
+#[test]
+fn a_path_on_a_prelude_or_primitive_type_is_outside() {
+    let a = "pub fn f(x: u8) {\n    Vec::<u8>::new();\n    String::new();\n    Box::new(x);\n    Option::Some(x);\n    usize::from(x);\n    char::from_u32(1);\n}\n";
+    let calls = calls_of(&[("src/a.rs", a)], "f");
+    assert_eq!(calls.len(), 6, "{calls:#?}");
+    assert!(
+        calls.iter().all(|c| c.ends_with("→ outside the project")),
+        "{calls:#?}"
+    );
+}
+
+#[test]
+fn a_prelude_type_name_the_project_has_is_not_outside() {
+    // A project type of the name and an alias of the name read as before;
+    // a project trait method, or a trait impl on the type, may be called.
+    let a = "use crate::b::Gear as Vec;\npub trait Tally {\n    fn tally(&self) -> usize { 0 }\n}\nimpl Tally for Option<u8> {}\npub struct Name;\nimpl From<Name> for Box<u8> {\n    fn from(_n: Name) -> Box<u8> { todo!() }\n}\npub fn f(n: Name, o: Option<u8>) {\n    String::new();\n    Vec::new();\n    Option::tally(&o);\n    Box::from(n);\n}\n";
+    let b = "pub struct String;\npub struct Gear;\n";
+    let files = [
+        ("src/lib.rs", "mod a;\nmod b;\n"),
+        ("src/a.rs", a),
+        ("src/b.rs", b),
+    ];
+    assert_eq!(
+        calls_of(&files, "f"),
+        [
+            "`String::new()` L11 → target not visible",
+            "`Vec::new()` L12 → target not visible",
+            "`Option::tally(&o)` L13 → one of: [[map/src/a_rs#tally_tally|Tally::tally]], or outside the project",
+            "`Box::from(n)` L14 → one of: [[map/src/a_rs#box_u8_as_from_name_from|<Box<u8> as From<Name>>::from]], or outside the project",
+        ]
+    );
+}
+
 // P2: a constructor of a project type is no outside call.
 #[test]
 fn a_tuple_struct_or_variant_constructor_is_not_an_outside_call() {
@@ -779,7 +812,7 @@ fn a_path_rooted_at_an_own_crate_name_is_the_projects() {
     assert_eq!(
         calls_in(&WORKSPACE, "map/crates/cli/src/main_rs", "main"),
         [
-            "`Vec::new()` L2 → target not visible",
+            "`Vec::new()` L2 → outside the project",
             "`app_cli::run(Vec::new())` L2 → [[map/crates/cli/src/lib_rs#run|run]]",
             "`other_crate::go()` L3 → target not visible",
             "`cli::go()` L4 → target not visible",
