@@ -3332,3 +3332,18 @@ fn a_cpp_chain_is_drawn_as_its_outermost_call() {
     );
     assert_eq!(common::fn_section(&block, "size_of", "Calls").len(), 3);
 }
+
+#[test]
+fn a_lambda_bound_to_a_declared_type_is_not_linked_but_an_auto_one_is() {
+    let src = "int spare(int x) { return x; }\nint choose(int n) {\n    std::function<int(int)> pick = [](int x) { if (x > 1) { return x; } return 0; };\n    if (n > 3) { pick = spare; }\n    return pick(n);\n}\nint keep(int n) {\n    const auto pick = [](int x) { if (x > 1) { return x; } return 0; };\n    return pick(n);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let page = common::map_page(&vault, "map/src/a_cpp");
+    assert_eq!(
+        common::fn_section(&page, "choose", "Calls")[0],
+        "`pick(n)` L5 → target not visible"
+    );
+    assert_eq!(
+        common::fn_section(&page, "keep", "Calls")[0],
+        "`pick(n)` L9 → the lambda `pick`, drawn in this chart"
+    );
+}

@@ -3606,3 +3606,36 @@ fn a_directory_page_has_each_section_once_when_main_files_sort_between() {
         ]
     );
 }
+
+/// The line of the Calls list of `f` that starts with `call`.
+fn call_line(page: &str, f: &str, call: &str) -> String {
+    let calls = common::fn_section(page, f, "Calls");
+    let line = calls.iter().find(|l| l.starts_with(&format!("`{call}`")));
+    line.unwrap_or_else(|| panic!("{call}: {calls:#?}")).clone()
+}
+
+#[test]
+fn a_let_mut_closure_is_not_linked() {
+    let src = "fn spare(x: u8) -> u8 { x }\npub fn choose(n: u8) -> u8 {\n    let mut pick: fn(u8) -> u8 = |x| { if x > 1 { x } else { 0 } };\n    if n > 3 { pick = spare; }\n    pick(n)\n}\npub fn keep(n: u8) -> u8 {\n    let pick = |x: u8| { if x > 1 { x } else { 0 } };\n    pick(n)\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        call_line(&page, "choose", "pick(n)"),
+        "`pick(n)` L5 → target not visible"
+    );
+    assert_eq!(
+        call_line(&page, "keep", "pick(n)"),
+        "`pick(n)` L9 → the closure `pick`, drawn in this chart"
+    );
+}
+
+#[test]
+fn a_reassigned_python_nested_def_is_not_linked() {
+    let py = "def spare(x):\n    return x\n\ndef choose(n):\n    def helper(x):\n        if x > 1:\n            return x\n        return 0\n    if n > 3:\n        helper = spare\n    return helper(n)\n";
+    let (_d, vault) = common::built(&[("app/m.py", py)]);
+    let page = common::map_page(&vault, "map/app/m_py");
+    assert_eq!(
+        call_line(&page, "choose", "helper(n)"),
+        "`helper(n)` L11 → target not visible"
+    );
+}

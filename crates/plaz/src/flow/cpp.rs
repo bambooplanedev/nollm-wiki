@@ -100,7 +100,14 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
                 .and_then(|p| p.child_by_field_name("declarator"))
                 .filter(|d| d.kind() == "identifier");
             // From the end of the declaration to the end of its block.
-            let decl = init.and_then(|i| i.parent()).filter(|_| name.is_some());
+            // Only `auto` types a lambda: a declared type (`std::function`)
+            // may be assigned another function.
+            let decl = (init.and_then(|i| i.parent()))
+                .filter(|d| {
+                    d.child_by_field_name("type")
+                        .is_some_and(|t| text(t, src) == "auto")
+                })
+                .filter(|_| name.is_some());
             FlowNode::Nested {
                 name: name.map(|d| text(d, src).to_string()),
                 body: n,

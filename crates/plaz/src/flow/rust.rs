@@ -170,10 +170,15 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
             FlowNode::Nested {
                 name: name.map(|p| text(p, src).to_string()),
                 body: n,
-                // From the end of the `let` to the end of its block.
+                // From the end of the `let` to the end of its block; none for
+                // a `let mut`, which may be assigned another function.
                 binds: bound
                     .zip(bound.and_then(|b| b.parent()))
                     .filter(|_| name.is_some())
+                    .filter(|(l, _)| {
+                        !l.children(&mut l.walk())
+                            .any(|c| c.kind() == "mutable_specifier")
+                    })
                     .map(|(l, b)| Binding {
                         scope: l.end_byte()..b.end_byte(),
                         what: "closure",
