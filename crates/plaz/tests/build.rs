@@ -995,6 +995,12 @@ fn mermaid_labels_escape_every_hostile_char() {
         plaz::render::mermaid_label("a<b> && c|d {\"#x\"} `y`\nz"),
         "a#lt;b#gt; #amp;#amp; c#124;d #123;#quot;#35;x#quot;#125; #96;y#96;<br/>z"
     );
+    assert_eq!(
+        plaz::render::mermaid_label("w(s, \"\\n\")"),
+        "w(s, #quot;#92;n#quot;)"
+    );
+    assert_eq!(plaz::render::mermaid_label("a: b"), "a#58; b");
+    assert_eq!(plaz::render::mermaid_label("$$x$$"), "#36;#36;x#36;#36;");
 }
 
 #[test]
@@ -1043,7 +1049,10 @@ fn long_comments_become_a_line_reference() {
     );
     let (_d, vault) = common::built(&[("src/a.rs", &src)]);
     let page = common::map_page(&vault, "map/src/a_rs");
-    assert!(page.contains("comment: 7 lines at src/a.rs:2-8"), "{page}");
+    assert!(
+        page.contains("comment#58; 7 lines at src/a.rs#58;2-8"),
+        "{page}"
+    );
     assert!(page.contains("[/\"a<br/>b\"\\]"), "{page}");
 }
 
@@ -1066,21 +1075,30 @@ fn hostile_owner_names_keep_slug_anchors() {
     let chart = chart.split_once("\n```\n").unwrap().0;
     assert!(!chart.contains('`'), "{chart}");
     assert!(
-        chart.contains("#lt;W#lt;T#gt; as std::fmt::Display#gt;::fmt"),
+        chart.contains("#lt;W#lt;T#gt; as std#58;#58;fmt#58;#58;Display#gt;#58;#58;fmt"),
         "{chart}"
     );
 }
 
 #[test]
 fn huge_charts_are_whole_and_point_to_the_calls_list() {
+    // 600 edges: over what mermaid.js draws, under the character limit.
     let body = (0..600).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
     let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
     let page = common::map_page(&vault, "map/src/a_rs");
     let chart = page.split("```mermaid\n").nth(1).unwrap();
     assert!(chart.split_once("\n```\n").unwrap().0.contains("g599()"));
-    assert!(page.contains("\n```\n\nThis chart exceeds Mermaid's default limits (500 edges, 50,000 characters); the Calls list below is the complete view.\n"));
+    assert!(page.contains("\n```\n\nThis chart exceeds the 500-edge limit of Mermaid.js renderers other than Obsidian's; the Calls list below is the complete view.\n"));
+    // over 50,000 characters no renderer draws it: no block, only the notice
+    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
+    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert!(!page.contains("```mermaid"), "{page}");
+    assert!(page.contains("\nThis chart exceeds Mermaid's 50,000-character limit and is not drawn; the Calls list below is the complete view.\n"));
+    assert!(page.contains("g2999()"), "the Calls list stays");
     let (_d, vault) = common::built(&[("src/a.rs", F_SRC)]);
-    assert!(!common::map_page(&vault, "map/src/a_rs").contains("Mermaid's default limits"));
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert!(page.contains("```mermaid") && !page.contains("This chart exceeds"));
 }
 
 #[test]
@@ -1264,11 +1282,11 @@ fn continue_returns_to_its_loop_and_labels_pick_the_loop() {
     assert_eq!(
         edges,
         [
-            "g --> 'outer: for x in xs",
-            "'outer: for x in xs -loop-> for y in xs",
+            "g --> 'outer#58; for x in xs",
+            "'outer#58; for x in xs -loop-> for y in xs",
             "for y in xs -loop-> y #gt; x",
             "y #gt; x -yes-> continue 'outer",
-            "continue 'outer --> 'outer: for x in xs",
+            "continue 'outer --> 'outer#58; for x in xs",
             "y #gt; x -no-> y == x",
             "y == x -yes-> break 'outer",
             "y == x -no-> *y == 0",
@@ -1278,9 +1296,9 @@ fn continue_returns_to_its_loop_and_labels_pick_the_loop() {
             "*y == 9 -yes-> return",
             "*y == 9 -no-> w()",
             "w() --> for y in xs",
-            "for y in xs -done-> 'outer: for x in xs",
+            "for y in xs -done-> 'outer#58; for x in xs",
             "break 'outer --> z()",
-            "'outer: for x in xs -done-> z()",
+            "'outer#58; for x in xs -done-> z()",
             "z() --> end",
         ]
     );
@@ -1314,10 +1332,10 @@ fn an_exhaustive_match_has_no_way_past_its_last_arm() {
         chart_edges(&common::map_page(&vault, "map/src/a_rs"), "f"),
         [
             "f --> match k",
-            "match k --> Kind::A",
-            "Kind::A -yes-> a()",
-            "Kind::A -no-> Kind::B",
-            "Kind::B -yes-> return 2",
+            "match k --> Kind#58;#58;A",
+            "Kind#58;#58;A -yes-> a()",
+            "Kind#58;#58;A -no-> Kind#58;#58;B",
+            "Kind#58;#58;B -yes-> return 2",
             "a() --> after()",
             "after() --> end",
         ]
@@ -1466,7 +1484,7 @@ fn an_exit_inside_a_closure_or_async_block_is_not_the_functions() {
     let page = common::map_page(&vault, "map/src/a_rs");
     let f = chart_edges(&page, "f");
     assert!(!f.iter().any(|e| e.contains("> panic!")), "{f:#?}");
-    assert!(f.contains(&"q(t).execute(p).await.unwrap_or_else(#124;e#124; panic!(#quot;add #123;t#125;: #123;e#125;#quot;)) --> for t in [#quot;a#quot;, #quot;b#quot;]".to_string()), "{f:#?}");
+    assert!(f.contains(&"q(t).execute(p).await.unwrap_or_else(#124;e#124; panic!(#quot;add #123;t#125;#58; #123;e#125;#quot;)) --> for t in [#quot;a#quot;, #quot;b#quot;]".to_string()), "{f:#?}");
     assert!(
         f.contains(&"for t in [#quot;a#quot;, #quot;b#quot;] -done-> done()".to_string()),
         "{f:#?}"
@@ -1650,22 +1668,22 @@ fn exits_inside_a_closure_stay_inside_it() {
     assert_eq!(
         edges_of(src, "f"),
         [
-            "f --> 'o: for x in xs".to_string(),
+            "f --> 'o#58; for x in xs".to_string(),
             "closure L3 --> y #gt; x".to_string(),
             "y #gt; x -yes-> return false".to_string(),
             "y #gt; x -no-> end".to_string(),
-            format!("'o: for x in xs -loop-> {all}"),
+            format!("'o#58; for x in xs -loop-> {all}"),
             format!("{all} --> ok"),
             "ok -yes-> continue".to_string(),
-            "continue --> 'o: for x in xs".to_string(),
+            "continue --> 'o#58; for x in xs".to_string(),
             "closure L5 --> loop".to_string(),
             "loop -loop-> y".to_string(),
             "y -yes-> break 'o".to_string(),
             "y -no-> t()".to_string(),
             "t() --> loop".to_string(),
             format!("ok -no-> {each}"),
-            format!("{each} --> 'o: for x in xs"),
-            "'o: for x in xs -done-> end".to_string(),
+            format!("{each} --> 'o#58; for x in xs"),
+            "'o#58; for x in xs -done-> end".to_string(),
         ]
     );
     let map =
@@ -1715,7 +1733,7 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
             "loop -exit not drawn-> end",
         ]
     );
-    let spawn = "spawn(async move #123; loop #123; tokio::select! #123; _ = cancel.recv() =#gt; break, #125; #125; #125;)";
+    let spawn = "spawn(async move #123; loop #123; tokio#58;#58;select! #123; _ = cancel.recv() =#gt; break, #125; #125; #125;)";
     assert_eq!(
         edges_of(src, "s"),
         [
@@ -2661,5 +2679,26 @@ fn build_leaves_a_compiled_wiki_alone() {
     assert_eq!((w.written, w.removed, w.left_alone), (1, 0, 0));
     for (path, text) in wiki {
         assert_eq!(std::fs::read_to_string(vault.join(path)).unwrap(), text);
+    }
+}
+
+#[test]
+fn an_empty_comment_draws_no_note() {
+    for (path, src) in [
+        (
+            "src/a.rs",
+            "fn f(x: u8) {\n    //\n    if x > 1 { g(); }\n}\n",
+        ),
+        ("a.py", "def f(x):\n    #\n    if x > 1:\n        g()\n"),
+        (
+            "a.cpp",
+            "void f(int x) {\n    //\n    if (x > 1) { g(); }\n}\n",
+        ),
+    ] {
+        let (_d, vault) = common::built(&[(path, src)]);
+        let id = format!("map/{}", path.replace('.', "_"));
+        let page = common::map_page(&vault, &id);
+        assert!(page.contains("x #gt; 1"), "{path}: {page}");
+        assert!(!page.contains("\"\""), "{path}: {page}");
     }
 }

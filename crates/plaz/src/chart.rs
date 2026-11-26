@@ -20,6 +20,9 @@ pub fn mermaid_label(s: &str) -> String {
             '{' => out.push_str("#123;"),
             '}' => out.push_str("#125;"),
             '`' => out.push_str("#96;"),
+            '\\' => out.push_str("#92;"),
+            ':' => out.push_str("#58;"),
+            '$' => out.push_str("#36;"),
             '\n' => out.push_str("<br/>"),
             '\r' => {}
             c => out.push(c),
@@ -114,6 +117,9 @@ impl Chart<'_> {
         } else {
             c.text.clone()
         };
+        if text.trim().is_empty() {
+            return;
+        }
         let id = self.node(("[/", "\\]"), &text, &[]);
         self.edges += 1;
         self.lines.push(format!("    n{at} -.- n{id}"));
@@ -406,7 +412,8 @@ impl Chart<'_> {
     }
 }
 
-/// The fenced `mermaid` block of `flow`, named `name`, in the file at
+/// The fenced `mermaid` block of `flow` (only a notice when it is over 50,000
+/// characters), named `name`, in the file at
 /// `path`; `href` gives a resolved target's link from this page.
 pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) -> String) -> String {
     let mut c = Chart {
@@ -429,9 +436,12 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
     body.push_str(
         "    classDef oneof stroke-dasharray: 5 5\n    classDef hidden stroke-dasharray: 2 2\n",
     );
+    if body.chars().count() > 50_000 {
+        return "This chart exceeds Mermaid's 50,000-character limit and is not drawn; the Calls list below is the complete view.\n".into();
+    }
     let mut out = format!("```mermaid\n{body}```\n");
-    if c.edges > 500 || body.chars().count() > 50_000 {
-        out.push_str("\nThis chart exceeds Mermaid's default limits (500 edges, 50,000 characters); the Calls list below is the complete view.\n");
+    if c.edges > 500 {
+        out.push_str("\nThis chart exceeds the 500-edge limit of Mermaid.js renderers other than Obsidian's; the Calls list below is the complete view.\n");
     }
     out
 }

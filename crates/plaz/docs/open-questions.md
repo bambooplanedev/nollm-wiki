@@ -148,7 +148,7 @@ State on 2026-11-16. The design is in [design.md](design.md). Rust, Python and C
 - **Python method links read `A::step`,** not `A.step`: the name comes from the shared code layer.
 - **No `# title` heading on a page.** Quartz shows the front-matter title; how Obsidian shows it is open until the renderer research.
 
-- **Mermaid limits.** Mermaid's defaults stop at 500 edges or 50,000 characters. The design says charts are complete; the map emits such a chart whole, followed by a line pointing to the Calls list as the complete view. Needs a check in Quartz and Obsidian with the largest real functions (39 diamonds in one measured function).
+- **Mermaid limits.** Mermaid.js stops at 500 edges or 50,000 characters; Obsidian's renderer draws up to 5,000 edges but also stops at 50,000 characters. A chart over 50,000 characters is not drawn: the map emits only a line pointing to the Calls list as the complete view. A chart over 500 edges but under the character limit is emitted whole, with a line saying the limit applies to Mermaid.js renderers other than Obsidian's. Needs a check in Quartz and Obsidian with the largest real functions (39 diamonds in one measured function).
 - **Clicks in Obsidian.** Mermaid clicks to internal notes probably do not work there; the wikilink list is the fallback. To be checked.
 - **mermaid-cli in CI.** It needs Node; the check is designed as a test run locally only. Decide whether CI gets Node.
 - **Comment cap.** The design picked 6 lines shown whole, then `comment: N lines at path:a-b`. Not measured.
