@@ -33,7 +33,7 @@ No end-to-end flows and no entry points: the map never claims which path a run t
 
 The person builds the path by moving up and down between charts. The map makes no claim it cannot back.
 
-**Index pages** (owner decision, 2026-11-26) are the way in from the top. They re-list, top down, only the links the function sections already state as certain (a single link in **Calls**), and claim nothing of their own: cross-function edges are where a map lies, so no edge is added, guessed or followed through "one of". `map/index.md` lists the top directories with the count of functions each holds and carries the functions of the files at the top of the tree; each top directory has `map/index/<dir>.md`. A page has up to four sections, each grouped by file:
+**Index pages** (owner decision, 2026-11-26) are the way in from the top. They re-list, top down, only the links the function sections already state as certain (a single link in **Calls**), and claim nothing of their own: cross-function edges are where a map lies, so no edge is added, guessed or followed through "one of". `map/index.md` lists the top directories, each with the count of functions its page lists, and carries the trees that start in the files at the top of the tree; each top directory has `map/index/<dir>.md`, holding the trees that start in its files. A page has up to four sections, each grouped by file:
 
 - **Not called by any charted function**: these functions, each with what it certainly calls nested under it, in the order of its Calls list.
 - **Called only by calls that may be another function**: the functions whose only callers are "may call", the same way.

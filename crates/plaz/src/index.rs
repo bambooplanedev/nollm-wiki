@@ -189,13 +189,13 @@ pub fn index(p: &Project, names: &Names) -> Index {
         let id = names.index_page(dir);
         let s = if *count == 1 { "" } else { "s" };
         listed.push_str(&format!(
-            "- [[{id}|{}]] · {count} function{s}\n",
+            "- [[{id}|{}]] · {count} function{s} listed\n",
             link_text(dir)
         ));
+        let under = inline_code(&format!("{dir}/"));
         let text = format!(
-            "{}The functions defined under {}, from the [[{INDEX}|index]]. {INTRO}\n{body}",
+            "{}The trees that start in a file under {under}, from the [[{INDEX}|index]]. A tree follows certain calls into other directories; a function of {under} first reached from another directory is listed on that directory's page. {INTRO}\n{body}",
             head(&format!("Index · {dir}")),
-            inline_code(&format!("{dir}/"))
         );
         pages.push(Page {
             rel_path: format!("{id}.md"),

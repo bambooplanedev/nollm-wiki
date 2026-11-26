@@ -3215,7 +3215,7 @@ fn the_index_lists_every_charted_function_from_the_top_down() {
     let (_d, vault) = common::built(&index_tree());
     assert_eq!(
         common::map_page(&vault, "map/index"),
-        format!("---\ntitle: \"Index\"\ntags: [\"plaz\"]\nkind: map\n---\n{INTRO}\n\n## Directories\n- [[map/index/src|src]] · 15 functions\n")
+        format!("---\ntitle: \"Index\"\ntags: [\"plaz\"]\nkind: map\n---\n{INTRO}\n\n## Directories\n- [[map/index/src|src]] · 15 functions listed\n")
     );
     let m = |a: &str, t: &str| format!("[[map/src/main_rs#{a}|{t}]]");
     let x = |a: &str, t: &str| format!("[[map/src/aux_rs#{a}|{t}]]");
@@ -3225,7 +3225,7 @@ fn the_index_lists_every_charted_function_from_the_top_down() {
         "tags: [\"plaz\"]".into(),
         "kind: map".into(),
         "---".into(),
-        "The functions defined under `src/`, from the [[map/index|index]]. ".to_string() + INTRO,
+        "The trees that start in a file under `src/`, from the [[map/index|index]]. A tree follows certain calls into other directories; a function of `src/` first reached from another directory is listed on that directory's page. ".to_string() + INTRO,
         String::new(),
         "## Not called by any charted function".into(),
         String::new(),
@@ -3330,7 +3330,7 @@ fn the_index_puts_main_first_and_follows_calls_across_files() {
     // The top of the tree is on the index itself, after the directories.
     let index = common::map_page(&vault, "map/index");
     assert!(
-        index.ends_with("\n## Directories\n- [[map/index/app|app]] · 4 functions\n\n## Not called, calling nothing certain\n\n### [[map/cli_py|cli.py]]\n- [[map/cli_py#run|run]]\n"),
+        index.ends_with("\n## Directories\n- [[map/index/app|app]] · 4 functions listed\n\n## Not called, calling nothing certain\n\n### [[map/cli_py|cli.py]]\n- [[map/cli_py#run|run]]\n"),
         "{index}"
     );
 }
@@ -3345,7 +3345,7 @@ fn the_index_takes_its_page_ids_before_any_source_file() {
         "{index}"
     );
     assert!(
-        index.contains("\n- [[map/index/src|src]] · 1 function\n"),
+        index.contains("\n- [[map/index/src|src]] · 1 function listed\n"),
         "{index}"
     );
     assert!(common::map_page(&vault, "map/index_2").contains("\nsource: \"index\"\n"));
