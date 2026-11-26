@@ -289,6 +289,15 @@ fn import_names(imp: &str) -> BTreeSet<String> {
 /// The last segments of the bases a Python class's signature names: `B`
 /// and `Mixin` of `class A(m.B, Mixin, metaclass=M)`.
 pub(crate) fn bases(t: &CodeItem) -> Vec<&str> {
+    let bases = written_bases(t).into_iter();
+    bases
+        .map(|b| b.rsplit('.').next().unwrap_or("").trim())
+        .collect()
+}
+
+/// The bases a Python class's signature names, as written: `m.B` and
+/// `Mixin` of `class A(m.B, Mixin, metaclass=M)`.
+pub(crate) fn written_bases(t: &CodeItem) -> Vec<&str> {
     let Some((_, rest)) = t.signature.split_once(&format!("class {}", t.name)) else {
         return Vec::new();
     };
@@ -299,16 +308,8 @@ pub(crate) fn bases(t: &CodeItem) -> Vec<&str> {
         .map_or(list, |(l, _)| l)
         .split(',')
         .filter(|b| !b.contains('='))
-        .map(|b| {
-            b.split('[')
-                .next()
-                .unwrap_or("")
-                .rsplit('.')
-                .next()
-                .unwrap_or("")
-                .trim()
-        })
-        .filter(|b| !b.is_empty())
+        .map(|b| b.split('[').next().unwrap_or("").trim())
+        .filter(|b| !b.is_empty() && !b.ends_with('.'))
         .collect()
 }
 

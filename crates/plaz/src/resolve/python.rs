@@ -4,7 +4,7 @@
 use super::{binder, rebound, Evidence, Rules};
 use crate::flow::FlowScope;
 use crate::model::{File, MapCall};
-use crate::uses::{bases, defines, python_import, PyRoots, Whose};
+use crate::uses::{bases, defines, python_import, written_bases, PyRoots, Whose};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::index::{owner_key, Family, FnRef};
 use wiki_code::model::{CallVia, CodeItem, CodeItemKind};
@@ -235,17 +235,39 @@ impl<'a> Python<'a> {
             && !self.outside.get(&page).is_some_and(|o| o.contains(name))
     }
 
+    /// The classes the base written `written` surely is in the file of
+    /// `page`: its own of that name, else the ones its project imports
+    /// name. None for a dotted base (`enum.Enum`) or one no definition or
+    /// import of the file names.
+    fn seen_base(&self, page: usize, written: &str) -> Vec<FnRef> {
+        if written.contains('.') || !self.binds_surely(page, written) {
+            return Vec::new();
+        }
+        let name = unaliased(self.pages[page].1, written);
+        let all = self.classes.get(name).map_or(&[][..], Vec::as_slice);
+        let own: Vec<FnRef> = all.iter().copied().filter(|c| c.0 == page).collect();
+        match self.sources(page, name) {
+            _ if !own.is_empty() => own,
+            Some(from) => all
+                .iter()
+                .copied()
+                .filter(|c| from.contains(&c.0))
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
     /// Does calling `class` surely run its `__init__`: its module surely
     /// binds its name to it, no decorator, no `metaclass=`, no `__new__`
-    /// of its own, and only bases of the project (or `object`) that are
-    /// so too?
+    /// of its own, and only bases the module surely sees in the project
+    /// (or `object`) that are so too?
     fn constructs(&self, class: FnRef, depth: usize) -> bool {
         let it = self.item(class);
         let sig = it.signature.trim_start();
         let plain = !sig.starts_with('@') && !sig.contains("metaclass");
         let bases_too = || {
-            bases(it).into_iter().all(|b| {
-                let found = self.classes_named(class.0, b);
+            written_bases(it).into_iter().all(|b| {
+                let found = self.seen_base(class.0, b);
                 b == "object"
                     || (!found.is_empty() && found.iter().all(|&c| self.constructs(c, depth - 1)))
             })

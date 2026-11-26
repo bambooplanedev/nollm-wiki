@@ -2235,6 +2235,21 @@ fn a_python_class_its_module_may_rebind_from_outside_stays_hidden() {
 }
 
 #[test]
+fn a_python_class_with_a_base_the_caller_does_not_see_stays_hidden() {
+    // `enum.Enum` is no project class, whatever project class `Enum` exists;
+    // nor is a base no import or definition of the file names.
+    let a = "import enum\n\nclass Color(enum.Enum):\n    def __init__(self, v):\n        self.v = v\n\nclass Child(Parent):\n    def __init__(self, v):\n        self.v = v\n\ndef make(v):\n    Color(v)\n    Child(v)\n";
+    let b = "class Enum:\n    def __init__(self):\n        pass\n\nclass Parent:\n    def __init__(self, v):\n        pass\n";
+    assert_eq!(
+        calls_in(&[("a.py", a), ("b.py", b)], "map/a_py", "make"),
+        [
+            "`Color(v)` L12 → target not visible",
+            "`Child(v)` L13 → target not visible",
+        ]
+    );
+}
+
+#[test]
 fn a_python_subclass_through_an_aliased_base_import_still_overrides() {
     let a =
         "class X:\n    def run(self):\n        self.step()\n\n    def step(self):\n        pass\n";
