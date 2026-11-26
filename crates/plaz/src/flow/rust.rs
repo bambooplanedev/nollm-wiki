@@ -29,9 +29,8 @@ fn own_initializer(n: Node, name: &str, src: &str) -> bool {
     let mut at = n;
     while let Some(p) = at.parent() {
         match p.kind() {
-            "function_item" => return false,
             // A macro may rebind the name where the call is written.
-            "token_tree" | "macro_invocation" => return false,
+            "function_item" | "token_tree" | "macro_invocation" => return false,
             "let_declaration"
                 if p.child_by_field_name("value") == Some(at)
                     && p.child_by_field_name("pattern")
@@ -283,8 +282,6 @@ fn in_inline_closure(n: Node) -> bool {
         match p.kind() {
             "closure_expression" => return !own_flow(p),
             "function_item" => return false,
-            // A macro may rebind the name where the call is written.
-            "token_tree" | "macro_invocation" => return false,
             "async_block" if own_flow(p) => return false,
             _ => at = p.parent(),
         }
