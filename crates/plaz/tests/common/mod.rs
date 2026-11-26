@@ -60,3 +60,16 @@ pub fn fn_block(page: &str, anchor: &str) -> String {
 pub fn headings(page: &str) -> Vec<&str> {
     page.lines().filter_map(|l| l.strip_prefix("## ")).collect()
 }
+
+/// The lines of the index page `id` under `## {heading}`, up to the next
+/// `## `, blank lines left out.
+pub fn index_section(vault: &Path, id: &str, heading: &str) -> Vec<String> {
+    let page = map_page(vault, id);
+    let h = format!("## {heading}");
+    let lines = page.lines().skip_while(|l| *l != h).skip(1);
+    let lines = lines.take_while(|l| !l.starts_with("## "));
+    lines
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}

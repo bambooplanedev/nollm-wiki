@@ -7,6 +7,7 @@ use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
 use crate::resolve::Resolved;
 use crate::write::Links;
+use std::collections::BTreeMap;
 use wiki_code::index::{owner_key, Family};
 
 pub use crate::chart::mermaid_label;
@@ -63,7 +64,14 @@ pub struct Page {
     pub content: String,
 }
 
-pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
+/// The pages of `r`, each function section with its level in the index
+/// when `levels` has one.
+pub fn render(
+    r: &Resolved,
+    names: &Names,
+    links: &Links,
+    levels: &BTreeMap<FnId, (usize, String)>,
+) -> Vec<Page> {
     let p = r.project();
     p.files
         .iter()
@@ -83,11 +91,15 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     item,
                 };
                 out.push_str(&format!(
-                    "\n## {}\n{} · {}\n\n",
+                    "\n## {}\n{} · {}\n",
                     names.anchor(&me),
                     inline_code(&it.signature),
                     links.code(path, it.start_line, it.end_line)
                 ));
+                if let Some((n, index)) = levels.get(&me) {
+                    out.push_str(&format!("Level {n} in the [[{index}|index]]\n"));
+                }
+                out.push('\n');
                 let Some(flow) = file.flows.get(&item) else {
                     out.push_str(&match file.cpp.declarations.get(&item) {
                         Some(Bodiless::Defaulted) => "Defaulted.\n".to_string(),
@@ -147,7 +159,7 @@ fn locals(flow: &Flow) -> String {
 }
 
 /// `[[page#anchor|Qualified::name]]` of the function `f`.
-fn link(p: &Project, names: &Names, f: &FnId) -> String {
+pub(crate) fn link(p: &Project, names: &Names, f: &FnId) -> String {
     let it = &p.files[&f.path].code.items[f.item];
     format!(
         "[[{}#{}|{}]]",

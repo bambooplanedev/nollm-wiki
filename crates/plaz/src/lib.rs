@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 mod chart;
 pub mod flow;
+mod index;
 pub mod model;
 pub mod names;
 pub mod render;
@@ -46,5 +47,8 @@ pub fn build(source: &Path, vault: &Path) -> Result<Written, Error> {
     let resolved = resolve::resolve(project);
     let names = names::names(&resolved);
     let links = write::Links::load(vault);
-    write::write(vault, &render::render(&resolved, &names, &links))
+    let index = index::index(resolved.project(), &names);
+    let mut pages = render::render(&resolved, &names, &links, &index.levels);
+    pages.extend(index.pages);
+    write::write(vault, &pages)
 }
