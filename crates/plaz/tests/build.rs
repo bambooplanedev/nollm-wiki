@@ -2887,3 +2887,54 @@ fn an_empty_comment_draws_no_note() {
         assert!(!page.contains("\"\""), "{path}: {page}");
     }
 }
+
+/// The line under the signature of `anchor`, if it is a locals line.
+fn locals_of(page: &str, anchor: &str) -> Vec<String> {
+    let block = common::fn_block(page, anchor);
+    block
+        .lines()
+        .skip(2)
+        .take_while(|l| !l.starts_with("**Called from**"))
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn rust_locals_line_lists_body_names_not_parameters_or_unit_patterns() {
+    let src = "fn tally(width: u8, ready: bool) -> u8 {\n    let count = 1;\n    let item: Entry = make();\n    let bag: BTreeMap<u8, u8> = make();\n    let rest = width;\n    match find() {\n        Some(got) => {}\n        None => {}\n        LIMIT => {}\n    }\n    if let Some(hit) = look() {}\n    if let None = look() {}\n    fn deep() { let own = 1; }\n    count\n}\nfn bare(a: u8) { a; }\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        locals_of(&page, "tally"),
+        ["Locals: `bag: BTreeMap<u8, u8>`, `count`, `got`, `hit`, `item: Entry`, `rest`"]
+    );
+    assert_eq!(locals_of(&page, "bare"), Vec::<String>::new());
+}
+
+#[test]
+fn python_locals_line_moves_global_names_to_outside_names() {
+    let src = "def tally(width, ready: bool):\n    global COUNT\n    count = 1\n    item: Entry = make()\n    for rest in width:\n        pass\n    def deep():\n        own = 2\n    COUNT = 3\n\ndef bare(a):\n    return a\n";
+    let (_d, vault) = common::built(&[("a.py", src)]);
+    let page = common::map_page(&vault, "map/a_py");
+    assert_eq!(
+        locals_of(&page, "tally"),
+        [
+            "Locals: `count`, `item: Entry`, `rest`",
+            "Outside names: `COUNT`"
+        ]
+    );
+    assert_eq!(locals_of(&page, "bare"), Vec::<String>::new());
+}
+
+#[test]
+fn asserts_are_counted_as_not_drawn() {
+    let rs = "fn f(a: u8) {\n    assert!(a > 0);\n    assert_eq!(a, 1);\n    debug_assert_ne!(a, 2);\n    std::assert!(a);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", rs)]);
+    let f = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "f");
+    assert!(f.contains(" Not drawn: 4 assert.\n"), "{f}");
+    let py = "def f(a):\n    assert a\n    assert a > 1, 'big'\n";
+    let (_d, vault) = common::built(&[("a.py", py)]);
+    let f = common::fn_block(&common::map_page(&vault, "map/a_py"), "f");
+    assert!(f.contains(" Not drawn: 2 assert.\n"), "{f}");
+}

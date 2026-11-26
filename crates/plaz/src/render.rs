@@ -96,6 +96,7 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
                     });
                     continue;
                 };
+                out.push_str(&locals(flow));
                 out.push_str(&called_from(p, names, &me));
                 let href = |t: &FnId| {
                     format!(
@@ -117,6 +118,32 @@ pub fn render(r: &Resolved, names: &Names, links: &Links) -> Vec<Page> {
             }
         })
         .collect()
+}
+
+/// The names the body binds, sorted by name, typed where the type is
+/// known; parameters (in the signature) and `global`/`nonlocal` names (on
+/// a line of their own) left out. Empty when there are none.
+fn locals(flow: &Flow) -> String {
+    let list = |names: Vec<String>, label: &str| {
+        (!names.is_empty()).then(|| format!("{label}: {}\n", names.join(", ")))
+    };
+    let own = (flow.locals.iter())
+        .filter(|n| !flow.params.contains(*n) && !flow.outside.contains(*n))
+        .map(|n| match flow.types.get(n) {
+            Some(t) => inline_code(&format!("{n}: {t}")),
+            None => inline_code(n),
+        })
+        .collect();
+    let outside = flow.outside.iter().map(|n| inline_code(n)).collect();
+    let lines: String = [list(own, "Locals"), list(outside, "Outside names")]
+        .into_iter()
+        .flatten()
+        .collect();
+    if lines.is_empty() {
+        lines
+    } else {
+        lines + "\n"
+    }
 }
 
 /// `[[page#anchor|Qualified::name]]` of the function `f`.

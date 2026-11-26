@@ -25,9 +25,10 @@ plaz depends on `wiki-code` only: a crate in this workspace, used by path, that 
 
 No end-to-end flows, no entry points. Each function gets a section with:
 
-1. **Called from**: the functions that call it, each linking to its chart, split into "certainly calls" and "may call (if this `get` is this one)".
-2. **Decision flowchart** (UML activity, Mermaid) of the body: every `if` / `else if` / `switch` / `match` arm is a diamond holding the literal condition code and the whole comment attached to it; actions and calls in order; call nodes are clickable where the renderer allows.
-3. **Calls**: the callees as a plain wikilink list (guaranteed navigation in Obsidian and Quartz).
+1. **Locals**, right under the signature: the names the body declares, parameters left out (they are in the signature), sorted by name, each with its type where the code writes one (`item: Entry`). Python `global` and `nonlocal` names go on an `Outside names:` line instead. No line when there are none. A nested function's or closure's names stay with its own sub-chart and are not listed.
+2. **Called from**: the functions that call it, each linking to its chart, split into "certainly calls" and "may call (if this `get` is this one)".
+3. **Decision flowchart** (UML activity, Mermaid) of the body: every `if` / `else if` / `switch` / `match` arm is a diamond holding the literal condition code and the whole comment attached to it; actions and calls in order; call nodes are clickable where the renderer allows.
+4. **Calls**: the callees as a plain wikilink list (guaranteed navigation in Obsidian and Quartz).
 
 The person builds the path by moving up and down between charts. The map makes no claim it cannot back.
 
@@ -46,7 +47,7 @@ The code is deterministic, so an undetermined target is written as what it is: "
 
 The node text is always the literal call (`ask(messages)`); the form only decides the link. When unsure: Hidden.
 
-Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
+Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, Rust `assert!`-family macros and Python `assert` (counted as `assert`, no node), conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
 
 ## What changed in the logic (planned, not built)
 

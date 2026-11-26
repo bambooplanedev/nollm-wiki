@@ -5,7 +5,7 @@
 **plaz**, said plahz (плаз): the loft floor where a bureau draws the airframe's real lines full
 size — the real decisions of each function.
 
-`plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
+`plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, the names its body declares, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
 
 The map is for the person who owns the code, to read the business logic and set tasks from it. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
 

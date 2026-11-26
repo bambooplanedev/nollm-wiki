@@ -3186,3 +3186,22 @@ fn a_bare_call_a_using_declaration_of_an_outside_function_reaches_may_be_outside
         ["swap(a, b) → one of: src/geo.cpp:3, src/geo.h:8"]
     );
 }
+
+#[test]
+fn cpp_locals_line_lists_body_names_not_parameters() {
+    let src = "int tally(int width, Shelf& s) {\n    int count = 1;\n    Shelf spare;\n    try {} catch (Fault& f) {}\n    auto pick = [&](int m) { int deep = 0; };\n    return count;\n}\nint bare(int a) { return a; }\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let page = common::map_page(&vault, "map/src/a_cpp");
+    let line = |a: &str| {
+        common::fn_block(&page, a)
+            .lines()
+            .filter(|l| l.starts_with("Locals: "))
+            .map(String::from)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        line("tally"),
+        ["Locals: `count`, `f: Fault`, `pick`, `spare: Shelf`"]
+    );
+    assert_eq!(line("bare"), Vec::<String>::new());
+}

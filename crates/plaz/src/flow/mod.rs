@@ -83,6 +83,10 @@ pub(crate) struct ArmNode<'a> {
 pub(crate) struct Bindings {
     pub names: BTreeSet<String>,
     pub types: BTreeMap<String, String>,
+    /// See `Flow::params`.
+    pub params: BTreeSet<String>,
+    /// See `Flow::outside`.
+    pub outside: BTreeSet<String>,
     /// See `Flow::rebound`.
     pub rebound: BTreeSet<String>,
     /// See `Flow::local_class`.
@@ -111,9 +115,7 @@ impl Bindings {
                 .filter_map(|(n, t)| Some((n.clone(), t.clone()?)))
                 .collect(),
             names: seen.into_keys().collect(),
-            rebound: BTreeSet::new(),
-            local_class: false,
-            inner: BTreeSet::new(),
+            ..Bindings::default()
         }
     }
 }
@@ -290,6 +292,8 @@ impl<'s> Walker<'s> {
         let mut flow = Flow {
             locals: b.names,
             types: b.types,
+            params: b.params,
+            outside: b.outside,
             rebound: b.rebound,
             local_class: b.local_class,
             inner: b.inner,

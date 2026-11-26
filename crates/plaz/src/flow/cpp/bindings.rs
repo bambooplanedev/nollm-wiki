@@ -18,6 +18,8 @@ use wiki_code::tree_sitter::Node;
 /// only below the body's own statements.
 pub(super) fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds = Vec::new();
+    // The names of `root`'s own parameter list (and captures).
+    let mut own = BTreeSet::new();
     // The indices in `binds` of the bindings below the body's statements.
     let mut nested = BTreeSet::new();
     let body = root.child_by_field_name("body");
@@ -38,6 +40,8 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
                 }
                 if n.kind() == "catch_clause" {
                     nested.extend(from..binds.len());
+                } else if n == root {
+                    own.extend(binds[from..].iter().map(|b| b.0.clone()));
                 }
             }
             "declaration" | "for_range_loop" => {
@@ -100,6 +104,7 @@ pub(super) fn bindings(root: Node, src: &str) -> Bindings {
         around.find(|n| matches!(n.kind(), "field_declaration_list" | "compound_statement"));
     let in_class = scope.is_some_and(|n| n.kind() == "field_declaration_list");
     Bindings {
+        params: own,
         rebound,
         local_class: in_class && around.any(|n| n.kind() == "compound_statement"),
         inner,

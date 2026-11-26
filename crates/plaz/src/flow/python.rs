@@ -79,6 +79,7 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         }
         "conditional_expression" => FlowNode::NotDrawn(NotDrawn::Ternary),
         "boolean_operator" => FlowNode::NotDrawn(NotDrawn::ShortCircuit),
+        "assert_statement" => FlowNode::NotDrawn(NotDrawn::Assert),
         _ => FlowNode::Plain,
     }
 }
@@ -216,6 +217,7 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
 fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds: Vec<(String, Option<String>)> = Vec::new();
     let mut rebound = BTreeSet::new();
+    let (mut params, mut outside) = (BTreeSet::new(), BTreeSet::new());
     let mut stack: Vec<Node> = root.children(&mut root.walk()).collect();
     while let Some(n) = stack.pop() {
         let field = |f: &str| n.child_by_field_name(f);
@@ -249,6 +251,11 @@ fn bindings(root: Node, src: &str) -> Bindings {
                     } else {
                         name
                     };
+                    if let Some(own) = name.filter(|_| n.parent() == Some(root)) {
+                        names(own, src, &mut |b| {
+                            params.insert(b);
+                        });
+                    }
                     bind(name, ty.and_then(|t| type_name(t, src)));
                 }
             }
@@ -269,7 +276,13 @@ fn bindings(root: Node, src: &str) -> Bindings {
             "augmented_assignment" | "for_statement" | "for_in_clause" => bind(field("left"), None),
             "as_pattern" | "except_clause" => bind(field("alias"), None),
             "named_expression" => bind(field("name"), None),
-            "global_statement" | "nonlocal_statement" | "case_pattern" => bind(Some(n), None),
+            "global_statement" | "nonlocal_statement" => {
+                names(n, src, &mut |b| {
+                    outside.insert(b);
+                });
+                bind(Some(n), None);
+            }
+            "case_pattern" => bind(Some(n), None),
             _ => {}
         }
         stack.extend(n.named_children(&mut n.walk()));
@@ -281,7 +294,12 @@ fn bindings(root: Node, src: &str) -> Bindings {
         )
     });
     let joined = Bindings::join(binds);
-    Bindings { rebound, ..joined }
+    Bindings {
+        params,
+        outside,
+        rebound,
+        ..joined
+    }
 }
 
 /// The identifiers a target binds: not an attribute's or a subscript's.
