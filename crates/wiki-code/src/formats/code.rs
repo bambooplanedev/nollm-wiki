@@ -423,6 +423,14 @@ fn split_captures<'a>(
             }
         }
     }
+    // A wrapped C/C++ definition's `@name` is its whole declarator: walk
+    // it to the function's name, and drop the match when it names none.
+    if let (Some(def), Some(d)) = (parts.def, parts.name) {
+        if def.kind() == "function_definition" && d.kind().ends_with("_declarator") {
+            parts.name = super::extract_cpp::defined_name(d);
+            parts.def = parts.name.and(parts.def);
+        }
+    }
     // A C/C++ data member's `@name` is its whole declarator: walk it to the
     // name, and to none for a declarator that is no data member.
     if let (Some(item), Some(d)) = (parts.item, parts.name) {

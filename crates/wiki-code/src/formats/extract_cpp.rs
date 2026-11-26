@@ -82,9 +82,17 @@ pub use pairs::pair_declarations;
 /// written. `code::name_text` cuts either one's name to `operator bool`.
 ///
 /// KNOWINGLY UNCOVERED, each observed against the real grammar:
-///   * declarator nesting beyond ONE wrapper — the wrapper patterns reach
-///     exactly one deep, and `int** f()` is
-///     `(pointer_declarator (pointer_declarator (function_declarator …)))`;
+///   * declarator nesting beyond ONE wrapper on a DECLARATION — the
+///     `field_declaration`/`declaration` wrapper patterns reach exactly one
+///     deep, and `int** f();` is
+///     `(pointer_declarator (pointer_declarator (function_declarator …)))`.
+///     A DEFINITION is walked to any depth instead: its wrapper pattern
+///     captures the whole declarator, and `defined_name` finds the function
+///     through any pointers and references (`char * const **f() {}`,
+///     `int *&f() {}`) and through the function pointer it returns
+///     (`void (*f(int))(void) {}`). A body tells such a definition from a
+///     variable holding a function pointer or a K&R head, which the grammar
+///     reads as `declaration`s and the walk never sees;
 ///   * qualifier nesting beyond two — `a::b::C::m` needs a third alternative;
 ///   * an out-of-line nested class (`class Outer::Inner { … }`), whose
 ///     `class_specifier` names itself with a `qualified_identifier`, not the
@@ -112,14 +120,8 @@ const QUERY: &str = r"
     (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))])) @def
 
 (function_definition declarator: [
-  (pointer_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))
-  (reference_declarator (function_declarator declarator: [
-    (identifier) @name (field_identifier) @name (destructor_name) @name (operator_name) @name (template_function) @name
-    (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name)
-    (qualified_identifier name: (qualified_identifier name: [(identifier) (destructor_name) (operator_name) (template_function)] @name))]))]) @def
+  (pointer_declarator) (reference_declarator)
+  (function_declarator declarator: (parenthesized_declarator))] @name) @def
 (field_declaration declarator: [
   (pointer_declarator (function_declarator declarator: (_) @name))
   (reference_declarator (function_declarator declarator: (_) @name))]) @def
@@ -394,18 +396,12 @@ fn cpp_placement(def: Node, text: &str) -> Placement {
 /// separate exclusion here.
 ///
 /// Two stated gaps, both observed:
-///   * one wrapper level only, and only on a `function_definition`: a
+///   * only on a `function_definition`, through `naming_declarator`: a
 ///     pointer- or reference-returning out-of-line definition
-///     (`Level* OrderBook::top()`) resolves `OrderBook` through its one
-///     `pointer_declarator`/`reference_declarator`, matching the query's
-///     wrapper patterns, while `int** OrderBook::grid()` (two wrappers)
-///     resolves nothing and is not an item. A definition returning a pointer
-///     to a function that returns a pointer (`char *(*get_fn(void))(int)`) is
-///     no longer an item either: its wrapped `function_declarator` names a
-///     `parenthesized_declarator`, which the general `(_)` capture once
-///     extracted as the garbage name `(*get_fn(void))`. The narrowed
-///     patterns also miss a pointer-returning definition qualified three or
-///     more levels deep (`Level* a::b::Book::top()`);
+///     (`int** OrderBook::grid()`) resolves `OrderBook` through any
+///     nesting of wrappers, as `defined_name` names it. The query misses a
+///     pointer-returning definition qualified three or more levels deep
+///     (`Level* a::b::Book::top()`);
 ///   * a template member's qualifier is a `template_type`, so
 ///     `void RingBuffer<T>::push(T)` owns under `RingBuffer<T>` while the
 ///     in-class declaration owns under `RingBuffer`. Rust strips generic
@@ -416,12 +412,10 @@ fn qualified_owner(def: Node, text: &str) -> Option<String> {
     if def.kind() == "function_definition"
         && matches!(
             declarator.kind(),
-            "pointer_declarator" | "reference_declarator"
+            "pointer_declarator" | "reference_declarator" | "function_declarator"
         )
     {
-        declarator = declarator
-            .named_children(&mut declarator.walk())
-            .find(|c| c.kind() == "function_declarator")?;
+        declarator = naming_declarator(declarator)?;
     }
     // A conversion operator's `operator_cast` sits under the qualifier
     // itself, with no `function_declarator` around it.
@@ -534,8 +528,9 @@ pub(crate) fn cpp_shape(def: Node) -> Shape {
 /// `Entity::methods`, which `Wiki::search` scores on.
 ///
 /// Exactly ONE wrapper deep, deliberately: that is the reach of the
-/// wrapper patterns in `QUERY`, so this gate accepts precisely the members
-/// the query captures — `Level** grid()` is uncovered on both sides at once
+/// declaration wrapper patterns in `QUERY` (a `function_definition` is a
+/// function whatever its declarator), so this gate accepts precisely the
+/// members the query captures — `Level** grid();` is uncovered on both sides at once
 /// (see `QUERY`'s KNOWINGLY UNCOVERED list), rather than counted as a method
 /// that no pattern extracts.
 pub(crate) fn is_function_declarator(d: Node) -> bool {
@@ -550,6 +545,49 @@ pub(crate) fn is_function_declarator(d: Node) -> bool {
     // spell both without a field name for the same reason), so scan children.
     d.named_children(&mut d.walk())
         .any(|c| c.kind() == "function_declarator")
+}
+
+/// The function declarator that names the function a definition's
+/// declarator `d` defines, through any nesting of pointer and reference
+/// declarators (`char * const **f()`, `int *&f()`) and of the function
+/// pointer it returns (`void (*f(int))(void)`, whose outer declarator is
+/// that pointer's). `None` when no function is named.
+pub(crate) fn naming_declarator(mut d: Node) -> Option<Node> {
+    loop {
+        d = match d.kind() {
+            "function_declarator" => match d.child_by_field_name("declarator")? {
+                inner if inner.kind() == "parenthesized_declarator" => inner,
+                _ => return Some(d),
+            },
+            "pointer_declarator" | "reference_declarator" | "parenthesized_declarator" => d
+                .named_children(&mut d.walk())
+                .find(|c| c.kind().ends_with("_declarator"))?,
+            _ => return None,
+        };
+    }
+}
+
+/// The name node a wrapped definition's declarator `d` defines, of the
+/// kinds the unwrapped `QUERY` patterns capture: a plain name, or one
+/// qualified at most twice.
+pub(crate) fn defined_name(d: Node) -> Option<Node> {
+    let plain = |n: Node| {
+        matches!(
+            n.kind(),
+            "identifier" | "destructor_name" | "operator_name" | "template_function"
+        )
+    };
+    let named = naming_declarator(d)?.child_by_field_name("declarator")?;
+    if plain(named) || named.kind() == "field_identifier" {
+        return Some(named);
+    }
+    let once = named
+        .child_by_field_name("name")
+        .filter(|_| named.kind() == "qualified_identifier")?;
+    let twice = once
+        .child_by_field_name("name")
+        .filter(|_| once.kind() == "qualified_identifier");
+    twice.or(Some(once)).filter(|n| plain(*n))
 }
 
 /// The name a data member's declarator declares, through any nesting of
