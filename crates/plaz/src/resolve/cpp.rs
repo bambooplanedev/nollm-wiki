@@ -31,6 +31,9 @@ pub(super) struct Cpp<'a> {
     /// The pages with a quoted include that names no project file: a
     /// generated header, or one found through a build include path.
     blind: BTreeSet<usize>,
+    /// Per page: `closures`, with what an angle include of a project
+    /// file's name (`<kit.h>`, found through `-I`) may bring in too.
+    macro_reach: Vec<BTreeSet<usize>>,
     /// The functions by name, a function both trees list once; an
     /// operator's name without spaces (`operator->` of `operator -> ()`).
     by_name: BTreeMap<String, Vec<FnRef>>,
@@ -81,6 +84,7 @@ impl<'a> Cpp<'a> {
             closures: Vec::new(),
             included: BTreeSet::new(),
             blind: BTreeSet::new(),
+            macro_reach: Vec::new(),
             by_name: BTreeMap::new(),
             shared: BTreeMap::new(),
             own: BTreeMap::new(),
@@ -111,40 +115,49 @@ impl<'a> Cpp<'a> {
         };
         // Per page: the pages its includes name.
         let mut includes = vec![Vec::new(); pages.len()];
+        let mut reach = vec![Vec::new(); pages.len()];
         for (page, &(path, file)) in cpp() {
-            let blind;
-            (includes[page], blind) = out.includes(&by_file, path, file);
+            let (blind, angled);
+            (includes[page], angled, blind) = out.includes(&by_file, path, file);
+            reach[page] = includes[page].iter().chain(&angled).copied().collect();
             if blind {
                 out.blind.insert(page);
             }
             out.read_items(page, file);
         }
         out.closures = closures(&includes);
+        out.macro_reach = closures(&reach);
         out.included = out.closures.iter().flatten().copied().collect();
         out.read_classes();
         out
     }
 
-    /// The pages the includes of `file`, at `path`, name, and whether a
-    /// quoted one names none.
+    /// The pages the includes of `file`, at `path`, name; those its angle
+    /// includes the system's would be, `<b.h>`, name; and whether a quoted
+    /// one names none.
     fn includes(
         &self,
         by_file: &BTreeMap<&str, Vec<usize>>,
         path: &str,
         file: &File,
-    ) -> (Vec<usize>, bool) {
-        let (mut pages, mut blind) = (Vec::new(), false);
+    ) -> (Vec<usize>, Vec<usize>, bool) {
+        let (mut pages, mut angled, mut blind) = (Vec::new(), Vec::new(), false);
         for import in &file.code.imports {
-            let Some(inc) = project_include(import) else {
+            let project = project_include(import);
+            let system = import.strip_prefix('<').and_then(|i| i.strip_suffix('>'));
+            let Some(inc) = project.or(system) else {
                 continue;
             };
             let named = by_file.get(inc.rsplit('/').next().unwrap_or(inc));
             let named = named.into_iter().flatten().map(|&p| (p, self.pages[p].0));
             let found = included(&named.collect::<Vec<_>>(), path, inc);
             blind |= found.is_empty() && !import.starts_with('<');
-            pages.extend(found);
+            match project {
+                Some(_) => pages.extend(found),
+                None => angled.extend(found),
+            }
         }
-        (pages, blind)
+        (pages, angled, blind)
     }
 
     /// Reads the items of `file`, at `page`: its types, its functions by
@@ -554,10 +567,11 @@ impl Caller<'_, '_, '_> {
         if pages.any(|&p| cpp.pages[p].1.cpp.variables.contains(name)) {
             return Evidence::Hidden;
         }
-        // A macro of the file or its includes, or of a quoted include the
-        // walk cannot match; in a header, or a file another includes, one
-        // of the includer's too.
-        let mut pages = std::iter::once(&self.page).chain(self.included);
+        // A macro of the file or its includes, an angle include of a
+        // project file's name among them, or of a quoted include the walk
+        // cannot match; in a header, or a file another includes, one of the
+        // includer's too.
+        let mut pages = std::iter::once(&self.page).chain(&cpp.macro_reach[self.page]);
         let defines = |p: usize| {
             cpp.blind.contains(&p) || cpp.pages[p].1.cpp.macros.iter().any(|m| m.0 == name)
         };

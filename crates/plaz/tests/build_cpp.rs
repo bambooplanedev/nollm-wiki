@@ -815,6 +815,9 @@ fn a_macro_hides_a_call_where_a_quoted_include_matches_no_project_file() {
     let gen = "#include \"conf_gen.h\"\nint run(char *buf) { release(buf); return 0; }\n";
     let deep = "#include \"../x/mid.h\"\nint run(char *buf) { release(buf); return 0; }\n";
     let sys = "#include <stdio.h>\n#include <sys/types.h>\n#include \"../x/plain.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    // An angle include of a project file's name, found through a build
+    // include path (`-I x`).
+    let angle = "#include <only.h>\nint run(char *buf) { release(buf); return 0; }\n";
     let files = [
         ("x/only.h", only),
         ("x/mid.h", mid),
@@ -822,16 +825,17 @@ fn a_macro_hides_a_call_where_a_quoted_include_matches_no_project_file() {
         ("src/gen.c", gen),
         ("src/deep.c", deep),
         ("src/sys.c", sys),
+        ("src/angle.c", angle),
     ];
-    for path in ["src/gen.c", "src/deep.c"] {
+    for path in ["src/gen.c", "src/deep.c", "src/angle.c"] {
         assert_eq!(
             cpp_targets(&files, path, "run"),
             ["release(buf) → hidden"],
             "{path}"
         );
     }
-    // Every quoted include matched, none defining it; angle ones are the
-    // system's: an ordinary call.
+    // Every quoted include matched, none defining it; angle ones name no
+    // project file: an ordinary call.
     assert_eq!(
         cpp_targets(&files, "src/sys.c", "run"),
         ["release(buf) → outside"]
