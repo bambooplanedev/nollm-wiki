@@ -18,7 +18,28 @@ pub(crate) const HOOKS: Hooks = Hooks {
             .is_some_and(|p| matches!(p.kind(), "block" | "match_arm"));
         (super::whole_statement(n) || tail) && !in_inline_closure(n)
     },
+    own_initializer,
 };
+
+/// Is `n` inside the initializer of a `let` binding `name` alone, in the
+/// same function? The `let`'s name is not in scope there.
+fn own_initializer(n: Node, name: &str, src: &str) -> bool {
+    let mut at = n;
+    while let Some(p) = at.parent() {
+        match p.kind() {
+            "function_item" => return false,
+            "let_declaration"
+                if p.child_by_field_name("value") == Some(at)
+                    && p.child_by_field_name("pattern")
+                        .is_some_and(|b| b.kind() == "identifier" && text(b, src) == name) =>
+            {
+                return true
+            }
+            _ => at = p,
+        }
+    }
+    false
+}
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];
 const ASSERTS: [&str; 6] = [

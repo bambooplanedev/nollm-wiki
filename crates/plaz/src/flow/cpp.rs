@@ -22,6 +22,8 @@ pub(crate) const HOOKS: Hooks = Hooks {
             && !f.is_some_and(|f| ENDS.contains(&text(f, src)))
             && !in_argument(n)
     },
+    // `int n = n(1);` sees the variable being declared: ill-formed.
+    own_initializer: |_, _, _| false,
 };
 
 /// Is `n` inside an argument list, below its function or lambda?

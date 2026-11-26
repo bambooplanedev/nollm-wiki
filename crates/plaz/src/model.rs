@@ -254,6 +254,8 @@ pub struct Flow {
     pub types: BTreeMap<String, String>,
     /// The names in `locals` that are parameters of the function.
     pub params: BTreeSet<String>,
+    /// The names in `locals` bound more than once.
+    pub twice: BTreeSet<String>,
     /// The names in `locals` declared `global` or `nonlocal` (Python).
     pub outside: BTreeSet<String>,
     /// Names that mean something else here than in the file: the generic
@@ -381,6 +383,11 @@ pub struct MapCall {
     /// statement on the path, kept by the resolve stage only when its
     /// target never returns.
     pub ends: bool,
+    /// The call's bytes in its file.
+    pub bytes: std::ops::Range<usize>,
+    /// The call names a local that is bound only by the `let` whose
+    /// initializer holds the call: the name there is the one outside.
+    pub outer: bool,
 }
 
 /// A handle valid within one build, never written to a page.

@@ -83,6 +83,31 @@ fn a_closure_calling_an_outer_parameter_is_hidden_even_when_a_project_function_s
     );
 }
 
+#[test]
+fn a_let_does_not_see_its_own_name_in_its_initializer() {
+    let src = "pub fn level(n: u8) -> u8 { n }\npub fn grow(v: u8, w: u8) -> u8 { v + w }\npub fn f(node: u8) -> u8 {\n    let level = level(node);\n    let grow = |v| grow(v, 1);\n    grow(level)\n}\npub fn g(level: fn(u8) -> u8) -> u8 {\n    let level = level(2);\n    level\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        common::fn_section(&page, "f", "Calls"),
+        [
+            "`level(node)` L4 → [[map/src/a_rs#level|level]]",
+            "`grow(v, 1)` L5 → [[map/src/a_rs#grow|grow]]",
+            // The closure bound by the `let` above.
+            "`grow(level)` L6 → target not visible",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&page, "level", "Called from"),
+        ["certainly: [[map/src/a_rs#f|f]] L4"]
+    );
+    // A parameter of that name is what the initializer calls.
+    assert_eq!(
+        common::fn_section(&page, "g", "Calls"),
+        ["`level(2)` L9 → target not visible"]
+    );
+}
+
 fn cli_build(src: &Path, vault: &Path) -> assert_cmd::assert::Assert {
     assert_cmd::cargo_bin_cmd!()
         .args(["build", "--source"])

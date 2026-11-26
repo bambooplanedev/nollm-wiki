@@ -85,6 +85,8 @@ pub(crate) struct Bindings {
     pub types: BTreeMap<String, String>,
     /// See `Flow::params`.
     pub params: BTreeSet<String>,
+    /// See `Flow::twice`.
+    pub twice: BTreeSet<String>,
     /// See `Flow::outside`.
     pub outside: BTreeSet<String>,
     /// See `Flow::rebound`.
@@ -100,7 +102,11 @@ impl Bindings {
     /// type only when each of its bindings gives it that same type.
     pub fn join(binds: impl IntoIterator<Item = (String, Option<String>)>) -> Bindings {
         let mut seen: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let mut twice = BTreeSet::new();
         for (name, ty) in binds {
+            if seen.contains_key(&name) {
+                twice.insert(name.clone());
+            }
             seen.entry(name)
                 .and_modify(|t| {
                     if *t != ty {
@@ -115,6 +121,7 @@ impl Bindings {
                 .filter_map(|(n, t)| Some((n.clone(), t.clone()?)))
                 .collect(),
             names: seen.into_keys().collect(),
+            twice,
             ..Bindings::default()
         }
     }
@@ -127,6 +134,9 @@ pub(crate) struct Hooks {
     pub skips_call: fn(&CallSite) -> bool,
     /// Is the call node a whole statement on the path (`MapCall::ends`)?
     pub ends_path: fn(Node, &str) -> bool,
+    /// Is the call node inside the initializer of a binding of the name
+    /// given, which the binding does not reach there (Rust's `let`)?
+    pub own_initializer: fn(Node, &str, &str) -> bool,
 }
 
 /// Is the call node `n` the whole of an expression statement?
@@ -214,6 +224,7 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
             drawn: RefCell::new(BTreeSet::new()),
         };
         let mut flow = w.flow(node);
+        mark_outer(&mut flow, node, source.text(), hooks);
         let hidden = w.groups.len() - w.drawn.borrow().len();
         let early = match file.family {
             Family::Cpp => cpp::before_case(node, source.text()),
@@ -229,6 +240,42 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
         }
         file.flows.insert(i, flow);
     }
+}
+
+/// How many times each name is bound in `flow` and its nested flows (2
+/// for more than once), and the names they declare as items.
+fn bound(flow: &Flow) -> (BTreeMap<&str, usize>, BTreeSet<&str>) {
+    let mut flows = vec![flow];
+    flow.each_step(&mut |s| {
+        if let Step::Nested { flow, .. } = s {
+            flows.push(flow);
+        }
+    });
+    let (mut counts, mut items) = (BTreeMap::new(), BTreeSet::new());
+    for f in flows {
+        for name in &f.locals {
+            *counts.entry(name.as_str()).or_default() += 1 + usize::from(f.twice.contains(name));
+        }
+        items.extend(f.rebound.iter().map(String::as_str));
+    }
+    (counts, items)
+}
+
+/// Sets `MapCall::outer` on each bare call inside the initializer of the
+/// one binding of its name in the function (`Hooks::own_initializer`).
+fn mark_outer(flow: &mut Flow, root: Node, src: &str, hooks: &Hooks) {
+    let (counts, items) = bound(flow);
+    let once: BTreeSet<String> = (counts.into_iter())
+        .filter(|&(n, c)| c == 1 && !items.contains(n))
+        .map(|(n, _)| n.to_string())
+        .collect();
+    flow.each_call_mut(&mut |_, c| {
+        if c.site.via == CallVia::Bare && once.contains(&c.site.name) {
+            c.outer = root
+                .descendant_for_byte_range(c.bytes.start, c.bytes.end)
+                .is_some_and(|n| (hooks.own_initializer)(n, &c.site.name, src));
+        }
+    });
 }
 
 struct Note {
@@ -293,6 +340,7 @@ impl<'s> Walker<'s> {
             locals: b.names,
             types: b.types,
             params: b.params,
+            twice: b.twice,
             outside: b.outside,
             rebound: b.rebound,
             local_class: b.local_class,
@@ -559,6 +607,8 @@ impl<'s> Walker<'s> {
                 callee: callee.map(str::to_string),
                 target: Target::Hidden,
                 ends: (self.hooks.ends_path)(n, text),
+                bytes: c.start_byte..c.end_byte,
+                outer: false,
             }));
         }
     }

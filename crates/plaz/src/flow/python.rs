@@ -12,6 +12,8 @@ pub(crate) const HOOKS: Hooks = Hooks {
     bindings,
     skips_call: |_| false,
     ends_path: |n, src| super::whole_statement(n) && !caught_exit(n, src),
+    // `x = x()` makes `x` local to the whole function: the call fails.
+    own_initializer: |_, _, _| false,
 };
 
 /// Is `n` in the body of a `try` whose handler catches an exit: a bare

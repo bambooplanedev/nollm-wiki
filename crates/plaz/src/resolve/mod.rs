@@ -323,7 +323,9 @@ impl Rules for Rust<'_, '_, '_> {
         let (cx, site) = (self.0, &call.site);
         let rebound = |x: &str| rebound(chain, x);
         match &site.via {
-            CallVia::Bare if binder(chain, &site.name).is_some() || rebound(&site.name) => {
+            CallVia::Bare
+                if !call.outer && (binder(chain, &site.name).is_some() || rebound(&site.name)) =>
+            {
                 Evidence::Hidden
             }
             CallVia::Bare => cx.bare(call),
