@@ -3120,6 +3120,81 @@ fn a_module_file_declared_under_cfg_test_is_test_code() {
     assert_eq!(common::headings(&plain), ["fixture"]);
 }
 
+/// Builds `lib` as `src/lib.rs` beside `src/<stem>.rs` holding a live
+/// `pub fn ping() {}`, plus `extra`, and checks that `ping` keeps its
+/// section and `go`'s call to it, `<stem>::ping()` on line `line`, stays a
+/// certain link.
+fn live_module_stays_charted(lib: &str, stem: &str, line: usize, extra: &[(&str, &str)]) {
+    let path = format!("src/{stem}.rs");
+    let mut files = vec![("src/lib.rs", lib), (path.as_str(), "pub fn ping() {}\n")];
+    files.extend_from_slice(extra);
+    let (_d, vault) = common::built(&files);
+    let page = common::map_page(&vault, &format!("map/src/{stem}_rs"));
+    assert_eq!(common::headings(&page), ["ping"], "{page}");
+    let lib = common::map_page(&vault, "map/src/lib_rs");
+    assert_eq!(
+        common::fn_section(&lib, "go", "Calls"),
+        [format!(
+            "`{stem}::ping()` L{line} → [[map/src/{stem}_rs#ping|ping]]"
+        )]
+    );
+}
+
+#[test]
+fn a_cfg_test_module_inside_an_inline_module_leaves_a_live_namesake_charted() {
+    live_module_stays_charted(
+        "mod probe;\npub mod client {\n    #[cfg(test)]\n    mod probe;\n}\npub fn go() {\n    probe::ping();\n}\n",
+        "probe",
+        7,
+        &[],
+    );
+}
+
+#[test]
+fn a_module_declared_inside_an_inline_test_module_leaves_a_live_namesake_charted() {
+    live_module_stays_charted(
+        "mod m;\npub fn go() {\n    m::ping();\n}\n#[cfg(test)]\nmod tests {\n    mod m;\n}\n",
+        "m",
+        3,
+        &[],
+    );
+}
+
+#[test]
+fn a_cfg_test_module_with_a_path_leaves_the_live_module_charted() {
+    live_module_stays_charted(
+        "#[cfg(not(test))]\nmod clock;\n#[cfg(test)]\n#[path = \"mock_clock.rs\"]\nmod clock;\npub fn go() {\n    clock::ping();\n}\n",
+        "clock",
+        7,
+        &[("src/mock_clock.rs", "pub fn fake() {}\n")],
+    );
+}
+
+#[test]
+fn a_test_module_of_a_crate_root_is_beside_it_and_its_children_are_test_code() {
+    let helper = "fn fixture() {}\n";
+    let (_d, vault) = common::built(&[
+        ("Cargo.toml", "[package]\nname = \"tool\"\n"),
+        ("src/lib.rs", "pub fn keep() {}\n"),
+        (
+            "src/bin/tool.rs",
+            "fn main() {}\n#[cfg(test)]\nmod checks;\n",
+        ),
+        ("src/bin/checks.rs", "mod deep;\nfn fixture() {}\n"),
+        ("src/bin/checks/deep.rs", helper),
+        ("build.rs", "fn main() {}\n#[cfg(test)]\nmod probe;\n"),
+        ("probe.rs", helper),
+    ]);
+    for page in [
+        "map/src/bin/checks_rs",
+        "map/src/bin/checks/deep_rs",
+        "map/probe_rs",
+    ] {
+        let text = common::map_page(&vault, page);
+        assert!(common::headings(&text).is_empty(), "{page}:\n{text}");
+    }
+}
+
 const INDEX_MAIN: &str = "mod aux;\n#[cfg(test)]\nmod tests;\n\nfn main() {\n    prepare();\n    shared();\n}\nfn prepare() {\n    shared();\n    again();\n}\nfn shared() {\n    leaf();\n}\nfn leaf() {}\nfn again() {\n    again();\n}\nfn spare() {}\n";
 const INDEX_AUX: &str = "pub fn begin() {\n    ping();\n}\nfn ping() {\n    pong();\n}\nfn pong() {\n    ping();\n}\nfn lone() {}\nfn ring_a() {\n    ring_b();\n}\nfn ring_b() {\n    ring_a();\n}\npub struct Store;\nimpl Store {\n    pub fn get(&self) {}\n}\npub struct Cache;\nimpl Cache {\n    pub fn get(&self) {}\n}\npub fn fetch(t: &Holder) {\n    t.get();\n}\n";
 const INDEX_TESTS: &str =

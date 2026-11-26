@@ -9,7 +9,8 @@ use cpp::cpp_facts;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use wiki_code::index::Family;
-use wiki_code::model::{CallVia, CodeItemKind};
+use wiki_code::model::CallVia;
+use wiki_code::tree_sitter::Node;
 use wiki_code::walk::walk;
 use wiki_code::{analyze, handles, is_cpp_fragment, pair_declarations, Analyzed};
 
@@ -25,10 +26,14 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
     // read again once every file's macros are known: path, text, the
     // misread words, file as read.
     let mut misread = Vec::new();
+    // Per Rust file, its top-level `mod n;` declarations; the directories
+    // holding a `Cargo.toml`.
+    let (mut mods, mut packages) = (BTreeMap::new(), BTreeSet::new());
     for (path, text) in sources {
         if manifest(&path) {
             let dir = path.trim_end_matches("Cargo.toml").trim_end_matches('/');
             crates.extend(crate_names(&text).into_iter().map(|n| (n, dir.to_string())));
+            packages.insert(dir.to_string());
             continue;
         }
         if twin(&path) {
@@ -42,6 +47,9 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
             continue;
         };
         let file = file(&path, &text, &a);
+        if file.family == Family::Rust {
+            mods.insert(path.clone(), file_mods(&a));
+        }
         let heads = match file.family {
             Family::Cpp => cpp::misread_heads(&a),
             Family::Rust | Family::Python | Family::Go | Family::Shell | Family::Ecma => Vec::new(),
@@ -62,7 +70,7 @@ pub fn project(sources: impl IntoIterator<Item = (String, String)>) -> Project {
         files.insert(path, f);
     }
     drop_pieces(&mut files);
-    test_modules(&mut files);
+    test_modules(&mut files, &mods, &packages);
     pair_declarations(&mut files);
     hidden_jumps(&mut files);
     unreadable.sort();
@@ -162,35 +170,78 @@ fn drop_pieces(files: &mut BTreeMap<String, File>) {
     files.retain(|path, _| !is_cpp_fragment(path) || read.contains(path));
 }
 
-/// Makes test code of each Rust file a `#[cfg(test)] mod n;` declares
-/// (`n.rs` or `n/mod.rs` in the declaring module's directory): its items
-/// are tests, its flows counted in `test_fns` instead.
-fn test_modules(files: &mut BTreeMap<String, File>) {
-    let mut declared = Vec::new();
-    for (path, f) in files.iter().filter(|(_, f)| f.family == Family::Rust) {
-        let (dir, name) = path.rsplit_once('/').unwrap_or(("", path));
-        let base = match name.strip_suffix(".rs") {
-            Some("mod" | "lib" | "main") | None => dir.to_string(),
-            Some(stem) if dir.is_empty() => stem.to_string(),
-            Some(stem) => format!("{dir}/{stem}"),
-        };
-        let at = |p: String| {
-            if base.is_empty() {
-                p
-            } else {
-                format!("{base}/{p}")
+/// The body-less `mod n;` declarations at the top level of a Rust file,
+/// each with whether it is written `#[cfg(test)]` exactly; one with a
+/// `path` attribute names a file elsewhere and is left out.
+fn file_mods(a: &Analyzed) -> Vec<(String, bool)> {
+    let Some(s) = a.sources.last() else {
+        return Vec::new();
+    };
+    let root = s.tree().root_node();
+    let (mut mods, mut attrs) = (Vec::new(), Vec::new());
+    for n in root.named_children(&mut root.walk()) {
+        let text = |n: Node| s.text().get(n.byte_range()).unwrap_or("");
+        if n.kind() == "attribute_item" {
+            attrs.push(text(n).replace(char::is_whitespace, ""));
+            continue;
+        }
+        let name = n.child_by_field_name("name").map(text);
+        if let ("mod_item", Some(name), None) = (n.kind(), name, n.child_by_field_name("body")) {
+            if !attrs.iter().any(|a| a.contains("path=")) {
+                mods.push((name.to_string(), attrs.iter().any(|a| a == "#[cfg(test)]")));
             }
+        }
+        attrs.clear();
+    }
+    mods
+}
+
+/// Makes test code of each Rust file a top-level `#[cfg(test)] mod n;`
+/// declares, unless its file also declares `n` without it, and of each
+/// module such a file declares: their items are tests, their flows
+/// counted in `test_fns` instead. `n.rs` or `n/mod.rs` is beside a `mod.rs`
+/// or a crate root (`lib.rs`, `main.rs`, a file in `bin/`, `examples/` or
+/// `benches/`, a `build.rs` beside a `Cargo.toml`; a declared module is
+/// none), in `x/` for `x.rs`.
+fn test_modules(
+    files: &mut BTreeMap<String, File>,
+    mods: &BTreeMap<String, Vec<(String, bool)>>,
+    packages: &BTreeSet<String>,
+) {
+    let children = |path: &str, name: &str, root: bool| {
+        let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
+        let stem = file.strip_suffix(".rs").unwrap_or(file);
+        let up = dir.rsplit('/').next().unwrap_or("");
+        let beside = stem == "mod"
+            || root
+                && (matches!(stem, "lib" | "main")
+                    || matches!(up, "bin" | "examples" | "benches")
+                    || (stem == "build" && packages.contains(dir)));
+        let base = match (beside, dir) {
+            (true, d) => d.to_string(),
+            (false, "") => stem.to_string(),
+            (false, d) => format!("{d}/{stem}"),
         };
-        for it in (f.code.items.iter()).filter(|it| it.kind == CodeItemKind::Module && it.test) {
-            declared.push(at(format!("{}.rs", it.name)));
-            declared.push(at(format!("{}/mod.rs", it.name)));
+        let base = if base.is_empty() { base } else { base + "/" };
+        [format!("{base}{name}.rs"), format!("{base}{name}/mod.rs")]
+    };
+    let mut todo = Vec::new();
+    for (path, decls) in mods {
+        let live = |n: &String| decls.iter().any(|d| !d.1 && d.0 == *n);
+        for (name, _) in decls.iter().filter(|d| d.1 && !live(&d.0)) {
+            todo.extend(children(path, name, true));
         }
     }
-    for path in declared {
-        if let Some(f) = files.get_mut(&path) {
-            f.test_fns += f.flows.len();
-            f.flows.clear();
-            f.code.items.iter_mut().for_each(|it| it.test = true);
+    let mut done = BTreeSet::new();
+    while let Some(path) = todo.pop() {
+        let Some(f) = files.get_mut(&path).filter(|_| done.insert(path.clone())) else {
+            continue;
+        };
+        f.test_fns += f.flows.len();
+        f.flows.clear();
+        f.code.items.iter_mut().for_each(|it| it.test = true);
+        for (name, _) in mods.get(&path).into_iter().flatten() {
+            todo.extend(children(&path, name, false));
         }
     }
 }
