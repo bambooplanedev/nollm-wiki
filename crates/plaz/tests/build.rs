@@ -2284,6 +2284,22 @@ fn a_python_class_its_module_may_rebind_from_outside_stays_hidden() {
 }
 
 #[test]
+fn a_python_class_imported_through_a_module_that_may_rebind_it_stays_hidden() {
+    // `kit` takes its names from a C module when there is one.
+    let kit = "try:\n    from _ckit import *\nexcept ImportError:\n    from _pykit import *\n";
+    let pykit = "class Base:\n    def __init__(self):\n        pass\n\nclass Thing:\n    def __init__(self, v):\n        pass\n";
+    let user = "from kit import Thing, Base\n\nclass Mine(Base):\n    def __init__(self):\n        pass\n\ndef build(v):\n    Thing(v)\n    Mine()\n";
+    let files = [("kit.py", kit), ("_pykit.py", pykit), ("user.py", user)];
+    assert_eq!(
+        calls_in(&files, "map/user_py", "build"),
+        [
+            "`Thing(v)` L8 → target not visible",
+            "`Mine()` L9 → target not visible",
+        ]
+    );
+}
+
+#[test]
 fn a_python_class_with_a_base_the_caller_does_not_see_stays_hidden() {
     // `enum.Enum` is no project class, whatever project class `Enum` exists;
     // nor is a base no import or definition of the file names.

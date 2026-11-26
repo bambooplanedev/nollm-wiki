@@ -228,11 +228,17 @@ impl<'a> Python<'a> {
     }
 
     /// Is the name `name` surely the file of `page`'s own or imported
-    /// project class: no import from outside binds it and no `import *`
-    /// the map cannot follow may?
+    /// project class: in that file and in each its imports bring the name
+    /// through, no import from outside binds it and no `import *` the map
+    /// cannot follow may?
     fn binds_surely(&self, page: usize, name: &str) -> bool {
-        !self.open_globs.contains(&page)
-            && !self.outside.get(&page).is_some_and(|o| o.contains(name))
+        let unsure = |p: usize| {
+            self.open_globs.contains(&p) || self.outside.get(&p).is_some_and(|o| o.contains(name))
+        };
+        !unsure(page)
+            && !self
+                .sources(page, name)
+                .is_some_and(|f| f.into_iter().any(unsure))
     }
 
     /// The classes the base written `written` surely is in the file of
