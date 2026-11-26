@@ -3302,7 +3302,7 @@ fn a_function_section_names_its_level_in_the_index() {
         let block = common::fn_block(&common::map_page(&vault, page), anchor);
         block
             .lines()
-            .find(|l| l.starts_with("Level: "))
+            .find(|l| l.starts_with("Level "))
             .map(str::to_string)
     };
     for (page, anchor, n) in [
@@ -3316,12 +3316,12 @@ fn a_function_section_names_its_level_in_the_index() {
         ("map/src/aux_rs", "ring_b", None),
         ("map/src/aux_rs", "store_get", None),
     ] {
-        let want = n.map(|n| format!("Level: [[map/index/src|{n}]]"));
+        let want = n.map(|n| format!("Level {n} in the [[map/index/src|index]]"));
         assert_eq!(level(page, anchor), want, "{anchor}");
     }
     let block = common::fn_block(&common::map_page(&vault, "map/src/main_rs"), "prepare");
     assert!(
-        block.starts_with("## prepare\n`fn prepare()` · `src/main.rs:9-12`\nLevel: [[map/index/src|1]]\n\n**Called from**\n"),
+        block.starts_with("## prepare\n`fn prepare()` · `src/main.rs:9-12`\nLevel 1 in the [[map/index/src|index]]\n\n**Called from**\n"),
         "{block}"
     );
 }

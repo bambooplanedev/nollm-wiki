@@ -97,7 +97,7 @@ pub fn render(
                     links.code(path, it.start_line, it.end_line)
                 ));
                 if let Some((n, index)) = levels.get(&me) {
-                    out.push_str(&format!("Level: [[{index}|{n}]]\n"));
+                    out.push_str(&format!("Level {n} in the [[{index}|index]]\n"));
                 }
                 out.push('\n');
                 let Some(flow) = file.flows.get(&item) else {

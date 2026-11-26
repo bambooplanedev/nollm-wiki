@@ -25,7 +25,7 @@ plaz depends on `wiki-code` only: a crate in this workspace, used by path, that 
 
 No end-to-end flows and no entry points: the map never claims which path a run takes through the functions. Each function gets a section with:
 
-1. **Level**, right under the signature, only for a function the index expands under a function no charted function calls: the depth at which it does (0 for that one), linking to that index page.
+1. **Level**, right under the signature, only for a function the index expands under a function no charted function calls: the depth at which it does (0 for that one), as `Level 2 in the index`, "index" linking to that index page.
 2. **Locals**, under the signature and the level line: the names the body declares, parameters left out (they are in the signature), sorted by name, each with its type where the code writes one (`item: Entry`). Python `global` and `nonlocal` names go on an `Outside names:` line instead. No line when there are none. A nested function's or closure's names stay with its own sub-chart and are not listed.
 3. **Called from**: the functions that call it, each linking to its chart, split into "certainly calls" and "may call (if this `get` is this one)".
 4. **Decision flowchart** (UML activity, Mermaid) of the body: every `if` / `else if` / `switch` / `match` arm is a diamond holding the literal condition code and the whole comment attached to it; actions and calls in order; call nodes are clickable where the renderer allows.
