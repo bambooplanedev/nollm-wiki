@@ -12,7 +12,7 @@ fn ent(id: &str) -> Entity {
 }
 
 fn map(ids: &[&str]) -> BTreeMap<String, Entity> {
-    ids.iter().map(|id| (id.to_string(), ent(id))).collect()
+    ids.iter().map(|id| ((*id).to_string(), ent(id))).collect()
 }
 
 fn ent_at(name: &str, path: &str) -> Entity {

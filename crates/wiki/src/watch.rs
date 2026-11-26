@@ -98,11 +98,13 @@ pub fn start(
 ) -> Result<notify::RecommendedWatcher, WikiError> {
     let err = |e: notify::Error| WikiError::Watch(e.to_string());
     let mut watcher = notify::recommended_watcher(on_event).map_err(err)?;
-    let mut batch = watcher.paths_mut();
-    for (path, mode) in paths {
-        batch.add(path, *mode).map_err(err)?;
-    }
-    batch.commit().map_err(err)?;
+    let ops = paths
+        .iter()
+        .map(|(path, mode)| {
+            notify::PathOp::Watch(path.to_path_buf(), notify::WatchPathConfig::new(*mode))
+        })
+        .collect::<Vec<_>>();
+    watcher.update_paths(ops).map_err(|e| err(e.source))?;
     Ok(watcher)
 }
 

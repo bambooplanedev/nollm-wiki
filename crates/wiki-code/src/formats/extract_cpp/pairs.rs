@@ -223,7 +223,7 @@ mod tests {
     fn twins_after(files: &[(&str, &str)]) -> Vec<String> {
         let mut parsed: BTreeMap<String, CodeFile> = files
             .iter()
-            .map(|(p, s)| (p.to_string(), crate::extract(p, s)))
+            .map(|(p, s)| ((*p).to_string(), crate::extract(p, s)))
             .collect();
         pair_declarations(&mut parsed);
         let all: Vec<(String, &CodeItem)> = (parsed.iter())

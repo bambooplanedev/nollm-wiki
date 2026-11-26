@@ -733,7 +733,11 @@ fn counted(
     path: &str,
     name: &str,
 ) -> (BTreeMap<NotDrawn, usize>, Vec<String>) {
-    let p = crate::source::project(files.iter().map(|(p, t)| (p.to_string(), t.to_string())));
+    let p = crate::source::project(
+        files
+            .iter()
+            .map(|(p, t)| ((*p).to_string(), (*t).to_string())),
+    );
     let f = &p.files[path];
     let i = f.code.items.iter().position(|it| it.name == name).unwrap();
     let mut calls = Vec::new();

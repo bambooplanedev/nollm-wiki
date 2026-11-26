@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/nollm-wiki)](https://github.com/bambooplanedev/nollm-wiki/releases)
-[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.91+](https://img.shields.io/badge/rust-1.91%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 nollm-wiki turns a project into a map an agent can search — where each function lives, what calls
@@ -155,7 +155,7 @@ tree, extracts functions and types with tree-sitter, and indexes calls and impor
 
 ## Building from source
 
-Building needs Rust 1.90 or later; the tests also need `git`, `jq` and a
+Building needs Rust 1.91 or later; the tests also need `git`, `jq` and a
 non-root user.
 
     git clone https://github.com/bambooplanedev/nollm-wiki

@@ -31,7 +31,7 @@ pub fn release(dir: &Path, version: &str, modules: &[(&str, &[u8])]) -> String {
         sums.push_str(&format!("{sum}  {file}\n"));
         let archives: serde_json::Map<String, Value> = TARGETS
             .iter()
-            .map(|t| (t.to_string(), json!({ "file": file, "sha256": sum })))
+            .map(|t| ((*t).to_string(), json!({ "file": file, "sha256": sum })))
             .collect();
         Value::Object(archives)
     };
