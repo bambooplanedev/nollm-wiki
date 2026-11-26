@@ -157,7 +157,11 @@ mod tests {
     use super::*;
 
     fn names_of(files: &[(&str, &str)]) -> Names {
-        let p = crate::source::project(files.iter().map(|(p, t)| (p.to_string(), t.to_string())));
+        let p = crate::source::project(
+            files
+                .iter()
+                .map(|(p, t)| ((*p).to_string(), (*t).to_string())),
+        );
         names(&crate::resolve::resolve(p))
     }
 

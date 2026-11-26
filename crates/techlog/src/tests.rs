@@ -136,7 +136,7 @@ fn resolve_a_missing_folder_through_its_canonical_parent() {
 fn env_of(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
     let m: HashMap<String, String> = pairs
         .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
         .collect();
     move |k| m.get(k).cloned()
 }

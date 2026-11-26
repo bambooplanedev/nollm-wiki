@@ -388,7 +388,9 @@ fn a_call_of_a_jumping_macro_from_another_file_is_on_the_coverage_line() {
 /// or `hidden`.
 fn cpp_targets(files: &[(&str, &str)], path: &str, name: &str) -> Vec<String> {
     use plaz::model::Target;
-    let sources = files.iter().map(|(p, t)| (p.to_string(), t.to_string()));
+    let sources = files
+        .iter()
+        .map(|(p, t)| ((*p).to_string(), (*t).to_string()));
     let resolved = plaz::resolve::resolve(plaz::source::project(sources));
     let p = resolved.project();
     let at = |id: &plaz::model::FnId| {

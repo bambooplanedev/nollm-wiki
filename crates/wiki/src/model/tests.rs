@@ -32,16 +32,16 @@ fn origin_trust_scores() {
         edited,
         mine,
     };
-    assert_eq!(Origin::Local.trust(), 1.0);
-    assert_eq!(repo(false, true).trust(), 0.8);
-    assert_eq!(repo(true, false).trust(), 0.8);
-    assert_eq!(repo(false, false).trust(), 0.5);
+    assert!((Origin::Local.trust() - 1.0).abs() < 1e-9);
+    assert!((repo(false, true).trust() - 0.8).abs() < 1e-9);
+    assert!((repo(true, false).trust() - 0.8).abs() < 1e-9);
+    assert!((repo(false, false).trust() - 0.5).abs() < 1e-9);
     let anonymous = Origin::Repo {
         author: None,
         edited: false,
         mine: false,
     };
-    assert_eq!(anonymous.trust(), 0.5);
+    assert!((anonymous.trust() - 0.5).abs() < 1e-9);
 }
 
 #[test]

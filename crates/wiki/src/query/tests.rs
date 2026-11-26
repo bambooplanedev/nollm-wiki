@@ -45,28 +45,21 @@ fn stem_is_snowball_chosen_by_script_per_part() {
 fn field_tier_puts_exact_and_prefix_above_a_shared_stem() {
     let w = |s: &str| super::Field::new(s);
     // Exact and prefix hits score the full field weight.
-    assert_eq!(Wiki::field_tier(&w("provisioning"), "provisioning"), 1.0);
-    assert_eq!(Wiki::field_tier(&w("provisioning"), "provision"), 1.0);
+    assert!((Wiki::field_tier(&w("provisioning"), "provisioning") - 1.0).abs() < 1e-9);
+    assert!((Wiki::field_tier(&w("provisioning"), "provision") - 1.0).abs() < 1e-9);
     // A word form that only shares the stem scores the stem tier.
-    assert_eq!(
-        Wiki::field_tier(&w("provision"), "provisioning"),
-        Wiki::STEM_TIER
-    );
-    assert_eq!(
-        Wiki::field_tier(&w("сторінка"), "сторінок"),
-        Wiki::STEM_TIER
-    );
+    assert!((Wiki::field_tier(&w("provision"), "provisioning") - Wiki::STEM_TIER).abs() < 1e-9);
+    assert!((Wiki::field_tier(&w("сторінка"), "сторінок") - Wiki::STEM_TIER).abs() < 1e-9);
     // Every part must connect; a shared prefix alone is still not a hit.
-    assert_eq!(Wiki::field_tier(&w("rewrite"), "write"), 0.0);
-    assert_eq!(Wiki::field_tier(&w("soak"), "brew_provisioning"), 0.0);
+    assert!((Wiki::field_tier(&w("rewrite"), "write") - 0.0).abs() < 1e-9);
+    assert!((Wiki::field_tier(&w("soak"), "brew_provisioning") - 0.0).abs() < 1e-9);
 }
 
 #[test]
 fn query_words_stay_out_of_the_corpus_stem_memo() {
     let field = super::Field::new("provision");
-    assert_eq!(
-        Wiki::field_tier(&field, "quokkaprovisioning"),
-        0.0,
+    assert!(
+        Wiki::field_tier(&field, "quokkaprovisioning").abs() < 1e-9,
         "no hit"
     );
     assert!(CORPUS_STEMS.read().unwrap().contains_key("provision"));
