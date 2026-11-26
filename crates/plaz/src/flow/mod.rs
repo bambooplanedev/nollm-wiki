@@ -8,6 +8,7 @@ mod rust;
 
 pub use calls::FlowScope;
 
+pub(crate) use cpp::noreturn_word;
 pub(crate) use cpp::{fields as cpp_fields, macros as cpp_macros, module_code as cpp_module_code};
 pub(crate) use python::{module_code, module_imports};
 
@@ -122,6 +123,14 @@ pub(crate) struct Hooks {
     pub bindings: fn(Node, &str) -> Bindings,
     /// A call site that is no call to chart (a C++ cast).
     pub skips_call: fn(&CallSite) -> bool,
+    /// Is the call node a whole statement on the path (`MapCall::ends`)?
+    pub ends_path: fn(Node, &str) -> bool,
+}
+
+/// Is the call node `n` the whole of an expression statement?
+fn whole_statement(n: Node) -> bool {
+    n.parent()
+        .is_some_and(|p| p.kind() == "expression_statement" && p.named_child_count() == 1)
 }
 
 pub(crate) fn hooks(family: Family) -> Option<&'static Hooks> {
@@ -545,6 +554,7 @@ impl<'s> Walker<'s> {
                 site: c.site,
                 callee: callee.map(str::to_string),
                 target: Target::Hidden,
+                ends: (self.hooks.ends_path)(n, text),
             }));
         }
     }

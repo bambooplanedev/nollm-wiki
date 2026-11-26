@@ -4,7 +4,7 @@
 mod cpp;
 mod python;
 
-use crate::flow::FlowScope;
+use crate::flow::{noreturn_word, FlowScope};
 use crate::model::{File, FnId, MapCall, Project, Target};
 use crate::uses::{defines, in_scope, in_trait, is_trait, own_crate, standard, InScope};
 use cpp::Cpp;
@@ -106,6 +106,7 @@ pub fn resolve(mut project: Project) -> Resolved {
             };
             definitions.insert(id((p, item)), defs.into_iter().map(id).collect());
         }
+        let never = never_returning(&project.files, &definitions);
         for f in project.files.values() {
             for it in f
                 .code
@@ -163,6 +164,11 @@ pub fn resolve(mut project: Project) -> Resolved {
                     };
                     flow.each_call_mut(&mut |chain, call| {
                         call.target = from_evidence(rules.evidence(chain, call));
+                        call.ends &= match &call.target {
+                            Target::Resolved(id) => never.contains(id),
+                            Target::Outside => library_exit(file, &in_scope, chain, call),
+                            Target::OneOf { .. } | Target::Hidden => false,
+                        };
                     });
                 }
                 (path.clone(), flows)
@@ -173,6 +179,100 @@ pub fn resolve(mut project: Project) -> Resolved {
         project.files.get_mut(&path).expect("own key").flows = flows;
     }
     Resolved(project, definitions)
+}
+
+/// The project functions that never return: a C/C++ one whose signature
+/// holds a `noreturn` word or a project macro with one (a declaration's
+/// passed on to its one definition), and a Rust one returning `!`.
+fn never_returning(
+    files: &BTreeMap<String, File>,
+    definitions: &BTreeMap<FnId, Vec<FnId>>,
+) -> BTreeSet<FnId> {
+    let macros: BTreeSet<&str> = (files.values().flat_map(|f| &f.cpp.macros))
+        .filter(|m| m.2)
+        .map(|m| m.0.as_str())
+        .collect();
+    let mut out = BTreeSet::new();
+    for (path, f) in files {
+        for (item, it) in f.code.items.iter().enumerate() {
+            let sig = it.signature.as_str();
+            let never = match f.family {
+                // Outside the parameters: a parameter may never return.
+                Family::Cpp => (unparametered(sig, &it.name)
+                    .split(|c: char| !(c.is_alphanumeric() || c == '_')))
+                .any(|w| noreturn_word(w) || macros.contains(w)),
+                Family::Rust => sig.rsplit_once("->").is_some_and(|(_, r)| {
+                    let r = r.trim();
+                    r == "!" || r.starts_with("! ")
+                }),
+                Family::Python | Family::Go | Family::Shell | Family::Ecma => false,
+            };
+            if never && matches!(it.kind, CodeItemKind::Fn | CodeItemKind::Method) {
+                out.insert(FnId {
+                    path: path.clone(),
+                    item,
+                });
+            }
+        }
+    }
+    for (decl, defs) in definitions {
+        if let [def] = defs.as_slice() {
+            if out.contains(decl) {
+                out.insert(def.clone());
+            }
+        }
+    }
+    out
+}
+
+/// The signature `sig` of the function `name` with its parameter list
+/// blanked; empty when no `name(` shows it.
+fn unparametered(sig: &str, name: &str) -> String {
+    let mut at = sig.match_indices(name).map(|(i, _)| i + name.len());
+    let Some(open) = at.find_map(|i| {
+        let rest = &sig[i..];
+        rest.trim_start()
+            .starts_with('(')
+            .then(|| i + rest.len() - rest.trim_start().len())
+    }) else {
+        return String::new();
+    };
+    let mut depth = 0usize;
+    for (i, c) in sig[open..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' if depth == 1 => return format!("{} {}", &sig[..open], &sig[open + i + 1..]),
+            ')' => depth -= 1,
+            _ => {}
+        }
+    }
+    String::new()
+}
+
+/// Is `call`, which reads outside the project, a standard library exit
+/// of a name nothing in the file shadows: Python's `sys.exit`, `os._exit`
+/// and the builtins `exit` and `quit`; Rust's `std::process::exit`, or
+/// `process::exit` after `use std::process`?
+fn library_exit(file: &File, names: &InScope, chain: &[FlowScope], call: &MapCall) -> bool {
+    let site = &call.site;
+    let free = |x: &str| binder(chain, x).is_none() && !rebound(chain, x) && !defines(file, x);
+    let std = |x: &str| names.external.get(x) == Some(&true) && free(x);
+    match (file.family, &site.via, site.name.as_str()) {
+        (Family::Python, CallVia::Member(Some(m)), name) => {
+            matches!((m.as_str(), name), ("sys", "exit") | ("os", "_exit")) && std(m)
+        }
+        (Family::Python, CallVia::Bare, name @ ("exit" | "quit")) => {
+            !names.imported.contains(name) && free(name)
+        }
+        (Family::Rust, CallVia::Path(q), "exit") if q == "process" => {
+            match call.callee.as_deref() {
+                Some("std::process::exit") => true,
+                Some("process::exit") => std("process"),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
 }
 
 /// One language family's call rules.
@@ -401,10 +501,34 @@ impl<'a> Caller<'_, 'a> {
             self.in_crate(root, found)
         // An alias of a project module or type: `q` is what it names.
         } else if self.project_root(root, root == q) || self.names.aliases.contains(root) {
-            self.of_type(call, q, root == q && !self.sure(q))
+            match self.of_type(call, q, root == q && !self.sure(q)) {
+                // `Vec::new()`: a prelude or primitive type, as a value of it.
+                Evidence::Hidden if root == q && self.prelude(root) => self.external(false, {
+                    let all = self.scope.methods_anywhere(site).into_iter();
+                    all.filter(|&c| self.by_trait(c)).collect()
+                }),
+                found @ (Evidence::Hidden | Evidence::Outside | Evidence::Found { .. }) => found,
+            }
         } else {
             Evidence::Hidden
         }
+    }
+
+    /// Is `name` a Rust prelude type or a primitive one that no project
+    /// type, module, import or item of the file is named?
+    fn prelude(&self, name: &str) -> bool {
+        const PRELUDE: [&str; 20] = [
+            "Vec", "String", "Box", "Option", "Result", "u8", "u16", "u32", "u64", "u128", "usize",
+            "i8", "i16", "i32", "i64", "i128", "isize", "f32", "f64", "char",
+        ];
+        (PRELUDE.contains(&name) || matches!(name, "bool" | "str"))
+            && self.file.family == Family::Rust
+            && !self.index.is_type(name)
+            && !self.index.is_module(name)
+            && !self.names.imported.contains(name)
+            && !self.names.aliases.contains(name)
+            && !defines(self.file, name)
+            && !own_crate(self.file, name, self.crates)
     }
 
     /// Is `name` a `use … as` alias that a project type is also called?

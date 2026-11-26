@@ -518,8 +518,9 @@ impl Caller<'_, '_, '_> {
 
     /// `or`, a bare call of `name`, unless it reads outside the project:
     /// then any project function of that name misread as a method, or
-    /// something outside; with none, not visible when `name` is a project
-    /// macro or names a project type, which the call constructs. Not when no class of that name
+    /// something outside; with none, not visible when `name` is a macro
+    /// the caller's file sees or names a project type, which the call
+    /// constructs. Not when no class of that name
     /// is in reach and every project alias of it in reach names a type
     /// shown to be from outside: of `std`, or qualified by no project
     /// namespace or type.
@@ -539,6 +540,12 @@ impl Caller<'_, '_, '_> {
         if pages.any(|&p| cpp.pages[p].1.cpp.variables.contains(name)) {
             return Evidence::Hidden;
         }
+        // A macro of the file or its includes; in a header, or a file
+        // another includes, one of the includer's too.
+        let mut pages = std::iter::once(&self.page).chain(self.included);
+        let defines = |p: usize| cpp.pages[p].1.cpp.macros.iter().any(|m| m.0 == name);
+        let macro_seen =
+            cpp.macros.contains(name) && (cpp.shared(self.page) || pages.any(|&p| defines(p)));
         // A function whose name a macro before its return type misread as
         // a method's: any of those, or something outside.
         let named = cpp.by_name.get(name).into_iter().flatten();
@@ -557,7 +564,7 @@ impl Caller<'_, '_, '_> {
         };
         let class = !cpp.namesakes(name, self.sight()).is_empty();
         let foreign = !class && !aliased.is_empty() && aliased.iter().all(|t| outside(t));
-        let project = cpp.macros.contains(name) || cpp.types.contains(name) || !aliased.is_empty();
+        let project = macro_seen || cpp.types.contains(name) || !aliased.is_empty();
         if !foreign && project {
             Evidence::Hidden
         } else {

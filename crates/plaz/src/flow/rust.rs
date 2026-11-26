@@ -10,6 +10,14 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings,
     skips_call: |_| false,
+    // A statement, a block's tail or a match arm's value, in no closure
+    // drawn in line.
+    ends_path: |n, _| {
+        let tail = n
+            .parent()
+            .is_some_and(|p| matches!(p.kind(), "block" | "match_arm"));
+        (super::whole_statement(n) || tail) && !in_inline_closure(n)
+    },
 };
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];

@@ -13,6 +13,11 @@ pub(crate) const HOOKS: Hooks = Hooks {
     flow_node,
     bindings: bindings::bindings,
     skips_call: |s: &CallSite| s.via == CallVia::Bare && CASTS.contains(&s.name.as_str()),
+    // `ENDS` are exits already.
+    ends_path: |n, src| {
+        let f = n.child_by_field_name("function");
+        super::whole_statement(n) && !f.is_some_and(|f| ENDS.contains(&text(f, src)))
+    },
 };
 
 /// Casts the grammar reads as calls of a template function.
@@ -477,10 +482,10 @@ fn initializes_with_call(n: Node, src: &str) -> bool {
 }
 
 /// Every `#define` name of the file in either tree, once, sorted, and
-/// whether a body of it holds a jump keyword as a token outside comments
-/// and string literals.
-pub(crate) fn macros(a: &Analyzed) -> Vec<(String, bool)> {
-    let mut out: BTreeMap<String, bool> = BTreeMap::new();
+/// whether a body of it holds a jump keyword, and whether one holds a
+/// `noreturn` word, as a token outside comments and string literals.
+pub(crate) fn macros(a: &Analyzed) -> Vec<(String, bool, bool)> {
+    let mut out: BTreeMap<String, (bool, bool)> = BTreeMap::new();
     for s in &a.sources {
         let mut stack = vec![s.tree().root_node()];
         while let Some(n) = stack.pop() {
@@ -488,17 +493,27 @@ pub(crate) fn macros(a: &Analyzed) -> Vec<(String, bool)> {
             if let Some(name) = n.child_by_field_name("name").filter(|_| define) {
                 let head = n.child_by_field_name("parameters").unwrap_or(name);
                 let body = &s.text()[head.end_byte()..n.end_byte()];
-                *out.entry(text(name, s.text()).to_string()).or_default() |= jumps(body);
+                let code = code(body);
+                let words = || code.split(|c: char| !(c.is_alphanumeric() || c == '_'));
+                let seen = out.entry(text(name, s.text()).to_string()).or_default();
+                seen.0 |= words()
+                    .any(|w| matches!(w, "return" | "goto" | "break" | "continue" | "throw"));
+                seen.1 |= words().any(noreturn_word);
             }
             stack.extend(n.named_children(&mut n.walk()));
         }
     }
-    out.into_iter().collect()
+    out.into_iter().map(|(m, (j, n))| (m, j, n)).collect()
 }
 
-/// Whether a macro body holds `return`, `goto`, `break`, `continue` or
-/// `throw` as a token outside comments, string and character literals.
-fn jumps(body: &str) -> bool {
+/// A word that says a function never returns: of `[[noreturn]]`,
+/// `_Noreturn`, `__attribute__((noreturn))` or `__declspec(noreturn)`.
+pub(crate) fn noreturn_word(w: &str) -> bool {
+    matches!(w, "noreturn" | "_Noreturn" | "__noreturn__")
+}
+
+/// A macro body with its comments, string and character literals blanked.
+fn code(body: &str) -> String {
     let mut code = String::new();
     let mut rest = body;
     while let Some(c) = rest.chars().next() {
@@ -531,8 +546,7 @@ fn jumps(body: &str) -> bool {
         }
         code.push(' ');
     }
-    code.split(|c: char| !(c.is_alphanumeric() || c == '_'))
-        .any(|w| matches!(w, "return" | "goto" | "break" | "continue" | "throw"))
+    code
 }
 
 mod bindings;

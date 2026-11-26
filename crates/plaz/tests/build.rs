@@ -583,6 +583,39 @@ fn a_name_both_defined_and_imported_in_the_file_is_not_certain() {
     assert_eq!(calls_of(&files, "g"), [format!("`helper()` L7 → {to}")]);
 }
 
+#[test]
+fn a_path_on_a_prelude_or_primitive_type_is_outside() {
+    let a = "pub fn f(x: u8) {\n    Vec::<u8>::new();\n    String::new();\n    Box::new(x);\n    Option::Some(x);\n    usize::from(x);\n    char::from_u32(1);\n}\n";
+    let calls = calls_of(&[("src/a.rs", a)], "f");
+    assert_eq!(calls.len(), 6, "{calls:#?}");
+    assert!(
+        calls.iter().all(|c| c.ends_with("→ outside the project")),
+        "{calls:#?}"
+    );
+}
+
+#[test]
+fn a_prelude_type_name_the_project_has_is_not_outside() {
+    // A project type of the name and an alias of the name read as before;
+    // a project trait method, or a trait impl on the type, may be called.
+    let a = "use crate::b::Gear as Vec;\npub trait Tally {\n    fn tally(&self) -> usize { 0 }\n}\nimpl Tally for Option<u8> {}\npub struct Name;\nimpl From<Name> for Box<u8> {\n    fn from(_n: Name) -> Box<u8> { todo!() }\n}\npub fn f(n: Name, o: Option<u8>) {\n    String::new();\n    Vec::new();\n    Option::tally(&o);\n    Box::from(n);\n}\n";
+    let b = "pub struct String;\npub struct Gear;\n";
+    let files = [
+        ("src/lib.rs", "mod a;\nmod b;\n"),
+        ("src/a.rs", a),
+        ("src/b.rs", b),
+    ];
+    assert_eq!(
+        calls_of(&files, "f"),
+        [
+            "`String::new()` L11 → target not visible",
+            "`Vec::new()` L12 → target not visible",
+            "`Option::tally(&o)` L13 → one of: [[map/src/a_rs#tally_tally|Tally::tally]], or outside the project",
+            "`Box::from(n)` L14 → one of: [[map/src/a_rs#box_u8_as_from_name_from|<Box<u8> as From<Name>>::from]], or outside the project",
+        ]
+    );
+}
+
 // P2: a constructor of a project type is no outside call.
 #[test]
 fn a_tuple_struct_or_variant_constructor_is_not_an_outside_call() {
@@ -779,7 +812,7 @@ fn a_path_rooted_at_an_own_crate_name_is_the_projects() {
     assert_eq!(
         calls_in(&WORKSPACE, "map/crates/cli/src/main_rs", "main"),
         [
-            "`Vec::new()` L2 → target not visible",
+            "`Vec::new()` L2 → outside the project",
             "`app_cli::run(Vec::new())` L2 → [[map/crates/cli/src/lib_rs#run|run]]",
             "`other_crate::go()` L3 → target not visible",
             "`cli::go()` L4 → target not visible",
@@ -1506,6 +1539,106 @@ fn an_exit_inside_a_closure_or_async_block_is_not_the_functions() {
     );
 }
 
+/// The edges of `anchor`'s chart on the page of `path`, built from `files`.
+fn edges_in(files: &[(&str, &str)], path: &str, anchor: &str) -> Vec<String> {
+    let (_d, vault) = common::built(files);
+    let id = format!("map/{}", path.replace('.', "_"));
+    chart_edges(&common::map_page(&vault, &id), anchor)
+}
+
+#[test]
+fn a_certain_call_of_a_c_function_that_never_returns_ends_the_path() {
+    let h = "#define NORETURN __attribute__((noreturn))\nNORETURN void die(const char *m);\n[[noreturn]] void halt(int c);\n_Noreturn void stop(int c);\nvoid quit(int c) __attribute__((noreturn));\nint fail(int c);\n";
+    let c = "#include \"a.h\"\nvoid die(const char *m) { report(m); }\nvoid halt(int c) { report(c); }\nint run(int v) {\n    if (v < 0) die(\"neg\");\n    if (v == 1) halt(1);\n    if (v == 2) stop(1);\n    if (v == 3) quit(1);\n    if (v == 4) fail(1);\n    return v * 2;\n}\n";
+    let e = edges_in(&[("src/a.h", h), ("src/a.c", c)], "src/a.c", "run");
+    for (call, next) in [
+        ("die(#quot;neg#quot;)", "v == 1"),
+        ("halt(1)", "v == 2"),
+        ("stop(1)", "v == 3"),
+        ("quit(1)", "v == 4"),
+    ] {
+        assert!(e.contains(&format!("{call} --> {call}")), "{call}: {e:#?}");
+        assert!(!e.contains(&format!("{call} --> {next}")), "{call}: {e:#?}");
+    }
+    // A function with no such attribute returns.
+    assert!(
+        e.contains(&"fail(1) --> return v * 2;".to_string()),
+        "{e:#?}"
+    );
+}
+
+#[test]
+fn a_noreturn_call_that_is_one_of_several_or_inside_an_expression_continues() {
+    let crash = "__attribute__((noreturn)) void crash(int c) { abort(); }\n";
+    let c = "[[noreturn]] void die(int c);\nvoid on_fault(void (*h)(int) __attribute__((noreturn)));\nint run(int v) {\n    crash(1);\n    on_fault(die);\n    ok(v) || die(2);\n    return v;\n}\n";
+    let files = [("src/b.c", crash), ("src/d.c", crash), ("src/a.c", c)];
+    let e = edges_in(&files, "src/a.c", "run");
+    assert!(
+        e.contains(&"crash(1) --> on_fault(die)".to_string()),
+        "{e:#?}"
+    );
+    // A parameter that never returns says nothing of the function.
+    assert!(e.contains(&"on_fault(die) --> ok(v)".to_string()), "{e:#?}");
+    assert!(e.contains(&"die(2) --> return v;".to_string()), "{e:#?}");
+}
+
+#[test]
+fn a_python_exit_ends_the_path_unless_its_name_is_rebound() {
+    let src = "import sys\nimport os\n\ndef f(v):\n    if v < 0:\n        sys.exit(1)\n    if v == 1:\n        os._exit(2)\n    if v == 2:\n        exit(3)\n    if v == 3:\n        quit(4)\n    return v * 2\n\ndef g(v):\n    sys = make(v)\n    sys.exit(1)\n    return v\n";
+    let page = page_of_py(src);
+    let f = chart_edges(&page, "f");
+    for call in ["sys.exit(1)", "os._exit(2)", "exit(3)", "quit(4)"] {
+        assert!(f.contains(&format!("{call} --> {call}")), "{call}: {f:#?}");
+    }
+    assert!(!f.contains(&"sys.exit(1) --> v == 1".to_string()), "{f:#?}");
+    let g = chart_edges(&page, "g");
+    assert!(
+        g.contains(&"sys.exit(1) --> return v".to_string()),
+        "{g:#?}"
+    );
+    // A project function named `exit` is the one called.
+    let own = "def exit(c):\n    return c\n\ndef h(v):\n    exit(1)\n    return v\n";
+    let h = edges_of_py(own, "h");
+    assert!(h.contains(&"exit(1) --> return v".to_string()), "{h:#?}");
+}
+
+#[test]
+fn a_rust_process_exit_or_a_never_returning_fn_ends_the_path() {
+    let src = "use std::process;\nfn fail(m: &str) -> ! { panic!(\"{m}\") }\nfn f(v: i32) -> i32 {\n    if v < 0 { std::process::exit(1); }\n    if v == 1 { process::exit(2) }\n    if v == 2 { fail(\"x\"); }\n    v * 2\n}\nfn g(o: Option<i32>) {\n    let n = o.map(|x| match x { 1 => keep(), _ => process::exit(x) });\n    after(n);\n}\n";
+    let f = edges_of(src, "f");
+    for call in [
+        "std#58;#58;process#58;#58;exit(1)",
+        "process#58;#58;exit(2)",
+        "fail(#quot;x#quot;)",
+    ] {
+        assert!(f.contains(&format!("{call} --> {call}")), "{call}: {f:#?}");
+    }
+    assert!(
+        !f.contains(&"std#58;#58;process#58;#58;exit(1) --> v == 1".to_string()),
+        "{f:#?}"
+    );
+    // In a closure the exit ends the closure's own flow, not the path.
+    let g = edges_of(src, "g");
+    let exit = "process#58;#58;exit(x)";
+    assert!(g.contains(&format!("{exit} --> {exit}")), "{g:#?}");
+    assert!(g.iter().any(|e| e.ends_with("--> after(n)")), "{g:#?}");
+}
+
+#[test]
+fn a_project_function_named_exit_that_returns_continues() {
+    let lib = "mod process;\nfn h() {\n    process::exit(1);\n    after();\n}\n";
+    let process = "pub fn exit(_c: i32) {}\n";
+    let e = edges_in(
+        &[("src/lib.rs", lib), ("src/process.rs", process)],
+        "src/lib.rs",
+        "h",
+    );
+    assert!(
+        e.contains(&"process#58;#58;exit(1) --> after()".to_string()),
+        "{e:#?}"
+    );
+}
+
 fn edges_of(src: &str, anchor: &str) -> Vec<String> {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     chart_edges(&common::map_page(&vault, "map/src/a_rs"), anchor)
@@ -2022,6 +2155,58 @@ fn python_class_relative_calls_walk_the_project_bases() {
         calls_in(&files, "map/a_py", "same_go"),
         ["`self.near()` L35 → [[map/a_py#near_near|Near::near]]"]
     );
+}
+
+const GAUGE: &str = "class Gauge:\n    def __init__(self, v):\n        self.v = v\n\nclass Base:\n    def __init__(self, v):\n        self.v = v\n\nclass Dial(Base):\n    def turn(self):\n        pass\n\ndef make(v):\n    Gauge(v)\n    Dial(v)\n";
+
+#[test]
+fn a_python_construction_of_a_project_class_links_its_init() {
+    let b = "from a import Gauge\n\ndef build(v):\n    Gauge(v)\n";
+    let files = [("a.py", GAUGE), ("b.py", b)];
+    assert_eq!(
+        calls_in(&files, "map/a_py", "make"),
+        [
+            "`Gauge(v)` L14 → [[map/a_py#gauge_init|Gauge::__init__]]",
+            "`Dial(v)` L15 → one of: [[map/a_py#base_init|Base::__init__]], or outside the project",
+        ]
+    );
+    assert_eq!(
+        calls_in(&files, "map/b_py", "build"),
+        ["`Gauge(v)` L4 → [[map/a_py#gauge_init|Gauge::__init__]]"]
+    );
+    let (_d, vault) = common::built(&files);
+    let called = common::fn_section(
+        &common::map_page(&vault, "map/a_py"),
+        "gauge_init",
+        "Called from",
+    );
+    assert_eq!(
+        called,
+        [
+            "certainly: [[map/a_py#make|make]] L14",
+            "certainly: [[map/b_py#build|build]] L4"
+        ]
+    );
+}
+
+#[test]
+fn a_python_construction_that_may_not_run_the_init_stays_hidden() {
+    let a = "from enum import Enum\n\nclass Meta(type):\n    pass\n\nclass Pooled:\n    def __new__(cls, v):\n        return cls\n\n    def __init__(self, v):\n        self.v = v\n\nclass Typed(metaclass=Meta):\n    def __init__(self, v):\n        self.v = v\n\nclass Color(Enum):\n    def __init__(self, v):\n        self.v = v\n\nclass Bare:\n    pass\n\ndef make(v):\n    Pooled(v)\n    Typed(v)\n    Color(v)\n    Bare()\n";
+    assert_eq!(
+        calls_in(&[("a.py", a)], "map/a_py", "make"),
+        [
+            "`Pooled(v)` L25 → target not visible",
+            "`Typed(v)` L26 → target not visible",
+            "`Color(v)` L27 → target not visible",
+            "`Bare()` L28 → target not visible",
+        ]
+    );
+    // Two classes of the name and no import saying which: as before.
+    let two = "class Gauge:\n    def __init__(self, v):\n        pass\n";
+    let c = "def build(v):\n    Gauge(v)\n";
+    let files = [("a.py", two), ("d.py", two), ("c.py", c)];
+    let built = calls_in(&files, "map/c_py", "build");
+    assert!(!built[0].contains("__init__"), "{built:?}");
 }
 
 #[test]

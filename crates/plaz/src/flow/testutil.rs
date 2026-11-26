@@ -13,6 +13,7 @@ pub fn call(name: &str) -> Step {
         },
         callee: None,
         target: Target::Hidden,
+        ends: false,
     })
 }
 

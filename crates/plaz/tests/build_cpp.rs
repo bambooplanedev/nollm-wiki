@@ -370,7 +370,7 @@ fn a_defaulted_or_deleted_function_says_so_and_has_no_chart() {
 #[test]
 fn a_call_of_a_jumping_macro_from_another_file_is_on_the_coverage_line() {
     let guard = "#define RETURN_UNLESS(c) do { if (!(c)) return; } while (0)\n";
-    let src = "void feed(int* p, int a) {\n    RETURN_UNLESS(a > 0);\n    use(p);\n}\n";
+    let src = "#include \"../inc/guard.h\"\nvoid feed(int* p, int a) {\n    RETURN_UNLESS(a > 0);\n    use(p);\n}\n";
     let (_d, vault) = common::built(&[("inc/guard.h", guard), ("src/a.cpp", src)]);
     let feed = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "feed");
     let coverage: Vec<&str> = feed
@@ -774,6 +774,45 @@ fn a_bare_call_of_a_project_macro_or_type_is_hidden_anything_else_outside() {
             "Point(2) → hidden",
             "puts(\"x\") → outside"
         ]
+    );
+}
+
+#[test]
+fn a_macro_hides_a_call_only_where_the_file_or_its_includes_define_it() {
+    let only = "#define release(p) guarded_release(p)\n";
+    let mid = "#include \"only.h\"\n";
+    let far = "int run(char *buf) { release(buf); return 0; }\n";
+    let near = "#include \"../x/mid.h\"\nint run(char *buf) { release(buf); return 0; }\n";
+    let own = "#define release(p) (p)\nint run(char *buf) { release(buf); return 0; }\n";
+    let files = [
+        ("x/only.h", only),
+        ("x/mid.h", mid),
+        ("src/far.c", far),
+        ("src/near.c", near),
+        ("src/own.c", own),
+    ];
+    assert_eq!(
+        cpp_targets(&files, "src/far.c", "run"),
+        ["release(buf) → outside"]
+    );
+    // Through an include of an include, or in the file itself: hidden.
+    for path in ["src/near.c", "src/own.c"] {
+        assert_eq!(
+            cpp_targets(&files, path, "run"),
+            ["release(buf) → hidden"],
+            "{path}"
+        );
+    }
+}
+
+#[test]
+fn a_macro_hides_a_call_in_a_header_whatever_it_includes() {
+    // A header may take the macro from its includer, as today.
+    let only = "#define release(p) guarded_release(p)\n";
+    let h = "static inline int run(char *buf) { release(buf); return 0; }\n";
+    assert_eq!(
+        cpp_targets(&[("x/only.h", only), ("src/use.h", h)], "src/use.h", "run"),
+        ["release(buf) → hidden"]
     );
 }
 
