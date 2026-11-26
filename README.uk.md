@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/nollm-wiki)](https://github.com/bambooplanedev/nollm-wiki/releases)
-[![Rust 1.90+](https://img.shields.io/badge/rust-1.90%2B-orange?logo=rust)](https://www.rust-lang.org)
+[![Rust 1.91+](https://img.shields.io/badge/rust-1.91%2B-orange?logo=rust)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 nollm-wiki перетворює проєкт на карту, в якій агент може шукати, — де лежить кожна функція, хто її
@@ -153,7 +153,7 @@ Python, C і C++; інші мови отримують примітку «not co
 
 ## Збірка з коду
 
-Для збірки потрібен Rust 1.90 чи новіший; для тестів — ще й `git`, `jq` та
+Для збірки потрібен Rust 1.91 чи новіший; для тестів — ще й `git`, `jq` та
 користувач без прав root.
 
     git clone https://github.com/bambooplanedev/nollm-wiki
