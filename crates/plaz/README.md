@@ -25,7 +25,7 @@ It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../
 
 `plaz build` reads the code under `--source` (default `.`) and writes the pages to `<source>/.nollm-wiki/map/`, or to `map/` under `--vault`. Pages carry the front matter `tags: ["plaz"]` and `kind: map`; a file at a page path without it is left alone and counted. Unchanged pages are not rewritten, pages of files that are gone are removed, and the output is the same on every run. A tree with no code file leaves the folder as it is, with a warning. Directories named `third_party`, `third-party`, `vendor`, `vendored` or `node_modules` are skipped; a line in a `.ignore` file (such as `extern/`) skips any other bundled code. Code references become wikilinks to `wiki`'s code pages when the vault holds a compiled project wiki, and plain `path:start-end` otherwise.
 
-It also writes index pages, the way in from the top: `map/index.md` lists the top directories and `map/index/<dir>.md` each directory's functions, first those no charted function calls, with what they certainly call nested under them, then the rest. Only calls the map reads as certain are followed; each function is expanded once, and its section names its level there.
+It also writes index pages, the way in from the top: `map/index.md` lists the top directories, and `map/index/<dir>.md` holds the trees that start in each directory's files: first the functions no charted function calls, with what they certainly call nested under them, then the rest. Only calls the map reads as certain are followed; each function is expanded once, and the section of a function placed under that first group names its level there.
 
 `plaz setup` builds the map and makes sure `.nollm-wiki/` is ignored by git:
 

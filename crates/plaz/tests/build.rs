@@ -3208,7 +3208,7 @@ fn index_tree() -> [(&'static str, &'static str); 3] {
     ]
 }
 
-const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth it is reached; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
+const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth the first section reaches it, or else where a later section first reaches it; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
 
 #[test]
 fn the_index_lists_every_charted_function_from_the_top_down() {

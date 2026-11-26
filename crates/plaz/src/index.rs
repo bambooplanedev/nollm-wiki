@@ -8,7 +8,7 @@ use crate::names::{Names, INDEX};
 use crate::render::{inline_code, link, link_text, yaml_str, Page};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth it is reached; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
+const INTRO: &str = "Every charted function, from the top down, following only the calls the map reads as certain (a single link in a page's **Calls**); a call that may be one of several functions is not followed. Each function is expanded once, at the shallowest depth the first section reaches it, or else where a later section first reaches it; its last line, \"also calls\", lists the functions it calls that are not expanded under it. A function listed as not called may still be called through a value, a trait or virtual call, a macro, an attribute, or from outside the project.";
 
 pub struct Index {
     /// Empty when no function is charted.
