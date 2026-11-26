@@ -1,6 +1,7 @@
 use super::*;
 use crate::flow::testutil::{arm, branch, call, exit, flow_of, looping};
 use crate::model::NotDrawn;
+use wiki_code::model::CallVia;
 
 /// The node and edge lines of the chart of `steps`.
 fn drawn(steps: Vec<Step>) -> Vec<String> {
@@ -260,6 +261,8 @@ fn calls_and_closures_in_a_post_are_counted() {
             name: "g".into(),
             line: 1,
             flow: nested,
+            at: 0..0,
+            binds: None,
         },
     ];
     let flow = flow_of(vec![looping("go", vec![call("a")], post, false)]);
@@ -275,4 +278,104 @@ fn relative_page_ids_climb_only_past_the_shared_directories() {
     assert_eq!(relative("map/src/a_rs", "map/src/a_rs"), "a_rs");
     assert_eq!(relative("map/a_rs", "map/src/x/b_rs"), "src/x/b_rs");
     assert_eq!(relative("map/x/a_rs", "map/y/x"), "../y/x");
+}
+
+/// A call `text` at `bytes`, reaching `target` through `via`.
+fn at(text: &str, bytes: std::ops::Range<usize>, target: Target, via: CallVia) -> Step {
+    let Step::Call(mut c) = call(text) else {
+        unreachable!()
+    };
+    c.text = text.to_string();
+    (c.bytes, c.target, c.site.via) = (bytes, target, via);
+    Step::Call(c)
+}
+
+#[test]
+fn a_hidden_chain_step_is_not_drawn_only_on_an_outside_receiver() {
+    let member = || CallVia::Member(None);
+    // `h(1)` is the hidden head of the chain: drawn. `h(1).a()` is outside,
+    // `h(1).a().b()` hidden on it, both steps of `h(1).a().b().c()`.
+    let steps = vec![
+        at("h(1)", 0..4, Target::Hidden, CallVia::Bare),
+        at("h(1).a()", 0..8, Target::Outside, member()),
+        at("h(1).a().b()", 0..12, Target::Hidden, member()),
+        at("h(1).a().b().c()", 0..16, Target::Outside, member()),
+    ];
+    let lines = drawn(steps.clone());
+    assert!(
+        lines.contains(&"n1>\"h(1)\"]:::hidden".to_string()),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&"n2[/\"h(1).a().b().c()\"/]".to_string()),
+        "{lines:?}"
+    );
+    assert_eq!(lines.iter().filter(|l| !l.contains("-->")).count(), 4);
+    assert_eq!(
+        coverage(&flow_of(steps)),
+        "Coverage: 4 calls: 0 resolved, 0 one of, 2 outside, 2 hidden. Not drawn: 2 chain step."
+    );
+}
+
+fn outside(text: &str) -> Step {
+    at(text, 0..0, Target::Outside, CallVia::Bare)
+}
+
+#[test]
+fn a_run_of_calls_of_one_unlinked_form_is_one_node() {
+    let sure = Target::Resolved(FnId {
+        path: "a.rs".into(),
+        item: 0,
+    });
+    let steps = vec![
+        outside("a()"),
+        outside("b()"),
+        // A certain call breaks the run, as does a call of another form.
+        at("c()", 0..0, sure, CallVia::Bare),
+        outside("d()"),
+        outside("e()"),
+        call("h"),
+        call("i"),
+        // A decision breaks it; so does the join after it.
+        branch(
+            vec![arm(Some("k"), vec![outside("f()"), outside("g()")], false)],
+            false,
+        ),
+        outside("x()"),
+        outside("y()"),
+    ];
+    assert_eq!(
+        drawn(steps),
+        [
+            "n0([\"f\"])",
+            "n1[/\"a()<br/>b()\"/]",
+            "n0 --> n1",
+            "n2[\"c()\"]",
+            "n1 --> n2",
+            "n3[/\"d()<br/>e()\"/]",
+            "n2 --> n3",
+            "n4>\"h()<br/>i()\"]:::hidden",
+            "n3 --> n4",
+            "n5{\"k\"}",
+            "n4 --> n5",
+            "n6[/\"f()<br/>g()\"/]",
+            "n5 -->|yes| n6",
+            "n7[/\"x()<br/>y()\"/]",
+            "n6 --> n7",
+            "n5 -->|no| n7",
+            "n8([\"end\"])",
+            "n7 --> n8",
+        ]
+    );
+}
+
+#[test]
+fn a_run_longer_than_eight_calls_is_split() {
+    let steps = (0..10).map(|i| outside(&format!("s{i}()"))).collect();
+    let lines = drawn(steps);
+    assert_eq!(
+        lines[1],
+        "n1[/\"s0()<br/>s1()<br/>s2()<br/>s3()<br/>s4()<br/>s5()<br/>s6()<br/>s7()\"/]"
+    );
+    assert_eq!(lines[3], "n2[/\"s8()<br/>s9()\"/]");
 }

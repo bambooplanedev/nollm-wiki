@@ -1,7 +1,7 @@
 //! Python's flow hooks, and the imports a module's tree shows.
 
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
-use crate::model::{ExitKind, Import, NotDrawn};
+use crate::model::{Binding, ExitKind, Import, NotDrawn};
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
@@ -12,6 +12,9 @@ pub(crate) const HOOKS: Hooks = Hooks {
     bindings,
     skips_call: |_| false,
     ends_path: |n, src| super::whole_statement(n) && !caught_exit(n, src),
+    // `x = x()` makes `x` local to the whole function: the call fails.
+    own_initializer: |_, _, _| false,
+    wrapper: |_| false,
 };
 
 /// Is `n` in the body of a `try` whose handler catches an exit: a bare
@@ -94,6 +97,10 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "function_definition" => FlowNode::Nested {
             name: field("name").map(|i| text(i, src).to_string()),
             body: n,
+            binds: def_scope(n).map(|scope| Binding {
+                scope,
+                what: "nested function",
+            }),
         },
         // Expressions: they hold no statements, so they are drawn inline.
         "lambda"
@@ -109,6 +116,20 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "boolean_operator" => FlowNode::NotDrawn(NotDrawn::ShortCircuit),
         "assert_statement" => FlowNode::NotDrawn(NotDrawn::Assert),
         _ => FlowNode::Plain,
+    }
+}
+
+/// Where the name of the nested def `n` means it: from the def to the end
+/// of the function around it. None for a decorated def, whose name holds
+/// what the decorator returns, and for a method of a class in the body.
+fn def_scope(n: Node) -> Option<std::ops::Range<usize>> {
+    let mut at = n.parent()?;
+    loop {
+        match at.kind() {
+            "decorated_definition" | "class_definition" => return None,
+            "function_definition" => return Some(n.start_byte()..at.end_byte()),
+            _ => at = at.parent()?,
+        }
     }
 }
 
@@ -244,7 +265,7 @@ fn try_arms<'a>(n: Node<'a>, src: &str) -> Vec<ArmNode<'a>> {
 /// body are `rebound`; the bodies of defs and classes bind for themselves.
 fn bindings(root: Node, src: &str) -> Bindings {
     let mut binds: Vec<(String, Option<String>)> = Vec::new();
-    let mut rebound = BTreeSet::new();
+    let (mut rebound, mut rejoined) = (BTreeSet::new(), BTreeSet::new());
     let (mut params, mut outside) = (BTreeSet::new(), BTreeSet::new());
     let mut stack: Vec<Node> = root.children(&mut root.walk()).collect();
     while let Some(n) = stack.pop() {
@@ -254,18 +275,21 @@ fn bindings(root: Node, src: &str) -> Bindings {
                 names(p, src, &mut |b| binds.push((b, ty.clone())));
             }
         };
+        // A name a def, class or import binds a second time is `twice`.
+        let mut rebind = |b: Option<String>| {
+            if let Some(b) = b.filter(|b| !rebound.insert(b.clone())) {
+                rejoined.insert(b);
+            }
+        };
         match n.kind() {
             "function_definition" | "class_definition" => {
-                rebound.extend(field("name").map(|i| text(i, src).to_string()));
+                rebind(field("name").map(|i| text(i, src).to_string()));
                 continue;
             }
             "import_statement" | "import_from_statement" => {
-                rebound.extend(
-                    statement_imports(n, src)
-                        .iter()
-                        .filter_map(|i| i.binds())
-                        .map(String::from),
-                );
+                for i in statement_imports(n, src) {
+                    rebind(i.binds().map(String::from));
+                }
                 continue;
             }
             "parameters" | "lambda_parameters" => {
@@ -321,7 +345,8 @@ fn bindings(root: Node, src: &str) -> Bindings {
             t.filter(|t| !rebound.contains(t.split("::").next().unwrap_or(""))),
         )
     });
-    let joined = Bindings::join(binds);
+    let mut joined = Bindings::join(binds);
+    joined.twice.extend(rejoined);
     Bindings {
         params,
         outside,

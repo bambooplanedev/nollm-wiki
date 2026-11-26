@@ -59,6 +59,40 @@ impl Flow {
         walk(&self.steps, &mut vec![self], f);
     }
 
+    /// Every step once, in source order, the steps of nested flows after
+    /// the nested step itself.
+    pub fn each_step<'a>(&'a self, f: &mut impl FnMut(&'a Step)) {
+        fn walk<'a>(steps: &'a [Step], f: &mut impl FnMut(&'a Step)) {
+            for s in steps {
+                f(s);
+                match s {
+                    Step::Branch { arms, .. } => {
+                        for a in arms {
+                            walk(&a.pre, f);
+                            walk(&a.body, f);
+                            walk(&a.after, f);
+                        }
+                    }
+                    Step::Loop {
+                        pre,
+                        body,
+                        post,
+                        orelse,
+                        ..
+                    } => {
+                        for part in [pre, body, post, orelse] {
+                            walk(part, f);
+                        }
+                    }
+                    Step::Finally { body, .. } => walk(body, f),
+                    Step::Nested { flow, .. } => walk(&flow.steps, f),
+                    Step::Call(_) | Step::Exit { .. } => {}
+                }
+            }
+        }
+        walk(&self.steps, f);
+    }
+
     /// [`Flow::each_call`] with each call mutable and the chain as copies.
     pub fn each_call_mut(&mut self, f: &mut impl FnMut(&[FlowScope], &mut MapCall)) {
         fn walk(

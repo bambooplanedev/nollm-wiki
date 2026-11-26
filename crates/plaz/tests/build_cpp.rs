@@ -975,7 +975,7 @@ fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
     let src = "struct Crate {\n    static int make(int v) { return v; }\n    template <class A, class B, class C> struct Tray {\n        static int make(int v) { return v + 1; }\n    };\n};\nint run() {\n    return Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigned long long>::make(1);\n}\nint cut() { return Crate::Tray<int, int, decltype(run())>::make(2) + Crate::Tray<int, int, sizeof(int)>::make(3); }\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "run"),
-        ["Crate::Tray<unsigned long long, unsigned long long, unsigned long long, unsigne… → src/a.cpp:4"]
+        ["Crate::Tray<unsigned long long, unsigned…long long, unsigned long long>::make(1) → src/a.cpp:4"]
     );
     // A parenthesis in the template arguments does not end the qualifier.
     let mut cut = cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "cut");
@@ -992,13 +992,13 @@ fn a_qualifier_longer_than_the_calls_shown_text_is_read_whole() {
 #[test]
 fn a_member_chain_longer_than_the_calls_shown_text_is_read_whole() {
     // The outer `twig` is called on what the inner one returns, a `Knot`,
-    // whatever the shown text, clipped inside the inner call, ends with.
+    // whatever the shown text, clipped in the middle, holds.
     let src = "struct Knot {\n    Knot& twig(const char* k) { return *this; }\n};\nstruct Bush {\n    Knot& twig(const char* k) { return root; }\n    Knot root;\n};\nvoid climb(Bush& b) {\n    b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_end_of_its_shown_text\").twig(\"x\");\n}\n";
     assert_eq!(
         cpp_targets(&[("src/a.cpp", src)], "src/a.cpp", "climb"),
         [
-            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → src/a.cpp:5",
-            "b.twig(\"a_branch_name_long_enough_to_carry_the_whole_outer_call_well_past_the_e… → one of: src/a.cpp:2, src/a.cpp:5, or outside"
+            "b.twig(\"a_branch_name_long_enough_to_car…l_well_past_the_end_of_its_shown_text\") → src/a.cpp:5",
+            "b.twig(\"a_branch_name_long_enough_to_car…t_the_end_of_its_shown_text\").twig(\"x\") → one of: src/a.cpp:2, src/a.cpp:5, or outside"
         ]
     );
 }
@@ -3296,4 +3296,54 @@ fn the_index_of_a_cpp_tree_follows_definitions() {
         ]
     );
     assert!(!common::map_page(&vault, "map/index/src").contains("run_h"));
+}
+
+#[test]
+fn a_lambda_is_linked_to_the_calls_that_take_or_call_it() {
+    let src = "int tally(int n) {\n    auto bump = [&](int v) {\n        if (v > 2) { return v + 1; }\n        return v;\n    };\n    apply(bump);\n    each([&](int v) { if (v) { n++; } });\n    return bump(n);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "tally");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[bump] -passed to-> apply(bump)",
+            "[closure L7] -passed to-> each([#amp;](int v) #123; if (v) #123; n++; #125; #125;)",
+            "bump(n) -calls-> [bump]",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&block, "tally", "Calls")[2],
+        "`bump(n)` L8 → the lambda `bump`, drawn in this chart"
+    );
+}
+
+#[test]
+fn a_cpp_chain_is_drawn_as_its_outermost_call() {
+    let src = "#include <string>\nint size_of(const std::string& name) {\n    return name.substr(1).append(\"x\").size();\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "size_of");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "size_of",
+            "name.substr(1).append(#quot;x#quot;).size()",
+            "return name.substr(1).append(#quot;x#quot;).size();"
+        ]
+    );
+    assert_eq!(common::fn_section(&block, "size_of", "Calls").len(), 3);
+}
+
+#[test]
+fn a_lambda_bound_to_a_declared_type_is_not_linked_but_an_auto_one_is() {
+    let src = "int spare(int x) { return x; }\nint choose(int n) {\n    std::function<int(int)> pick = [](int x) { if (x > 1) { return x; } return 0; };\n    if (n > 3) { pick = spare; }\n    return pick(n);\n}\nint keep(int n) {\n    const auto pick = [](int x) { if (x > 1) { return x; } return 0; };\n    return pick(n);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let page = common::map_page(&vault, "map/src/a_cpp");
+    assert_eq!(
+        common::fn_section(&page, "choose", "Calls")[0],
+        "`pick(n)` L5 → target not visible"
+    );
+    assert_eq!(
+        common::fn_section(&page, "keep", "Calls")[0],
+        "`pick(n)` L9 → the lambda `pick`, drawn in this chart"
+    );
 }

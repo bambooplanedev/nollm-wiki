@@ -1,8 +1,9 @@
 //! Rust's flow hooks.
 
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
-use crate::model::{ExitKind, NotDrawn};
+use crate::model::{Binding, ExitKind, NotDrawn};
 use std::collections::BTreeSet;
+use wiki_code::model::CallVia;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
 
@@ -18,7 +19,30 @@ pub(crate) const HOOKS: Hooks = Hooks {
             .is_some_and(|p| matches!(p.kind(), "block" | "match_arm"));
         (super::whole_statement(n) || tail) && !in_inline_closure(n)
     },
+    own_initializer,
+    wrapper: |s| s.via == CallVia::Bare && matches!(s.name.as_str(), "Some" | "Ok" | "Err"),
 };
+
+/// Is `n` inside the initializer of a `let` binding `name` alone, in the
+/// same function? The `let`'s name is not in scope there.
+fn own_initializer(n: Node, name: &str, src: &str) -> bool {
+    let mut at = n;
+    while let Some(p) = at.parent() {
+        match p.kind() {
+            // A macro may rebind the name where the call is written.
+            "function_item" | "token_tree" | "macro_invocation" => return false,
+            "let_declaration"
+                if p.child_by_field_name("value") == Some(at)
+                    && p.child_by_field_name("pattern")
+                        .is_some_and(|b| b.kind() == "identifier" && text(b, src) == name) =>
+            {
+                return true
+            }
+            _ => at = p,
+        }
+    }
+    false
+}
 
 const PANICS: [&str; 5] = ["panic", "unreachable", "todo", "unimplemented", "bail"];
 const ASSERTS: [&str; 6] = [
@@ -139,15 +163,31 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         {
             FlowNode::NotDrawn(NotDrawn::Assert)
         }
-        "closure_expression" if own_flow(n) => FlowNode::Nested {
-            name: n
-                .parent()
-                .filter(|p| p.kind() == "let_declaration")
+        "closure_expression" if own_flow(n) => {
+            let bound = n.parent().filter(|p| p.kind() == "let_declaration");
+            let name = bound
                 .and_then(|p| p.child_by_field_name("pattern"))
-                .filter(|p| p.kind() == "identifier")
-                .map(|p| text(p, src).to_string()),
-            body: n,
-        },
+                .filter(|p| p.kind() == "identifier");
+            FlowNode::Nested {
+                name: name.map(|p| text(p, src).to_string()),
+                body: n,
+                // From the end of the `let` to the end of its block; none for
+                // a `let mut` with a declared type, which may be assigned
+                // another function (a closure's own type cannot).
+                binds: bound
+                    .zip(bound.and_then(|b| b.parent()))
+                    .filter(|_| name.is_some())
+                    .filter(|(l, _)| {
+                        let mutable =
+                            (l.children(&mut l.walk())).any(|c| c.kind() == "mutable_specifier");
+                        !mutable || l.child_by_field_name("type").is_none()
+                    })
+                    .map(|(l, b)| Binding {
+                        scope: l.end_byte()..b.end_byte(),
+                        what: "closure",
+                    }),
+            }
+        }
         "closure_expression" => FlowNode::NotDrawn(NotDrawn::Closure),
         "try_expression" => FlowNode::NotDrawn(NotDrawn::Try),
         // A let chain's `&&` is a token of its own, not a binary expression.
@@ -171,11 +211,20 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "async_block" if own_flow(n) => FlowNode::Nested {
             name: Some(format!("async L{}", n.start_position().row + 1)),
             body: n,
+            binds: None,
         },
         // A function in a body is no item of the file: drawn where it stands.
+        // Its name means it in the whole block it stands in.
         "function_item" => FlowNode::Nested {
             name: field("name").map(|i| text(i, src).to_string()),
             body: n,
+            binds: n
+                .parent()
+                .filter(|_| field("name").is_some())
+                .map(|b| Binding {
+                    scope: b.byte_range(),
+                    what: "nested function",
+                }),
         },
         _ => FlowNode::Plain,
     }

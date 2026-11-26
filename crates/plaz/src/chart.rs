@@ -1,8 +1,10 @@
 //! The decision flowchart of one function and its coverage line.
 
-use crate::model::{Arm, Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
+use crate::model::{Arm, Comment, ExitKind, Flow, FnId, MapCall, NotDrawn, Step, Target};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ops::Range;
+use wiki_code::model::CallVia;
 
 /// `s` as the text of a double-quoted Mermaid label: every char that could
 /// end the label, the node or the fence becomes an entity code, a line break
@@ -76,6 +78,31 @@ struct Chart<'a> {
     /// `closed` of each arm list asked already, by its address: shared
     /// with the scratch charts, so each list is drawn once to tell.
     closed: &'a RefCell<BTreeMap<*const Arm, bool>>,
+    /// The node of each call drawn and the subgraph of each nested flow,
+    /// by their bytes: the ends of the dotted edges between them.
+    placed: BTreeMap<(usize, usize), usize>,
+    /// The calls drawn as no node (`undrawn`).
+    undrawn: &'a BTreeMap<(usize, usize), NotDrawn>,
+    /// The node drawn last, when it holds a run of calls a next call of
+    /// its form on the straight path joins.
+    run: Option<Run>,
+}
+
+/// A node holding consecutive calls of one form that links nowhere.
+struct Run {
+    id: usize,
+    /// Its line in `Chart::lines`.
+    line: usize,
+    shape: (&'static str, &'static str),
+    texts: Vec<String>,
+}
+
+/// The most calls one node holds.
+const RUN: usize = 8;
+
+/// The line of node `id` of `shape` labelled `text`.
+fn node_line(id: usize, (open, close): (&str, &str), text: &str) -> String {
+    format!("    n{id}{open}\"{}\"{close}", mermaid_label(text))
 }
 
 impl Chart<'_> {
@@ -88,14 +115,13 @@ impl Chart<'_> {
     /// `text`, with an edge from each of `from`.
     fn node(&mut self, shape: (&str, &str), text: &str, from: &[(usize, Option<&str>)]) -> usize {
         let id = self.id();
-        let (open, close) = shape;
-        self.lines
-            .push(format!("    n{id}{open}\"{}\"{close}", mermaid_label(text)));
+        self.lines.push(node_line(id, shape, text));
         self.edges_to(from, id);
         id
     }
 
     fn edges_to(&mut self, from: &[(usize, Option<&str>)], to: usize) {
+        self.run = None;
         for (f, label) in from {
             self.edges += 1;
             self.lines.push(match label {
@@ -139,13 +165,25 @@ impl Chart<'_> {
         self.branches = branches;
     }
 
-    /// `steps` as a chart of their own, beside the path.
-    fn beside(&mut self, name: &str, steps: &[Step]) {
+    /// `steps` as a chart of their own, beside the path; returns the
+    /// subgraph's id.
+    fn beside(&mut self, name: &str, steps: &[Step]) -> usize {
         let id = self.id();
         self.lines
             .push(format!("    subgraph n{id} [\"{}\"]", mermaid_label(name)));
         self.flow(name, steps);
         self.lines.push("    end".to_string());
+        id
+    }
+
+    /// A dotted edge labelled `label` between two nodes or subgraphs
+    /// placed, by their bytes.
+    fn dotted(&mut self, from: &Range<usize>, label: &str, to: &Range<usize>) {
+        let at = |r: &Range<usize>| self.placed.get(&(r.start, r.end)).copied();
+        if let (Some(f), Some(t)) = (at(from), at(to)) {
+            self.edges += 1;
+            self.lines.push(format!("    n{f} -.->|{label}| n{t}"));
+        }
     }
 
     /// The index in `loops` of the loop labelled `label`, or the innermost.
@@ -164,12 +202,22 @@ impl Chart<'_> {
     /// subgraph is beside it, not on it, as is a `finally` no path falls
     /// into.
     fn steps(&mut self, steps: &[Step], mut ends: Ends) -> (Option<usize>, Ends) {
+        // The first step is a node of its own: what comes before may be
+        // reached by edges that skip it (a loop's way back).
+        self.run = None;
         let mut entry = None;
         for (i, s) in steps.iter().enumerate() {
             let nested = |s: &Step| matches!(s, Step::Nested { .. });
             let beside = nested(s) || (matches!(s, Step::Finally { .. }) && ends.is_empty());
             let first = self.next;
             let next = !steps[i + 1..].iter().all(nested);
+            // `exit(1);` is a call and the exit that follows it: the call
+            // is no part of a run.
+            if let (Step::Call(c), Some(Step::Exit { text, .. })) = (s, steps.get(i + 1)) {
+                if *text == c.whole {
+                    self.run = None;
+                }
+            }
             ends = self.step(s, ends, next);
             if entry.is_none() && !beside && self.next > first {
                 entry = Some(first);
@@ -181,14 +229,44 @@ impl Chart<'_> {
     /// `next`: a step of the same list follows `s`.
     fn step(&mut self, s: &Step, ends: Ends, next: bool) -> Ends {
         match s {
+            Step::Call(c) if self.undrawn.contains_key(&(c.bytes.start, c.bytes.end)) => ends,
             Step::Call(c) => {
                 let shape = match &c.target {
+                    _ if c.local.is_some() => ("(", ")"),
                     Target::Resolved(_) => ("[", "]"),
                     Target::OneOf { .. } => ("[[", "]]:::oneof"),
                     Target::Outside => ("[/", "/]"),
                     Target::Hidden => (">", "]:::hidden"),
                 };
+                // Calls that link nowhere and are not an end of a dotted
+                // edge or an exit join the run of their form before them
+                // on the straight path, one per line.
+                let folds = matches!(c.target, Target::Outside | Target::Hidden)
+                    && c.local.is_none()
+                    && c.takes.is_empty()
+                    && !(c.ends && c.target != Target::Hidden);
+                let key = (c.bytes.start, c.bytes.end);
+                if let Some(r) = self.run.as_mut().filter(|r| {
+                    folds && r.shape == shape && r.texts.len() < RUN && ends == [(r.id, None)]
+                }) {
+                    r.texts.push(c.text.clone());
+                    let line = node_line(r.id, shape, &r.texts.join("\n"));
+                    let (id, at) = (r.id, r.line);
+                    self.lines[at] = line;
+                    self.placed.insert(key, id);
+                    return ends;
+                }
+                let line = self.lines.len();
                 let id = self.node(shape, &c.text, &ends);
+                self.placed.insert(key, id);
+                if folds {
+                    self.run = Some(Run {
+                        id,
+                        line,
+                        shape,
+                        texts: vec![c.text.clone()],
+                    });
+                }
                 if let Target::Resolved(t) = &c.target {
                     let href = (self.href)(t);
                     self.clicks.push(format!("    click n{id} href \"{href}\""));
@@ -242,11 +320,14 @@ impl Chart<'_> {
                 arms, unseen: true, ..
             } if !(next && self.closed(arms)) => {
                 let ends = arms.iter().fold(ends, |e, a| self.steps(&a.body, e).1);
+                // A branch not drawn still ends a run.
+                self.run = None;
                 ends
             }
             Step::Branch { .. } => self.branched(s, ends),
-            Step::Nested { name, flow, .. } => {
-                self.beside(name, &flow.steps);
+            Step::Nested { name, flow, at, .. } => {
+                let id = self.beside(name, &flow.steps);
+                self.placed.insert((at.start, at.end), id);
                 ends
             }
             // The exit that passed through it goes on from its end, undrawn.
@@ -347,6 +428,9 @@ impl Chart<'_> {
             loops: Vec::new(),
             branches: Vec::new(),
             closed: self.closed,
+            placed: BTreeMap::new(),
+            undrawn: self.undrawn,
+            run: None,
         };
         let closed = (arms.iter()).all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty());
         self.closed.borrow_mut().insert(arms.as_ptr(), closed);
@@ -420,6 +504,45 @@ impl Chart<'_> {
     }
 }
 
+/// The calls of `flow` drawn as no node of their own, by their bytes: a
+/// chain step or a wrapper outside the project (or a call of a hidden
+/// target whose receiver is such a chain step), never one that takes a
+/// nested flow or calls one.
+fn undrawn(flow: &Flow) -> BTreeMap<(usize, usize), NotDrawn> {
+    let mut all = Vec::new();
+    flow.each_call(&mut |_, c| all.push(c));
+    // The calls that start where `c` does and are longer or shorter.
+    let starting = |c: &MapCall, longer: bool| -> Vec<&MapCall> {
+        (all.iter().copied())
+            .filter(|b| b.bytes.start == c.bytes.start && b.bytes != c.bytes)
+            .filter(|b| (b.bytes.end > c.bytes.end) == longer)
+            .collect()
+    };
+    let mut out = BTreeMap::new();
+    for c in &all {
+        if !c.takes.is_empty() || c.local.is_some() || c.ends {
+            continue;
+        }
+        let (outside, hidden) = (c.target == Target::Outside, c.target == Target::Hidden);
+        let kind = if c.wrapper && (outside || hidden) {
+            NotDrawn::Wrapper
+        } else if !starting(c, true).is_empty()
+            && (outside
+                || hidden
+                    && matches!(c.site.via, CallVia::Member(None))
+                    && starting(c, false)
+                        .iter()
+                        .any(|r| r.target == Target::Outside))
+        {
+            NotDrawn::ChainStep
+        } else {
+            continue;
+        };
+        out.insert((c.bytes.start, c.bytes.end), kind);
+    }
+    out
+}
+
 /// The fenced `mermaid` block of `flow` (only a notice when it is over 50,000
 /// characters), named `name`, in the file at
 /// `path`; `href` gives a resolved target's link from this page.
@@ -434,8 +557,24 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         loops: Vec::new(),
         branches: Vec::new(),
         closed: &RefCell::new(BTreeMap::new()),
+        placed: BTreeMap::new(),
+        undrawn: &undrawn(flow),
+        run: None,
     };
     c.flow(name, &flow.steps);
+    // A nested flow is drawn beside the path: dotted edges tie it to the
+    // calls that take it and to those that call it by name.
+    // None from a call inside the subgraph: a nested function calling or
+    // passing itself.
+    flow.each_call(&mut |_, call| {
+        let inside = |at: &Range<usize>| at.start <= call.bytes.start && call.bytes.end <= at.end;
+        for at in call.takes.iter().filter(|at| !inside(at)) {
+            c.dotted(at, "passed to", &call.bytes);
+        }
+        if let Some(l) = call.local.as_ref().filter(|l| !inside(&l.at)) {
+            c.dotted(&call.bytes, "calls", &l.at);
+        }
+    });
     let mut body = String::from("flowchart TD\n");
     for l in c.lines.iter().chain(&c.clicks) {
         body.push_str(l);
@@ -490,10 +629,11 @@ pub(crate) fn coverage(flow: &Flow) -> String {
             }
         }
     }
-    let mut n = [0; 5];
+    let mut n = [0; 6];
     flow.each_call(&mut |_, c| {
         n[0] += 1;
         n[match c.target {
+            _ if c.local.is_some() => 5,
             Target::Resolved(_) => 1,
             Target::OneOf { .. } => 2,
             Target::Outside => 3,
@@ -502,12 +642,21 @@ pub(crate) fn coverage(flow: &Flow) -> String {
     });
     let mut kinds = flow.not_drawn.clone();
     not_drawn(&flow.steps, &mut kinds);
+    for k in undrawn(flow).into_values() {
+        *kinds.entry(k).or_default() += 1;
+    }
     let kinds: Vec<String> = kinds
         .iter()
         .map(|(k, n)| format!("{n} {}", k.label()))
         .collect();
+    // A call of a closure or nested function drawn in the chart.
+    let local = if n[5] > 0 {
+        format!(", {} local", n[5])
+    } else {
+        String::new()
+    };
     let mut out = format!(
-        "Coverage: {} calls: {} resolved, {} one of, {} outside, {} hidden. Not drawn: {}.",
+        "Coverage: {} calls: {} resolved, {} one of, {} outside, {} hidden{local}. Not drawn: {}.",
         n[0],
         n[1],
         n[2],

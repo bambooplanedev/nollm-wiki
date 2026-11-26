@@ -2,7 +2,7 @@
 //! outside its functions.
 
 use super::{text, ArmNode, FlowNode, Hooks};
-use crate::model::{Bodiless, ExitKind, NotDrawn};
+use crate::model::{Binding, Bodiless, ExitKind, NotDrawn};
 use std::collections::BTreeMap;
 use wiki_code::model::{CallSite, CallVia};
 use wiki_code::support::one_line;
@@ -22,6 +22,9 @@ pub(crate) const HOOKS: Hooks = Hooks {
             && !f.is_some_and(|f| ENDS.contains(&text(f, src)))
             && !in_argument(n)
     },
+    // `int n = n(1);` sees the variable being declared: ill-formed.
+    own_initializer: |_, _, _| false,
+    wrapper: |_| false,
 };
 
 /// Is `n` inside an argument list, below its function or lambda?
@@ -91,21 +94,39 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         }
         // Every label a switch draws as an arm is an arm's `at`, never walked.
         "case_statement" => FlowNode::NotDrawn(NotDrawn::NestedCase),
-        "lambda_expression" if field("body").is_some() => FlowNode::Nested {
-            name: n
-                .parent()
-                .filter(|p| p.kind() == "init_declarator")
+        "lambda_expression" if field("body").is_some() => {
+            let init = n.parent().filter(|p| p.kind() == "init_declarator");
+            let name = init
                 .and_then(|p| p.child_by_field_name("declarator"))
-                .filter(|d| d.kind() == "identifier")
-                .map(|d| text(d, src).to_string()),
-            body: n,
-        },
+                .filter(|d| d.kind() == "identifier");
+            // From the end of the declaration to the end of its block.
+            // Only `auto` types a lambda: a declared type (`std::function`)
+            // may be assigned another function.
+            let decl = (init.and_then(|i| i.parent()))
+                .filter(|d| {
+                    d.child_by_field_name("type")
+                        .is_some_and(|t| text(t, src) == "auto")
+                })
+                .filter(|_| name.is_some());
+            FlowNode::Nested {
+                name: name.map(|d| text(d, src).to_string()),
+                body: n,
+                binds: decl
+                    .zip(decl.and_then(|d| d.parent()))
+                    .filter(|(_, b)| b.kind() == "compound_statement")
+                    .map(|(d, b)| Binding {
+                        scope: d.end_byte()..b.end_byte(),
+                        what: "lambda",
+                    }),
+            }
+        }
         // A local class's method: no item of the file, drawn where it stands.
         "function_definition" => FlowNode::Nested {
             name: field("declarator")
                 .and_then(|d| d.child_by_field_name("declarator"))
                 .map(|d| one_line(text(d, src))),
             body: n,
+            binds: None,
         },
         "conditional_expression" => FlowNode::NotDrawn(NotDrawn::Ternary),
         "binary_expression"

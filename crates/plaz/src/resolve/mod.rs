@@ -163,7 +163,11 @@ pub fn resolve(mut project: Project) -> Resolved {
                         Family::Go | Family::Shell | Family::Ecma => continue,
                     };
                     flow.each_call_mut(&mut |chain, call| {
-                        call.target = from_evidence(rules.evidence(chain, call));
+                        // A closure or nested function the chart draws.
+                        call.target = match call.local {
+                            Some(_) => Target::Hidden,
+                            None => from_evidence(rules.evidence(chain, call)),
+                        };
                         call.ends &= match &call.target {
                             Target::Resolved(id) => never.contains(id),
                             Target::Outside => library_exit(file, &in_scope, chain, call),
@@ -323,7 +327,9 @@ impl Rules for Rust<'_, '_, '_> {
         let (cx, site) = (self.0, &call.site);
         let rebound = |x: &str| rebound(chain, x);
         match &site.via {
-            CallVia::Bare if binder(chain, &site.name).is_some() || rebound(&site.name) => {
+            CallVia::Bare
+                if !call.outer && (binder(chain, &site.name).is_some() || rebound(&site.name)) =>
+            {
                 Evidence::Hidden
             }
             CallVia::Bare => cx.bare(call),

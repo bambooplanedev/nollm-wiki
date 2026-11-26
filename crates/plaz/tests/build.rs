@@ -78,8 +78,166 @@ fn a_closure_calling_an_outer_parameter_is_hidden_even_when_a_project_function_s
         calls,
         [
             "`cb()` L4 → target not visible",
-            "`run()` L6 → target not visible"
+            "`run()` L6 → the closure `run`, drawn in this chart"
         ]
+    );
+}
+
+#[test]
+fn a_let_does_not_see_its_own_name_in_its_initializer() {
+    let src = "pub fn level(n: u8) -> u8 { n }\npub fn grow(v: u8, w: u8) -> u8 { v + w }\npub fn f(node: u8) -> u8 {\n    let level = level(node);\n    let grow = |v| grow(v, 1);\n    grow(level)\n}\npub fn g(level: fn(u8) -> u8) -> u8 {\n    let level = level(2);\n    level\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        common::fn_section(&page, "f", "Calls"),
+        [
+            "`level(node)` L4 → [[map/src/a_rs#level|level]]",
+            "`grow(v, 1)` L5 → [[map/src/a_rs#grow|grow]]",
+            // The closure bound by the `let` above.
+            "`grow(level)` L6 → target not visible",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&page, "level", "Called from"),
+        ["certainly: [[map/src/a_rs#f|f]] L4"]
+    );
+    // A parameter of that name is what the initializer calls.
+    assert_eq!(
+        common::fn_section(&page, "g", "Calls"),
+        ["`level(2)` L9 → target not visible"]
+    );
+}
+
+#[test]
+fn closures_and_nested_functions_are_linked_to_the_calls_that_take_or_call_them() {
+    let src = "pub fn sort_all(v: &mut Vec<u8>, w: &mut Vec<u8>) {\n    let fits = |x: &u8| {\n        if *x > 3 { return 1; }\n        0\n    };\n    v.sort_by_key(fits);\n    w.retain(|x| {\n        if *x > 2 { return true; }\n        false\n    });\n    fits(1);\n    fn tidy(n: u8) -> u8 { if n > 1 { tidy(n - 1) } else { 0 } }\n    tidy(2);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "sort_all");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[fits] -passed to-> v.sort_by_key(fits)",
+            "[closure L7] -passed to-> w.retain(#124;x#124; #123; if *x #gt; 2 #123; return true; #125; false #125;)",
+            "fits(1) -calls-> [fits]",
+            "tidy(2) -calls-> [tidy]",
+        ]
+    );
+    assert!(block.contains("(\"fits(1)\")\n"), "{block}");
+    assert_eq!(
+        common::fn_section(&block, "sort_all", "Calls"),
+        [
+            "`v.sort_by_key(fits)` L6 → outside the project",
+            "`w.retain(|x| { if *x > 2 { return true; } false })` L7 → outside the project",
+            "`fits(1)` L11 → the closure `fits`, drawn in this chart",
+            // Calling itself: no edge from inside its subgraph to it.
+            "`tidy(n - 1)` L12 → the nested function `tidy`, drawn in this chart",
+            "`tidy(2)` L13 → the nested function `tidy`, drawn in this chart",
+        ]
+    );
+    assert!(
+        block.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 2 outside, 0 hidden, 3 local. Not drawn: none.\n"),
+        "{block}"
+    );
+}
+
+#[test]
+fn a_name_bound_twice_leaves_its_calls_unlinked() {
+    let src = "pub fn twice(flag: bool) {\n    let pick = |x: u8| { if x > 1 { return 1; } 0 };\n    pick(1);\n    let pick = |x: u8| { if x > 2 { return 2; } 0 };\n    pick(2);\n}\npub fn param(pick: u8) {\n    fn pick() { if true {} }\n    pick();\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    for (f, calls) in [
+        (
+            "twice",
+            vec![
+                "`pick(1)` L3 → target not visible",
+                "`pick(2)` L5 → target not visible",
+            ],
+        ),
+        ("param", vec!["`pick()` L9 → target not visible"]),
+    ] {
+        let block = common::fn_block(&page, f);
+        assert!(common::dotted_edges(&block).is_empty(), "{block}");
+        assert_eq!(common::fn_section(&block, f, "Calls"), calls);
+    }
+}
+
+#[test]
+fn a_python_nested_def_is_linked_to_the_calls_that_take_or_call_it() {
+    let src = "def outer(rows):\n    def keep(r):\n        if r > 2:\n            return True\n        return False\n    picked = list(filter(keep, rows))\n    if keep(1):\n        return picked\n    return []\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/app/m_py"), "outer");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[keep] -passed to-> filter(keep, rows)",
+            "keep(1) -calls-> [keep]",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&block, "outer", "Calls"),
+        [
+            "`filter(keep, rows)` L6 → outside the project",
+            "`list(filter(keep, rows))` L6 → outside the project",
+            "`keep(1)` L7 → the nested function `keep`, drawn in this chart",
+        ]
+    );
+}
+
+#[test]
+fn chain_steps_and_wrappers_outside_the_project_are_not_drawn() {
+    let src = "pub struct Store;\nimpl Store { pub fn load(&self) -> Vec<u8> { Vec::new() } }\npub fn helper(n: usize) -> usize { n }\npub fn shape(v: Vec<u8>, s: &Store) -> Option<usize> {\n    let n = v.iter().map(|x| x + 1).filter(|x| *x > 2).count();\n    let k = s.load().iter().count();\n    if n > k {\n        return Some(helper(n));\n    }\n    let e: Result<u8, u8> = Err(2);\n    None\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "shape");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "shape",
+            "v.iter().map(#124;x#124; x + 1).filter(#124;x#124; *x #gt; 2).count()",
+            // A project call inside a chain stays a node of its own.
+            "s.load()",
+            "s.load().iter().count()",
+            "n #gt; k",
+            "helper(n)",
+            "return Some(helper(n))",
+            "end",
+        ]
+    );
+    // The Calls list keeps every call.
+    assert_eq!(common::fn_section(&block, "shape", "Calls").len(), 10);
+    assert!(
+        block.contains("\nCoverage: 10 calls: 2 resolved, 0 one of, 8 outside, 0 hidden. Not drawn: 2 closure, 4 chain step, 2 Some/Ok/Err.\n"),
+        "{block}"
+    );
+}
+
+#[test]
+fn a_python_chain_is_drawn_as_its_outermost_call() {
+    let src = "def tidy(parts):\n    return \" \".join(parts).strip().lower()\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/app/m_py"), "tidy");
+    assert_eq!(
+        common::node_labels(&block),
+        [
+            "tidy",
+            "#quot; #quot;.join(parts).strip().lower()",
+            "return #quot; #quot;.join(parts).strip().lower()"
+        ]
+    );
+    assert_eq!(common::fn_section(&block, "tidy", "Calls").len(), 3);
+}
+
+#[test]
+fn a_call_is_resolved_from_its_whole_text_not_the_text_shown() {
+    let inner = "def measure_everything_carefully_at_once(*a):\n    return a\n";
+    let outer = "import pkg.gauges\n\ndef run(v):\n    return pkg.gauges.measure_everything_carefully_at_once(v, v + 1, v + 2, v + 3, v + 4, v + 5)\n";
+    let (_d, vault) = common::built(&[
+        ("pkg/__init__.py", ""),
+        ("pkg/gauges.py", inner),
+        ("app.py", outer),
+    ]);
+    assert_eq!(
+        common::fn_section(&common::map_page(&vault, "map/app_py"), "run", "Calls"),
+        ["`pkg.gauges.measure_everything_carefully_…e(v, v + 1, v + 2, v + 3, v + 4, v + 5)` L4 → [[map/pkg/gauges_py#measure_everything_carefully_at_once|measure_everything_carefully_at_once]]"]
     );
 }
 
@@ -746,9 +904,9 @@ fn an_item_declared_in_a_body_hides_the_files_item_of_that_name() {
     assert_eq!(
         calls_of(&files, "f"),
         [
-            "`helper()` L9 → target not visible",
+            "`helper()` L9 → the nested function `helper`, drawn in this chart",
             "`S::new()` L10 → one of: [[map/src/a_rs#s_new|S::new]], or outside the project",
-            "`helper()` L12 → target not visible",
+            "`helper()` L12 → the nested function `helper`, drawn in this chart",
         ]
     );
     assert_eq!(
@@ -1067,7 +1225,7 @@ fn coverage_line_counts_forms_and_not_drawn() {
     let (_d, vault) = common::built(&[("src/a.rs", src)]);
     let f = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "f");
     assert!(
-        f.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 5 outside, 0 hidden. Not drawn: 1 ?, 1 unwrap_or, 1 closure.\n"),
+        f.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 5 outside, 0 hidden. Not drawn: 1 ?, 1 unwrap_or, 1 closure, 2 chain step.\n"),
         "{f}"
     );
 }
@@ -1127,19 +1285,24 @@ fn hostile_owner_names_keep_slug_anchors() {
 #[test]
 fn huge_charts_are_whole_and_point_to_the_calls_list() {
     // 600 edges: over what mermaid.js draws, under the character limit.
-    let body = (0..600).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
-    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    // Calls of a project function: each a node of its own.
+    let body = (0..600).fold(String::new(), |s, i| s + &format!("    g({i});\n"));
+    let src = |body| format!("fn f() {{\n{body}}}\nfn g(_: u32) {{}}\n");
+    let (_d, vault) = common::built(&[("src/a.rs", &src(body))]);
     let page = common::map_page(&vault, "map/src/a_rs");
     let chart = page.split("```mermaid\n").nth(1).unwrap();
-    assert!(chart.split_once("\n```\n").unwrap().0.contains("g599()"));
+    assert!(chart.split_once("\n```\n").unwrap().0.contains("g(599)"));
     assert!(page.contains("\n```\n\nThis chart exceeds the 500-edge limit of Mermaid.js renderers other than Obsidian's; the Calls list below is the complete view.\n"));
     // over 50,000 characters no renderer draws it: no block, only the notice
-    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g{i}();\n"));
-    let (_d, vault) = common::built(&[("src/a.rs", &format!("fn f() {{\n{body}}}\n"))]);
+    let body = (0..3000).fold(String::new(), |s, i| s + &format!("    g({i});\n"));
+    let (_d, vault) = common::built(&[("src/a.rs", &src(body))]);
     let page = common::map_page(&vault, "map/src/a_rs");
-    assert!(!page.contains("```mermaid"), "{page}");
+    assert!(
+        !common::fn_block(&page, "f").contains("```mermaid"),
+        "{page}"
+    );
     assert!(page.contains("\nThis chart exceeds Mermaid's 50,000-character limit and is not drawn; the Calls list below is the complete view.\n"));
-    assert!(page.contains("g2999()"), "the Calls list stays");
+    assert!(page.contains("g(2999)"), "the Calls list stays");
     let (_d, vault) = common::built(&[("src/a.rs", F_SRC)]);
     let page = common::map_page(&vault, "map/src/a_rs");
     assert!(page.contains("```mermaid") && !page.contains("This chart exceeds"));
@@ -1604,7 +1767,7 @@ fn a_python_exit_ends_the_path_unless_its_name_is_rebound() {
     assert!(!f.contains(&"sys.exit(1) --> v == 1".to_string()), "{f:#?}");
     let g = chart_edges(&page, "g");
     assert!(
-        g.contains(&"sys.exit(1) --> return v".to_string()),
+        g.contains(&"make(v)<br/>sys.exit(1) --> return v".to_string()),
         "{g:#?}"
     );
     // A project function named `exit` is the one called.
@@ -1660,7 +1823,12 @@ fn a_noreturn_call_in_a_macro_argument_does_not_end_the_path() {
     let c = "[[noreturn]] void raise_now(void);\nint run(int v) {\n    EXPECT_FAILS({ count++; raise_now(); }, \"msg\");\n    after(v);\n    return v;\n}\n";
     let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
     assert!(!ends_at(&e, "raise_now()"), "{e:#?}");
-    assert!(e.iter().any(|l| l.ends_with("--> after(v)")), "{e:#?}");
+    // Folded or not, the path goes on to `after(v)`.
+    assert!(
+        e.iter()
+            .any(|l| l.contains(" --> ") && l.ends_with("after(v)")),
+        "{e:#?}"
+    );
 }
 
 #[test]
@@ -1680,7 +1848,11 @@ fn a_python_exit_in_a_lambda_or_a_try_catching_it_does_not_end_the_path() {
     let f = chart_edges(&page, "f");
     assert!(!ends_at(&f, "sys.exit(1)"), "{f:#?}");
     let g = chart_edges(&page, "g");
-    assert!(g.iter().any(|l| l.ends_with("--> after(v)")), "{g:#?}");
+    assert!(
+        g.iter()
+            .any(|l| l.contains(" --> ") && l.ends_with("after(v)")),
+        "{g:#?}"
+    );
     // A bare `except:` catches the exit; `except ValueError` does not.
     let h = chart_edges(&page, "h");
     assert!(!ends_at(&h, "sys.exit(2)"), "{h:#?}");
@@ -1737,9 +1909,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
         [
             "f --> c",
             "c -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> after()",
             "c -no-> after()",
             "after() --> end",
@@ -1751,9 +1922,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
             "g --> match k",
             "match k --> 1",
             "1 -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "1 -no-> _",
             "_ -yes-> other()",
             "loop -exit not drawn-> after()",
@@ -1768,9 +1938,8 @@ fn a_hidden_exit_of_a_loop_ending_an_arm_reaches_the_code_after_the_branch() {
             "h --> for x in xs",
             "for x in xs -loop-> *x #gt; 1",
             "*x #gt; 1 -yes-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> for x in xs",
             "*x #gt; 1 -no-> for x in xs",
             "for x in xs -done-> end",
@@ -1825,9 +1994,8 @@ fn an_async_block_awaited_in_place_is_on_the_path() {
     assert_eq!(
         edges_of(src, "f"),
         [
-            "f --> compute()",
-            "compute() --> use_it(v)",
-            "use_it(v) --> end"
+            "f --> compute()<br/>use_it(v)",
+            "compute()<br/>use_it(v) --> end"
         ]
     );
     assert_eq!(
@@ -1894,9 +2062,8 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
         [
             "o --> loop",
             "loop -loop-> loop",
-            "loop -loop-> rx.recv()",
-            "rx.recv() --> m.is_none()",
-            "m.is_none() --> loop",
+            "loop -loop-> rx.recv()<br/>m.is_none()",
+            "rx.recv()<br/>m.is_none() --> loop",
             "loop -exit not drawn-> done()",
             "done() --> done()",
             "done() -yes-> return",
@@ -1907,10 +2074,8 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
         edges_of(src, "run"),
         [
             "run --> loop",
-            "loop -loop-> stop.recv()",
-            "stop.recv() --> rx.recv()",
-            "rx.recv() --> handle(m)",
-            "handle(m) --> loop",
+            "loop -loop-> stop.recv()<br/>rx.recv()<br/>handle(m)",
+            "stop.recv()<br/>rx.recv()<br/>handle(m) --> loop",
             "loop -exit not drawn-> end",
         ]
     );
@@ -1941,7 +2106,7 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
 }
 
 #[test]
-fn python_calls_to_parameters_and_nested_defs_are_hidden() {
+fn python_calls_to_parameters_are_hidden_and_to_nested_defs_local() {
     let a = "def decide(messages, ask):\n    return ask(messages)\n\ndef outer(x):\n    def inner(y):\n        return y\n    return inner(x)\n\ndef ask(m):\n    pass\n\ndef inner(y):\n    pass\n";
     let (_d, vault) = common::built(&[("a.py", a)]);
     let page = common::map_page(&vault, "map/a_py");
@@ -1951,7 +2116,7 @@ fn python_calls_to_parameters_and_nested_defs_are_hidden() {
     );
     assert_eq!(
         common::fn_section(&page, "outer", "Calls"),
-        ["`inner(x)` L7 → target not visible"]
+        ["`inner(x)` L7 → the nested function `inner`, drawn in this chart"]
     );
 }
 
@@ -2381,9 +2546,8 @@ fn a_python_finally_is_on_every_path_that_falls_into_it() {
         edges_of_py(plain, "w"),
         [
             "w --> work()",
-            "work() --> close()",
-            "close() --> after()",
-            "after() --> end",
+            "work() --> close()<br/>after()",
+            "close()<br/>after() --> end",
         ]
     );
     // An exit in the `finally` ends the path: nothing leads to `after()`.
@@ -2404,10 +2568,9 @@ fn a_python_finally_is_on_every_path_that_falls_into_it() {
             "except E -no-> except F",
             "except F -yes-> c()",
             "c() --> return c()",
-            "d() --> e()",
-            "b() --> e()",
-            "e() --> g()",
-            "g() --> end",
+            "d() --> e()<br/>g()",
+            "b() --> e()<br/>g()",
+            "e()<br/>g() --> end",
         ]
     );
     for src in [plain, exit, full] {
@@ -3442,4 +3605,85 @@ fn a_directory_page_has_each_section_once_when_main_files_sort_between() {
             "  - [[map/src/aux_rs#step|step]]",
         ]
     );
+}
+
+/// The line of the Calls list of `f` that starts with `call`.
+fn call_line(page: &str, f: &str, call: &str) -> String {
+    let calls = common::fn_section(page, f, "Calls");
+    let line = calls.iter().find(|l| l.starts_with(&format!("`{call}`")));
+    line.unwrap_or_else(|| panic!("{call}: {calls:#?}")).clone()
+}
+
+#[test]
+fn a_let_mut_closure_is_not_linked() {
+    let src = "fn spare(x: u8) -> u8 { x }\npub fn choose(n: u8) -> u8 {\n    let mut pick: fn(u8) -> u8 = |x| { if x > 1 { x } else { 0 } };\n    if n > 3 { pick = spare; }\n    pick(n)\n}\npub fn keep(n: u8) -> u8 {\n    let pick = |x: u8| { if x > 1 { x } else { 0 } };\n    pick(n)\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        call_line(&page, "choose", "pick(n)"),
+        "`pick(n)` L5 → target not visible"
+    );
+    assert_eq!(
+        call_line(&page, "keep", "pick(n)"),
+        "`pick(n)` L9 → the closure `pick`, drawn in this chart"
+    );
+}
+
+#[test]
+fn a_let_mut_closure_with_no_declared_type_is_linked() {
+    // Its type is the closure's own: nothing else can be assigned to it.
+    let src = "pub fn count(n: u8) -> u8 {\n    let mut total = 0;\n    let mut add = |x: u8| { if x > 1 { total += x; } };\n    add(n);\n    total\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    assert_eq!(
+        call_line(&common::map_page(&vault, "map/src/a_rs"), "count", "add(n)"),
+        "`add(n)` L4 → the closure `add`, drawn in this chart"
+    );
+}
+
+#[test]
+fn a_reassigned_python_nested_def_is_not_linked() {
+    let py = "def spare(x):\n    return x\n\ndef choose(n):\n    def helper(x):\n        if x > 1:\n            return x\n        return 0\n    if n > 3:\n        helper = spare\n    return helper(n)\n";
+    let (_d, vault) = common::built(&[("app/m.py", py)]);
+    let page = common::map_page(&vault, "map/app/m_py");
+    assert_eq!(
+        call_line(&page, "choose", "helper(n)"),
+        "`helper(n)` L11 → target not visible"
+    );
+}
+
+#[test]
+fn a_python_nested_def_and_an_import_of_one_name_are_two_bindings() {
+    let src = "def show(doc):\n    try:\n        from fastlib import pager\n    except ImportError:\n        def pager(text):\n            if text:\n                return text\n            return ''\n    return pager(doc)\n\ndef plain(doc):\n    def pager(text):\n        if text:\n            return text\n        return ''\n    return pager(doc)\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let page = common::map_page(&vault, "map/app/m_py");
+    assert_eq!(
+        call_line(&page, "show", "pager(doc)"),
+        "`pager(doc)` L9 → target not visible"
+    );
+    assert_eq!(
+        call_line(&page, "plain", "pager(doc)"),
+        "`pager(doc)` L16 → the nested function `pager`, drawn in this chart"
+    );
+}
+
+#[test]
+fn a_let_rebound_by_a_macro_does_not_see_the_function_outside() {
+    let src = "macro_rules! with { ($i:ident, $e:expr) => {{ let $i = grow; $e }} }\npub fn level(n: u8) -> u8 { n }\npub fn grow(n: u8) -> u8 { n }\npub fn run(n: u8) -> u8 {\n    let level = with!(level, level(n));\n    level\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    assert_eq!(
+        call_line(&page, "run", "level(n)"),
+        "`level(n)` L5 → target not visible"
+    );
+}
+
+#[test]
+fn a_c_call_that_never_returns_is_a_node_of_its_own() {
+    let c = "int run(int v) {\n    puts(\"c\");\n    exit(1);\n}\n";
+    let e = edges_in(&[("src/a.c", c)], "src/a.c", "run");
+    assert!(
+        e.contains(&"puts(#quot;c#quot;) --> exit(1)".to_string()),
+        "{e:#?}"
+    );
+    assert!(e.contains(&"exit(1) --> exit(1)".to_string()), "{e:#?}");
 }

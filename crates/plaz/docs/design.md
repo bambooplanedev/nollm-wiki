@@ -55,9 +55,13 @@ The code is deterministic, so an undetermined target is written as what it is: "
 | **Outside** | path or receiver type known to be external (std, dependency, an import that resolves to no project file) | "outside the project" |
 | **Hidden** | call to a parameter, local, closure, function value, unknown `Q::` path, nested def | "target not visible", never "outside", never "one of" |
 
-The node text is always the literal call (`ask(messages)`); the form only decides the link. When unsure: Hidden.
+The node text is always the literal call (`ask(messages)`), on one line; past 80 characters its middle is cut to `…`, so its start and its end stay visible (the Calls list shows the same text). The form only decides the link. When unsure: Hidden.
 
-Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls, plus branches and code not drawn (Rust `?`, `unwrap_or`, Rust `assert!`-family macros and Python `assert` (counted as `assert`, no node), conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros).
+A closure, nested function or lambda with control flow of its own is a sub-chart beside the path. Dotted edges tie it to the path, saying where it is used and nothing about when or how often it runs: `passed to`, from the sub-chart to the call that takes it as an argument (to the innermost call whose arguments hold it); `calls`, from a call of it by name to the sub-chart. A call by name counts only when that name is bound once in the whole function, nested flows included (no parameter, loop variable, second `let` or item of that name), by a Rust `let` (not a `let mut` with a declared type) or a C++ `auto` declaration (a declared type such as `std::function` may be assigned another function), and the call stands where the binding is in scope: after a Rust `let` or a C++ declaration, in the rest of its block; in the whole block of a Rust nested `fn`; from a Python nested `def` (undecorated, in no class) to the end of the function around it. Such a call is drawn as a local call (a rounded box), and a call naming it as an argument (`v.sort_by_key(fits)`, `filter(keep, rows)`) gets a `passed to` edge too. Its Calls line reads "the closure `fits`, drawn in this chart" (`lambda`, `nested function`), and the coverage line counts it as `local`. It is no call target: Called from and the index pages do not list it. Any other call of a local stays Hidden.
+
+A call adds a node of its own only when it says something the nodes around it do not (owner decision, 2026-11-26). A step of a method chain outside the project is not drawn when a longer call of the chart starts with its text: `a.b().c().d()` is one node, the outermost, whose text holds the steps (so is a "target not visible" step whose receiver is such a step). A step that links into the project, or reads "one of", stays a node of its own, as does one that takes a closure drawn in the chart. Rust's `Some(…)`, `Ok(…)` and `Err(…)` outside the project build a value and are not drawn; the calls in their arguments are. The Calls list keeps every call, and the coverage line counts what is not drawn (`chain step`, `Some/Ok/Err`). Calls that follow one another on one straight path (no decision, join, note or sub-chart between them) and all read "outside the project", or all "target not visible", are one node of that form with one call per line, in order, at most 8 lines a node. A call that links, reads "one of", is local, never returns or is an end of a dotted edge is a node of its own and ends the run. Each call keeps its line, so the coverage line counts nothing for these.
+
+Each chart carries a coverage line: counts of resolved / one of / outside / hidden calls (and local ones, when there are), plus branches and code not drawn (Rust `?`, `unwrap_or`, Rust `assert!`-family macros and Python `assert` (counted as `assert`, no node), conditions inside closures or ternaries, C/C++ `#if` branches, `goto` and jumps hidden in macros, chain steps and wrappers not drawn).
 
 ## What changed in the logic (planned, not built)
 
@@ -89,6 +93,7 @@ Decided by the owner:
 - Literal code and comments only, no model; doubt shown as "either … or …".
 - Logic inside functions plus caller/callee navigation.
 - Index pages from the top down (2026-11-26), re-listing certain links only; this revisits the earlier "no entry points" rule, whose reason stands.
+- Lighter charts (2026-11-26): chain steps and `Some`/`Ok`/`Err` wrappers outside the project are not drawn, the Calls list and the coverage line still name them, and runs of calls that link nowhere share a node, a line each; this revisits the earlier "charts complete, no collapsing" rule.
 - State diagrams in the simple shape; sequence diagrams deferred.
 - Browser main view (Quartz); Obsidian and agent access too.
 - No stored history; compare with commits on demand.
@@ -97,7 +102,7 @@ Decided by the owner:
 Made during design (open to change):
 - Change baseline HEAD by default.
 - Comments shown whole up to a line cap, then a link to the lines; never cut to the first sentence.
-- Charts complete; no collapsing of large functions. A chart over Mermaid's 50,000-character limit is not drawn: a notice points to the Calls list as the complete view.
+- Charts complete in what they decide: every decision, exit and call that links or reads "one of" is a node; only calls that repeat what another node says are left out or put together (see "Call targets"), and the Calls list stays the complete view. No collapsing of large functions: a chart over Mermaid's 50,000-character limit is not drawn, and a notice points to the Calls list.
 - Python nested defs and closures drawn as their own sub-charts.
 - Mermaid output escaped (quotes, `{}`, `<>`, `|`, `\`, `:`, `$`) and validated with mermaid-cli in tests; clicks checked in Quartz and Obsidian, with the wikilink list as the fallback.
 - Measurement gate before release, on projects not used to design this: zero wrong "resolved" links, every "one of" contains the true target or is "hidden", every diamond's text equals the source.

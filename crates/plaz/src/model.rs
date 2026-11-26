@@ -224,6 +224,11 @@ pub enum NotDrawn {
     /// An `assert` statement or an `assert!`-family macro: no node, no
     /// edge for the failing case.
     Assert,
+    /// A call outside the project that a longer call of the chart starts
+    /// with (`a.b()` of `a.b().c()`): its text is in that call's node.
+    ChainStep,
+    /// Rust's `Some(…)`, `Ok(…)`, `Err(…)` outside the project.
+    Wrapper,
 }
 
 impl NotDrawn {
@@ -242,6 +247,8 @@ impl NotDrawn {
             NotDrawn::BeforeCase => "code before the first case",
             NotDrawn::HiddenJump => "macro jump",
             NotDrawn::Assert => "assert",
+            NotDrawn::ChainStep => "chain step",
+            NotDrawn::Wrapper => "Some/Ok/Err",
         }
     }
 }
@@ -254,6 +261,8 @@ pub struct Flow {
     pub types: BTreeMap<String, String>,
     /// The names in `locals` that are parameters of the function.
     pub params: BTreeSet<String>,
+    /// The names in `locals` or `rebound` bound more than once.
+    pub twice: BTreeSet<String>,
     /// The names in `locals` declared `global` or `nonlocal` (Python).
     pub outside: BTreeSet<String>,
     /// Names that mean something else here than in the file: the generic
@@ -323,6 +332,10 @@ pub enum Step {
         name: String,
         line: usize,
         flow: Flow,
+        /// The bytes of the closure or function in its file.
+        at: std::ops::Range<usize>,
+        /// The name it is bound to, when a call by that name reaches it.
+        binds: Option<Binding>,
     },
     /// The body of a `finally`, after the steps of its `try`: on every path
     /// that falls into it. When none does (each leaves by an exit, which
@@ -331,6 +344,25 @@ pub enum Step {
         line: usize,
         body: Vec<Step>,
     },
+}
+
+/// Where calls by a nested flow's name reach it: a `let` closure, a
+/// nested function or def, a lambda bound to a local.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Binding {
+    /// The bytes where the name means it.
+    pub scope: std::ops::Range<usize>,
+    /// What it is, for the Calls list: `closure`, `lambda`, `nested function`.
+    pub what: &'static str,
+}
+
+/// The nested flow a call reaches by name (`MapCall::local`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Local {
+    pub name: String,
+    pub what: &'static str,
+    /// The nested flow's `Step::Nested::at`.
+    pub at: std::ops::Range<usize>,
 }
 
 /// Where an exit goes.
@@ -370,7 +402,10 @@ pub struct Comment {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapCall {
+    /// The call as shown: on one line, its middle cut past 80 characters.
     pub text: String,
+    /// The call as written, on one line: what the resolve stage reads.
+    pub whole: String,
     pub site: CallSite,
     /// A path call's or a member call's callee (`a::f`, `x.g(1).f`) as
     /// written, to its arguments: `text` is clipped. None on a receiver
@@ -381,6 +416,21 @@ pub struct MapCall {
     /// statement on the path, kept by the resolve stage only when its
     /// target never returns.
     pub ends: bool,
+    /// The call's bytes in its file.
+    pub bytes: std::ops::Range<usize>,
+    /// The call names a local that is bound only by the `let` whose
+    /// initializer holds the call: the name there is the one outside.
+    pub outer: bool,
+    /// The closure or nested function drawn in the same chart that the
+    /// call calls by name: the name's one binding in the function, and in
+    /// scope at the call.
+    pub local: Option<Local>,
+    /// The `Step::Nested::at` of each nested flow drawn in the same chart
+    /// that the call takes as an argument, or by its one name.
+    pub takes: Vec<std::ops::Range<usize>>,
+    /// A constructor of a value the chart does not draw as a call: Rust's
+    /// `Some(…)`, `Ok(…)`, `Err(…)`.
+    pub wrapper: bool,
 }
 
 /// A handle valid within one build, never written to a page.
