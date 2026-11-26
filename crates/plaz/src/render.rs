@@ -242,6 +242,13 @@ fn calls(p: &Project, names: &Names, flow: &Flow) -> String {
     let mut calls = Vec::new();
     flow.each_call(&mut |_, c| {
         let to = match &c.target {
+            _ if c.local.is_some() => c.local.as_ref().map_or(String::new(), |l| {
+                format!(
+                    "the {} {}, drawn in this chart",
+                    l.what,
+                    inline_code(&l.name)
+                )
+            }),
             Target::Resolved(t) => link(t),
             Target::OneOf {
                 candidates,

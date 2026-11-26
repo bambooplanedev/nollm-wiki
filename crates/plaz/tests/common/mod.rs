@@ -73,3 +73,29 @@ pub fn index_section(vault: &Path, id: &str, heading: &str) -> Vec<String> {
         .map(str::to_string)
         .collect()
 }
+
+/// The labelled dotted edges (`-.->|…|`) of the charts in `block`, each as
+/// `from -label-> to`: a node by its label, a subgraph by `[its title]`.
+pub fn dotted_edges(block: &str) -> Vec<String> {
+    let mut names = std::collections::BTreeMap::new();
+    for l in block.lines().map(str::trim) {
+        if let Some(rest) = l.strip_prefix("subgraph ") {
+            let (id, title) = rest.split_once(' ').unwrap();
+            let title = title.trim_matches(|c| matches!(c, '[' | ']' | '"'));
+            names.insert(id.to_string(), format!("[{title}]"));
+        } else if l.starts_with('n') && !l.contains(" -") {
+            let id: String = l.chars().take_while(|c| c.is_alphanumeric()).collect();
+            let label = l.split('"').nth(1).unwrap_or("").to_string();
+            names.insert(id, label);
+        }
+    }
+    block
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| {
+            let (from, rest) = l.split_once(" -.->|")?;
+            let (label, to) = rest.split_once("| ")?;
+            Some(format!("{} -{label}-> {}", names[from], names[to]))
+        })
+        .collect()
+}

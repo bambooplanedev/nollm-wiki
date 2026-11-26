@@ -3297,3 +3297,22 @@ fn the_index_of_a_cpp_tree_follows_definitions() {
     );
     assert!(!common::map_page(&vault, "map/index/src").contains("run_h"));
 }
+
+#[test]
+fn a_lambda_is_linked_to_the_calls_that_take_or_call_it() {
+    let src = "int tally(int n) {\n    auto bump = [&](int v) {\n        if (v > 2) { return v + 1; }\n        return v;\n    };\n    apply(bump);\n    each([&](int v) { if (v) { n++; } });\n    return bump(n);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.cpp", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_cpp"), "tally");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[bump] -passed to-> apply(bump)",
+            "[closure L7] -passed to-> each([#amp;](int v) #123; if (v) #123; n++; #125; #125;)",
+            "bump(n) -calls-> [bump]",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&block, "tally", "Calls")[2],
+        "`bump(n)` L8 → the lambda `bump`, drawn in this chart"
+    );
+}

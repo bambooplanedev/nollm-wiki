@@ -3,6 +3,7 @@
 use crate::model::{Arm, Comment, ExitKind, Flow, FnId, NotDrawn, Step, Target};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 /// `s` as the text of a double-quoted Mermaid label: every char that could
 /// end the label, the node or the fence becomes an entity code, a line break
@@ -76,6 +77,9 @@ struct Chart<'a> {
     /// `closed` of each arm list asked already, by its address: shared
     /// with the scratch charts, so each list is drawn once to tell.
     closed: &'a RefCell<BTreeMap<*const Arm, bool>>,
+    /// The node of each call drawn and the subgraph of each nested flow,
+    /// by their bytes: the ends of the dotted edges between them.
+    placed: BTreeMap<(usize, usize), usize>,
 }
 
 impl Chart<'_> {
@@ -139,13 +143,25 @@ impl Chart<'_> {
         self.branches = branches;
     }
 
-    /// `steps` as a chart of their own, beside the path.
-    fn beside(&mut self, name: &str, steps: &[Step]) {
+    /// `steps` as a chart of their own, beside the path; returns the
+    /// subgraph's id.
+    fn beside(&mut self, name: &str, steps: &[Step]) -> usize {
         let id = self.id();
         self.lines
             .push(format!("    subgraph n{id} [\"{}\"]", mermaid_label(name)));
         self.flow(name, steps);
         self.lines.push("    end".to_string());
+        id
+    }
+
+    /// A dotted edge labelled `label` between two nodes or subgraphs
+    /// placed, by their bytes.
+    fn dotted(&mut self, from: &Range<usize>, label: &str, to: &Range<usize>) {
+        let at = |r: &Range<usize>| self.placed.get(&(r.start, r.end)).copied();
+        if let (Some(f), Some(t)) = (at(from), at(to)) {
+            self.edges += 1;
+            self.lines.push(format!("    n{f} -.->|{label}| n{t}"));
+        }
     }
 
     /// The index in `loops` of the loop labelled `label`, or the innermost.
@@ -183,12 +199,14 @@ impl Chart<'_> {
         match s {
             Step::Call(c) => {
                 let shape = match &c.target {
+                    _ if c.local.is_some() => ("(", ")"),
                     Target::Resolved(_) => ("[", "]"),
                     Target::OneOf { .. } => ("[[", "]]:::oneof"),
                     Target::Outside => ("[/", "/]"),
                     Target::Hidden => (">", "]:::hidden"),
                 };
                 let id = self.node(shape, &c.text, &ends);
+                self.placed.insert((c.bytes.start, c.bytes.end), id);
                 if let Target::Resolved(t) = &c.target {
                     let href = (self.href)(t);
                     self.clicks.push(format!("    click n{id} href \"{href}\""));
@@ -245,8 +263,9 @@ impl Chart<'_> {
                 ends
             }
             Step::Branch { .. } => self.branched(s, ends),
-            Step::Nested { name, flow, .. } => {
-                self.beside(name, &flow.steps);
+            Step::Nested { name, flow, at, .. } => {
+                let id = self.beside(name, &flow.steps);
+                self.placed.insert((at.start, at.end), id);
                 ends
             }
             // The exit that passed through it goes on from its end, undrawn.
@@ -347,6 +366,7 @@ impl Chart<'_> {
             loops: Vec::new(),
             branches: Vec::new(),
             closed: self.closed,
+            placed: BTreeMap::new(),
         };
         let closed = (arms.iter()).all(|a| scratch.steps(&a.body, vec![(0, None)]).1.is_empty());
         self.closed.borrow_mut().insert(arms.as_ptr(), closed);
@@ -434,8 +454,22 @@ pub(crate) fn chart(name: &str, path: &str, flow: &Flow, href: &dyn Fn(&FnId) ->
         loops: Vec::new(),
         branches: Vec::new(),
         closed: &RefCell::new(BTreeMap::new()),
+        placed: BTreeMap::new(),
     };
     c.flow(name, &flow.steps);
+    // A nested flow is drawn beside the path: dotted edges tie it to the
+    // calls that take it and to those that call it by name.
+    // None from a call inside the subgraph: a nested function calling or
+    // passing itself.
+    flow.each_call(&mut |_, call| {
+        let inside = |at: &Range<usize>| at.start <= call.bytes.start && call.bytes.end <= at.end;
+        for at in call.takes.iter().filter(|at| !inside(at)) {
+            c.dotted(at, "passed to", &call.bytes);
+        }
+        if let Some(l) = call.local.as_ref().filter(|l| !inside(&l.at)) {
+            c.dotted(&call.bytes, "calls", &l.at);
+        }
+    });
     let mut body = String::from("flowchart TD\n");
     for l in c.lines.iter().chain(&c.clicks) {
         body.push_str(l);
@@ -490,10 +524,11 @@ pub(crate) fn coverage(flow: &Flow) -> String {
             }
         }
     }
-    let mut n = [0; 5];
+    let mut n = [0; 6];
     flow.each_call(&mut |_, c| {
         n[0] += 1;
         n[match c.target {
+            _ if c.local.is_some() => 5,
             Target::Resolved(_) => 1,
             Target::OneOf { .. } => 2,
             Target::Outside => 3,
@@ -506,8 +541,14 @@ pub(crate) fn coverage(flow: &Flow) -> String {
         .iter()
         .map(|(k, n)| format!("{n} {}", k.label()))
         .collect();
+    // A call of a closure or nested function drawn in the chart.
+    let local = if n[5] > 0 {
+        format!(", {} local", n[5])
+    } else {
+        String::new()
+    };
     let mut out = format!(
-        "Coverage: {} calls: {} resolved, {} one of, {} outside, {} hidden. Not drawn: {}.",
+        "Coverage: {} calls: {} resolved, {} one of, {} outside, {} hidden{local}. Not drawn: {}.",
         n[0],
         n[1],
         n[2],

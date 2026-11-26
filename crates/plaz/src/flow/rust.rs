@@ -1,7 +1,7 @@
 //! Rust's flow hooks.
 
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
-use crate::model::{ExitKind, NotDrawn};
+use crate::model::{Binding, ExitKind, NotDrawn};
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
@@ -160,15 +160,24 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         {
             FlowNode::NotDrawn(NotDrawn::Assert)
         }
-        "closure_expression" if own_flow(n) => FlowNode::Nested {
-            name: n
-                .parent()
-                .filter(|p| p.kind() == "let_declaration")
+        "closure_expression" if own_flow(n) => {
+            let bound = n.parent().filter(|p| p.kind() == "let_declaration");
+            let name = bound
                 .and_then(|p| p.child_by_field_name("pattern"))
-                .filter(|p| p.kind() == "identifier")
-                .map(|p| text(p, src).to_string()),
-            body: n,
-        },
+                .filter(|p| p.kind() == "identifier");
+            FlowNode::Nested {
+                name: name.map(|p| text(p, src).to_string()),
+                body: n,
+                // From the end of the `let` to the end of its block.
+                binds: bound
+                    .zip(bound.and_then(|b| b.parent()))
+                    .filter(|_| name.is_some())
+                    .map(|(l, b)| Binding {
+                        scope: l.end_byte()..b.end_byte(),
+                        what: "closure",
+                    }),
+            }
+        }
         "closure_expression" => FlowNode::NotDrawn(NotDrawn::Closure),
         "try_expression" => FlowNode::NotDrawn(NotDrawn::Try),
         // A let chain's `&&` is a token of its own, not a binary expression.
@@ -192,11 +201,20 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "async_block" if own_flow(n) => FlowNode::Nested {
             name: Some(format!("async L{}", n.start_position().row + 1)),
             body: n,
+            binds: None,
         },
         // A function in a body is no item of the file: drawn where it stands.
+        // Its name means it in the whole block it stands in.
         "function_item" => FlowNode::Nested {
             name: field("name").map(|i| text(i, src).to_string()),
             body: n,
+            binds: n
+                .parent()
+                .filter(|_| field("name").is_some())
+                .map(|b| Binding {
+                    scope: b.byte_range(),
+                    what: "nested function",
+                }),
         },
         _ => FlowNode::Plain,
     }

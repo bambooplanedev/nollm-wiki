@@ -78,7 +78,7 @@ fn a_closure_calling_an_outer_parameter_is_hidden_even_when_a_project_function_s
         calls,
         [
             "`cb()` L4 → target not visible",
-            "`run()` L6 → target not visible"
+            "`run()` L6 → the closure `run`, drawn in this chart"
         ]
     );
 }
@@ -105,6 +105,81 @@ fn a_let_does_not_see_its_own_name_in_its_initializer() {
     assert_eq!(
         common::fn_section(&page, "g", "Calls"),
         ["`level(2)` L9 → target not visible"]
+    );
+}
+
+#[test]
+fn closures_and_nested_functions_are_linked_to_the_calls_that_take_or_call_them() {
+    let src = "pub fn sort_all(v: &mut Vec<u8>, w: &mut Vec<u8>) {\n    let fits = |x: &u8| {\n        if *x > 3 { return 1; }\n        0\n    };\n    v.sort_by_key(fits);\n    w.retain(|x| {\n        if *x > 2 { return true; }\n        false\n    });\n    fits(1);\n    fn tidy(n: u8) -> u8 { if n > 1 { tidy(n - 1) } else { 0 } }\n    tidy(2);\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/src/a_rs"), "sort_all");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[fits] -passed to-> v.sort_by_key(fits)",
+            "[closure L7] -passed to-> w.retain(#124;x#124; #123; if *x #gt; 2 #123; return true; #125; false #125;)",
+            "fits(1) -calls-> [fits]",
+            "tidy(2) -calls-> [tidy]",
+        ]
+    );
+    assert!(block.contains("(\"fits(1)\")\n"), "{block}");
+    assert_eq!(
+        common::fn_section(&block, "sort_all", "Calls"),
+        [
+            "`v.sort_by_key(fits)` L6 → outside the project",
+            "`w.retain(|x| { if *x > 2 { return true; } false })` L7 → outside the project",
+            "`fits(1)` L11 → the closure `fits`, drawn in this chart",
+            // Calling itself: no edge from inside its subgraph to it.
+            "`tidy(n - 1)` L12 → the nested function `tidy`, drawn in this chart",
+            "`tidy(2)` L13 → the nested function `tidy`, drawn in this chart",
+        ]
+    );
+    assert!(
+        block.contains("\nCoverage: 5 calls: 0 resolved, 0 one of, 2 outside, 0 hidden, 3 local. Not drawn: none.\n"),
+        "{block}"
+    );
+}
+
+#[test]
+fn a_name_bound_twice_leaves_its_calls_unlinked() {
+    let src = "pub fn twice(flag: bool) {\n    let pick = |x: u8| { if x > 1 { return 1; } 0 };\n    pick(1);\n    let pick = |x: u8| { if x > 2 { return 2; } 0 };\n    pick(2);\n}\npub fn param(pick: u8) {\n    fn pick() { if true {} }\n    pick();\n}\n";
+    let (_d, vault) = common::built(&[("src/a.rs", src)]);
+    let page = common::map_page(&vault, "map/src/a_rs");
+    for (f, calls) in [
+        (
+            "twice",
+            vec![
+                "`pick(1)` L3 → target not visible",
+                "`pick(2)` L5 → target not visible",
+            ],
+        ),
+        ("param", vec!["`pick()` L9 → target not visible"]),
+    ] {
+        let block = common::fn_block(&page, f);
+        assert!(common::dotted_edges(&block).is_empty(), "{block}");
+        assert_eq!(common::fn_section(&block, f, "Calls"), calls);
+    }
+}
+
+#[test]
+fn a_python_nested_def_is_linked_to_the_calls_that_take_or_call_it() {
+    let src = "def outer(rows):\n    def keep(r):\n        if r > 2:\n            return True\n        return False\n    picked = list(filter(keep, rows))\n    if keep(1):\n        return picked\n    return []\n";
+    let (_d, vault) = common::built(&[("app/m.py", src)]);
+    let block = common::fn_block(&common::map_page(&vault, "map/app/m_py"), "outer");
+    assert_eq!(
+        common::dotted_edges(&block),
+        [
+            "[keep] -passed to-> filter(keep, rows)",
+            "keep(1) -calls-> [keep]",
+        ]
+    );
+    assert_eq!(
+        common::fn_section(&block, "outer", "Calls"),
+        [
+            "`filter(keep, rows)` L6 → outside the project",
+            "`list(filter(keep, rows))` L6 → outside the project",
+            "`keep(1)` L7 → the nested function `keep`, drawn in this chart",
+        ]
     );
 }
 
@@ -771,9 +846,9 @@ fn an_item_declared_in_a_body_hides_the_files_item_of_that_name() {
     assert_eq!(
         calls_of(&files, "f"),
         [
-            "`helper()` L9 → target not visible",
+            "`helper()` L9 → the nested function `helper`, drawn in this chart",
             "`S::new()` L10 → one of: [[map/src/a_rs#s_new|S::new]], or outside the project",
-            "`helper()` L12 → target not visible",
+            "`helper()` L12 → the nested function `helper`, drawn in this chart",
         ]
     );
     assert_eq!(
@@ -1966,7 +2041,7 @@ fn a_hidden_exit_reaches_the_end_of_its_flow_and_is_found_by_token() {
 }
 
 #[test]
-fn python_calls_to_parameters_and_nested_defs_are_hidden() {
+fn python_calls_to_parameters_are_hidden_and_to_nested_defs_local() {
     let a = "def decide(messages, ask):\n    return ask(messages)\n\ndef outer(x):\n    def inner(y):\n        return y\n    return inner(x)\n\ndef ask(m):\n    pass\n\ndef inner(y):\n    pass\n";
     let (_d, vault) = common::built(&[("a.py", a)]);
     let page = common::map_page(&vault, "map/a_py");
@@ -1976,7 +2051,7 @@ fn python_calls_to_parameters_and_nested_defs_are_hidden() {
     );
     assert_eq!(
         common::fn_section(&page, "outer", "Calls"),
-        ["`inner(x)` L7 → target not visible"]
+        ["`inner(x)` L7 → the nested function `inner`, drawn in this chart"]
     );
 }
 

@@ -16,6 +16,8 @@ pub fn call(name: &str) -> Step {
         ends: false,
         bytes: 0..0,
         outer: false,
+        local: None,
+        takes: Vec::new(),
     })
 }
 
@@ -161,7 +163,9 @@ pub fn flow_lines(path: &str, src: &str, name: &str) -> Vec<String> {
                 }
                 Step::Call(c) => out.push(format!("{pad}call {} @{}", c.text, c.site.line)),
                 Step::Exit { text, line, .. } => out.push(format!("{pad}exit {text} @{line}")),
-                Step::Nested { name, line, flow } => {
+                Step::Nested {
+                    name, line, flow, ..
+                } => {
                     out.push(format!("{pad}nested {name} @{line}"));
                     lines(&flow.steps, depth + 1, out);
                 }

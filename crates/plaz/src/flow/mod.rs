@@ -12,7 +12,9 @@ pub(crate) use cpp::noreturn_word;
 pub(crate) use cpp::{fields as cpp_fields, macros as cpp_macros, module_code as cpp_module_code};
 pub(crate) use python::{module_code, module_imports};
 
-use crate::model::{Arm, Comment, ExitKind, File, Flow, MapCall, NotDrawn, Step, Target};
+use crate::model::{
+    Arm, Binding, Comment, ExitKind, File, Flow, Local, MapCall, NotDrawn, Step, Target,
+};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
@@ -54,9 +56,11 @@ pub(crate) enum FlowNode<'a> {
     Exit(ExitKind),
     /// `body` is the node whose children form the nested flow and whose
     /// bindings are the nested flow's own; `None` names it `closure L<n>`.
+    /// `binds`: where a call by `name` reaches it.
     Nested {
         name: Option<String>,
         body: Node<'a>,
+        binds: Option<Binding>,
     },
     /// Counted, then walked as `Plain`.
     NotDrawn(NotDrawn),
@@ -225,6 +229,7 @@ pub(crate) fn attach(file: &mut File, analyzed: &Analyzed) {
         };
         let mut flow = w.flow(node);
         mark_outer(&mut flow, node, source.text(), hooks);
+        link_nested(&mut flow, node, source.text());
         let hidden = w.groups.len() - w.drawn.borrow().len();
         let early = match file.family {
             Family::Cpp => cpp::before_case(node, source.text()),
@@ -275,6 +280,116 @@ fn bound(flow: &Flow) -> (BTreeMap<&str, usize>, BTreeSet<&str>) {
         items.extend(f.rebound.iter().map(String::as_str));
     }
     (counts, items)
+}
+
+/// The call node of the call at `bytes` under `root`.
+fn call_node<'t>(root: Node<'t>, bytes: &Range<usize>) -> Option<Node<'t>> {
+    let inner = root.descendant_for_byte_range(bytes.start, bytes.end)?;
+    std::iter::successors(Some(inner), Node::parent)
+        .take_while(|n| n.byte_range() == *bytes)
+        .find(|n| n.child_by_field_name("arguments").is_some())
+}
+
+/// The bytes of the call that takes `n` as an argument, or as part of one
+/// within the same expression (`f(Box::new(|| …))` is `Box::new`'s).
+fn taker(n: Node) -> Option<Range<usize>> {
+    let mut at = n;
+    while let Some(p) = at.parent() {
+        let k = p.kind();
+        if matches!(k, "arguments" | "argument_list") {
+            let call = p.parent()?;
+            return (call.child_by_field_name("arguments") == Some(p)).then(|| call.byte_range());
+        }
+        let stops = [
+            "statement",
+            "block",
+            "declaration",
+            "declarator",
+            "closure",
+            "lambda",
+        ];
+        if stops.iter().any(|s| k.contains(s)) || k.starts_with("function") || k == "assignment" {
+            return None;
+        }
+        at = p;
+    }
+    None
+}
+
+/// Does the call node `call` pass the name `name` itself as an argument:
+/// `f(x)`, `f(&x)`, `f(&mut x)`, `f(key=x)`?
+fn passes(call: Node, name: &str, src: &str) -> bool {
+    let Some(args) = call.child_by_field_name("arguments") else {
+        return false;
+    };
+    args.named_children(&mut args.walk()).any(|a| {
+        let a = match a.kind() {
+            "keyword_argument" | "reference_expression" => a.child_by_field_name("value"),
+            "pointer_expression" => a.child_by_field_name("argument"),
+            _ => Some(a),
+        };
+        a.is_some_and(|a| a.kind() == "identifier" && text(a, src) == name)
+    })
+}
+
+/// Links each nested flow to the calls that take it (`MapCall::takes`)
+/// and, when its name has no other binding in the function, to the calls
+/// of that name in its scope (`MapCall::local`).
+fn link_nested(flow: &mut Flow, root: Node, src: &str) {
+    let (counts, items) = bound(flow);
+    let mut binders: BTreeMap<&str, Vec<(Range<usize>, &Binding)>> = BTreeMap::new();
+    let mut taken: Vec<(Range<usize>, Range<usize>)> = Vec::new();
+    flow.each_step(&mut |s| {
+        if let Step::Nested {
+            name, at, binds, ..
+        } = s
+        {
+            if let Some(b) = binds {
+                binders.entry(name).or_default().push((at.clone(), b));
+            }
+            let node = root.descendant_for_byte_range(at.start, at.end);
+            if let Some(call) = node.and_then(taker) {
+                taken.push((call, at.clone()));
+            }
+        }
+    });
+    // Per name bound once in the function, by a nested flow: where that
+    // name means it, and the nested flow.
+    let single: Vec<(Range<usize>, Local)> = (binders.into_iter())
+        .filter(|(name, b)| {
+            let all = counts.get(name).copied().unwrap_or(0) + usize::from(items.contains(name));
+            b.len() == 1 && all == 1
+        })
+        .map(|(name, b)| {
+            let (at, binding) = &b[0];
+            let local = Local {
+                name: name.to_string(),
+                what: binding.what,
+                at: at.clone(),
+            };
+            (binding.scope.clone(), local)
+        })
+        .collect();
+    flow.each_call_mut(&mut |_, c| {
+        let inside =
+            |scope: &Range<usize>| scope.start <= c.bytes.start && c.bytes.end <= scope.end;
+        let node = call_node(root, &c.bytes);
+        for (_, local) in single.iter().filter(|(s, _)| inside(s)) {
+            // The name as written: not `::open(4)` beside a local `open`.
+            let callee = node.and_then(|n| n.child_by_field_name("function"));
+            if c.site.via == CallVia::Bare && callee.is_some_and(|f| text(f, src) == local.name) {
+                c.local = Some(local.clone());
+            }
+            if node.is_some_and(|n| passes(n, &local.name, src)) {
+                c.takes.push(local.at.clone());
+            }
+        }
+        for (_, at) in taken.iter().filter(|(call, _)| *call == c.bytes) {
+            if !c.takes.contains(at) {
+                c.takes.push(at.clone());
+            }
+        }
+    });
 }
 
 /// Sets `MapCall::outer` on each bare call inside the initializer of the
@@ -495,13 +610,15 @@ impl<'s> Walker<'s> {
                     body,
                 });
             }
-            FlowNode::Nested { name, body } => {
+            FlowNode::Nested { name, body, binds } => {
                 let mut nested = self.flow(body);
                 flow.words.append(&mut nested.words);
                 out.push(Step::Nested {
                     name: name.unwrap_or_else(|| format!("closure L{}", line(n))),
                     line: line(n),
                     flow: nested,
+                    at: n.byte_range(),
+                    binds,
                 });
             }
             FlowNode::Loop {
@@ -625,6 +742,8 @@ impl<'s> Walker<'s> {
                 ends: (self.hooks.ends_path)(n, text),
                 bytes: c.start_byte..c.end_byte,
                 outer: false,
+                local: None,
+                takes: Vec::new(),
             }));
         }
     }

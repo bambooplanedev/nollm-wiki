@@ -260,6 +260,8 @@ fn calls_and_closures_in_a_post_are_counted() {
             name: "g".into(),
             line: 1,
             flow: nested,
+            at: 0..0,
+            binds: None,
         },
     ];
     let flow = flow_of(vec![looping("go", vec![call("a")], post, false)]);

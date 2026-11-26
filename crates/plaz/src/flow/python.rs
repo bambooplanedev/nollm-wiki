@@ -1,7 +1,7 @@
 //! Python's flow hooks, and the imports a module's tree shows.
 
 use super::{text, ArmNode, Bindings, FlowNode, Hooks};
-use crate::model::{ExitKind, Import, NotDrawn};
+use crate::model::{Binding, ExitKind, Import, NotDrawn};
 use std::collections::BTreeSet;
 use wiki_code::support::one_line;
 use wiki_code::tree_sitter::Node;
@@ -96,6 +96,10 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "function_definition" => FlowNode::Nested {
             name: field("name").map(|i| text(i, src).to_string()),
             body: n,
+            binds: def_scope(n).map(|scope| Binding {
+                scope,
+                what: "nested function",
+            }),
         },
         // Expressions: they hold no statements, so they are drawn inline.
         "lambda"
@@ -111,6 +115,20 @@ fn flow_node<'a>(n: Node<'a>, src: &str) -> FlowNode<'a> {
         "boolean_operator" => FlowNode::NotDrawn(NotDrawn::ShortCircuit),
         "assert_statement" => FlowNode::NotDrawn(NotDrawn::Assert),
         _ => FlowNode::Plain,
+    }
+}
+
+/// Where the name of the nested def `n` means it: from the def to the end
+/// of the function around it. None for a decorated def, whose name holds
+/// what the decorator returns, and for a method of a class in the body.
+fn def_scope(n: Node) -> Option<std::ops::Range<usize>> {
+    let mut at = n.parent()?;
+    loop {
+        match at.kind() {
+            "decorated_definition" | "class_definition" => return None,
+            "function_definition" => return Some(n.start_byte()..at.end_byte()),
+            _ => at = at.parent()?,
+        }
     }
 }
 
