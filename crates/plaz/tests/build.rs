@@ -443,6 +443,17 @@ fn the_cli_reports_counts_and_fails_cleanly() {
     assert!(stderr.contains("/no/such/dir"), "{stderr}");
 }
 
+#[test]
+fn building_from_a_file_says_it_is_not_a_directory() {
+    let d = tempfile::tempdir().unwrap();
+    let file = d.path().join("a.rs");
+    std::fs::write(&file, "fn f() {}\n").unwrap();
+    let out = cli_build(&file, &d.path().join("vault")).failure();
+    let stderr = String::from_utf8(out.get_output().stderr.clone()).unwrap();
+    assert!(stderr.contains("is not a directory"), "{stderr}");
+    assert!(stderr.contains(&file.display().to_string()), "{stderr}");
+}
+
 #[cfg(unix)]
 #[test]
 fn the_cli_names_every_file_it_could_not_read() {
