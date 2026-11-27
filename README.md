@@ -2,7 +2,7 @@
 
 # nollm-wiki
 
-**A project map for coding agents and a clear view of the business logic for people, compiled from the code without an LLM.**
+**A project map for coding agents and decision charts for people, compiled from the code without an LLM.**
 
 [![CI](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/bambooplanedev/nollm-wiki/actions/workflows/rust.yml)
 [![Release](https://img.shields.io/github/v/release/bambooplanedev/nollm-wiki)](https://github.com/bambooplanedev/nollm-wiki/releases)
@@ -10,24 +10,22 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 nollm-wiki turns a project into a map an agent can search — where each function lives, what calls
-it, which lines to read — and into decision charts that show people the business logic of each
+it, which lines to read — and into decision charts of each
 function. Nothing calls a model: the same sources give byte-identical output.
 
 - `wiki` compiles the map and serves it to agents over MCP;
-- `plaz` draws the business logic of each function — its real decisions — as charts people can read;
+- `plaz` draws the real decisions of each function as charts;
 - `nollm-wiki-install` installs both, checks the release signature and sets them up in a project with
   one command.
 
 ## Why
 
-So that a person and an agent work from the same picture of the project. The person needs it to
-understand the business logic, meaning what happens and under which conditions, and to give the
-agent precise tasks. The agent needs it to find what it is looking for without spending tokens on
-reading it does not need. `wiki` and `plaz` build that picture from the code, without a language
-model, to the same precision: down to the line and the condition.
-
-`wiki` gives the agent search across the project; `plaz` draws a decision chart for each function
-for the person. What was measured: [What `wiki` saves, and when](#what-wiki-saves-and-when).
+So that a person and an agent can work from the same map of the project. `wiki` gives the agent
+search across the project: it finds a symbol it can name without reading whole files, while finding
+a file it cannot name is not what the index does. `plaz` draws a decision chart for each function
+for the person. Both are built from the code, without a language model. `plaz` is a preview: what
+it covers and what is still open is in [its open questions](crates/plaz/docs/open-questions.md).
+What was measured: [What `wiki` saves, and when](#what-wiki-saves-and-when).
 
 ## What `wiki` saves, and when
 
@@ -37,15 +35,18 @@ narrowly anyway. Whether that project is typical has not been measured.
 
 - **Lookups with no file named** (isolated harness, strong models): about half the cost per lookup,
   −54% on Claude Sonnet 5.5 and −51% on Claude Opus 5.5 (−38% to −40% at the files' real size, more
-  on files padded to 1,500 and 5,000 lines); weaker models read fewer whole files, with no more
-  correct answers.
+  on files padded to 1,500 and 5,000 lines); weaker models read fewer whole files. Correct answers: Haiku +5.2 points [+1.3, +10.0] with
+  `wiki` against none (one C++ tree, no file named); a local 27B model's gain is not shown (+4 [−3, +10]
+  under pi on the same kind of lookups; +2 [−9, +13] at the files' real size, 87% against 75% over
+  all sizes).
 - **Full Claude Code, Sonnet 5.5, file named in both tasks:** lookups by name −20% per run, −26% per
   successful run (the control had 24 of 26 correct); a small edit +9% to +17% across three groups
   of 26.
 - **Use:** agents used `wiki` first in 52 of 52 controlled full-Claude-Code runs (26 + 26), and in
-  13% (Sonnet children) to 35% (Opus leads) of agents in the live work; the cause of the gap is not
-  known.
-- **It helps** when the lookup is the job: files too large to read whole, weaker models (in tokens read, not in correct answers), a list of
+  13% (Sonnet children) to 35% (Opus leads) of agents in the live work. The first navigation call was
+  `wiki` in 100 of 100 runs of a local 27B model on stock pi (localisation tasks) and in 6 of 30
+  under pi with workflow skills (fix tasks); tasks and models differ, so the cause is not settled.
+- **It helps** when the lookup is the job: files too large to read whole, weaker models (in tokens read; correct-answer gains are not shown for the local ones), a list of
   names to find. On a small edit in a named file it did not help and cost 9% to 17% more, in the
   one task measured. It does nothing for literal text, regular expressions or counts: that stays
   grep's job.
@@ -59,7 +60,7 @@ issue](https://github.com/bambooplanedev/nollm-wiki/issues).
 
 | Name | Say it | The word |
 |---|---|---|
-| nollm-wiki | the project's name | the project: the map for agents and the business-logic charts for people |
+| nollm-wiki | the project's name | the project: the map for agents and the decision charts for people |
 | `nollm-wiki-install` | nollm-wiki install | plain name: the installer of the tools |
 | `wiki` | wiki | plain name: the module that compiles the project wiki and serves it to agents |
 | plaz | plahz (плаз) | the loft floor where a bureau draws the airframe's real lines full size — the real decisions of each function |
