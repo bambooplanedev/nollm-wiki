@@ -1,7 +1,7 @@
 //! Page ids, heading anchors and callers, computed once before rendering.
 
-use crate::model::{FnId, Target};
-use crate::resolve::Resolved;
+use crate::model::FnId;
+use crate::resolve::{EdgeKind, Resolved};
 use std::collections::{BTreeMap, BTreeSet};
 use wiki_code::model::CodeItemKind;
 
@@ -111,31 +111,14 @@ pub fn names(r: &Resolved) -> Names {
                 anchors.insert(id, unique(&slug(&it.qualified_name()), &mut taken));
             }
         }
-        for (&item, flow) in &file.flows {
-            let caller = FnId {
-                path: path.clone(),
-                item,
-            };
-            flow.each_call(&mut |_, c| {
-                let mut add = |t: &FnId, certain: bool| {
-                    // `!certain` so the certain ones sort first.
-                    callers.entry(t.clone()).or_default().insert((
-                        !certain,
-                        caller.clone(),
-                        c.site.line,
-                    ));
-                };
-                match &c.target {
-                    Target::Resolved(t) => add(t, true),
-                    Target::OneOf { candidates, .. } => {
-                        for t in candidates {
-                            add(t, false);
-                        }
-                    }
-                    Target::Outside | Target::Hidden => {}
-                }
-            });
-        }
+    }
+    for e in r.edges() {
+        // `!certain` so the certain ones sort first.
+        let certain = e.kind == EdgeKind::Certain;
+        callers
+            .entry(e.callee)
+            .or_default()
+            .insert((!certain, e.caller, e.line));
     }
     let callers = callers
         .into_iter()

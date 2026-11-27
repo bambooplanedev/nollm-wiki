@@ -28,6 +28,67 @@ impl Resolved {
     pub fn definitions(&self, f: &FnId) -> &[FnId] {
         self.1.get(f).map_or(&[], Vec::as_slice)
     }
+
+    /// Every call edge, sorted by callee, kind, caller and line, each once:
+    /// calls of nested closures and functions count for the enclosing
+    /// function, and a one-of call has an edge per candidate.
+    pub fn edges(&self) -> Vec<Edge> {
+        let mut out = BTreeSet::new();
+        for (path, file) in &self.0.files {
+            for (&item, flow) in &file.flows {
+                let caller = FnId {
+                    path: path.clone(),
+                    item,
+                };
+                flow.each_call(&mut |_, c| {
+                    let (fns, kind) = match &c.target {
+                        Target::Resolved(t) => (std::slice::from_ref(t), EdgeKind::Certain),
+                        Target::OneOf {
+                            candidates,
+                            outside,
+                        } => (candidates.as_slice(), EdgeKind::OneOf { outside: *outside }),
+                        Target::Outside | Target::Hidden => (&[][..], EdgeKind::Certain),
+                    };
+                    for callee in fns {
+                        out.insert(Edge {
+                            callee: callee.clone(),
+                            kind,
+                            caller: caller.clone(),
+                            line: c.site.line,
+                        });
+                    }
+                });
+            }
+        }
+        out.into_iter().collect()
+    }
+
+    /// `path:start-end` and the qualified name of the function `f`.
+    pub fn place(&self, f: &FnId) -> (String, String) {
+        let it = &self.0.files[&f.path].code.items[f.item];
+        (
+            format!("{}:{}-{}", f.path, it.start_line, it.end_line),
+            it.qualified_name(),
+        )
+    }
+}
+
+/// How sure an edge is: one candidate, or one of several, which may also
+/// be something outside the project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EdgeKind {
+    Certain,
+    OneOf { outside: bool },
+}
+
+/// One call: `caller` calls `callee` at `line` of its file. Fields in sort
+/// order.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Edge {
+    pub callee: FnId,
+    pub kind: EdgeKind,
+    pub caller: FnId,
+    pub line: usize,
 }
 
 /// What the code shows about one call's target.
@@ -732,5 +793,57 @@ mod tests {
         assert_eq!(from_evidence(found(&[2, 1], false)), one_of(&[1, 2], false));
         assert_eq!(from_evidence(found(&[], false)), Target::Hidden);
         assert_eq!(from_evidence(found(&[], true)), Target::Outside);
+    }
+
+    fn edges_of(files: &[(&str, &str)]) -> Vec<(String, usize, String, EdgeKind)> {
+        let r = resolve(crate::links::source::project(
+            files.iter().map(|(p, t)| (p.to_string(), t.to_string())),
+        ));
+        let name = |f: &FnId| r.project().files[&f.path].code.items[f.item].name.clone();
+        let at = |f: &FnId| format!("{}:{}", f.path, name(f));
+        (r.edges().iter())
+            .map(|e| (at(&e.caller), e.line, at(&e.callee), e.kind))
+            .collect()
+    }
+
+    #[test]
+    fn edges_certain_for_one_target() {
+        let e = edges_of(&[
+            ("src/lib.rs", "mod b;\nfn a() { b::b(); }\n"),
+            ("src/b.rs", "pub fn b() {}\n"),
+        ]);
+        let want = ("src/lib.rs:a", 2, "src/b.rs:b", EdgeKind::Certain);
+        assert_eq!(e, [(want.0.into(), want.1, want.2.into(), want.3)]);
+    }
+
+    #[test]
+    fn edges_one_of_per_candidate() {
+        let e = edges_of(&[
+            ("src/lib.rs", "mod b;\nmod c;\nfn a() { f(); }\n"),
+            ("src/b.rs", "pub fn f() {}\n"),
+            ("src/c.rs", "pub fn f() {}\n"),
+        ]);
+        let kinds: Vec<_> = e.iter().map(|e| (e.2.as_str(), e.3)).collect();
+        let one = EdgeKind::OneOf { outside: false };
+        assert_eq!(kinds, [("src/b.rs:f", one), ("src/c.rs:f", one)]);
+    }
+
+    #[test]
+    fn edges_none_for_outside_calls() {
+        let e = edges_of(&[("src/lib.rs", "fn a() { String::new(); other(); }\n")]);
+        assert_eq!(e, []);
+    }
+
+    #[test]
+    fn place_names_file_and_lines() {
+        let r = resolve(crate::links::source::project([(
+            "src/a.rs".to_string(),
+            "fn f() {\n}\n".to_string(),
+        )]));
+        let f = FnId {
+            path: "src/a.rs".to_string(),
+            item: 0,
+        };
+        assert_eq!(r.place(&f), ("src/a.rs:1-2".to_string(), "f".to_string()));
     }
 }
