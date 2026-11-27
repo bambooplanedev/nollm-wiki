@@ -1,14 +1,17 @@
 //! Prints one tab-separated line per call edge of the tree given as the
-//! argument: caller, callee, kind.
+//! argument: caller, callee, kind, call line.
 use wiki_code::links::resolve::{resolve, EdgeKind};
 use wiki_code::links::source::load;
 
 fn main() {
-    let loaded = std::env::args().nth(1).map(|a| load(a.as_ref()));
-    let Some(Ok(project)) = loaded else {
+    let Some(arg) = std::env::args().nth(1) else {
         eprintln!("usage: edges <directory>");
         std::process::exit(2);
     };
+    let project = load(arg.as_ref()).unwrap_or_else(|e| {
+        eprintln!("edges: {arg}: {e}");
+        std::process::exit(1);
+    });
     let r = resolve(project);
     let kind = |k| match k {
         EdgeKind::Certain => "certain",
@@ -18,9 +21,11 @@ fn main() {
     let mut lines: Vec<String> = (r.edges().iter())
         .map(|e| {
             let ((c, cn), (t, tn)) = (r.place(&e.caller), r.place(&e.callee));
-            format!("{c}\t{cn}\t{t}\t{tn}\t{}", kind(e.kind))
+            format!("{c}\t{cn}\t{t}\t{tn}\t{}\t{}", kind(e.kind), e.line)
         })
         .collect();
     lines.sort();
-    println!("{}", lines.join("\n"));
+    for l in lines {
+        println!("{l}");
+    }
 }

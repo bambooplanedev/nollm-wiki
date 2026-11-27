@@ -64,6 +64,9 @@ impl Resolved {
     }
 
     /// `path:start-end` and the qualified name of the function `f`.
+    ///
+    /// # Panics
+    /// On an id from another build.
     pub fn place(&self, f: &FnId) -> (String, String) {
         let it = &self.0.files[&f.path].code.items[f.item];
         (
@@ -826,6 +829,16 @@ mod tests {
         let kinds: Vec<_> = e.iter().map(|e| (e.2.as_str(), e.3)).collect();
         let one = EdgeKind::OneOf { outside: false };
         assert_eq!(kinds, [("src/b.rs:f", one), ("src/c.rs:f", one)]);
+    }
+
+    #[test]
+    fn edges_one_of_outside_when_the_receiver_may_be_foreign() {
+        let e = edges_of(&[(
+            "src/lib.rs",
+            "struct S;\nimpl S { fn m(&self) {} }\nfn a(x: T) { x.m(); }\n",
+        )]);
+        let kind = EdgeKind::OneOf { outside: true };
+        assert_eq!(e, [("src/lib.rs:a".into(), 3, "src/lib.rs:m".into(), kind)]);
     }
 
     #[test]
