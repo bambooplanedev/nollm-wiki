@@ -25,7 +25,9 @@
 //!   and call resolution, for Rust, Python, C and C++; `plaz` renders it.
 //!   Rely on [`links::source::load`] and [`links::source::project`],
 //!   [`links::resolve::resolve`] with [`links::resolve::Resolved`] and its
-//!   `project` and `definitions`, and [`links::flow::charted`];
+//!   `project`, `definitions`, `edges` and `place`, with
+//!   [`links::resolve::Edge`] and [`links::resolve::EdgeKind`], and
+//!   [`links::flow::charted`];
 //! - [`tree_sitter`], re-exported at the version the grammars are pinned to.
 //!
 //! [`support`] is not part of the contract: it holds text helpers the wiki
