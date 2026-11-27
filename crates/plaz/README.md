@@ -9,7 +9,7 @@ size — the real decisions of each function.
 
 The map is for the person who owns the code, to read the business logic and set tasks from it. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
 
-It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. Its version is the workspace's.
+It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. The link extraction (decision flow and call resolution) lives in `wiki-code`; plaz renders it. Its version is the workspace's.
 
 **Preview.** Rust, Python, C and C++ are charted; other languages get a "not covered yet" note. `nollm-wiki-install install` installs it with the release (see [Install](../../README.md#install)); to build it yourself, see below.
 

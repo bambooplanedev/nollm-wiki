@@ -21,14 +21,22 @@
 //!   ([`index::Index`], [`index::Scope`], [`index::Family`], [`index::FnRef`],
 //!   [`index::sees`], [`index::owner_key`]);
 //! - [`imports`]: import resolution ([`imports::Imports`]);
+//! - [`links`]: the links between code: the decision flow of each function
+//!   and call resolution, for Rust, Python, C and C++; `plaz` renders it.
+//!   Rely on [`links::source::load`] and [`links::source::project`],
+//!   [`links::resolve::resolve`] with [`links::resolve::Resolved`] and its
+//!   `project` and `definitions`, and [`links::flow::charted`];
 //! - [`tree_sitter`], re-exported at the version the grammars are pinned to.
 //!
 //! [`support`] is not part of the contract: it holds text helpers the wiki
-//! compiler shares with this crate and may change with the compiler.
+//! compiler shares with this crate and may change with the compiler. Nor is
+//! [`links::model`]: it is the chart model `plaz` draws from and may change with
+//! `plaz`.
 
 pub mod analyze;
 pub mod imports;
 pub mod index;
+pub mod links;
 pub mod model;
 pub mod support;
 pub mod walk;

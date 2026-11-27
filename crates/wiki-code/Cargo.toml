@@ -3,7 +3,7 @@ name = "wiki-code"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-description = "Code layer shared by the wiki compiler and its sibling tools: the item model, source tree walk, tree-sitter extraction, call-site index and import resolution"
+description = "Code layer shared by the wiki compiler and its sibling tools: the item model, source tree walk, tree-sitter extraction, call-site index, import resolution and the links between code (decision flow, call resolution)"
 license.workspace = true
 repository.workspace = true
 publish = false
@@ -22,6 +22,10 @@ tree-sitter-typescript = "=0.23.2"
 tree-sitter-go = "=0.25.0"
 tree-sitter-bash = "=0.25.1"
 tree-sitter-cpp = "=0.23.4"
+
+[features]
+# `links::flow::testutil` for plaz's chart tests.
+test-util = []
 
 [dev-dependencies]
 serde_json = { version = "1", features = ["preserve_order"] }

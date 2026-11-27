@@ -141,7 +141,8 @@ people: `plaz setup` tells agents nothing about it.
 `wiki` uses it.
 
 **[wiki-code](crates/wiki-code/README.md)** is the library `wiki` and plaz share: it walks a source
-tree, extracts functions and types with tree-sitter, and indexes calls and imports.
+tree, extracts functions and types with tree-sitter, and indexes calls and imports. It also holds the
+links between code (the decision flow of each function and call resolution) that plaz renders.
 
 ## Requirements
 

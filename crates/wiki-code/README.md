@@ -4,7 +4,7 @@
 
 A library crate of the [nollm-wiki project](../../README.md), shared by [`wiki`](../wiki/README.md) and
 [plaz](../plaz/README.md): the item model, the source tree walk, tree-sitter extraction for each
-language, the index that call sites resolve against, and import resolution. The contract a consumer
+language, the index that call sites resolve against, import resolution, and the links between code (the decision flow of each function and call resolution). The contract a consumer
 may rely on is written at the top of [`src/lib.rs`](src/lib.rs); the grammar versions are pinned
 exactly in `Cargo.toml`, since a grammar bump changes what is extracted.
 

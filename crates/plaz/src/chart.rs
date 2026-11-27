@@ -675,4 +675,6 @@ pub(crate) fn coverage(flow: &Flow) -> String {
 }
 
 #[cfg(test)]
+mod cpp_tests;
+#[cfg(test)]
 mod tests;
