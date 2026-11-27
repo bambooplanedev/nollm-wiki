@@ -21,8 +21,9 @@ function. Nothing calls a model: the same sources give byte-identical output.
 ## Why
 
 So that a person and an agent can work from the same map of the project. `wiki` gives the agent
-search across the project: it finds a symbol it can name without reading whole files, while finding
-a file it cannot name is not what the index does. `plaz` draws a decision chart for each function
+search across the project: it finds a symbol it can name without reading whole files. A file it cannot
+name it finds less well: on real sessions, `search` had such a file among its first five hits in
+20% of cases. `plaz` draws a decision chart for each function
 for the person. Both are built from the code, without a language model. `plaz` is a preview: what
 it covers and what is still open is in [its open questions](crates/plaz/docs/open-questions.md).
 What was measured: [What `wiki` saves, and when](#what-wiki-saves-and-when).
@@ -35,21 +36,24 @@ narrowly anyway. Whether that project is typical has not been measured.
 
 - **Lookups with no file named** (isolated harness, strong models): about half the cost per lookup,
   −54% on Claude Sonnet 5.5 and −51% on Claude Opus 5.5 (−38% to −40% at the files' real size, more
-  on files padded to 1,500 and 5,000 lines); weaker models read fewer whole files. Correct answers: Haiku +5.2 points [+1.3, +10.0] with
-  `wiki` against none (one C++ tree, no file named); a local 27B model's gain is not shown (+4 [−3, +10]
-  under pi on the same kind of lookups; +2 [−9, +13] at the files' real size, 87% against 75% over
-  all sizes).
+  on files padded to 1,500 and 5,000 lines); weaker models read fewer whole files, and three of them
+  (Claude Haiku 5.5, deepseek-v4.1-flash, qwen3.8-27b) gave no more correct answers. A local model,
+  Bonsai 27B, gave more only with padded files: 87% against 75% over all sizes, −2 points [−13, +9]
+  at the files' real size. In later runs on one C++ tree with no file named, Haiku gave 5.2 points
+  more correct answers with `wiki` than without [+1.3, +10.0]; Bonsai 27B under pi gave +4 [−3,
+  +10], not shown.
 - **Full Claude Code, Sonnet 5.5, file named in both tasks:** lookups by name −20% per run, −26% per
   successful run (the control had 24 of 26 correct); a small edit +9% to +17% across three groups
   of 26.
 - **Use:** agents used `wiki` first in 52 of 52 controlled full-Claude-Code runs (26 + 26), and in
-  13% (Sonnet children) to 35% (Opus leads) of agents in the live work. The first navigation call was
-  `wiki` in 100 of 100 runs of a local 27B model on stock pi (localisation tasks) and in 6 of 30
-  under pi with workflow skills (fix tasks); tasks and models differ, so the cause is not settled.
-- **It helps** when the lookup is the job: files too large to read whole, weaker models (in tokens read; correct-answer gains are not shown for the local ones), a list of
-  names to find. On a small edit in a named file it did not help and cost 9% to 17% more, in the
-  one task measured. It does nothing for literal text, regular expressions or counts: that stays
-  grep's job.
+  13% (Sonnet children) to 35% (Opus leads) of agents in the live work. The cause of that gap is not
+  settled. For a local 27B model, `wiki` was the first navigation call in 100 of 100 runs on stock
+  pi and in 6 of 30 under pi with workflow skills, but the tasks differ too (finding a place against
+  fixing a bug in a named area).
+- **It helps** when the lookup is the job: files too large to read whole, weaker models (in tokens
+  read; in correct answers only Haiku, and Bonsai 27B on padded files), a list of names to find. On
+  a small edit in a named file it did not help and cost 9% to 17% more, in the one task measured. It
+  does nothing for literal text, regular expressions or counts: that stays grep's job.
 
 No saving on real work has been shown. Setups, intervals and limits for every figure:
 [the `wiki` module's Measured section](crates/wiki/README.md#measured). Results from other projects and

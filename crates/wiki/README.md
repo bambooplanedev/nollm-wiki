@@ -976,9 +976,12 @@ per cell:
 | qwen3.8-27b | 58% / 4% | −75% | −23% | 131 / 127 |
 
 They read whole files when they do not know where the answer is, and the ranges of `wiki` replace those
-reads; most of the saving comes with the padded files. On correct answers, later runs on one C++ tree:
-Haiku +5.2 points [+1.3, +10.0] with `wiki` against none (no file named); a local 27B model's gain
-is not shown (+4 [−3, +10] under pi; +2 [−9, +13] at the files' real size).
+reads; most of the saving comes with the padded files, and none of these three models answered more
+questions correctly. Bonsai 27B, a local model, in a separate run of that version (9 tasks): 87%
+correct with `wiki` against 75% without over all sizes (+13 points [+5, +21]), −2 [−13, +9] at the
+unpadded size. Later runs on one C++ tree, `wiki` 0.9.2, lookups with no file named, `wiki` against
+none: Haiku +5.2 points [+1.3, +10.0] (40 tasks); Bonsai 27B under stock pi +4 [−3, +10] (20 tasks),
+not shown.
 
 Real work with the file named, 2026-11-12 to 2026-11-17. Agent traces from one
 C++/Rust/Python/TypeScript project of 894 pages: Claude Opus and Sonnet agents working from briefs
@@ -1071,9 +1074,9 @@ children and 20 of 150 Sonnet children; the figures are per agent, and the tasks
 differ from those of Opus children. The tools were not deferred behind a tool search and the server's
 instructions were present in those sessions, so a missing tool does not explain the gap with the
 controlled runs. The tools and the server's instructions were loaded. Two candidate causes were not reproduced in the controlled runs: Claude Code's larger context (a descriptive comparison, confounded with build, date and tool set) and a brief that names the file and asks for an edit (0 points, −13 to +13, at this size, with a ready list of names).
-What is not settled: the cause. The first navigation call was `wiki` in 100 of 100 runs of a local
-27B model on stock pi (localisation tasks) and in 6 of 30 under pi with workflow skills (fix tasks);
-tasks and models differ. Not yet tested: lookups done by child agents a lead spawned (none of
+What is not settled: the cause. For a local 27B model, `wiki` was the first navigation call in
+100 of 100 runs on stock pi and in 6 of 30 under pi with workflow skills, but the tasks differ too
+(finding a place against fixing a bug in a named area). Not yet tested: lookups done by child agents a lead spawned (none of
 the 52 controlled runs delegated, while in the live work nearly all lookups were made by leads and
 children), long sessions, and targets that do not arrive as a list of names. One code tree, one
 team's live work, one model in the controlled runs: a larger sample from independent projects is
