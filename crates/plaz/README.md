@@ -7,7 +7,7 @@ size — the real decisions of each function.
 
 `plaz` draws the real decisions of each function: for every function a Markdown page with a decision flowchart (Mermaid) that holds the literal condition of each `if`, `match` arm and loop, the comments attached to it, the names its body declares, who calls the function, and what each call reaches. It calls no model: the same sources give byte-identical pages.
 
-The map is for the person who owns the code, to read the business logic and set tasks from it. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
+The map is for the person who owns the code: a chart of each function's decisions to read when setting tasks. `plaz setup` tells agents nothing about it: it adds no MCP server, skill, instruction line or hook, and the map's folder is ignored by git.
 
 It is a module of the [nollm-wiki project](../../README.md), beside [`wiki`](../wiki/README.md). It depends on `wiki-code` of this workspace by path and nothing of the project wiki. The link extraction (decision flow and call resolution) lives in `wiki-code`; plaz renders it. Its version is the workspace's.
 
