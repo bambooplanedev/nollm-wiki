@@ -2,7 +2,7 @@
 //! page only through the escaping function of its sink.
 
 use crate::chart::{chart, coverage, relative};
-use crate::flow::hooks;
+use crate::flow;
 use crate::model::{Bodiless, File, Flow, FnId, Project, Target};
 use crate::names::Names;
 use crate::resolve::Resolved;
@@ -186,7 +186,7 @@ fn head(path: &str, file: &File, links: &Links) -> String {
     if file.syntax_errors {
         out.push_str("\nSyntax errors in this file: some functions may be missing from the map.\n");
     }
-    if hooks(file.family).is_none() {
+    if !flow::charted(file.family) {
         out.push_str(&format!(
             "\nNot covered yet: {} flowcharts.\n",
             file.family.as_str()

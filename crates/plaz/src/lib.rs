@@ -4,17 +4,13 @@
 use std::path::{Path, PathBuf};
 
 mod chart;
-pub mod flow;
 mod index;
-pub mod model;
 pub mod names;
 pub mod render;
-pub mod resolve;
 pub mod setup;
-pub mod source;
-mod uses;
 pub mod write;
 
+pub use wiki_code::links::{flow, model, resolve, source};
 pub use write::Written;
 
 #[derive(Debug, thiserror::Error)]
@@ -33,7 +29,7 @@ pub enum Error {
 /// tree with no code file leaves the vault as it is, with a warning, so a
 /// wrong `source` does not wipe a map.
 pub fn build(source: &Path, vault: &Path) -> Result<Written, Error> {
-    let project = source::load(source)?;
+    let project = source::load(source).map_err(|_| Error::NotADirectory(source.to_path_buf()))?;
     for path in &project.unreadable {
         eprintln!("warning: could not read {path}");
     }

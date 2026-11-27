@@ -29,6 +29,7 @@
 pub mod analyze;
 pub mod imports;
 pub mod index;
+pub mod links;
 pub mod model;
 pub mod support;
 pub mod walk;
