@@ -21,6 +21,8 @@
 //!   ([`index::Index`], [`index::Scope`], [`index::Family`], [`index::FnRef`],
 //!   [`index::sees`], [`index::owner_key`]);
 //! - [`imports`]: import resolution ([`imports::Imports`]);
+//! - [`links`]: the links between code: the decision flow of each function
+//!   and call resolution, for Rust, Python, C and C++; `plaz` renders it;
 //! - [`tree_sitter`], re-exported at the version the grammars are pinned to.
 //!
 //! [`support`] is not part of the contract: it holds text helpers the wiki

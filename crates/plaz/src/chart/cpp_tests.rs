@@ -80,7 +80,7 @@ fn a_continue_in_a_switch_without_default_in_a_for_reaches_the_update() {
 }
 
 /// `gate`'s braces split across `#ifdef`/`#else`, so the file has a
-/// first-branch tree; `tune` after it is whole in the main tree.
+/// first-branch tree. A copy of the const in `wiki-code`'s `links/flow/cpp/tests.rs`.
 const SPLIT: &str = "void gate(int a) {\n#ifdef TURBO\n    if (a) {\n#else\n    if (a && armed()) {\n#endif\n        open();\n    }\n}\n\n";
 
 #[test]

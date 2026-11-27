@@ -29,7 +29,16 @@ pub enum Error {
 /// tree with no code file leaves the vault as it is, with a warning, so a
 /// wrong `source` does not wipe a map.
 pub fn build(source: &Path, vault: &Path) -> Result<Written, Error> {
-    let project = source::load(source).map_err(|_| Error::NotADirectory(source.to_path_buf()))?;
+    let project = source::load(source).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotADirectory {
+            Error::NotADirectory(source.to_path_buf())
+        } else {
+            Error::Io {
+                path: source.to_path_buf(),
+                source: e,
+            }
+        }
+    })?;
     for path in &project.unreadable {
         eprintln!("warning: could not read {path}");
     }
