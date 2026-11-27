@@ -31,7 +31,10 @@ impl Resolved {
 
     /// Every call edge, sorted by callee, kind, caller and line, each once:
     /// calls of nested closures and functions count for the enclosing
-    /// function, and a one-of call has an edge per candidate.
+    /// function, and a one-of call has an edge per candidate. Edges are
+    /// deduplicated on (callee, kind, caller, line), so two calls of one
+    /// callee on one line are one edge, and one callee reached on one line
+    /// both as certain and as one-of gives two edges.
     pub fn edges(&self) -> Vec<Edge> {
         let mut out = BTreeSet::new();
         for (path, file) in &self.0.files {
@@ -47,7 +50,7 @@ impl Resolved {
                             candidates,
                             outside,
                         } => (candidates.as_slice(), EdgeKind::OneOf { outside: *outside }),
-                        Target::Outside | Target::Hidden => (&[][..], EdgeKind::Certain),
+                        Target::Outside | Target::Hidden => return,
                     };
                     for callee in fns {
                         out.insert(Edge {
@@ -63,16 +66,14 @@ impl Resolved {
         out.into_iter().collect()
     }
 
-    /// `path:start-end` and the qualified name of the function `f`.
-    ///
-    /// # Panics
-    /// On an id from another build.
-    pub fn place(&self, f: &FnId) -> (String, String) {
-        let it = &self.0.files[&f.path].code.items[f.item];
-        (
+    /// `path:start-end` and the qualified name of the function `f`, or
+    /// `None` when `f` is not in this build (an id from another build).
+    pub fn place(&self, f: &FnId) -> Option<(String, String)> {
+        let it = self.0.files.get(&f.path)?.code.items.get(f.item)?;
+        Some((
             format!("{}:{}-{}", f.path, it.start_line, it.end_line),
             it.qualified_name(),
-        )
+        ))
     }
 }
 
@@ -857,6 +858,15 @@ mod tests {
             path: "src/a.rs".to_string(),
             item: 0,
         };
-        assert_eq!(r.place(&f), ("src/a.rs:1-2".to_string(), "f".to_string()));
+        assert_eq!(
+            r.place(&f),
+            Some(("src/a.rs:1-2".to_string(), "f".to_string()))
+        );
+        let other = |path: &str, item| FnId {
+            path: path.to_string(),
+            item,
+        };
+        assert_eq!(r.place(&other("src/none.rs", 0)), None);
+        assert_eq!(r.place(&other("src/a.rs", 99)), None);
     }
 }

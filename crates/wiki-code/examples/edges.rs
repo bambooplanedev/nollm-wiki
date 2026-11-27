@@ -19,9 +19,13 @@ fn main() {
         EdgeKind::OneOf { outside: true } => "one_of+outside",
     };
     let mut lines: Vec<String> = (r.edges().iter())
-        .map(|e| {
-            let ((c, cn), (t, tn)) = (r.place(&e.caller), r.place(&e.callee));
-            format!("{c}\t{cn}\t{t}\t{tn}\t{}\t{}", kind(e.kind), e.line)
+        .filter_map(|e| {
+            let ((c, cn), (t, tn)) = (r.place(&e.caller)?, r.place(&e.callee)?);
+            Some(format!(
+                "{c}\t{cn}\t{t}\t{tn}\t{}\t{}",
+                kind(e.kind),
+                e.line
+            ))
         })
         .collect();
     lines.sort();
