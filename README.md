@@ -21,12 +21,12 @@ function. Nothing calls a model: the same sources give byte-identical output.
 ## Why
 
 So that a person and an agent can work from the same map of the project. `wiki` gives the agent
-search across the project: it finds a symbol it can name without reading whole files. A file it cannot
-name it finds less well: on real sessions, `search` had such a file among its first five hits in
-20% of cases. `plaz` draws a decision chart for each function
-for the person. Both are built from the code, without a language model. `plaz` is a preview: what
-it covers and what is still open is in [its open questions](crates/plaz/docs/open-questions.md).
-What was measured: [What `wiki` saves, and when](#what-wiki-saves-and-when).
+search across the project: it finds a symbol it can name without reading whole files. A file it
+cannot name it finds less well: replayed on real sessions, `search` had such a file among its first
+five hits in 20% of cases. `plaz` draws a decision chart for each function for the person. Both are
+built from the code, without a language model. `plaz` is a preview: what it covers and what is still
+open is in [its open questions](crates/plaz/docs/open-questions.md). What was measured: [What `wiki`
+saves, and when](#what-wiki-saves-and-when).
 
 ## What `wiki` saves, and when
 
